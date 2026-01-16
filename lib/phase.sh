@@ -156,17 +156,18 @@ TASK_BACK=100
 TASK_QUIT=101
 
 # Interactive task wrapper - allows redo, go back, quit
-# Usage: phase_task_interactive <task_num> <task_name> <task_function>
+# Usage: phase_task_interactive <task_id> <task_name> <task_function>
+#   task_id: 3-digit ID like 001, 002, 101, 102 (first digit = phase)
 # Returns: 0=continue, 100=go back, 101=quit
 phase_task_interactive() {
-    local task_num="$1"
+    local task_id="$1"
     local task_name="$2"
     local task_func="$3"
 
     while true; do
         echo ""
         echo -e "${BOLD}${CYAN}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
-        echo -e "${BOLD}${CYAN}┃${NC} ${BOLD}TASK $task_num: $task_name${NC}"
+        echo -e "${BOLD}${CYAN}┃${NC} ${BOLD}TASK $task_id: $task_name${NC}"
         echo -e "${BOLD}${CYAN}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
 
         # Run the task
@@ -241,27 +242,39 @@ phase_task_interactive() {
 }
 
 # Run a sequence of tasks with navigation support
-# Usage: phase_run_tasks task1 task2 task3 ...
-# Each task should be a function name
+# Usage: phase_run_tasks task_001_name task_002_name task_005_name ...
+# Each task should be a function named: task_XXX_descriptive_name
+#   where XXX is the 3-digit task ID (e.g., 001, 002, 101, 102)
 phase_run_tasks() {
     local tasks=("$@")
+    local task_ids=()
     local task_names=()
     local i=0
     local total=${#tasks[@]}
 
-    # Extract task names from function names (task_01_foo -> "Foo")
+    # Extract task IDs and names from function names (task_001_foo_bar -> "001", "Foo Bar")
     for task in "${tasks[@]}"; do
-        local name="${task#task_[0-9][0-9]_}"  # Remove task_XX_ prefix
-        name="${name//_/ }"                      # Replace underscores with spaces
+        # Extract the 3-digit ID
+        local id=$(echo "$task" | sed -n 's/task_\([0-9]\{3\}\)_.*/\1/p')
+        if [[ -z "$id" ]]; then
+            # Fallback: try 2-digit format and convert
+            id=$(echo "$task" | sed -n 's/task_\([0-9]\{2\}\)_.*/\1/p')
+            [[ -n "$id" ]] && id="0$id"
+        fi
+        [[ -z "$id" ]] && id="???"
+        task_ids+=("$id")
+
+        # Extract the name part after task_XXX_
+        local name="${task#task_[0-9][0-9][0-9]_}"
+        [[ "$name" == "$task" ]] && name="${task#task_[0-9][0-9]_}"  # Try 2-digit
+        name="${name//_/ }"  # Replace underscores with spaces
         # Capitalize first letter of each word
         name=$(echo "$name" | sed 's/\b\(.\)/\u\1/g')
         task_names+=("$name")
     done
 
     while [[ $i -lt $total ]]; do
-        local task_num=$((i + 1))
-
-        phase_task_interactive "$task_num/$total" "${task_names[$i]}" "${tasks[$i]}"
+        phase_task_interactive "${task_ids[$i]}" "${task_names[$i]}" "${tasks[$i]}"
         local result=$?
 
         case $result in
