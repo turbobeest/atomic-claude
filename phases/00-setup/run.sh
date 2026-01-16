@@ -21,6 +21,7 @@ ROOT_DIR="$(cd "$PHASE_DIR/../.." && pwd)"
 
 # Source libraries
 source "$ROOT_DIR/lib/phase.sh"
+source "$ROOT_DIR/lib/intro.sh"
 
 # ============================================================================
 # TASK DEFINITIONS
@@ -343,6 +344,17 @@ task_08_validate_env() {
 # ============================================================================
 
 main() {
+    # Check for --skip-intro flag
+    local skip_intro=false
+    for arg in "$@"; do
+        [[ "$arg" == "--skip-intro" ]] && skip_intro=true
+    done
+
+    # Show the WarGames-style intro
+    if ! $skip_intro; then
+        wopr_intro
+    fi
+
     phase_start "00-setup" "Project Setup"
 
     echo ""

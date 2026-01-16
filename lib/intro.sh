@@ -1,0 +1,231 @@
+#!/bin/bash
+#
+# ATOMIC CLAUDE - Retro Terminal Intro
+# WarGames-style typing animation
+#
+
+# Terminal colors - that green CRT glow
+WOPR_GREEN='\033[0;32m'
+WOPR_BRIGHT='\033[1;32m'
+WOPR_DIM='\033[2;32m'
+WOPR_BLINK='\033[5;32m'
+NC='\033[0m'
+
+# Typing speed (seconds between characters)
+TYPING_SPEED=0.04
+TYPING_SPEED_FAST=0.02
+LINE_PAUSE=0.5
+DRAMATIC_PAUSE=1.5
+
+# Type text character by character
+wopr_type() {
+    local text="$1"
+    local speed="${2:-$TYPING_SPEED}"
+
+    for (( i=0; i<${#text}; i++ )); do
+        printf "%s" "${text:$i:1}"
+        sleep "$speed"
+    done
+}
+
+# Type a line and add newline
+wopr_line() {
+    local text="$1"
+    local speed="${2:-$TYPING_SPEED}"
+
+    echo -ne "${WOPR_BRIGHT}"
+    wopr_type "$text" "$speed"
+    echo -e "${NC}"
+    sleep "$LINE_PAUSE"
+}
+
+# Fast type (for less dramatic moments)
+wopr_fast() {
+    wopr_line "$1" "$TYPING_SPEED_FAST"
+}
+
+# Blinking cursor effect
+wopr_cursor() {
+    local duration="${1:-3}"
+    local end_time=$((SECONDS + duration))
+
+    while [ $SECONDS -lt $end_time ]; do
+        echo -ne "${WOPR_BRIGHT}█${NC}"
+        sleep 0.5
+        echo -ne "\b "
+        sleep 0.5
+        echo -ne "\b"
+    done
+}
+
+# Clear screen with retro effect
+wopr_clear() {
+    # Quick scan-line clear effect
+    local lines=$(tput lines)
+    for ((i=0; i<lines; i++)); do
+        tput cup $i 0
+        echo -ne "${WOPR_DIM}"
+        printf '%*s' "$(tput cols)" '' | tr ' ' '░'
+        echo -ne "${NC}"
+        sleep 0.01
+    done
+    clear
+}
+
+# The main intro sequence
+wopr_intro() {
+    clear
+    echo ""
+    sleep 0.5
+
+    # Connection sequence
+    echo -ne "${WOPR_DIM}"
+    wopr_type "CONNECTING TO MAINFRAME" "$TYPING_SPEED_FAST"
+    for i in {1..3}; do
+        sleep 0.3
+        echo -n "."
+    done
+    echo -e "${NC}"
+    sleep "$DRAMATIC_PAUSE"
+
+    echo ""
+
+    # The classic greeting
+    wopr_line "GREETINGS PROFESSOR FALKEN."
+    sleep "$DRAMATIC_PAUSE"
+
+    wopr_line "HELLO."
+    sleep "$LINE_PAUSE"
+
+    echo ""
+    wopr_line "A STRANGE GAME."
+    wopr_line "THE ONLY WINNING MOVE IS"
+    wopr_line "NOT TO PLAY."
+
+    sleep "$DRAMATIC_PAUSE"
+    echo ""
+
+    wopr_line "HOW ABOUT A NICE GAME OF CHESS?"
+
+    sleep "$DRAMATIC_PAUSE"
+    echo ""
+    echo ""
+
+    # Transition to ATOMIC CLAUDE
+    echo -ne "${WOPR_DIM}"
+    wopr_type "..." 0.3
+    echo -e "${NC}"
+    sleep "$DRAMATIC_PAUSE"
+
+    wopr_line "JUST KIDDING."
+    sleep "$LINE_PAUSE"
+
+    echo ""
+    wopr_line "LET'S BUILD SOMETHING INSTEAD."
+
+    sleep "$DRAMATIC_PAUSE"
+    clear
+
+    # ASCII Art title
+    echo ""
+    echo -e "${WOPR_BRIGHT}"
+    cat << 'EOF'
+     █████╗ ████████╗ ██████╗ ███╗   ███╗██╗ ██████╗
+    ██╔══██╗╚══██╔══╝██╔═══██╗████╗ ████║██║██╔════╝
+    ███████║   ██║   ██║   ██║██╔████╔██║██║██║
+    ██╔══██║   ██║   ██║   ██║██║╚██╔╝██║██║██║
+    ██║  ██║   ██║   ╚██████╔╝██║ ╚═╝ ██║██║╚██████╗
+    ╚═╝  ╚═╝   ╚═╝    ╚═════╝ ╚═╝     ╚═╝╚═╝ ╚═════╝
+EOF
+    echo -e "${NC}"
+
+    sleep 0.3
+
+    echo -e "${WOPR_BRIGHT}"
+    cat << 'EOF'
+     ██████╗██╗      █████╗ ██╗   ██╗██████╗ ███████╗
+    ██╔════╝██║     ██╔══██╗██║   ██║██╔══██╗██╔════╝
+    ██║     ██║     ███████║██║   ██║██║  ██║█████╗
+    ██║     ██║     ██╔══██║██║   ██║██║  ██║██╔══╝
+    ╚██████╗███████╗██║  ██║╚██████╔╝██████╔╝███████╗
+     ╚═════╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝
+EOF
+    echo -e "${NC}"
+
+    sleep "$DRAMATIC_PAUSE"
+    echo ""
+
+    # Tagline
+    echo -ne "    ${WOPR_DIM}"
+    wopr_type "Script-controlled LLM invocations" "$TYPING_SPEED_FAST"
+    echo -e "${NC}"
+    echo -ne "    ${WOPR_DIM}"
+    wopr_type "for deterministic software development" "$TYPING_SPEED_FAST"
+    echo -e "${NC}"
+
+    sleep "$DRAMATIC_PAUSE"
+    echo ""
+    echo ""
+
+    # System info
+    echo -e "${WOPR_DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+
+    echo -ne "    ${WOPR_GREEN}"
+    wopr_type "SYSTEM STATUS: " "$TYPING_SPEED_FAST"
+    echo -ne "${WOPR_BRIGHT}ONLINE${NC}"
+    echo ""
+
+    echo -ne "    ${WOPR_GREEN}"
+    wopr_type "MODE: " "$TYPING_SPEED_FAST"
+    echo -ne "${WOPR_BRIGHT}PHASE 00 - PROJECT SETUP${NC}"
+    echo ""
+
+    echo -ne "    ${WOPR_GREEN}"
+    wopr_type "PRINCIPLE: " "$TYPING_SPEED_FAST"
+    echo -ne "${WOPR_BRIGHT}SCRIPT IS SOVEREIGN${NC}"
+    echo ""
+
+    echo ""
+    echo -e "${WOPR_DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+    sleep "$LINE_PAUSE"
+    echo ""
+    echo -ne "    ${WOPR_DIM}"
+    wopr_type "Press ENTER to begin..." "$TYPING_SPEED_FAST"
+    echo -ne "${NC}"
+    wopr_cursor 2
+    read -r
+
+    clear
+}
+
+# Quick intro (skip the WarGames part)
+wopr_intro_quick() {
+    clear
+    echo ""
+    echo -e "${WOPR_BRIGHT}"
+    cat << 'EOF'
+     █████╗ ████████╗ ██████╗ ███╗   ███╗██╗ ██████╗
+    ██╔══██╗╚══██╔══╝██╔═══██╗████╗ ████║██║██╔════╝
+    ███████║   ██║   ██║   ██║██╔████╔██║██║██║
+    ██╔══██║   ██║   ██║   ██║██║╚██╔╝██║██║██║
+    ██║  ██║   ██║   ╚██████╔╝██║ ╚═╝ ██║██║╚██████╗
+    ╚═╝  ╚═╝   ╚═╝    ╚═════╝ ╚═╝     ╚═╝╚═╝ ╚═════╝
+     ██████╗██╗      █████╗ ██╗   ██╗██████╗ ███████╗
+    ██╔════╝██║     ██╔══██╗██║   ██║██╔══██╗██╔════╝
+    ██║     ██║     ███████║██║   ██║██║  ██║█████╗
+    ██║     ██║     ██╔══██║██║   ██║██║  ██║██╔══╝
+    ╚██████╗███████╗██║  ██║╚██████╔╝██████╔╝███████╗
+     ╚═════╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝
+EOF
+    echo -e "${NC}"
+    echo ""
+    echo -e "    ${WOPR_DIM}Script-controlled LLM invocations${NC}"
+    echo -e "    ${WOPR_DIM}for deterministic software development${NC}"
+    echo ""
+    sleep 1
+}
+
+# Export for use in other scripts
+export -f wopr_type wopr_line wopr_fast wopr_cursor wopr_intro wopr_intro_quick
