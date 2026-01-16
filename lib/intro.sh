@@ -14,6 +14,7 @@ NC='\033[0m'
 # Typing speed (seconds between characters)
 TYPING_SPEED=0.04
 TYPING_SPEED_FAST=0.02
+TYPING_SPEED_1200BAUD=0.08  # That slow modem feel
 LINE_PAUSE=0.5
 DRAMATIC_PAUSE=1.5
 
@@ -78,11 +79,11 @@ wopr_intro() {
     echo ""
     sleep 0.5
 
-    # Connection sequence
+    # Connection sequence - nice and slow like 1200 baud
     echo -ne "${WOPR_DIM}"
-    wopr_type "CONNECTING TO MAINFRAME" "$TYPING_SPEED_FAST"
+    wopr_type "CONNECTING TO MAINFRAME" "$TYPING_SPEED_1200BAUD"
     for i in {1..3}; do
-        sleep 0.3
+        sleep 0.4
         echo -n "."
     done
     echo -e "${NC}"
@@ -90,22 +91,18 @@ wopr_intro() {
 
     echo ""
 
-    # The classic greeting
-    wopr_line "GREETINGS PROFESSOR FALKEN."
-    sleep "$DRAMATIC_PAUSE"
-
-    wopr_line "HELLO."
-    sleep "$LINE_PAUSE"
-
-    echo ""
-    wopr_line "A STRANGE GAME."
-    wopr_line "THE ONLY WINNING MOVE IS"
-    wopr_line "NOT TO PLAY."
+    # The classic greeting - slow 1200 baud style
+    echo -ne "${WOPR_BRIGHT}"
+    wopr_type "GREETINGS PROFESSOR FALKEN." "$TYPING_SPEED_1200BAUD"
+    echo -e "${NC}"
 
     sleep "$DRAMATIC_PAUSE"
     echo ""
 
-    wopr_line "HOW ABOUT A NICE GAME OF CHESS?"
+    # The chess question - also slow
+    echo -ne "${WOPR_BRIGHT}"
+    wopr_type "HOW ABOUT A NICE GAME OF CHESS?" "$TYPING_SPEED_1200BAUD"
+    echo -e "${NC}"
 
     sleep "$DRAMATIC_PAUSE"
     echo ""
@@ -113,15 +110,19 @@ wopr_intro() {
 
     # Transition to ATOMIC CLAUDE
     echo -ne "${WOPR_DIM}"
-    wopr_type "..." 0.3
+    wopr_type "..." 0.4
     echo -e "${NC}"
     sleep "$DRAMATIC_PAUSE"
 
-    wopr_line "JUST KIDDING."
+    echo -ne "${WOPR_BRIGHT}"
+    wopr_type "JUST KIDDING." "$TYPING_SPEED_1200BAUD"
+    echo -e "${NC}"
     sleep "$LINE_PAUSE"
 
     echo ""
-    wopr_line "LET'S BUILD SOMETHING INSTEAD."
+    echo -ne "${WOPR_BRIGHT}"
+    wopr_type "LET'S BUILD SOMETHING INSTEAD." "$TYPING_SPEED_1200BAUD"
+    echo -e "${NC}"
 
     sleep "$DRAMATIC_PAUSE"
     clear
