@@ -179,7 +179,7 @@ EOF
 
     echo -ne "    ${WOPR_GREEN}"
     wopr_type "MODE: " "$TYPING_SPEED_FAST"
-    echo -ne "${WOPR_BRIGHT}PHASE 00 - PROJECT SETUP${NC}"
+    echo -ne "${WOPR_BRIGHT}PHASE 0 - SETUP${NC}"
     echo ""
 
     echo -ne "    ${WOPR_GREEN}"

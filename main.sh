@@ -98,28 +98,43 @@ cmd_status() {
 }
 
 cmd_run() {
-    local phase_id="$1"
-    local phase_dir="$ROOT_DIR/phases/$phase_id"
+    local phase_input="$1"
+    local phase_dir=""
+
+    # Support both "0" and "0-setup" formats
+    if [[ "$phase_input" =~ ^[0-9]$ ]]; then
+        # Single digit - find matching phase
+        for p in "$ROOT_DIR"/phases/${phase_input}-*/; do
+            if [[ -d "$p" ]]; then
+                phase_dir="$p"
+                break
+            fi
+        done
+    else
+        phase_dir="$ROOT_DIR/phases/$phase_input"
+    fi
 
     if [[ ! -d "$phase_dir" ]]; then
-        atomic_error "Phase not found: $phase_id"
+        atomic_error "Phase not found: $phase_input"
         echo ""
         echo "Available phases:"
         cmd_list
         exit 1
     fi
 
+    local phase_id=$(basename "$phase_dir")
+
     if [[ ! -f "$phase_dir/run.sh" ]]; then
         atomic_error "Phase script not found: $phase_dir/run.sh"
+        atomic_info "Phase $phase_id exists but has no run.sh yet"
         exit 1
     fi
 
     # Check prerequisites (previous phase completed)
-    # For now, only 00-setup has no prereq
-    if [[ "$phase_id" != "00-setup" ]]; then
-        # Extract phase number
-        local phase_num="${phase_id%%-*}"
-        local prev_num=$(printf "%02d" $((10#$phase_num - 1)))
+    # Phase 0 has no prereq
+    local phase_num="${phase_id%%-*}"
+    if [[ "$phase_num" != "0" ]]; then
+        local prev_num=$((phase_num - 1))
 
         # Find previous phase
         local prev_phase=""
@@ -132,7 +147,7 @@ cmd_run() {
 
         if [[ -n "$prev_phase" ]] && [[ ! -f "$ATOMIC_OUTPUT_DIR/$prev_phase/closeout.json" ]]; then
             atomic_error "Previous phase not completed: $prev_phase"
-            atomic_info "Run: ./main.sh run $prev_phase"
+            atomic_info "Run: ./main.sh run $prev_num"
             exit 1
         fi
     fi

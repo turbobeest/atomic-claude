@@ -1,11 +1,12 @@
 #!/bin/bash
 #
-# PHASE 00: SETUP
+# PHASE 0: SETUP
 # Configuration + API Keys + Materials + Environment
 #
+# Tasks: 001-008 (0xx range)
+#
 # This phase is 95% deterministic. Claude is only used for:
-# - Summarizing existing documentation (Task 5)
-# - Generating material manifest descriptions (Task 7)
+# - Task 005: Summarizing existing documentation
 #
 # Navigation: After each task, you can:
 #   [c] Continue    - proceed to next task
@@ -355,7 +356,7 @@ main() {
         wopr_intro
     fi
 
-    phase_start "00-setup" "Project Setup"
+    phase_start "0-setup" "Setup"
 
     echo ""
     echo -e "${DIM}Navigation: After each task you can:${NC}"
@@ -363,7 +364,7 @@ main() {
     echo ""
 
     # Run all tasks with interactive navigation
-    # Task IDs: 001-008 (Phase 00 = 0xx range)
+    # Task IDs: 001-008 (Phase 0 = 0xx range)
     phase_run_tasks \
         task_001_project_name \
         task_002_description \
