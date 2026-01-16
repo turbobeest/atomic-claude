@@ -149,6 +149,143 @@ EOF
 # PHASE WORKFLOW HELPERS
 # ============================================================================
 
+# Exit codes for task navigation
+TASK_CONTINUE=0
+TASK_REDO=1
+TASK_BACK=100
+TASK_QUIT=101
+
+# Interactive task wrapper - allows redo, go back, quit
+# Usage: phase_task_interactive <task_num> <task_name> <task_function>
+# Returns: 0=continue, 100=go back, 101=quit
+phase_task_interactive() {
+    local task_num="$1"
+    local task_name="$2"
+    local task_func="$3"
+
+    while true; do
+        echo ""
+        echo -e "${BOLD}${CYAN}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
+        echo -e "${BOLD}${CYAN}┃${NC} ${BOLD}TASK $task_num: $task_name${NC}"
+        echo -e "${BOLD}${CYAN}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
+
+        # Run the task
+        local task_result=0
+        if $task_func; then
+            atomic_success "Task completed"
+
+            # Post-task navigation
+            echo ""
+            echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo -e "  ${GREEN}[c]${NC} Continue    ${YELLOW}[r]${NC} Redo    ${BLUE}[b]${NC} Go back    ${RED}[q]${NC} Quit"
+            echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            read -p "  Choice [c]: " choice
+            choice=${choice:-c}
+
+            case "$choice" in
+                c|C|"")
+                    return $TASK_CONTINUE
+                    ;;
+                r|R)
+                    atomic_info "Redoing task..."
+                    continue
+                    ;;
+                b|B)
+                    atomic_info "Going back to previous task..."
+                    return $TASK_BACK
+                    ;;
+                q|Q)
+                    atomic_warn "Quitting phase..."
+                    return $TASK_QUIT
+                    ;;
+                *)
+                    atomic_info "Continuing..."
+                    return $TASK_CONTINUE
+                    ;;
+            esac
+        else
+            atomic_error "Task failed"
+
+            # Failure navigation
+            echo ""
+            echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo -e "  ${YELLOW}[r]${NC} Retry    ${BLUE}[b]${NC} Go back    ${DIM}[s]${NC} Skip    ${RED}[q]${NC} Quit"
+            echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            read -p "  Choice [r]: " choice
+            choice=${choice:-r}
+
+            case "$choice" in
+                r|R|"")
+                    atomic_info "Retrying task..."
+                    continue
+                    ;;
+                b|B)
+                    atomic_info "Going back to previous task..."
+                    return $TASK_BACK
+                    ;;
+                s|S)
+                    atomic_warn "Skipping task..."
+                    return $TASK_CONTINUE
+                    ;;
+                q|Q)
+                    atomic_warn "Quitting phase..."
+                    return $TASK_QUIT
+                    ;;
+                *)
+                    atomic_info "Retrying..."
+                    continue
+                    ;;
+            esac
+        fi
+    done
+}
+
+# Run a sequence of tasks with navigation support
+# Usage: phase_run_tasks task1 task2 task3 ...
+# Each task should be a function name
+phase_run_tasks() {
+    local tasks=("$@")
+    local task_names=()
+    local i=0
+    local total=${#tasks[@]}
+
+    # Extract task names from function names (task_01_foo -> "Foo")
+    for task in "${tasks[@]}"; do
+        local name="${task#task_[0-9][0-9]_}"  # Remove task_XX_ prefix
+        name="${name//_/ }"                      # Replace underscores with spaces
+        # Capitalize first letter of each word
+        name=$(echo "$name" | sed 's/\b\(.\)/\u\1/g')
+        task_names+=("$name")
+    done
+
+    while [[ $i -lt $total ]]; do
+        local task_num=$((i + 1))
+
+        phase_task_interactive "$task_num/$total" "${task_names[$i]}" "${tasks[$i]}"
+        local result=$?
+
+        case $result in
+            $TASK_CONTINUE)
+                ((i++))
+                ;;
+            $TASK_BACK)
+                if [[ $i -gt 0 ]]; then
+                    ((i--))
+                else
+                    atomic_warn "Already at first task"
+                fi
+                ;;
+            $TASK_QUIT)
+                atomic_error "Phase aborted by user"
+                return 1
+                ;;
+        esac
+    done
+
+    atomic_success "All tasks completed"
+    return 0
+}
+
 # Run a deterministic (non-LLM) task
 phase_deterministic() {
     local task_name="$1"

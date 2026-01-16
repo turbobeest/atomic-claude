@@ -7,6 +7,12 @@
 # - Summarizing existing documentation (Task 5)
 # - Generating material manifest descriptions (Task 7)
 #
+# Navigation: After each task, you can:
+#   [c] Continue    - proceed to next task
+#   [r] Redo        - run this task again
+#   [b] Go back     - return to previous task
+#   [q] Quit        - abort the phase
+#
 
 set -euo pipefail
 
@@ -33,14 +39,20 @@ task_01_project_name() {
     read -p "Project name [$detected_name]: " project_name
     project_name=${project_name:-$detected_name}
 
-    # Initialize config
-    cat > "$config_file" << EOF
+    # Initialize or update config
+    mkdir -p "$(dirname "$config_file")"
+    if [[ -f "$config_file" ]]; then
+        local tmp=$(mktemp)
+        jq ".project.name = \"$project_name\"" "$config_file" > "$tmp" && mv "$tmp" "$config_file"
+    else
+        cat > "$config_file" << EOF
 {
   "project": {
     "name": "$project_name"
   }
 }
 EOF
+    fi
 
     atomic_success "Project name set: $project_name"
     return 0
@@ -52,13 +64,22 @@ task_02_description() {
 
     atomic_step "Project Description"
 
+    # Show current value if exists
+    local current=$(jq -r '.project.description // empty' "$config_file" 2>/dev/null || true)
+    if [[ -n "$current" ]]; then
+        atomic_substep "Current: $current"
+    fi
+
     read -p "Brief description: " description
 
-    # Update config
-    local tmp=$(mktemp)
-    jq ".project.description = \"$description\"" "$config_file" > "$tmp" && mv "$tmp" "$config_file"
+    if [[ -n "$description" ]]; then
+        local tmp=$(mktemp)
+        jq ".project.description = \"$description\"" "$config_file" > "$tmp" && mv "$tmp" "$config_file"
+        atomic_success "Description saved"
+    else
+        atomic_warn "No description provided (optional)"
+    fi
 
-    atomic_success "Description saved"
     return 0
 }
 
@@ -67,6 +88,13 @@ task_03_project_type() {
     local config_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/project-config.json"
 
     atomic_step "Project Type"
+
+    # Show current value if exists
+    local current=$(jq -r '.project.type // empty' "$config_file" 2>/dev/null || true)
+    if [[ -n "$current" ]]; then
+        atomic_substep "Current: $current"
+    fi
+
     echo ""
     echo "  1. new        - Brand new project"
     echo "  2. existing   - Enhance existing codebase"
@@ -99,45 +127,57 @@ task_04_github_url() {
 
     # Try to detect from git remote
     local detected_url=""
-    if git remote get-url origin 2>/dev/null; then
-        detected_url=$(git remote get-url origin 2>/dev/null || true)
+    detected_url=$(git remote get-url origin 2>/dev/null || true)
+    if [[ -n "$detected_url" ]]; then
         atomic_substep "Detected remote: $detected_url"
+    fi
+
+    # Show current value if exists
+    local current=$(jq -r '.github.repository_url // empty' "$config_file" 2>/dev/null || true)
+    if [[ -n "$current" ]]; then
+        atomic_substep "Current: $current"
+        detected_url="$current"
     fi
 
     read -p "Repository URL [$detected_url]: " repo_url
     repo_url=${repo_url:-$detected_url}
 
-    local tmp=$(mktemp)
-    jq ".github.repository_url = \"$repo_url\"" "$config_file" > "$tmp" && mv "$tmp" "$config_file"
+    if [[ -n "$repo_url" ]]; then
+        local tmp=$(mktemp)
+        jq ".github.repository_url = \"$repo_url\"" "$config_file" > "$tmp" && mv "$tmp" "$config_file"
+        atomic_success "GitHub URL configured"
+    else
+        atomic_warn "No GitHub URL configured (optional)"
+    fi
 
-    atomic_success "GitHub URL configured"
     return 0
 }
 
 # Task 5: Summarize existing docs (LLM TASK)
 task_05_summarize_docs() {
-    local prompt_file="$PHASE_DIR/prompts/summarize-docs.md"
-    local output_file="doc-summary.md"
+    local output_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/doc-summary.md"
 
     # First, scan for existing documentation
     atomic_step "Scanning for existing documentation..."
 
-    local docs_found=$(find . -maxdepth 3 -name "*.md" -o -name "*.rst" -o -name "*.txt" 2>/dev/null | head -20)
+    local docs_found=$(find . -maxdepth 3 \( -name "*.md" -o -name "*.rst" -o -name "*.txt" \) -type f 2>/dev/null | grep -v node_modules | grep -v .git | head -20 || true)
 
     if [[ -z "$docs_found" ]]; then
         atomic_info "No documentation found, skipping summarization"
+        echo "No documentation files found." > "$output_file"
         return 0
     fi
 
-    atomic_substep "Found $(echo "$docs_found" | wc -l) documentation files"
+    local count=$(echo "$docs_found" | wc -l)
+    atomic_substep "Found $count documentation files"
 
     # Build context for Claude
     local context=""
-    for doc in $docs_found; do
+    while IFS= read -r doc; do
         context+="=== $doc ===\n"
         context+=$(head -50 "$doc" 2>/dev/null || true)
         context+="\n\n"
-    done
+    done <<< "$docs_found"
 
     # Create dynamic prompt
     local dynamic_prompt="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/prompts/summarize-docs-dynamic.md"
@@ -157,10 +197,18 @@ $context
 Provide a 3-5 sentence summary of what this project does based on the documentation.
 Focus on: purpose, key features, technology stack (if apparent).
 
-Output as plain text, no JSON.
+Output as plain text, no JSON, no markdown headers.
 EOF
 
-    phase_llm_task "Summarize existing documentation" "$dynamic_prompt" "$output_file" --model=haiku
+    atomic_invoke "$dynamic_prompt" "$output_file" "Summarize existing documentation" --model=haiku
+
+    # Show the summary
+    if [[ -f "$output_file" ]]; then
+        echo ""
+        atomic_output_box "$(cat "$output_file")"
+    fi
+
+    return 0
 }
 
 # Task 6: Collect API keys (deterministic + secure input)
@@ -170,9 +218,27 @@ task_06_api_keys() {
     atomic_step "API Key Configuration"
     atomic_warn "API keys will be stored locally and never committed to git"
 
+    # Check if already configured
+    if [[ -f "$secrets_file" ]]; then
+        local has_key=$(jq -r '.anthropic_api_key // empty' "$secrets_file" 2>/dev/null || true)
+        if [[ -n "$has_key" ]]; then
+            atomic_substep "API key already configured (starts with: ${has_key:0:10}...)"
+            read -p "Reconfigure? [y/N]: " reconfigure
+            if [[ ! "$reconfigure" =~ ^[Yy] ]]; then
+                atomic_info "Keeping existing configuration"
+                return 0
+            fi
+        fi
+    fi
+
     echo ""
     read -s -p "Anthropic API Key (sk-ant-...): " anthropic_key
     echo ""
+
+    if [[ -z "$anthropic_key" ]]; then
+        atomic_warn "No API key provided"
+        return 0
+    fi
 
     # Validate format
     if [[ ! "$anthropic_key" =~ ^sk-ant-.* ]]; then
@@ -180,6 +246,7 @@ task_06_api_keys() {
     fi
 
     # Store securely
+    mkdir -p "$(dirname "$secrets_file")"
     cat > "$secrets_file" << EOF
 {
   "anthropic_api_key": "$anthropic_key"
@@ -193,44 +260,37 @@ EOF
     return 0
 }
 
-# Task 7: Generate material manifest (LLM TASK)
+# Task 7: Generate material manifest (mostly deterministic)
 task_07_material_manifest() {
+    local manifest_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/material-manifest.json"
+
     atomic_step "Scanning project materials..."
 
     # Deterministic scan
-    local materials=$(find . -maxdepth 4 \( -name "*.md" -o -name "*.json" -o -name "*.yaml" -o -name "*.yml" \) 2>/dev/null | head -50)
+    local materials=$(find . -maxdepth 4 \( -name "*.md" -o -name "*.json" -o -name "*.yaml" -o -name "*.yml" \) -type f 2>/dev/null | grep -v node_modules | grep -v .git | head -50 || true)
 
     if [[ -z "$materials" ]]; then
         atomic_info "No materials found"
+        echo '{"materials": [], "count": 0}' > "$manifest_file"
         return 0
     fi
 
     local count=$(echo "$materials" | wc -l)
     atomic_substep "Found $count material files"
 
-    # For a small number, we can just list them (no LLM needed)
-    if [[ $count -lt 10 ]]; then
-        local manifest_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/material-manifest.json"
-        echo '{"materials": [' > "$manifest_file"
-        local first=true
-        for file in $materials; do
-            [[ "$first" == "true" ]] || echo "," >> "$manifest_file"
-            first=false
-            echo "  {\"path\": \"$file\", \"type\": \"${file##*.}\"}" >> "$manifest_file"
-        done
-        echo ']}' >> "$manifest_file"
+    # Build manifest (deterministic - no LLM needed for simple listing)
+    echo '{"materials": [' > "$manifest_file"
+    local first=true
+    while IFS= read -r file; do
+        [[ "$first" == "true" ]] || echo "," >> "$manifest_file"
+        first=false
+        local ext="${file##*.}"
+        echo "  {\"path\": \"$file\", \"type\": \"$ext\"}" >> "$manifest_file"
+    done <<< "$materials"
+    echo '], "count": '"$count"'}' >> "$manifest_file"
 
-        atomic_success "Material manifest created (deterministic)"
-        return 0
-    fi
-
-    # For larger sets, use LLM to categorize
-    phase_llm_task "Categorize project materials" \
-        "$PHASE_DIR/prompts/categorize-materials.md" \
-        "material-manifest.json" \
-        --model=haiku \
-        --format=json \
-        --stdin <<< "$materials"
+    atomic_success "Material manifest created: $count files indexed"
+    return 0
 }
 
 # Task 8: Validate environment (deterministic)
@@ -239,16 +299,17 @@ task_08_validate_env() {
 
     atomic_step "Environment Validation"
 
-    local checks=()
+    local checks='[]'
     local all_pass=true
 
     # Check required tools
-    for tool in git jq bash node; do
+    for tool in git jq bash; do
         if command -v $tool &> /dev/null; then
-            checks+=("{\"tool\": \"$tool\", \"status\": \"pass\", \"version\": \"$(${tool} --version 2>&1 | head -1)\"}")
+            local version=$($tool --version 2>&1 | head -1 || echo "unknown")
+            checks=$(echo "$checks" | jq ". + [{\"tool\": \"$tool\", \"status\": \"pass\", \"version\": \"$version\"}]")
             atomic_success "$tool: installed"
         else
-            checks+=("{\"tool\": \"$tool\", \"status\": \"fail\", \"version\": null}")
+            checks=$(echo "$checks" | jq ". + [{\"tool\": \"$tool\", \"status\": \"fail\", \"version\": null}]")
             atomic_error "$tool: NOT FOUND"
             all_pass=false
         fi
@@ -256,16 +317,17 @@ task_08_validate_env() {
 
     # Check Claude CLI
     if command -v claude &> /dev/null; then
-        checks+=("{\"tool\": \"claude\", \"status\": \"pass\", \"version\": \"$(claude --version 2>&1 || echo 'unknown')\"}")
+        local version=$(claude --version 2>&1 || echo "unknown")
+        checks=$(echo "$checks" | jq ". + [{\"tool\": \"claude\", \"status\": \"pass\", \"version\": \"$version\"}]")
         atomic_success "claude: installed"
     else
-        checks+=("{\"tool\": \"claude\", \"status\": \"fail\", \"version\": null}")
+        checks=$(echo "$checks" | jq ". + [{\"tool\": \"claude\", \"status\": \"fail\", \"version\": null}]")
         atomic_error "claude: NOT FOUND (required!)"
         all_pass=false
     fi
 
     # Write report
-    echo "{\"checks\": [$(IFS=,; echo "${checks[*]}")], \"all_pass\": $all_pass}" > "$report_file"
+    echo "{\"checks\": $checks, \"all_pass\": $all_pass}" > "$report_file"
 
     if $all_pass; then
         atomic_success "Environment validation passed"
@@ -283,34 +345,47 @@ task_08_validate_env() {
 main() {
     phase_start "00-setup" "Project Setup"
 
-    # Deterministic tasks
-    phase_task "01" "Project Name" task_01_project_name || exit 1
-    phase_task "02" "Description" task_02_description || exit 1
-    phase_task "03" "Project Type" task_03_project_type || exit 1
-    phase_task "04" "GitHub URL" task_04_github_url || exit 1
+    echo ""
+    echo -e "${DIM}Navigation: After each task you can:${NC}"
+    echo -e "${DIM}  [c] Continue  [r] Redo  [b] Go back  [q] Quit${NC}"
+    echo ""
 
-    # LLM task (optional - only if docs exist)
-    phase_task "05" "Summarize Documentation" task_05_summarize_docs || true
+    # Run all tasks with interactive navigation
+    phase_run_tasks \
+        task_01_project_name \
+        task_02_description \
+        task_03_project_type \
+        task_04_github_url \
+        task_05_summarize_docs \
+        task_06_api_keys \
+        task_07_material_manifest \
+        task_08_validate_env
 
-    # Human gate before collecting sensitive info
-    phase_human_gate "Ready to collect API keys?" || exit 1
+    local result=$?
 
-    # Secure data collection
-    phase_task "06" "API Keys" task_06_api_keys || exit 1
+    if [[ $result -ne 0 ]]; then
+        atomic_error "Phase aborted"
+        exit 1
+    fi
 
-    # Material indexing
-    phase_task "07" "Material Manifest" task_07_material_manifest || true
+    # Final review
+    echo ""
+    atomic_header "Configuration Summary"
+    echo ""
 
-    # Environment validation
-    phase_task "08" "Environment Validation" task_08_validate_env || exit 1
+    local config_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/project-config.json"
+    if [[ -f "$config_file" ]]; then
+        echo "Project Configuration:"
+        jq '.' "$config_file"
+    fi
 
     # Final human gate
-    phase_human_gate "Configuration complete. Proceed to Phase 01 (Ideation)?" || exit 1
+    phase_human_gate "Configuration complete. Ready to proceed?" || exit 1
 
     phase_complete
 
     echo ""
-    atomic_info "Next: Run ./phases/01-ideation/run.sh"
+    atomic_info "Next: Run ./phases/01-ideation/run.sh (when available)"
 }
 
 main "$@"
