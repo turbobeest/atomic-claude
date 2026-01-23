@@ -39,33 +39,71 @@ task_205_prd_authoring() {
     echo ""
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # GATHER CONTEXT
+    # GATHER CONTEXT (with truncation for token management)
     # ═══════════════════════════════════════════════════════════════════════════
 
     local approach_context=""
     local interview_context=""
     local setup_context=""
+    local tech_stack_context=""
 
-    # Load Phase 1 approach
+    # Load Phase 1 approach (truncated)
     if [[ -f "$phase1_dir/selected-approach.json" ]]; then
-        approach_context=$(cat "$phase1_dir/selected-approach.json")
+        approach_context=$(atomic_context_truncate "$phase1_dir/selected-approach.json" 100)
     fi
 
-    # Load interview data
+    # Load interview data (extract key fields, not full dump)
     if [[ -f "$interview_file" ]]; then
-        interview_context=$(cat "$interview_file")
+        interview_context=$(jq -r '
+            "Problem: " + (.problem // "Not specified") + "\n" +
+            "Solution: " + (.solution // "Not specified") + "\n" +
+            "Users: " + (.target_users // "Not specified") + "\n" +
+            "Success Criteria: " + ((.success_criteria // []) | join("; ")) + "\n" +
+            "Constraints: " + ((.constraints // []) | join("; "))
+        ' "$interview_file" 2>/dev/null || cat "$interview_file" | head -100)
     fi
 
-    # Load setup data
+    # Load setup data (extract key fields)
     if [[ -f "$setup_file" ]]; then
-        setup_context=$(cat "$setup_file")
+        setup_context=$(jq -r '
+            "Project Type: " + (.project_type // "Not specified") + "\n" +
+            "Timeline: " + (.timeline // "Not specified") + "\n" +
+            "Team Size: " + (.team_size // "Not specified")
+        ' "$setup_file" 2>/dev/null || cat "$setup_file" | head -50)
     fi
 
-    # Load corpus if available
+    # Load tech stack from project config (CRITICAL for TaskMaster compatibility)
+    local project_config="$ATOMIC_OUTPUT_DIR/0-setup/project-config.json"
+    if [[ -f "$project_config" ]]; then
+        tech_stack_context=$(jq -r '
+            .extracted // {} |
+            "Languages: " + ((.constraints.technical // []) | join(", ")) + "\n" +
+            "Infrastructure: " + (.constraints.infrastructure // "Not specified") + "\n" +
+            "Compliance: " + ((.constraints.compliance // []) | join(", "))
+        ' "$project_config" 2>/dev/null || echo "Tech stack not specified")
+    fi
+
+    # Load corpus for grounding (CRITICAL - was unused before!)
     local corpus_context=""
     if [[ -f "$phase1_dir/corpus.json" ]]; then
-        corpus_context=$(jq -c '.materials[:5] // []' "$phase1_dir/corpus.json" 2>/dev/null || echo "[]")
+        # Extract summaries from first 5 materials
+        corpus_context=$(jq -r '
+            .materials[:5] // [] | map(
+                "- " + (.name // .path // "unnamed") + ": " + ((.summary // .content // "")[:200])
+            ) | join("\n")
+        ' "$phase1_dir/corpus.json" 2>/dev/null || echo "No corpus materials")
     fi
+
+    # Load dialogue synthesis for vision/goals
+    local dialogue_context=""
+    if [[ -f "$phase1_dir/dialogue.json" ]]; then
+        dialogue_context=$(jq -r '
+            .synthesis // {} |
+            "Vision: " + (.vision.core_problem // "Not specified") + "\n" +
+            "Impact: " + (.impact.primary_impact // "Not specified") + "\n" +
+            "Audience: " + (.audience.primary // "Not specified") + "\n" +
+            "Non-negotiables: " + ((.non_negotiables // []) | join("; "))
+        ' "$phase1_dir/dialogue.json" 2>/dev/null || echo "No dialogue synthesis")
 
     # ═══════════════════════════════════════════════════════════════════════════
     # STAGE 1: REQUIREMENTS SYNTHESIS
@@ -79,36 +117,101 @@ task_205_prd_authoring() {
     cat > "$prompts_dir/requirements-synthesis.md" << EOF
 # Task: Requirements Synthesis
 
-You are a requirements engineer synthesizing project requirements.
+You are a requirements engineer synthesizing project requirements for downstream tool consumption (TaskMaster, OpenSpec).
 
-## Context
+## Project Context
 
-### Selected Approach (from Phase 1)
+### Vision & Goals (from Discovery)
+$dialogue_context
+
+### Selected Approach
 $approach_context
 
-### PRD Interview Responses
+### Interview Responses
 $interview_context
 
-### PRD Setup
+### Project Setup
 $setup_context
 
-## Your Task
+### Tech Stack (MUST be respected - TaskMaster will enforce these)
+$tech_stack_context
 
-Synthesize the above into structured requirements using:
-- RFC 2119 keywords (MUST, SHOULD, MAY)
-- EARS syntax where appropriate (When/While/If...then)
+### Reference Materials (Corpus)
+$corpus_context
 
-Output format:
+## Requirements Format Standards
+
+### RFC 2119 Keywords (REQUIRED)
+- **MUST/SHALL**: Absolute requirement
+- **SHOULD**: Recommended but not mandatory
+- **MAY**: Optional feature
+
+### OpenSpec Scenario Format (REQUIRED for each requirement)
+Every functional requirement needs at least one scenario:
+\`\`\`
+Scenario: <descriptive name>
+- WHEN <trigger condition>
+- THEN <expected outcome>
+\`\`\`
+
+## Example Requirement (follow this format)
+
 {
-    "functional_requirements": [
-        {"id": "FR-001", "description": "...", "priority": "MUST|SHOULD|MAY", "acceptance": "..."}
-    ],
-    "non_functional_requirements": [
-        {"id": "NFR-001", "category": "performance|security|usability|...", "description": "...", "metric": "..."}
-    ],
-    "constraints": [...],
-    "assumptions": [...]
+  "id": "FR-001",
+  "name": "User Authentication",
+  "description": "The system SHALL authenticate users via JWT tokens",
+  "priority": "MUST",
+  "scenarios": [
+    {
+      "name": "Valid credentials",
+      "when": "a user submits valid username and password",
+      "then": "the system returns a JWT with 1-hour expiry"
+    },
+    {
+      "name": "Invalid credentials",
+      "when": "a user submits invalid credentials",
+      "then": "the system returns 401 Unauthorized"
+    }
+  ],
+  "acceptance_criteria": "JWT issued within 200ms, token contains user ID and roles"
 }
+
+## Output Schema
+
+Generate 10-25 functional requirements and 5-10 non-functional requirements.
+
+{
+  "functional_requirements": [
+    {
+      "id": "FR-001",
+      "name": "Short name",
+      "description": "The system SHALL/SHOULD/MAY...",
+      "priority": "MUST|SHOULD|MAY",
+      "scenarios": [{"name": "...", "when": "...", "then": "..."}],
+      "acceptance_criteria": "Measurable criteria"
+    }
+  ],
+  "non_functional_requirements": [
+    {
+      "id": "NFR-001",
+      "category": "performance|security|scalability|reliability|usability",
+      "description": "The system SHALL...",
+      "metric": "Specific measurable target (e.g., <200ms p99 latency)"
+    }
+  ],
+  "constraints": ["Technical constraints that MUST be respected"],
+  "assumptions": ["Assumptions we're making"],
+  "logical_dependencies": [
+    {"requirement": "FR-002", "depends_on": ["FR-001"], "reason": "Auth required before user actions"}
+  ]
+}
+
+## Quality Criteria
+
+- Every requirement uses SHALL/SHOULD/MAY
+- Every functional requirement has at least one scenario
+- NFRs have specific, measurable metrics (not "fast" but "<200ms")
+- Dependencies are explicit for TaskMaster task ordering
 
 Output ONLY valid JSON.
 EOF
@@ -143,86 +246,246 @@ EOF
 
     local requirements_json=$(cat "$reqs_file")
 
+    # Extract key counts for guidance
+    local fr_count=$(echo "$requirements_json" | jq '.functional_requirements | length' 2>/dev/null || echo "0")
+    local nfr_count=$(echo "$requirements_json" | jq '.non_functional_requirements | length' 2>/dev/null || echo "0")
+
     cat > "$prompts_dir/prd-writing.md" << EOF
-# Task: PRD Writing
+# Task: PRD Writing (TaskMaster & OpenSpec Compatible)
 
-You are a PRD writer creating a formal Product Requirements Document.
+You are a PRD writer creating a formal Product Requirements Document that will be consumed by:
+1. **TaskMaster** - for automatic task decomposition (needs Logical Dependency Chain, explicit tech stack)
+2. **OpenSpec** - for spec-driven development (needs SHALL/SHOULD/MAY language, WHEN/THEN scenarios)
 
-## Context
+## Synthesized Requirements (from Stage 1)
 
-### Selected Approach
-$approach_context
-
-### Interview Responses
-$interview_context
-
-### Synthesized Requirements
 $requirements_json
 
-## Your Task
+## Tech Stack (EXPLICIT - TaskMaster will enforce these)
 
-Write a complete PRD using the 15-section template below.
-Use clear, specific language. Include measurable criteria where possible.
+$tech_stack_context
 
-## Template
+## Vision Context
+
+$dialogue_context
+
+## Section Depth Guidance
+
+| Section | Target Length | Key Content |
+|---------|---------------|-------------|
+| 0. Vision | 2-3 paragraphs | Problem, solution concept, why now |
+| 1. Executive Summary | 1 paragraph | 30-second overview for stakeholders |
+| 2. Technical Architecture | 1-2 pages | Components, tech stack, data flow |
+| 3. Feature Requirements | 2-4 pages | All $fr_count FRs with scenarios |
+| 4. Non-Functional Reqs | 1 page | All $nfr_count NFRs with metrics |
+| 5. Logical Dependency Chain | 1 page | **CRITICAL for TaskMaster** |
+| 6. Development Phases | 1 page | Scope-based, NOT time-based |
+| 7. Code Structure Map | Half page | Directory structure |
+| 8. TDD Strategy | 1 page | Test approach per component |
+| 9. Integration Testing | Half page | Integration test strategy |
+| 10. Documentation Reqs | Half page | Required docs |
+| 11. Operational Readiness | 1 page | Deploy, monitor, support |
+| 12. Risks & Assumptions | 1 page | Top 5 risks, key assumptions |
+| 13. Success Metrics | Half page | Measurable KPIs |
+| 14. Approval | Quarter page | Sign-off checklist |
+
+## Template (FOLLOW THIS STRUCTURE)
 
 # Product Requirements Document (PRD)
 
 ## 0. Vision + Problem Statement
-[What problem are we solving? What's the vision?]
+
+**Problem**: [2-3 sentences describing the pain point]
+
+**Solution**: [2-3 sentences describing our approach]
+
+**Why Now**: [Why is this the right time to solve this?]
 
 ## 1. Executive Summary
-[Brief overview for stakeholders]
 
-## 2. System Architecture Overview
-[High-level architecture description]
+[One paragraph that a stakeholder can read in 30 seconds to understand what we're building and why]
+
+## 2. Technical Architecture
+
+### 2.1 Tech Stack (EXPLICIT)
+
+| Layer | Technology | Rationale |
+|-------|------------|-----------|
+| Backend | [e.g., Node.js/Express] | [Why this choice] |
+| Frontend | [e.g., React] | [Why] |
+| Database | [e.g., PostgreSQL] | [Why] |
+| Cache | [e.g., Redis] | [Why] |
+| Infrastructure | [e.g., AWS ECS] | [Why] |
+
+### 2.2 System Components
+
+[Describe major components and their interactions]
+
+### 2.3 Data Flow
+
+[How data moves through the system]
 
 ## 3. Feature Requirements
-[Detailed functional requirements using RFC 2119]
 
-### 3.1 Core Features
-[MUST have features]
+### 3.1 Core Features (MUST)
 
-### 3.2 Enhanced Features
-[SHOULD have features]
+For each requirement, use this format (OpenSpec-compatible):
 
-### 3.3 Optional Features
-[MAY have features]
+#### FR-001: [Name]
 
-## 4. Non-Functional Requirements
-[Performance, security, scalability, etc.]
+The system **SHALL** [requirement description].
 
-## 5. Code Structure Map
-[Expected project structure]
+**Scenarios:**
+- **WHEN** [trigger condition] **THEN** [expected outcome]
+- **WHEN** [another condition] **THEN** [outcome]
 
-## 6. TDD Implementation Strategy
-[Test-driven development approach]
-
-## 7. Integration Testing Strategy
-[Integration test approach]
-
-## 8. Documentation Requirements
-[Required documentation]
-
-## 9. Operational Readiness
-[Deployment, monitoring, support]
-
-## 10. Risks and Assumptions
-[Known risks and assumptions]
-
-## 11. Success Metrics
-[How we measure success]
-
-## 12. Task Decomposition
-[High-level task breakdown]
-
-## 13. Subtask Extraction
-[Detailed subtasks for implementation]
-
-## 14. Approval and Sign-off
-[Approval workflow]
+**Acceptance Criteria:** [Measurable criteria]
 
 ---
+
+[Include all MUST requirements from synthesized data]
+
+### 3.2 Enhanced Features (SHOULD)
+
+[SHOULD requirements with same format]
+
+### 3.3 Optional Features (MAY)
+
+[MAY requirements with same format]
+
+## 4. Non-Functional Requirements
+
+| ID | Category | Requirement | Metric |
+|----|----------|-------------|--------|
+| NFR-001 | Performance | The system SHALL respond within... | <200ms p99 |
+| NFR-002 | Security | The system SHALL encrypt... | AES-256 |
+
+[Include all NFRs from synthesized data]
+
+## 5. Logical Dependency Chain
+
+**CRITICAL FOR TASKMASTER**: This section defines the order in which features MUST be built.
+
+### Foundation Layer (Build First)
+1. [Requirement ID]: [Why it's foundational]
+2. [Requirement ID]: [Depends on #1 because...]
+
+### Core Layer (Build Second)
+3. [Requirement ID]: [Depends on Foundation because...]
+
+### Feature Layer (Build Third)
+[Continue the chain...]
+
+### Integration Layer (Build Last)
+[Features that tie everything together]
+
+## 6. Development Phases
+
+**NOTE: Phases are defined by SCOPE, not time estimates.**
+
+### Phase 1: Foundation
+**Scope**: [What's included]
+**Exit Criteria**: [How we know it's done]
+**Delivers**: [Usable outcome, even if minimal]
+
+### Phase 2: Core Features
+**Scope**: [What's included]
+**Exit Criteria**: [Measurable]
+**Delivers**: [What users can do after this phase]
+
+### Phase 3: Enhanced Features
+[Continue pattern...]
+
+## 7. Code Structure Map
+
+\`\`\`
+project/
+├── src/
+│   ├── api/           # REST endpoints
+│   ├── services/      # Business logic
+│   ├── models/        # Data models
+│   └── utils/         # Shared utilities
+├── tests/
+│   ├── unit/
+│   └── integration/
+├── docs/
+└── config/
+\`\`\`
+
+## 8. TDD Implementation Strategy
+
+### Unit Testing
+- Framework: [e.g., Jest, pytest]
+- Coverage target: [e.g., 80%]
+- Strategy: [Test-first for all business logic]
+
+### Test Categories
+| Category | What to Test | Example |
+|----------|--------------|---------|
+| Unit | Individual functions | Service method returns expected value |
+| Integration | Component interactions | API → Service → Database |
+| E2E | User workflows | Login → Dashboard → Action |
+
+## 9. Integration Testing Strategy
+
+[How components will be tested together]
+
+## 10. Documentation Requirements
+
+- [ ] README.md with setup instructions
+- [ ] API documentation (OpenAPI/Swagger)
+- [ ] Architecture decision records (ADRs)
+- [ ] Deployment runbook
+
+## 11. Operational Readiness
+
+### Deployment
+[How the system will be deployed]
+
+### Monitoring
+[What metrics/logs/alerts]
+
+### Support
+[Escalation path, on-call expectations]
+
+## 12. Risks and Assumptions
+
+### Top 5 Risks
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| [Risk 1] | High/Med/Low | High/Med/Low | [How we'll handle it] |
+
+### Key Assumptions
+
+1. [Assumption]: [Why we believe this is true]
+
+## 13. Success Metrics
+
+| Metric | Target | Measurement Method |
+|--------|--------|-------------------|
+| [e.g., API Latency] | <200ms p99 | [Monitoring tool] |
+| [e.g., User adoption] | 100 DAU in 30 days | [Analytics] |
+
+## 14. Approval and Sign-off
+
+- [ ] Technical Review Complete
+- [ ] Product Owner Approval
+- [ ] Security Review (if applicable)
+- [ ] Stakeholder Sign-off
+
+---
+*Generated by ATOMIC CLAUDE - Phase 2 PRD*
+*Compatible with TaskMaster and OpenSpec*
+
+## Quality Anti-Patterns (AVOID THESE)
+
+- Vague requirements ("system should be fast" → use specific metrics)
+- Missing scenarios (every FR needs WHEN/THEN)
+- Implicit tech stack (TaskMaster needs EXPLICIT technologies)
+- Timeline-based phases (use scope-based phases instead)
+- Missing dependency chain (TaskMaster needs this for task ordering)
+- Generic NFRs without metrics
 
 Output the complete PRD in markdown format.
 EOF
@@ -273,92 +536,141 @@ _205_create_fallback_prd() {
 
 ## 0. Vision + Problem Statement
 
-[To be completed - describe the problem being solved and the vision]
+**Problem**: [Describe the pain point in 2-3 sentences]
+
+**Solution**: [Describe the approach in 2-3 sentences]
+
+**Why Now**: [Why is this the right time?]
 
 ## 1. Executive Summary
 
-[To be completed - brief overview for stakeholders]
+[One paragraph overview for stakeholders - what we're building and why]
 
-## 2. System Architecture Overview
+## 2. Technical Architecture
 
-[To be completed - high-level architecture]
+### 2.1 Tech Stack (EXPLICIT - Required for TaskMaster)
+
+| Layer | Technology | Rationale |
+|-------|------------|-----------|
+| Backend | [TBD] | [TBD] |
+| Frontend | [TBD] | [TBD] |
+| Database | [TBD] | [TBD] |
+| Infrastructure | [TBD] | [TBD] |
+
+### 2.2 System Components
+
+[To be completed - major components and interactions]
 
 ## 3. Feature Requirements
 
 ### 3.1 Core Features (MUST)
 
-- [ ] Feature 1
-- [ ] Feature 2
+#### FR-001: [Feature Name]
+
+The system **SHALL** [requirement].
+
+**Scenarios:**
+- **WHEN** [condition] **THEN** [outcome]
+
+**Acceptance Criteria:** [Measurable criteria]
 
 ### 3.2 Enhanced Features (SHOULD)
 
-- [ ] Feature 3
+[Add SHOULD requirements with same format]
 
 ### 3.3 Optional Features (MAY)
 
-- [ ] Feature 4
+[Add MAY requirements with same format]
 
 ## 4. Non-Functional Requirements
 
-- Performance: [TBD]
-- Security: [TBD]
-- Scalability: [TBD]
+| ID | Category | Requirement | Metric |
+|----|----------|-------------|--------|
+| NFR-001 | Performance | The system SHALL... | [Target] |
+| NFR-002 | Security | The system SHALL... | [Target] |
 
-## 5. Code Structure Map
+## 5. Logical Dependency Chain (CRITICAL for TaskMaster)
+
+### Foundation Layer (Build First)
+1. [FR-XXX]: [Why foundational]
+
+### Core Layer (Build Second)
+2. [FR-XXX]: [Depends on Foundation]
+
+### Feature Layer (Build Third)
+3. [FR-XXX]: [Depends on Core]
+
+## 6. Development Phases (Scope-Based)
+
+### Phase 1: Foundation
+**Scope**: [What's included]
+**Exit Criteria**: [How we know it's done]
+
+### Phase 2: Core Features
+**Scope**: [What's included]
+**Exit Criteria**: [Measurable]
+
+## 7. Code Structure Map
 
 ```
 project/
 ├── src/
+│   ├── api/
+│   ├── services/
+│   └── models/
 ├── tests/
+│   ├── unit/
+│   └── integration/
 └── docs/
 ```
 
-## 6. TDD Implementation Strategy
+## 8. TDD Implementation Strategy
+
+- Framework: [TBD]
+- Coverage target: [TBD]
+- Strategy: Test-first for business logic
+
+## 9. Integration Testing Strategy
 
 [To be completed]
 
-## 7. Integration Testing Strategy
+## 10. Documentation Requirements
 
-[To be completed]
+- [ ] README.md
+- [ ] API documentation
+- [ ] Deployment runbook
 
-## 8. Documentation Requirements
+## 11. Operational Readiness
 
-- README.md
-- API documentation
-- User guide
+[To be completed - deployment, monitoring, support]
 
-## 9. Operational Readiness
+## 12. Risks and Assumptions
 
-[To be completed]
+### Top Risks
 
-## 10. Risks and Assumptions
-
-### Risks
-- Risk 1: [Description]
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| [Risk] | [H/M/L] | [H/M/L] | [Mitigation] |
 
 ### Assumptions
-- Assumption 1: [Description]
+1. [Assumption]
 
-## 11. Success Metrics
+## 13. Success Metrics
 
-- Metric 1: [Description]
-
-## 12. Task Decomposition
-
-[To be completed]
-
-## 13. Subtask Extraction
-
-[To be completed]
+| Metric | Target | Measurement |
+|--------|--------|-------------|
+| [Metric] | [Target] | [How measured] |
 
 ## 14. Approval and Sign-off
 
-- [ ] Technical review
-- [ ] Product owner approval
-- [ ] Stakeholder sign-off
+- [ ] Technical Review
+- [ ] Product Owner Approval
+- [ ] Security Review
+- [ ] Stakeholder Sign-off
 
 ---
 *Generated by ATOMIC CLAUDE - Phase 2 PRD*
+*Compatible with TaskMaster and OpenSpec*
 EOF
 
     atomic_warn "Created fallback PRD template - manual completion required"

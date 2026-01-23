@@ -298,13 +298,17 @@ EOF
 
     # Orchestrator opens
     local opening_prompt="$prompts_dir/opening.md"
+
+    # Use truncated context to protect token budget
+    local truncated_context=$(atomic_context_truncate "$context_file" 300)
+
     cat > "$opening_prompt" << EOF
 # Role: Orchestrator
 
 You are moderating a discovery conversation about a software project.
 
-## Project Context
-$(cat "$context_file")
+## Project Context (Summary)
+$truncated_context
 
 ## Your Task
 
@@ -434,16 +438,23 @@ EOF
     echo ""
 
     # Generate final consensus document
+    # Adjudicate conversation if needed before final synthesis
+    local primary_model=$(atomic_get_model primary)
+    conversation_json=$(atomic_context_adjudicate "$conversation_json" "Discovery Deliberation" "$primary_model")
+
+    local final_context=$(atomic_context_truncate "$context_file" 200)
+    local final_exchanges=$(echo "$conversation_json" | jq -r '.exchanges[] | "**\(.agent):** \(.message)"')
+
     cat > "$prompts_dir/final-consensus.md" << EOF
 # Task: Generate Final Consensus
 
 Based on the deliberation, create a consensus document.
 
-## Project Context
-$(cat "$context_file")
+## Project Context (Summary)
+$final_context
 
 ## Deliberation Exchanges
-$(jq -r '.exchanges[] | "**\(.agent):** \(.message)"' <<< "$conversation_json")
+$final_exchanges
 
 ## Your Task
 
@@ -570,16 +581,20 @@ _106_generate_approaches() {
     local prompts_dir="$3"
     local approaches_file="$4"
 
+    # Truncate context and use sliding window for exchanges
+    local ctx_summary=$(atomic_context_truncate "$context_file" 250)
+    local recent_discussion=$(echo "$conversation_json" | jq -r '.exchanges[-12:] | .[] | "**\(.agent):** \(.message)"')
+
     cat > "$prompts_dir/generate-approaches.md" << EOF
 # Generate Approaches
 
 Based on the project context and discussion, generate 2-3 meaningfully different approaches.
 
 ## Project Context
-$(cat "$context_file")
+$ctx_summary
 
-## Discussion So Far
-$(echo "$conversation_json" | jq -r '.exchanges[] | "**\(.agent):** \(.message)"')
+## Discussion So Far (Recent)
+$recent_discussion
 
 ## Output Format
 
@@ -626,18 +641,28 @@ _106_first_principles() {
     local conversation_json="$3"
     local prompts_dir="$4"
 
+    # Truncate context, approaches file is usually small
+    local ctx_summary=$(atomic_context_truncate "$context_file" 150)
+    local approaches_content=$(atomic_context_truncate "$approaches_file" 200)
+
     cat > "$prompts_dir/first-principles.md" << EOF
 # First Principles Analysis
 
 Role: first-principles-analyst
 
-Challenge the approaches. What assumptions are we making? What's the simplest thing that could work?
+You challenge assumptions, identify fundamentals, and ask "what's the simplest thing that could work?"
+
+## Your Approach
+- Question every assumption explicitly
+- Break problems down to basic truths
+- Identify unnecessary complexity
+- Suggest simpler alternatives where possible
 
 ## Project Context
-$(cat "$context_file")
+$ctx_summary
 
 ## Current Approaches
-$(cat "$approaches_file")
+$approaches_content
 
 Respond conversationally as the first-principles-analyst. Be direct, challenge assumptions, identify fundamentals.
 Keep it to 3-5 key points. Plain text, not JSON.
@@ -696,6 +721,18 @@ _106_check_consensus() {
     local conversation_json="$2"
     local prompts_dir="$3"
 
+    # Use sliding window - consensus check needs recent context, not full history
+    local recent_exchanges=$(echo "$conversation_json" | jq -r '.exchanges[-15:] | .[] | "**\(.agent):** \(.message)"')
+
+    # Include any adjudication summaries for full picture
+    local adjudication_context=""
+    if echo "$conversation_json" | jq -e '.adjudication_history | length > 0' &>/dev/null; then
+        adjudication_context=$(echo "$conversation_json" | jq -r '
+            "## Earlier Discussion Summary\n" +
+            (.adjudication_history | map(.level_set) | join("\n"))
+        ')
+    fi
+
     cat > "$prompts_dir/consensus-check.md" << EOF
 # Consensus Check
 
@@ -704,8 +741,10 @@ Review the discussion and identify:
 2. Areas of disagreement
 3. What would help reach consensus
 
-## Discussion
-$(echo "$conversation_json" | jq -r '.exchanges[] | "**\(.agent):** \(.message)"')
+$adjudication_context
+
+## Recent Discussion
+$recent_exchanges
 
 Be concise. Plain text, 3-5 bullet points.
 EOF
@@ -730,18 +769,36 @@ _106_agent_response() {
     local prompts_dir="$5"
     local deliberation_log="$6"
 
+    # Get agent persona based on name
+    local agent_persona=""
+    case "$agent" in
+        orchestrator) agent_persona="You moderate discussion, drive toward consensus, and keep the conversation productive. You synthesize viewpoints and identify next steps." ;;
+        discovery-facilitator) agent_persona="You guide exploration by asking probing questions. You help draw out requirements and ensure all perspectives are considered." ;;
+        first-principles-analyst) agent_persona="You challenge assumptions and identify fundamentals. You ask 'why' and 'what's the simplest solution that could work?'" ;;
+        *security*|*auditor*) agent_persona="You focus on security implications, threat modeling, and compliance. You identify risks and suggest mitigations." ;;
+        *api*|*backend*) agent_persona="You specialize in API design, backend architecture, and service patterns. You consider scalability and maintainability." ;;
+        *test*|*tdd*) agent_persona="You focus on testing strategies, testability, and quality assurance. You advocate for test-driven approaches." ;;
+        *) agent_persona="You are an expert in ${agent//-/ }. Draw on your specialized knowledge to provide insights." ;;
+    esac
+
+    # Use truncated context and recent exchanges
+    local ctx_summary=$(atomic_context_truncate "$context_file" 150)
+    local recent_exchanges=$(echo "$conversation_json" | jq -r '.exchanges[-6:] | .[] | "**\(.agent):** \(.message)"')
+
     cat > "$prompts_dir/agent-direct.md" << EOF
 # Direct Question to $agent
 
-Role: $agent
+## Your Role
+$agent_persona
 
+## The Question
 The human asked you directly: "$message"
 
 ## Project Context
-$(head -100 "$context_file")
+$ctx_summary
 
 ## Recent Discussion
-$(echo "$conversation_json" | jq -r '.exchanges[-6:] | .[] | "**\(.agent):** \(.message)"')
+$recent_exchanges
 
 Respond as $agent. Be helpful, specific, and draw on your expertise.
 2-5 sentences. Plain text.
@@ -774,16 +831,45 @@ _106_route_input() {
     shift 5
     local panel_agents=("$@")
 
+    # Build agent roster with descriptions for routing decision
+    local agent_roster=""
+    for agent in "${panel_agents[@]}"; do
+        local desc=""
+        case "$agent" in
+            orchestrator) desc="Moderates discussion, drives toward consensus, keeps conversation on track" ;;
+            discovery-facilitator) desc="Guides exploration, asks probing questions, draws out requirements" ;;
+            first-principles-analyst) desc="Challenges assumptions, identifies fundamentals, simplifies" ;;
+            *security*|*auditor*) desc="Security expertise, threat modeling, compliance considerations" ;;
+            *api*|*backend*) desc="API design, backend architecture, service patterns" ;;
+            *frontend*|*ui*) desc="Frontend architecture, user experience, client-side concerns" ;;
+            *database*|*data*) desc="Data modeling, storage strategies, query optimization" ;;
+            *devops*|*infrastructure*) desc="Deployment, CI/CD, infrastructure concerns" ;;
+            *test*|*tdd*) desc="Testing strategies, quality assurance, test architecture" ;;
+            *) desc="Specialist in ${agent//-/ }" ;;
+        esac
+        agent_roster+="- **$agent**: $desc"$'\n'
+    done
+
     # Orchestrator decides who should respond
     cat > "$prompts_dir/route.md" << EOF
 # Route Input
 
 The human said: "$user_input"
 
-Panel members: ${panel_agents[*]}
+## Available Panel Members
 
-Who should respond? Pick ONE agent that's best suited.
-Just output the agent name, nothing else.
+$agent_roster
+
+## Routing Criteria
+
+Choose the agent whose expertise BEST matches the human's input:
+- Technical questions → relevant technical specialist
+- Process/approach questions → orchestrator or discovery-facilitator
+- "Why" questions or challenges → first-principles-analyst
+- Security concerns → security-related agent
+- General exploration → discovery-facilitator
+
+Output ONLY the exact agent name (e.g., "discovery-facilitator"), nothing else.
 EOF
 
     local responder="discovery-facilitator"  # default

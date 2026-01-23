@@ -75,9 +75,13 @@ task_002_config_document() {
 
     atomic_substep "Reading setup: $SETUP_FILE_PATH"
 
-    # Read the setup content
+    # Read the setup content (limited to 500 lines to protect context window)
     local setup_content
-    setup_content=$(cat "$SETUP_FILE_PATH")
+    setup_content=$(head -500 "$SETUP_FILE_PATH")
+    local setup_lines=$(wc -l < "$SETUP_FILE_PATH")
+    if [[ $setup_lines -gt 500 ]]; then
+        setup_content+=$'\n\n[TRUNCATED: Showing 500 of '"$setup_lines"' lines]'
+    fi
 
     # Determine initialization directory
     local setup_dir
@@ -132,11 +136,11 @@ You are parsing project initialization files to extract configuration values.
 Output ONLY valid JSON - no markdown, no explanation, no code blocks.
 
 ## Rules:
-1. For fields with explicit values: use that value
-2. For fields marked "infer": derive from reference materials or use sensible default
-3. For fields marked "default": use the default value shown in brackets
-4. For fields marked "detect": I'll provide detected values below
-5. If you cannot determine a value, use null
+1. For fields with explicit values in the setup: use that exact value
+2. For fields marked "infer": analyze reference materials to derive a project-specific value
+3. For fields marked "default [X]": use the literal value X shown in brackets
+4. For fields marked "detect": use the auto-detected values I provide below
+5. If a required value cannot be determined from any source, use null
 
 ## Detected Values:
 PROMPT_HEADER
@@ -198,6 +202,13 @@ PROMPT_HEADER
     "primary_model": "string or null",
     "fast_model": "string or null",
     "local_fallback": boolean
+  },
+  "gardener": {
+    "model": "string or 'infer' (auto-select fastest)",
+    "threshold_percent": "number 50-90 (trigger adjudication at this % of context)",
+    "fallback_chain": ["array of model names to try if primary fails"],
+    "preserve_recent_exchanges": "number 2-8 (exchanges to keep after adjudication)",
+    "preserve_opening": "boolean (keep opening messages for continuity)"
   },
   "constraints": {
     "technical": ["array of strings"] or null,

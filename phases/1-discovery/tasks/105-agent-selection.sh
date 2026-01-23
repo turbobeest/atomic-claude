@@ -215,10 +215,29 @@ EOF
 
     # Build agent suggestion prompt
     local suggestion_prompt="$prompts_dir/agent-suggestion.md"
+
+    # Extract full agent list from manifest (not just categories)
+    local agent_list=""
+    if [[ -f "$AGENT_MANIFEST" ]]; then
+        agent_list=$(jq -r '
+            .categories | to_entries[] |
+            "### \(.value.title)\n\(.value.description)\n" +
+            (.value.subcategories | to_entries | map(
+                "**\(.value.title):**\n" +
+                (.value.agents | map("- " + .) | join("\n"))
+            ) | join("\n\n"))
+        ' "$AGENT_MANIFEST" 2>/dev/null)
+    fi
+
+    # Fallback if manifest parsing fails
+    if [[ -z "$agent_list" ]]; then
+        agent_list="(Agent manifest not available - suggest based on common patterns)"
+    fi
+
     cat > "$suggestion_prompt" << EOF
 # Task: Suggest expert agents for this project
 
-Based on the project context, suggest which expert agents would be most valuable.
+Based on the project context, select the most valuable agents from the available list.
 
 ## Project Context
 
@@ -226,39 +245,77 @@ Based on the project context, suggest which expert agents would be most valuable
 **Compliance Requirements**: ${compliance:-"None specified"}
 **Project Domain**: ${project_domain:-"General software development"}
 
-## Available Expert Agent Categories
+## Available Expert Agents
 
-$(jq -r '.categories | to_entries[] | "- **\(.value.title)**: \(.value.description)"' "$AGENT_MANIFEST")
+IMPORTANT: You may ONLY suggest agents from this list. Do not invent agent names.
+
+$agent_list
 
 ## Your Task
 
-1. Suggest 5-8 expert agents that would be most valuable for this project
-2. Explain briefly why each agent is relevant
-3. Note any critical gaps where no existing agent fits
+1. Select 5-8 agents from the list above that would be most valuable for this project
+2. Explain briefly (1 sentence) why each agent is relevant to THIS project
+3. Note any gaps where no existing agent fits the project's needs
 
-Format as a simple list:
-- agent-name: Brief reason for selection
+## Output Format
 
-Be specific and practical. Don't suggest agents unless they're clearly relevant.
+Output ONLY valid JSON (no markdown, no explanation):
+{
+    "suggested_agents": [
+        {"name": "exact-agent-name-from-list", "reason": "Why this agent is relevant"},
+        {"name": "another-agent-name", "reason": "Why this agent is relevant"}
+    ],
+    "gaps": ["Description of any capability gaps not covered by available agents"]
+}
 EOF
 
     echo -e "  ${DIM}Analyzing project context for agent suggestions...${NC}"
     echo ""
 
-    local suggested_agents=""
-    if atomic_invoke "$suggestion_prompt" "$prompts_dir/suggested-agents.txt" "Suggest agents" --model=sonnet; then
-        suggested_agents=$(cat "$prompts_dir/suggested-agents.txt")
-        echo "$suggested_agents" | while IFS= read -r line; do
-            echo -e "    $line"
-        done
+    local suggested_agents_json=""
+    local suggestion_file="$prompts_dir/suggested-agents.json"
+
+    if atomic_invoke "$suggestion_prompt" "$suggestion_file" "Suggest agents" --model=sonnet --format=json; then
+        # Try to parse JSON response
+        if jq -e '.suggested_agents' "$suggestion_file" &>/dev/null; then
+            suggested_agents_json=$(cat "$suggestion_file")
+
+            echo -e "  ${GREEN}Recommended agents:${NC}"
+            echo ""
+
+            # Display each suggested agent
+            echo "$suggested_agents_json" | jq -r '.suggested_agents[] | "    \u001b[32m•\u001b[0m \u001b[1m\(.name)\u001b[0m: \(.reason)"'
+
+            # Display gaps if any
+            local gaps=$(echo "$suggested_agents_json" | jq -r '.gaps[]? // empty')
+            if [[ -n "$gaps" ]]; then
+                echo ""
+                echo -e "  ${YELLOW}Capability gaps identified:${NC}"
+                echo "$suggested_agents_json" | jq -r '.gaps[] | "    ! \(.)"'
+            fi
+
+            # Pre-populate selected_experts from suggestions
+            while IFS= read -r agent_name; do
+                [[ -n "$agent_name" ]] && selected_experts+=("$agent_name")
+            done < <(echo "$suggested_agents_json" | jq -r '.suggested_agents[].name')
+        else
+            # JSON parsing failed, try to extract from text
+            echo -e "  ${YELLOW}!${NC} Parsing suggestions..."
+            cat "$suggestion_file" | head -20 | while IFS= read -r line; do
+                echo -e "    $line"
+            done
+        fi
     else
         # Fallback suggestions
         echo -e "  ${DIM}Using default suggestions based on common patterns...${NC}"
         echo ""
-        echo -e "    - python-pro: Backend development"
-        echo -e "    - typescript-pro: Frontend/full-stack development"
-        echo -e "    - security-auditor: Security validation"
-        echo -e "    - tdd-implementation-agent: Test-driven development"
+        echo -e "    ${GREEN}•${NC} ${BOLD}code-reviewer${NC}: Code quality validation"
+        echo -e "    ${GREEN}•${NC} ${BOLD}security-auditor${NC}: Security validation"
+        echo -e "    ${GREEN}•${NC} ${BOLD}test-strategist${NC}: Test coverage planning"
+        echo -e "    ${GREEN}•${NC} ${BOLD}tdd-implementation-agent${NC}: Test-driven development"
+
+        # Add fallback defaults to selected
+        selected_experts+=("code-reviewer" "security-auditor" "test-strategist" "tdd-implementation-agent")
     fi
     echo ""
 
@@ -328,6 +385,14 @@ What would work best for you?"
         fi
 
         # Generate agent response based on human input
+        # Include actual agent names so LLM can make valid suggestions
+        local available_agents_list=""
+        if [[ -f "$AGENT_MANIFEST" ]]; then
+            available_agents_list=$(jq -r '
+                [.categories[].subcategories[].agents[]] | unique | sort | join(", ")
+            ' "$AGENT_MANIFEST" 2>/dev/null)
+        fi
+
         cat > "$prompts_dir/agent-response.md" << EOF
 # Task: Continue agent selection conversation
 
@@ -335,17 +400,19 @@ The human said: "$human_response"
 
 ## Context
 - We're helping them select agents for their development pipeline
-- They can browse categories, search for agents, or describe what they need
-- Agent manifest location: $AGENT_MANIFEST
-- Available categories: $(jq -r '.categories | keys | join(", ")' "$AGENT_MANIFEST")
+- Currently selected agents: $(printf '%s\n' "${selected_experts[@]}" | paste -sd, -)
+
+## Available Agents (ONLY suggest from this list)
+$available_agents_list
 
 ## Your Task
-Respond helpfully to their input. If they're asking about specific needs:
-1. Suggest relevant agents from the manifest
-2. Explain what each agent specializes in
-3. Ask if they want to add any to their selection
+Respond helpfully to their input:
+1. If they describe a need, suggest SPECIFIC agents from the list above
+2. If they mention an agent name, confirm it exists in the list
+3. Ask if they want to add suggested agents to their selection
 
 Keep response concise (3-5 sentences). Be helpful and specific.
+If suggesting agents, format as: "I recommend **agent-name** for [reason]."
 EOF
 
         atomic_waiting "Thinking..."
@@ -371,18 +438,28 @@ EOF
         echo "**Agent:** $agent_response" >> "$conversation_log"
         echo "" >> "$conversation_log"
 
-        # Check for agent additions
+        # Check for agent additions - validate against manifest
         if [[ "${human_response,,}" =~ (add|select|want|yes|include) ]]; then
-            # Try to extract agent names from the response
-            local mentioned_agents=$(echo "$human_response" | grep -oE '[a-z]+-[a-z]+(-[a-z]+)?' | tr '\n' ' ')
-            if [[ -n "$mentioned_agents" ]]; then
-                for agent in $mentioned_agents; do
-                    if ! printf '%s\n' "${selected_experts[@]}" | grep -q "^${agent}$"; then
-                        selected_experts+=("$agent")
-                        echo -e "    ${GREEN}✓${NC} Added: $agent"
-                    fi
-                done
+            # Get all valid agent names from manifest
+            local valid_agents=""
+            if [[ -f "$AGENT_MANIFEST" ]]; then
+                valid_agents=$(jq -r '[.categories[].subcategories[].agents[]] | unique | .[]' "$AGENT_MANIFEST" 2>/dev/null)
             fi
+
+            # Check each word in response against valid agents
+            for word in $human_response; do
+                # Normalize: lowercase, remove punctuation
+                local normalized=$(echo "$word" | tr '[:upper:]' '[:lower:]' | tr -d '.,!?')
+
+                # Check if it's a valid agent name
+                if echo "$valid_agents" | grep -qx "$normalized"; then
+                    # Not already selected?
+                    if ! printf '%s\n' "${selected_experts[@]}" | grep -q "^${normalized}$"; then
+                        selected_experts+=("$normalized")
+                        echo -e "    ${GREEN}✓${NC} Added: $normalized"
+                    fi
+                fi
+            done
         fi
 
         ((turn++))

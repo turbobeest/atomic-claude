@@ -974,6 +974,416 @@ EOF
 }
 
 # ============================================================================
+# MODEL REGISTRY & TOKEN MANAGEMENT
+# ============================================================================
+
+ATOMIC_MODELS_CONFIG="${ATOMIC_MODELS_CONFIG:-$ATOMIC_ROOT/config/models.json}"
+
+# Discover available Ollama models and merge with known registry
+# Usage: atomic_discover_models
+atomic_discover_models() {
+    local models_config="$ATOMIC_MODELS_CONFIG"
+    local discovered_file="$ATOMIC_STATE_DIR/discovered-models.json"
+
+    mkdir -p "$ATOMIC_STATE_DIR"
+
+    # Start with static config or create minimal default
+    if [[ -f "$models_config" ]]; then
+        cp "$models_config" "$discovered_file"
+    else
+        cat > "$discovered_file" << 'DEFAULTMODELS'
+{
+  "models": {
+    "claude": {
+      "opus": {"context_window": 200000, "cost_tier": "high"},
+      "sonnet": {"context_window": 200000, "cost_tier": "medium"},
+      "haiku": {"context_window": 200000, "cost_tier": "low"}
+    },
+    "ollama": {}
+  },
+  "defaults": {"primary": "sonnet", "fast": "haiku", "gardener": "haiku"}
+}
+DEFAULTMODELS
+    fi
+
+    # Check if Ollama is available
+    if ! command -v ollama &>/dev/null; then
+        return 0
+    fi
+
+    atomic_substep "Discovering Ollama models..."
+
+    # Get list of installed models
+    local ollama_models=$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')
+
+    [[ -z "$ollama_models" ]] && return 0
+
+    # For each discovered model, add to registry if not already present
+    while IFS= read -r model; do
+        [[ -z "$model" ]] && continue
+
+        local exists=$(jq -r ".models.ollama[\"$model\"] // null" "$discovered_file" 2>/dev/null)
+
+        if [[ "$exists" == "null" ]]; then
+            local context_window=$(atomic_infer_context_window "$model")
+            local tmp=$(mktemp)
+            jq --arg model "$model" --argjson ctx "$context_window" '
+                .models.ollama[$model] = {
+                    "context_window": $ctx,
+                    "cost_tier": "free",
+                    "discovered": true
+                }
+            ' "$discovered_file" > "$tmp" && mv "$tmp" "$discovered_file"
+
+            atomic_substep "  Found: $model (${context_window} tokens)"
+        fi
+    done <<< "$ollama_models"
+}
+
+# Infer context window from model name patterns
+atomic_infer_context_window() {
+    local model="$1"
+
+    case "$model" in
+        *llama3.1*|*llama-3.1*) echo "128000" ;;
+        *llama3*|*llama-3*) echo "8000" ;;
+        *llama2*|*llama-2*) echo "4096" ;;
+        *mistral*|*mixtral*) echo "32000" ;;
+        *codellama*|*code-llama*) echo "16000" ;;
+        *phi3*|*phi-3*) echo "128000" ;;
+        *phi*) echo "4096" ;;
+        *qwen2*|*qwen-2*) echo "32000" ;;
+        *qwen*) echo "8000" ;;
+        *deepseek*coder*) echo "16000" ;;
+        *deepseek*) echo "32000" ;;
+        *gemma*) echo "8000" ;;
+        *yi*) echo "32000" ;;
+        *wizard*|*starcoder*) echo "8000" ;;
+        *) echo "4096" ;;  # Conservative default
+    esac
+}
+
+# Get token limit for a model
+# Usage: limit=$(atomic_model_token_limit "llama3.1:8b")
+atomic_model_token_limit() {
+    local model="$1"
+    local discovered_file="$ATOMIC_STATE_DIR/discovered-models.json"
+
+    [[ ! -f "$discovered_file" ]] && atomic_discover_models
+
+    # Check Claude models (short names)
+    case "$model" in
+        opus|sonnet|haiku)
+            jq -r ".models.claude.${model}.context_window // 200000" "$discovered_file" 2>/dev/null || echo "200000"
+            return ;;
+    esac
+
+    # Check Ollama models
+    local limit=$(jq -r ".models.ollama[\"${model}\"].context_window // null" "$discovered_file" 2>/dev/null)
+
+    if [[ "$limit" != "null" && -n "$limit" ]]; then
+        echo "$limit"
+    else
+        echo "4096"  # Conservative fallback
+    fi
+}
+
+# Get the configured model for a role (primary, fast, gardener)
+# Usage: model=$(atomic_get_model "gardener")
+atomic_get_model() {
+    local role="$1"
+    local project_config="$ATOMIC_OUTPUT_DIR/${CURRENT_PHASE:-0-setup}/project-config.json"
+    local discovered_file="$ATOMIC_STATE_DIR/discovered-models.json"
+
+    [[ ! -f "$discovered_file" ]] && atomic_discover_models
+
+    # Try project config first
+    if [[ -f "$project_config" ]]; then
+        local model=""
+        case "$role" in
+            primary)  model=$(jq -r '.extracted.llm.primary_model // empty' "$project_config" 2>/dev/null) ;;
+            fast)     model=$(jq -r '.extracted.llm.fast_model // empty' "$project_config" 2>/dev/null) ;;
+            gardener) model=$(jq -r '.extracted.gardener.model // empty' "$project_config" 2>/dev/null) ;;
+        esac
+
+        # Handle "infer" - auto-select fastest available
+        if [[ "$model" == "infer" ]]; then
+            model=$(atomic_infer_best_model "$role")
+        fi
+
+        [[ -n "$model" && "$model" != "null" ]] && echo "$model" && return
+    fi
+
+    # Fall back to defaults
+    jq -r ".defaults.${role} // \"haiku\"" "$discovered_file" 2>/dev/null || echo "haiku"
+}
+
+# Auto-select best model for a role based on available models
+atomic_infer_best_model() {
+    local role="$1"
+    local discovered_file="$ATOMIC_STATE_DIR/discovered-models.json"
+
+    case "$role" in
+        gardener|fast)
+            # Prefer fast/cheap: haiku > phi3 > mistral > llama3.1:8b
+            for candidate in haiku phi3:medium mistral:7b llama3.1:8b; do
+                if atomic_model_available "$candidate"; then
+                    echo "$candidate"
+                    return
+                fi
+            done
+            echo "haiku"  # Default fallback
+            ;;
+        primary)
+            # Prefer capable: sonnet > llama3.1:70b > mixtral > llama3.1:8b
+            for candidate in sonnet llama3.1:70b mixtral:8x7b llama3.1:8b; do
+                if atomic_model_available "$candidate"; then
+                    echo "$candidate"
+                    return
+                fi
+            done
+            echo "sonnet"
+            ;;
+    esac
+}
+
+# Check if a model is available
+atomic_model_available() {
+    local model="$1"
+    local discovered_file="$ATOMIC_STATE_DIR/discovered-models.json"
+
+    case "$model" in
+        opus|sonnet|haiku)
+            # Claude models assumed available if ANTHROPIC_API_KEY is set
+            [[ -n "${ANTHROPIC_API_KEY:-}" ]] && return 0
+            ;;
+        *)
+            # Check Ollama models
+            [[ -f "$discovered_file" ]] && \
+                jq -e ".models.ollama[\"$model\"]" "$discovered_file" &>/dev/null && return 0
+            ;;
+    esac
+    return 1
+}
+
+# Get gardener configuration
+# Usage: threshold=$(atomic_gardener_config "threshold_percent")
+atomic_gardener_config() {
+    local key="$1"
+    local project_config="$ATOMIC_OUTPUT_DIR/${CURRENT_PHASE:-0-setup}/project-config.json"
+
+    local defaults=(
+        ["threshold_percent"]=70
+        ["preserve_recent_exchanges"]=4
+        ["preserve_opening"]=true
+    )
+
+    if [[ -f "$project_config" ]]; then
+        local value=$(jq -r ".extracted.gardener.${key} // empty" "$project_config" 2>/dev/null)
+        [[ -n "$value" && "$value" != "null" ]] && echo "$value" && return
+    fi
+
+    # Return default
+    case "$key" in
+        threshold_percent) echo "70" ;;
+        preserve_recent_exchanges) echo "4" ;;
+        preserve_opening) echo "true" ;;
+        fallback_chain) echo '["haiku", "mistral:7b", "phi3:medium", "llama3.1:8b"]' ;;
+        *) echo "" ;;
+    esac
+}
+
+# Estimate token count (rough: 1 token ≈ 4 chars for English)
+atomic_estimate_tokens() {
+    local text="$1"
+    local char_count=${#text}
+    echo $((char_count / 4))
+}
+
+# ============================================================================
+# CONTEXT HELPERS (Truncation, Windowing, Validation, Adjudication)
+# ============================================================================
+
+# Truncate file content with notice
+# Usage: content=$(atomic_context_truncate "$file" 500)
+atomic_context_truncate() {
+    local file="$1"
+    local max_lines="${2:-500}"
+
+    if [[ ! -f "$file" ]]; then
+        echo "(file not found: $file)"
+        return 1
+    fi
+
+    local total_lines=$(wc -l < "$file")
+    if [[ $total_lines -le $max_lines ]]; then
+        cat "$file"
+    else
+        head -"$max_lines" "$file"
+        echo ""
+        echo "[TRUNCATED: Showing $max_lines of $total_lines lines]"
+    fi
+}
+
+# Sliding window for JSON conversation arrays
+# Usage: windowed_json=$(atomic_context_window "$dialogue_json" 12)
+atomic_context_window() {
+    local json="$1"
+    local window_size="${2:-12}"
+    local preserve_opening="${3:-true}"
+
+    if [[ "$preserve_opening" == "true" ]]; then
+        echo "$json" | jq --argjson win "$window_size" '
+            .conversation as $conv |
+            if ($conv | length) <= ($win + 2) then
+                .
+            else
+                .conversation = ($conv[:2] +
+                    [{"role": "system", "content": "[...earlier exchanges omitted...]"}] +
+                    $conv[-$win:])
+            end
+        '
+    else
+        echo "$json" | jq --argjson win "$window_size" '
+            .conversation = .conversation[-$win:]
+        '
+    fi
+}
+
+# Validate required context variables are set
+# Usage: atomic_context_validate "corpus_content" "approach_context" || return 1
+atomic_context_validate() {
+    local missing=()
+
+    for var in "$@"; do
+        if [[ -z "${!var:-}" ]]; then
+            missing+=("$var")
+        fi
+    done
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        atomic_warn "Missing required context: ${missing[*]}"
+        return 1
+    fi
+    return 0
+}
+
+# Context adjudication with model-aware thresholds and fallback chain
+# Usage: adjudicated_json=$(atomic_context_adjudicate "$dialogue_json" "Opening Dialogue" "$primary_model")
+atomic_context_adjudicate() {
+    local dialogue_json="$1"
+    local conversation_name="${2:-Conversation}"
+    local primary_model="${3:-$(atomic_get_model primary)}"
+    local output_dir="${ATOMIC_CONTEXT_DIR:-$ATOMIC_STATE_DIR}"
+    local output_file="$output_dir/adjudication-$(date +%s).json"
+
+    mkdir -p "$output_dir"
+
+    # Get configuration
+    local threshold_pct=$(atomic_gardener_config "threshold_percent")
+    local preserve_recent=$(atomic_gardener_config "preserve_recent_exchanges")
+    local preserve_opening=$(atomic_gardener_config "preserve_opening")
+    local fallback_chain=$(atomic_gardener_config "fallback_chain")
+
+    # Calculate threshold based on primary model
+    local token_limit=$(atomic_model_token_limit "$primary_model")
+    local threshold=$((token_limit * threshold_pct / 100))
+
+    # Estimate current conversation size
+    local conversation_text=$(echo "$dialogue_json" | jq -r '.conversation | map(.content) | join(" ")' 2>/dev/null)
+    local estimated_tokens=$(atomic_estimate_tokens "$conversation_text")
+
+    if [[ $estimated_tokens -lt $threshold ]]; then
+        # Under threshold, no adjudication needed
+        echo "$dialogue_json"
+        return 0
+    fi
+
+    atomic_substep "Context threshold exceeded (~$estimated_tokens of $threshold tokens for $primary_model)"
+    atomic_substep "Invoking context gardener..."
+
+    # Build adjudication prompt
+    local full_conversation=$(echo "$dialogue_json" | jq -r '.conversation | map("\(.role): \(.content)") | join("\n\n")' 2>/dev/null)
+
+    local prompt=$(cat << ADJUDICATE_PROMPT
+# Task: Adjudicate Conversation Context
+
+You are a context gardener. This conversation has exceeded its token budget and needs intelligent compression.
+
+## Conversation: $conversation_name
+
+$full_conversation
+
+## Your Task
+
+Produce a compressed context summary that preserves:
+1. Key decisions made
+2. Critical context future responses depend on
+3. Open threads still being discussed
+4. Constraints that were established
+
+Output ONLY valid JSON:
+{
+    "level_set": "2-4 sentences starting with 'Here is where we left off:' capturing current state",
+    "decisions_made": ["Concrete decisions or agreements reached"],
+    "open_threads": ["Topics still under discussion"],
+    "constraints_captured": {
+        "technical": "Tech constraints mentioned or null",
+        "timeline": "Timeline constraints or null",
+        "other": "Other constraints or null"
+    },
+    "key_context": "Critical context that must not be lost"
+}
+ADJUDICATE_PROMPT
+)
+
+    # Try gardener model with fallback chain
+    local gardener_model=$(atomic_get_model gardener)
+    local models_to_try=("$gardener_model")
+
+    # Add fallback chain
+    while IFS= read -r fallback; do
+        [[ -n "$fallback" && "$fallback" != "$gardener_model" ]] && models_to_try+=("$fallback")
+    done < <(echo "$fallback_chain" | jq -r '.[]' 2>/dev/null)
+
+    local success=false
+    for model in "${models_to_try[@]}"; do
+        atomic_substep "Trying gardener model: $model"
+
+        if atomic_invoke "$prompt" "$output_file" "Adjudicate context" --model="$model" --format=json 2>/dev/null; then
+            if jq -e '.level_set' "$output_file" &>/dev/null; then
+                success=true
+                atomic_success "Adjudication complete with $model"
+                break
+            fi
+        fi
+        atomic_warn "Model $model failed, trying next..."
+    done
+
+    if [[ "$success" == true ]]; then
+        # Merge adjudication into dialogue JSON
+        local adjudication=$(cat "$output_file")
+
+        # Build new conversation: opening (if preserved) + level-set + recent exchanges
+        echo "$dialogue_json" | jq \
+            --argjson adj "$adjudication" \
+            --argjson recent "$preserve_recent" \
+            --argjson keep_opening "$([[ "$preserve_opening" == "true" ]] && echo "true" || echo "false")" '
+            .adjudication_history = ((.adjudication_history // []) + [$adj]) |
+            .conversation = (
+                (if $keep_opening then .conversation[:2] else [] end) +
+                [{"role": "system", "content": ("CONTEXT SUMMARY: " + $adj.level_set + "\nDecisions: " + ($adj.decisions_made | join("; ")) + "\nOpen threads: " + ($adj.open_threads | join("; ")))}] +
+                .conversation[-$recent:]
+            )
+        '
+    else
+        # All models failed, use simple window fallback
+        atomic_warn "All gardener models failed, using simple window fallback"
+        atomic_context_window "$dialogue_json" "$((preserve_recent * 2))" "$preserve_opening"
+    fi
+}
+
+# ============================================================================
 # INITIALIZATION
 # ============================================================================
 

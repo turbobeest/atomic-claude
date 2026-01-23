@@ -224,6 +224,10 @@ EOF
         fi
 
         # Generate agent response
+        # First, check if conversation needs adjudication (context gardener)
+        local primary_model=$(atomic_get_model primary)
+        dialogue=$(atomic_context_adjudicate "$dialogue" "Opening Dialogue" "$primary_model")
+
         local conversation_so_far
         conversation_so_far=$(jq -r '.conversation | map("\(.role): \(.content)") | join("\n\n")' <<< "$dialogue")
 
@@ -307,6 +311,19 @@ EOF
     local full_conversation
     full_conversation=$(jq -r '.conversation | map("\(.role): \(.content)") | join("\n\n")' <<< "$dialogue")
 
+    # Check if conversation was adjudicated - include those summaries for complete picture
+    local adjudication_context=""
+    if echo "$dialogue" | jq -e '.adjudication_history | length > 0' &>/dev/null; then
+        adjudication_context=$(echo "$dialogue" | jq -r '
+            .adjudication_history | map(
+                "### Captured at adjudication:\n" +
+                "Decisions: " + (.decisions_made | join("; ")) + "\n" +
+                "Open threads: " + (.open_threads | join("; ")) + "\n" +
+                "Key context: " + (.key_context // "N/A")
+            ) | join("\n\n")
+        ')
+    fi
+
     cat > "$prompts_dir/dialogue-synthesis.md" << 'EOF'
 # Task: Synthesize the conversation into structured output
 
@@ -315,6 +332,15 @@ Based on this dialogue, extract the key information.
 ## Conversation
 EOF
     echo "$full_conversation" >> "$prompts_dir/dialogue-synthesis.md"
+
+    # Include adjudication history if conversation was compressed
+    if [[ -n "$adjudication_context" ]]; then
+        cat >> "$prompts_dir/dialogue-synthesis.md" << EOF
+
+## Earlier Context (from conversation compression)
+$adjudication_context
+EOF
+    fi
 
     cat >> "$prompts_dir/dialogue-synthesis.md" << 'EOF'
 

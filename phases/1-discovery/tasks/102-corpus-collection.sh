@@ -268,6 +268,67 @@ Provide a concise analysis:
    - Where should discovery focus?
 
 Be specific to THIS project. Output as markdown.
+
+## Example Output (Full System)
+
+# Corpus Analysis
+
+## 1. Project Understanding
+This project is a CLI tool for automating software development workflows through LLM-assisted phases. It solves the problem of inconsistent project setup and manual orchestration across discovery, planning, implementation, and release stages.
+
+## 2. Key Themes
+- Phase-based workflow orchestration (10 phases from setup to release)
+- LLM-assisted code generation and review
+- Human-in-the-loop gates at critical decision points
+- Agent-based task delegation
+- Artifact generation and audit trails
+
+## 3. Technical Indicators
+- **Technologies**: Bash scripting, jq for JSON processing, Claude API integration
+- **Architecture**: Pipeline pattern with discrete phases, each containing ordered tasks
+- **Constraints**: Must support offline/local LLM fallback, sandbox restrictions for security
+
+## 4. Gaps & Questions
+- How should failed LLM calls be retried or recovered?
+- What's the expected project size/complexity this tool should handle?
+- Are there specific compliance requirements for generated artifacts?
+- How do agents coordinate when multiple are assigned to a phase?
+
+## 5. Recommended Focus Areas
+- Error handling and recovery strategies across phases
+- Context management to stay within LLM token limits
+- Human gate UX for approval workflows
+
+---
+
+## Example Output (Component/Module)
+
+# Corpus Analysis
+
+## 1. Project Understanding
+This project is a containerized authentication service designed to support the platform's microservices architecture by providing centralized JWT validation and session management. It serves as the security boundary between public-facing APIs and internal services.
+
+## 2. Key Themes
+- Stateless token validation for horizontal scaling
+- Integration with existing LDAP/AD identity providers
+- Rate limiting and brute-force protection
+- Audit logging for compliance
+
+## 3. Technical Indicators
+- **Technologies**: Go, Redis for session cache, PostgreSQL for audit logs
+- **Architecture**: Sidecar pattern, deployed alongside API gateway
+- **Constraints**: Must meet SOC2 requirements, <10ms p99 latency for token validation
+
+## 4. Gaps & Questions
+- What's the token refresh strategy when the identity provider is unavailable?
+- Should this service handle authorization (RBAC) or only authentication?
+- What existing services will consume this component first?
+- Are there legacy session-based services that need migration support?
+
+## 5. Recommended Focus Areas
+- Failure modes when Redis cache is unavailable
+- Migration path for services currently using embedded auth
+- Observability and alerting thresholds
 EOF
 
             atomic_waiting "Claude is analyzing corpus..."

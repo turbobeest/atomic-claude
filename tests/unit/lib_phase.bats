@@ -242,9 +242,9 @@ teardown() {
 @test "phase_human_gate produces output" {
     phase_start "1-discovery" "Discovery"
 
-    # Can't fully test interactive function, but check it doesn't crash
-    # when given piped input
-    echo "approve" | run phase_human_gate "Test gate message"
+    # Test interactive function using here-string for input
+    # Note: run with stdin doesn't work well, so we capture output directly
+    output=$(echo "approve" | phase_human_gate "Test gate message" 2>&1) || true
 
     # Should mention approval required
     assert_contains "$output" "HUMAN"
@@ -259,7 +259,8 @@ teardown() {
 
     echo "Review content here" > "$TEST_TEMP_DIR/review.md"
 
-    echo "" | run phase_review "$TEST_TEMP_DIR/review.md" "Test Review"
+    # Test interactive function using direct capture
+    output=$(echo "" | phase_review "$TEST_TEMP_DIR/review.md" "Test Review" 2>&1) || true
 
     assert_contains "$output" "Review content here"
 }
@@ -267,7 +268,8 @@ teardown() {
 @test "phase_review handles missing file" {
     phase_start "1-discovery" "Discovery"
 
-    echo "" | run phase_review "/nonexistent/file.md" "Test Review"
+    # Test interactive function using direct capture
+    output=$(echo "" | phase_review "/nonexistent/file.md" "Test Review" 2>&1) || true
 
     assert_contains "$output" "not found"
 }

@@ -45,12 +45,26 @@ task_303_task_decomposition() {
         return 1
     fi
 
-    # Extract PRD content
-    local prd_content
-    prd_content=$(cat "$prd_file")
+    # Extract ONLY relevant PRD sections (4, 5, 6, 10, 11)
+    # Section 4: Feature Requirements (primary source of tasks)
+    # Section 5: Logical Dependency Chain (task ordering)
+    # Section 6: Development Phases (phase grouping)
+    # Section 10: Task Decomposition rules (if present)
+    # Section 11: Subtask Context (for Phase 4 prep)
     local prd_lines=$(wc -l < "$prd_file")
 
+    # Extract key sections with smart truncation
+    local section_4=$(sed -n '/^## 3\. Feature Requirements/,/^## 4\./p' "$prd_file" 2>/dev/null | head -200)
+    local section_5=$(sed -n '/^## 4\. Non-Functional/,/^## 5\./p' "$prd_file" 2>/dev/null | head -80)
+    local section_deps=$(sed -n '/^## 5\. Logical Dependency/,/^## 6\./p' "$prd_file" 2>/dev/null | head -100)
+    local section_phases=$(sed -n '/^## 6\. Development Phases/,/^## 7\./p' "$prd_file" 2>/dev/null | head -80)
+    local section_tech=$(sed -n '/### 2\.1 Tech Stack/,/### 2\.2/p' "$prd_file" 2>/dev/null | head -40)
+
+    # Also get project name from PRD metadata or Section 0
+    local project_name=$(grep -m1 "^# " "$prd_file" 2>/dev/null | sed 's/^# //' || echo "Project")
+
     echo -e "  ${GREEN}✓${NC} PRD loaded ($prd_lines lines)"
+    echo -e "  ${DIM}  Extracted: Feature Requirements, Dependencies, Phases, Tech Stack${NC}"
     echo ""
 
     # ─────────────────────────────────────────────────────────────────────────────
@@ -63,37 +77,46 @@ task_303_task_decomposition() {
     echo ""
 
     # Build the decomposition prompt following PRD-TEMPLATE v3.0 structure
-    cat > "$prompts_dir/task-decomposition.md" << 'PROMPT_HEADER'
+    cat > "$prompts_dir/task-decomposition.md" << PROMPT_HEADER
 # Task: PRD to TaskMaster Decomposition
 
 You are a task-decomposer agent. Your job is to break down the PRD into atomic, implementable tasks following PRD-TEMPLATE v3.0 structure.
 
-## PRD Structure Reference
+## Token Budget Warning
 
-The PRD follows this structure:
-- **Section 4**: Feature Requirements (F1, F2, ...) with FR-* requirements
-- **Section 10**: Task Decomposition rules and dependency graph
-- **Section 11**: Subtask Context Extraction (for Phase 4)
+Your output should be 50-150 tasks typically. Keep descriptions concise (1-2 sentences). Acceptance criteria should be bullet points, not paragraphs.
 
-## Task Generation Rules (from PRD Section 10)
+## Project Context
 
-1. **Each Feature** → One top-level task
-2. **Each FR** → Details field or subtask (subtasks populated in Phase 4)
-3. **Dependencies** → From PRD dependency tables (FR-*-F*.* Blocks/Blocked By)
+Project Name: $project_name
+
+## Task Generation Rules
+
+1. **Each Feature (F1, F2, ...)** → One top-level task
+2. **Each FR (FR-001, FR-002, ...)** → Details in description or later subtasks (Phase 4)
+3. **Dependencies** → From PRD dependency chain section
 4. **Priorities** → From RFC 2119 keywords:
    - SHALL/MUST → "high"
    - SHOULD → "medium"
    - MAY → "low"
 
-## TaskMaster JSON Format
+## Categories
 
-Generate tasks in this exact structure:
+- **infrastructure**: Setup, CI/CD, project structure (F0)
+- **feature**: Core functionality from Feature Requirements
+- **testing**: Test infrastructure (TDD subtasks come in Phase 4)
+- **documentation**: API docs, guides
+- **security**: Auth, validation from NFRs
 
-```json
+## Complete Example Output
+
+Here is a complete, valid example of the expected output format:
+
+\`\`\`json
 {
   "meta": {
-    "project_name": "<from PRD metadata>",
-    "generated_at": "<ISO timestamp>",
+    "project_name": "TaskFlow API",
+    "generated_at": "2024-01-15T10:30:00Z",
     "source": "prd",
     "version": "1.0"
   },
@@ -101,50 +124,96 @@ Generate tasks in this exact structure:
     {
       "id": 1,
       "title": "F0: Foundation Setup",
-      "description": "Initialize project structure per PRD Section 6",
+      "description": "Initialize project structure with Node.js, TypeScript, and Express per tech stack",
       "status": "pending",
       "priority": "high",
       "category": "infrastructure",
       "dependencies": [],
-      "acceptance_criteria": "From PRD acceptance criteria tables",
-      "tags": ["foundation"],
-      "estimated_complexity": "simple|moderate|complex",
-      "prd_section": "Section reference",
+      "acceptance_criteria": "- package.json configured\\n- TypeScript compiles\\n- Express server starts on port 3000",
+      "tags": ["setup", "foundation"],
+      "estimated_complexity": "simple",
+      "prd_section": "Section 6",
+      "subtasks": []
+    },
+    {
+      "id": 2,
+      "title": "F1: User Authentication",
+      "description": "Implement JWT-based authentication per FR-001 through FR-005",
+      "status": "pending",
+      "priority": "high",
+      "category": "feature",
+      "dependencies": [1],
+      "acceptance_criteria": "- Users can register with email/password\\n- Login returns valid JWT\\n- Protected routes reject invalid tokens",
+      "tags": ["auth", "security"],
+      "estimated_complexity": "moderate",
+      "prd_section": "Section 3.1",
+      "subtasks": []
+    },
+    {
+      "id": 3,
+      "title": "F2: Task Management Core",
+      "description": "Implement CRUD operations for tasks per FR-006 through FR-012",
+      "status": "pending",
+      "priority": "high",
+      "category": "feature",
+      "dependencies": [2],
+      "acceptance_criteria": "- Create task with title, description, priority\\n- List tasks with pagination\\n- Update task status\\n- Delete task",
+      "tags": ["tasks", "crud"],
+      "estimated_complexity": "moderate",
+      "prd_section": "Section 3.2",
+      "subtasks": []
+    },
+    {
+      "id": 4,
+      "title": "Test Infrastructure",
+      "description": "Configure Jest with TypeScript, set up test utilities",
+      "status": "pending",
+      "priority": "high",
+      "category": "testing",
+      "dependencies": [1],
+      "acceptance_criteria": "- Jest runs TypeScript tests\\n- Test utilities for API testing\\n- CI integration ready",
+      "tags": ["testing"],
+      "estimated_complexity": "simple",
+      "prd_section": "Section 8",
       "subtasks": []
     }
   ]
 }
-```
-
-## Categories
-
-- **infrastructure**: Setup, CI/CD, project structure (F0)
-- **feature**: Core functionality from Section 4 Features
-- **testing**: Test infrastructure (not TDD subtasks - those come in Phase 4)
-- **documentation**: API docs, guides from Section 12
-- **security**: Auth, validation from NFR-2
+\`\`\`
 
 ## Decomposition Checklist
 
-- [ ] All Features (F1, F2, ...) have corresponding tasks
-- [ ] Dependencies match PRD dependency tables
-- [ ] Acceptance criteria from PRD AC tables
-- [ ] No circular dependencies (DAG structure)
-- [ ] ID 1 is foundation/setup task
+Before outputting, verify:
+- [ ] All Features (F1, F2, ...) from Section 3 have corresponding tasks
+- [ ] Dependencies match the Logical Dependency Chain
+- [ ] Acceptance criteria are testable (not vague)
+- [ ] No circular dependencies (valid DAG)
+- [ ] ID 1 is always foundation/setup
 
-## Output
+## Output Format
 
-Generate ONLY valid JSON. No markdown, no explanations.
-Start with `{` and end with `}`.
+Generate ONLY valid JSON. No markdown wrapper, no explanations.
+Start with \`{\` and end with \`}\`.
 
 ---
 
-## PRD Content
+## PRD Sections (Extracted)
 
+### Tech Stack
+$section_tech
+
+### Feature Requirements (Section 3)
+$section_4
+
+### Non-Functional Requirements (Section 4)
+$section_5
+
+### Logical Dependency Chain (Section 5)
+$section_deps
+
+### Development Phases (Section 6)
+$section_phases
 PROMPT_HEADER
-
-    # Append the actual PRD content
-    echo "$prd_content" >> "$prompts_dir/task-decomposition.md"
 
     echo -e "  ${DIM}Invoking task-decomposer agent...${NC}"
     echo ""

@@ -111,6 +111,10 @@ teardown() {
 
     task_state_init "1-discovery"
 
+    # Export for subshell in 'run'
+    export TASK_STATE_FILE
+    export ATOMIC_ROOT
+
     # Should skip 101, 102, 103
     run task_state_should_skip "101"
     [[ "$status" -eq 0 ]]

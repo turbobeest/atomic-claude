@@ -75,7 +75,7 @@ phase_task() {
     local task_name="$2"
     shift 2
 
-    ((PHASE_TASKS_RUN++))
+    PHASE_TASKS_RUN=$((PHASE_TASKS_RUN + 1))
 
     echo ""
     echo -e "${BOLD}${CYAN}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
@@ -174,6 +174,9 @@ EOF
 
     # Record phase completion as artifact
     atomic_context_artifact "$closeout_file" "Phase $CURRENT_PHASE closeout" "closeout"
+
+    # Mark phase complete in task state
+    task_state_phase_complete
 
     # Clear state
     atomic_state_set "current_phase" "null"

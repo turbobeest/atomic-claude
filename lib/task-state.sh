@@ -66,6 +66,13 @@ EOF
 # Returns: 0 if complete, 1 if not
 task_state_is_complete() {
     local task_id="$1"
+
+    # Ensure TASK_STATE_FILE is set (needed for subshell contexts)
+    if [[ -z "$TASK_STATE_FILE" ]]; then
+        TASK_STATE_FILE="$ATOMIC_ROOT/.claude/task-state.json"
+    fi
+    [[ ! -f "$TASK_STATE_FILE" ]] && return 1
+
     local phase_id
     phase_id=$(jq -r '.current_phase // ""' "$TASK_STATE_FILE")
 
@@ -84,11 +91,16 @@ task_state_is_complete() {
 task_state_should_skip() {
     local task_id="$1"
 
+    # Ensure TASK_STATE_FILE is set (needed for subshell contexts)
+    if [[ -z "$TASK_STATE_FILE" ]]; then
+        TASK_STATE_FILE="$ATOMIC_ROOT/.claude/task-state.json"
+    fi
+
     # Check for forced redo flag
-    [[ "$TASK_FORCE_REDO" == "true" ]] && return 1
+    [[ "${TASK_FORCE_REDO:-}" == "true" ]] && return 1
 
     # Check for resume target - skip until we reach it
-    if [[ -n "$TASK_RESUME_AT" ]]; then
+    if [[ -n "${TASK_RESUME_AT:-}" ]]; then
         if [[ "$task_id" == "$TASK_RESUME_AT" ]]; then
             # Reached resume point, clear it and run
             TASK_RESUME_AT=""
@@ -357,7 +369,7 @@ task_state_pipeline_reset() {
                 .phases[$phase].tasks = {}
             ' "$TASK_STATE_FILE" > "$tmp" && mv "$tmp" "$TASK_STATE_FILE"
 
-            ((phases_cleared++))
+            phases_cleared=$((phases_cleared + 1))
             started_clearing=true
 
         else

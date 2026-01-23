@@ -494,6 +494,52 @@ default
 false
 
 # ============================================================================
+# CONTEXT GARDENER
+# ============================================================================
+# The Context Gardener is a background agent that monitors conversation length
+# during multi-turn dialogues and intelligently compresses context when token
+# thresholds are exceeded. This prevents context overflow while preserving
+# critical decisions and continuity.
+
+## Gardener Model
+# Which model handles context adjudication/compression?
+# Use "infer" to auto-select the fastest available model.
+# Recommended: haiku (API) or phi3:medium / mistral:7b (local)
+# Options: [model-name] | infer | default [infer]
+
+infer
+
+## Threshold Percent
+# Trigger adjudication when conversation reaches this % of model's context window.
+# Lower = more aggressive compression, higher = less interruption.
+# Range: 50-90, recommended: 70
+# Options: [value] | default [70]
+
+default
+
+## Fallback Chain
+# If primary gardener model fails, try these models in order.
+# Comma-separated list. First available model is used.
+# Options: [list] | default [haiku, mistral:7b, phi3:medium, llama3.1:8b]
+
+default
+
+## Preserve Recent Exchanges
+# After adjudication, always keep the last N message pairs (human + agent).
+# Higher = more immediate context, lower = more room for summary.
+# Range: 2-8, recommended: 4
+# Options: [value] | default [4]
+
+default
+
+## Preserve Opening
+# Always keep the opening 2 messages (initial context) after adjudication?
+# This helps maintain conversation continuity and original framing.
+# Options: true | false | default [true]
+
+default
+
+# ============================================================================
 # END OF SETUP
 # ============================================================================
 # This file lives in: initialization/setup.md

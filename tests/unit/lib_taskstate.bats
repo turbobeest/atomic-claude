@@ -169,6 +169,10 @@ teardown() {
     task_state_start "101" "Task 1"
     task_state_complete "101" "Task 1"
 
+    # Export needed for subshell in 'run'
+    export TASK_STATE_FILE
+    export ATOMIC_ROOT
+
     run task_state_should_skip "101"
     [[ "$status" -eq 0 ]]
 }
@@ -198,7 +202,10 @@ teardown() {
     task_state_start "101" "Task 1"
     task_state_complete "101" "Task 1"
 
-    TASK_RESUME_AT="103"
+    # Export needed for subshell in 'run'
+    export TASK_STATE_FILE
+    export ATOMIC_ROOT
+    export TASK_RESUME_AT="103"
 
     # Should skip until we reach 103
     run task_state_should_skip "101"
@@ -294,6 +301,9 @@ teardown() {
 # ============================================================================
 
 @test "task_state_pipeline_reset resets from specific task" {
+    # Source atomic.sh to get color definitions
+    source_lib "atomic.sh"
+
     # Initialize multiple phases
     task_state_init "1-discovery"
     task_state_start "101" "Task 1"
@@ -308,6 +318,10 @@ teardown() {
 
     # Reset from task 102 in phase 1
     task_state_pipeline_reset "102"
+
+    # Export for subshell
+    export TASK_STATE_FILE
+    export ATOMIC_ROOT
 
     # Phase 1 task 101 should still be complete
     task_state_init "1-discovery"

@@ -154,17 +154,56 @@ _109_legacy_audit() {
     echo -e "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 
-    # Gather phase artifacts
+    # Gather phase artifacts with smart truncation
     local artifacts=""
+    local artifact_count=0
+    local skipped_count=0
+
     for f in "$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE"/*.json "$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE"/*.md; do
-        [[ -f "$f" ]] && artifacts+="$(basename "$f"): $(head -50 "$f" 2>/dev/null)\n\n"
+        [[ -f "$f" ]] || continue
+
+        local filename=$(basename "$f")
+        local filesize=$(wc -c < "$f")
+        local filelines=$(wc -l < "$f")
+
+        # Skip very large files (>50KB), summarize instead
+        if [[ $filesize -gt 51200 ]]; then
+            artifacts+="### $filename\n"
+            artifacts+="[Large file: ${filelines} lines, $(( filesize / 1024 ))KB - showing structure only]\n"
+            if [[ "$f" == *.json ]]; then
+                artifacts+="Top-level keys: $(jq -r 'keys | join(", ")' "$f" 2>/dev/null || echo "unable to parse")\n"
+            else
+                artifacts+="First 20 lines:\n$(head -20 "$f")\n"
+            fi
+            artifacts+="\n"
+            ((skipped_count++))
+            continue
+        fi
+
+        # Different limits by file type
+        local max_lines=150
+        [[ "$f" == *.json ]] && max_lines=200  # JSON needs more for structure
+        [[ "$filename" == *"log"* ]] && max_lines=100  # Logs can be shorter
+
+        artifacts+="### $filename\n"
+
+        if [[ $filelines -le $max_lines ]]; then
+            artifacts+="$(cat "$f")\n"
+        else
+            artifacts+="$(head -$max_lines "$f")\n"
+            artifacts+="\n[TRUNCATED: Showing $max_lines of $filelines lines]\n"
+        fi
+        artifacts+="\n---\n\n"
+        ((artifact_count++))
     done
+
+    [[ $skipped_count -gt 0 ]] && echo -e "  ${DIM}Note: $skipped_count large files summarized${NC}"
 
     # Build audit prompt
     cat > "$prompts_dir/phase-audit.md" << EOF
 # Task: Phase 1 Discovery Audit (Legacy Mode)
 
-You are an independent auditor reviewing Phase 1 (Discovery) outputs.
+You are an independent auditor reviewing Phase 1 (Discovery) outputs. Your job is to identify gaps that would cause problems in later phases, while recognizing that Discovery outputs are inherently exploratory.
 
 ## Artifacts to Review
 
@@ -179,38 +218,79 @@ $(for dim in "${selected_dims[@]}"; do
     echo ""
 done)
 
+## Scoring Criteria
+
+**PASS**: Clear evidence the requirement is met. Artifacts explicitly support the claim. Sufficient to proceed to Phase 2.
+
+**WARNING**: Partially met OR evidence is ambiguous OR minor gaps exist. Does NOT block progress but should be noted. Issues can be addressed in later phases.
+
+**CRITICAL**: Clearly not met OR missing essential elements OR would cause downstream failures in Phase 2 (PRD). Must be addressed before proceeding.
+
+## Calibration Guidelines
+
+- This is Phase 1 (Discovery) - some ambiguity is EXPECTED and acceptable
+- Don't mark CRITICAL unless it would genuinely block Phase 2 (PRD authoring)
+- Prefer WARNING over CRITICAL for "could be clearer" issues
+- PASS doesn't mean perfect - it means "sufficient to proceed"
+- Discovery is exploratory; don't expect the precision of later phases
+
+## Example Findings
+
+**GOOD finding (specific, evidenced, actionable):**
+{
+  "status": "WARNING",
+  "finding": "Vision statement exists but lacks measurable success criteria",
+  "evidence": "dialogue.json contains vision.core_problem ('reduce deployment time') but synthesis.impact.success_metrics array is empty",
+  "recommendation": "Add 2-3 quantifiable success metrics (e.g., 'reduce deployment time from 2 hours to 15 minutes') before PRD phase"
+}
+
+**BAD finding (avoid this - vague, no evidence):**
+{
+  "status": "WARNING",
+  "finding": "Could be better",
+  "evidence": "Looked at files",
+  "recommendation": "Improve it"
+}
+
+## Anti-Patterns (avoid these)
+
+- Marking everything PASS without citing specific evidence
+- Being overly critical of exploratory content that's naturally ambiguous
+- Expecting Phase 1 outputs to have Phase 3 (implementation) precision
+- Vague findings without specific artifact/field references
+- CRITICAL status for stylistic issues rather than substantive gaps
+- Ignoring truncation notices when evidence might be in omitted content
+
 ## Output Format
 
-For EACH dimension, provide:
-1. **Status**: PASS / WARNING / CRITICAL
-2. **Finding**: What you observed
-3. **Evidence**: Supporting artifacts/content
-4. **Recommendation**: What to do (if not PASS)
+For EACH dimension, provide a finding with specific evidence from the artifacts.
 
 Output as JSON:
 {
   "audit_timestamp": "$(date -Iseconds)",
   "audit_mode": "legacy",
+  "phase": "1-discovery",
   "dimensions_audited": ${#selected_dims[@]},
   "findings": {
     "ID-XX": {
-      "name": "...",
+      "name": "Dimension Name",
       "status": "PASS|WARNING|CRITICAL",
-      "finding": "...",
-      "evidence": "...",
-      "recommendation": "..."
+      "finding": "Specific observation about this dimension",
+      "evidence": "artifact.json field X contains Y, or 'No evidence found in artifacts'",
+      "recommendation": "Specific action if not PASS, or null if PASS"
     }
   },
   "summary": {
-    "passed": N,
-    "warnings": N,
-    "critical": N
+    "passed": 0,
+    "warnings": 0,
+    "critical": 0
   },
-  "overall_status": "PASS|WARNING|CRITICAL",
-  "proceed_recommendation": true|false
+  "overall_status": "PASS if no CRITICAL, WARNING if any warnings, CRITICAL if any critical",
+  "proceed_recommendation": true,
+  "proceed_rationale": "Brief explanation of why it's safe (or not) to proceed to Phase 2"
 }
 
-Output ONLY valid JSON.
+Output ONLY valid JSON. No markdown, no explanation.
 EOF
 
     atomic_waiting "auditor analyzing..."

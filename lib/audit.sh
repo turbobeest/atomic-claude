@@ -9,8 +9,8 @@
 #
 # Flow:
 #   1. Gather context (codebase, phase artifacts, config)
-#   2. Fetch AUDIT-MENU.md (local or GitHub)
-#   3. AI recommends 15-25 relevant audits
+#   2. Load AUDIT-INVENTORY.csv and filter by SDLC phase
+#   3. AI prioritizes from pre-filtered audit list (50-200 audits vs 2,200)
 #   4. User reviews and approves selection
 #   5. Execute selected audits
 #   6. Generate audit report
@@ -22,18 +22,34 @@ set -euo pipefail
 # CONFIGURATION
 # ============================================================================
 
-AUDIT_VERSION="0.1.0"
+AUDIT_VERSION="0.2.0"
 AUDIT_CONFIG_FILE="${AUDIT_CONFIG_FILE:-$ATOMIC_OUTPUT_DIR/0-setup/project-config.json}"
 AUDIT_OUTPUT_DIR="${AUDIT_OUTPUT_DIR:-$ATOMIC_OUTPUT_DIR/audits}"
 AUDIT_CACHE_DIR="${AUDIT_CACHE_DIR:-$ATOMIC_STATE_DIR/audit-cache}"
 
-# GitHub fallback for AUDIT-MENU.md
+# Primary: CSV inventory with SDLC phase columns
+AUDIT_INVENTORY_GITHUB_URL="https://raw.githubusercontent.com/turbobeest/audits/main/AUDIT-INVENTORY.csv"
+
+# DEPRECATED: Old markdown menu (kept for fallback)
 AUDIT_MENU_GITHUB_URL="https://raw.githubusercontent.com/turbobeest/audits/main/AUDIT-MENU.md"
 
 # Default audit counts
 AUDIT_MIN_RECOMMENDATIONS=10
 AUDIT_MAX_RECOMMENDATIONS=30
 AUDIT_DEFAULT_RECOMMENDATIONS=20
+
+# Phase number to CSV column mapping
+declare -A AUDIT_PHASE_COLUMNS=(
+    [1]="discovery"
+    [2]="prd"
+    [3]="task_decomposition"
+    [4]="specification"
+    [5]="implementation"      # TDD + implementation
+    [6]="testing"             # Code review uses testing column
+    [7]="integration"
+    [8]="deployment"
+    [9]="post_production"
+)
 
 # ============================================================================
 # STATE
@@ -42,7 +58,8 @@ AUDIT_DEFAULT_RECOMMENDATIONS=20
 declare -A _AUDIT_CONFIG
 _AUDIT_INITIALIZED=false
 _AUDIT_REPO_PATH=""
-_AUDIT_MENU_PATH=""
+_AUDIT_INVENTORY_PATH=""
+_AUDIT_MENU_PATH=""  # DEPRECATED
 
 # ============================================================================
 # INITIALIZATION
@@ -69,7 +86,12 @@ _audit_load_config() {
     # Get audits repository path
     _AUDIT_REPO_PATH=$(jq -r '.repositories.audits.repository // ""' "$config")
 
-    # Check for local AUDIT-MENU.md
+    # Check for local AUDIT-INVENTORY.csv (preferred)
+    if [[ -n "$_AUDIT_REPO_PATH" && -f "$_AUDIT_REPO_PATH/AUDIT-INVENTORY.csv" ]]; then
+        _AUDIT_INVENTORY_PATH="$_AUDIT_REPO_PATH/AUDIT-INVENTORY.csv"
+    fi
+
+    # DEPRECATED: Check for local AUDIT-MENU.md (fallback only)
     if [[ -n "$_AUDIT_REPO_PATH" && -f "$_AUDIT_REPO_PATH/AUDIT-MENU.md" ]]; then
         _AUDIT_MENU_PATH="$_AUDIT_REPO_PATH/AUDIT-MENU.md"
     fi
@@ -82,11 +104,120 @@ _audit_load_config() {
 }
 
 # ============================================================================
-# AUDIT MENU FETCHING
+# AUDIT INVENTORY (CSV-based, phase-filtered)
 # ============================================================================
 
-# Fetch AUDIT-MENU.md from local repo or GitHub
+# Fetch AUDIT-INVENTORY.csv from local repo or GitHub
+_audit_fetch_inventory_csv() {
+    audit_init
+
+    # Try local first
+    if [[ -n "$_AUDIT_INVENTORY_PATH" && -f "$_AUDIT_INVENTORY_PATH" ]]; then
+        cat "$_AUDIT_INVENTORY_PATH"
+        return 0
+    fi
+
+    # Try cached version
+    local cache_file="$AUDIT_CACHE_DIR/AUDIT-INVENTORY.csv"
+    local cache_age_limit=$((24 * 60 * 60))  # 24 hours
+
+    if [[ -f "$cache_file" ]]; then
+        local cache_age=$(($(date +%s) - $(stat -c %Y "$cache_file" 2>/dev/null || echo 0)))
+        if [[ $cache_age -lt $cache_age_limit ]]; then
+            cat "$cache_file"
+            return 0
+        fi
+    fi
+
+    # Fetch from GitHub
+    echo "Fetching AUDIT-INVENTORY.csv from GitHub..." >&2
+    if curl -s --fail "$AUDIT_INVENTORY_GITHUB_URL" > "$cache_file" 2>/dev/null; then
+        cat "$cache_file"
+        return 0
+    fi
+
+    echo "ERROR: Could not fetch AUDIT-INVENTORY.csv" >&2
+    return 1
+}
+
+# Get audits filtered by SDLC phase
+# Returns: CSV subset with header + matching rows
+audit_get_phase_audits() {
+    local phase_num="$1"
+    local phase_column="${AUDIT_PHASE_COLUMNS[$phase_num]:-}"
+
+    if [[ -z "$phase_column" ]]; then
+        echo "ERROR: Unknown phase number: $phase_num" >&2
+        return 1
+    fi
+
+    local csv_content=$(_audit_fetch_inventory_csv)
+    if [[ -z "$csv_content" ]]; then
+        return 1
+    fi
+
+    # Get header and find column index for the phase
+    local header=$(echo "$csv_content" | head -1)
+    local col_index=$(echo "$header" | tr ',' '\n' | grep -n "^${phase_column}$" | cut -d: -f1)
+
+    if [[ -z "$col_index" ]]; then
+        echo "ERROR: Column '$phase_column' not found in CSV" >&2
+        return 1
+    fi
+
+    # Output header
+    echo "$header"
+
+    # Filter rows where phase column = "Yes"
+    echo "$csv_content" | tail -n +2 | awk -F',' -v col="$col_index" '$col == "Yes"'
+}
+
+# Format filtered audits for LLM consumption (concise format)
+audit_format_for_llm() {
+    local phase_num="$1"
+    local max_audits="${2:-200}"
+
+    local filtered=$(audit_get_phase_audits "$phase_num")
+    if [[ -z "$filtered" ]]; then
+        return 1
+    fi
+
+    local count=$(echo "$filtered" | tail -n +2 | wc -l)
+    local phase_column="${AUDIT_PHASE_COLUMNS[$phase_num]}"
+
+    echo "## Audits Available for Phase $phase_num ($phase_column)"
+    echo ""
+    echo "Total applicable: $count audits"
+    echo ""
+    echo "| Audit ID | Name | Category | Tier | Automated |"
+    echo "|----------|------|----------|------|-----------|"
+
+    # Extract key columns: audit_id, audit_name, category, tier, fully_automated
+    echo "$filtered" | tail -n +2 | head -n "$max_audits" | \
+        awk -F',' '{
+            audit_id=$1
+            name=$3
+            category=$4
+            tier=$7
+            automated=($24=="Yes" ? "Yes" : ($25=="Yes" ? "Semi" : "Manual"))
+            printf "| %s | %s | %s | %s | %s |\n", audit_id, name, category, tier, automated
+        }'
+
+    if [[ "$count" -gt "$max_audits" ]]; then
+        echo ""
+        echo "_Showing first $max_audits of $count applicable audits_"
+    fi
+}
+
+# ============================================================================
+# DEPRECATED: AUDIT-MENU.md FETCHING (kept for fallback)
+# ============================================================================
+
+# DEPRECATED: Fetch AUDIT-MENU.md from local repo or GitHub
+# Use audit_get_phase_audits() instead for phase-filtered CSV access
 audit_fetch_menu() {
+    echo "WARNING: audit_fetch_menu() is deprecated. Use audit_get_phase_audits() for phase-filtered audits." >&2
+
     audit_init
 
     # Try local first
@@ -187,7 +318,7 @@ audit_gather_context() {
 # AI-DRIVEN AUDIT SELECTION
 # ============================================================================
 
-# Get AI recommendations for audits
+# Get AI recommendations for audits (using phase-filtered CSV)
 audit_get_recommendations() {
     local phase_num="$1"
     local phase_name="$2"
@@ -198,50 +329,85 @@ audit_get_recommendations() {
     # Gather context
     local context=$(audit_gather_context "$phase_num" "$phase_name")
 
-    # Fetch audit menu
-    local audit_menu=$(audit_fetch_menu)
-    if [[ -z "$audit_menu" ]]; then
-        echo "ERROR: Could not fetch audit menu" >&2
+    # Get phase-filtered audit list (much smaller than full 2,200)
+    local phase_column="${AUDIT_PHASE_COLUMNS[$phase_num]:-}"
+    local audit_list=$(audit_format_for_llm "$phase_num" 150)
+    local audit_count=$(audit_get_phase_audits "$phase_num" 2>/dev/null | tail -n +2 | wc -l)
+
+    if [[ -z "$audit_list" ]]; then
+        echo "ERROR: Could not fetch audits for phase $phase_num" >&2
         return 1
     fi
 
-    # Build prompt for AI
+    echo -e "  ${DIM}Phase $phase_num has $audit_count applicable audits (filtered from 2,190)${NC}" >&2
+
+    # Build prompt for AI with improved structure
     local prompt_file=$(mktemp)
     cat > "$prompt_file" << EOF
-You are conducting a Phase $phase_num audit for "$phase_name".
+# Task: Prioritize Audits for Phase $phase_num ($phase_name)
 
-CONTEXT:
+You are an audit recommender. The audit inventory has been PRE-FILTERED to show only audits applicable to Phase $phase_num ($phase_column column = Yes).
+
+Your job is to PRIORITIZE the $num_recommendations most relevant audits from this pre-filtered list based on the project context.
+
+## Project Context
+
 $context
 
-AUDIT MENU (Available Audits):
-$audit_menu
+## Pre-Filtered Audit List (Phase $phase_num applicable)
 
-TASK:
-1. Analyze the context above
-2. Select $num_recommendations most relevant audits from the menu for this phase
-3. For each selected audit, provide:
-   - Audit ID (e.g., SEC-1.1.01)
-   - Name
-   - Why it's relevant to this phase
-   - Estimated dependency status: "ready" (can run immediately) or "needs-deps" (requires external files/tools)
+$audit_list
 
-OUTPUT FORMAT (JSON):
+## Prioritization Criteria
+
+Rank audits by:
+1. **Relevance** to project type and tech stack (highest weight)
+2. **Tier** - prefer "expert" and "focused" over "basic"
+3. **Automation** - prefer "Yes" (fully automated) for efficiency
+4. **Category balance** - include audits from multiple categories
+
+## Priority Calibration
+
+- **high**: Critical for this phase, would catch major issues
+- **medium**: Important but not blocking, good coverage
+- **low**: Nice to have, additional assurance
+
+## Output Format
+
+Select exactly $num_recommendations audits and output as JSON:
+
 {
   "phase": $phase_num,
   "phase_name": "$phase_name",
+  "total_available": $audit_count,
   "recommendations": [
     {
-      "audit_id": "SEC-1.1.01",
-      "name": "Session Management Audit",
-      "relevance": "Critical for authentication security in the PRD phase",
+      "audit_id": "security-trust.application-security.cors-policy",
+      "name": "CORS Policy Audit",
+      "category": "security-trust",
+      "relevance": "API project needs proper CORS configuration",
+      "dependency_status": "ready",
+      "priority": "high"
+    },
+    {
+      "audit_id": "code-quality.testing.unit-test-coverage",
+      "name": "Unit Test Coverage Audit",
+      "category": "code-quality",
+      "relevance": "TDD phase requires coverage validation",
       "dependency_status": "ready",
       "priority": "high"
     }
   ],
-  "summary": "Brief summary of the audit focus areas"
+  "summary": "Brief summary of audit focus areas for this phase"
 }
 
-Respond with ONLY the JSON, no markdown formatting.
+## Rules
+
+- Use EXACT audit_id values from the table (e.g., "security-trust.application-security.cors-policy")
+- Include a mix of categories for balanced coverage
+- Set dependency_status to "ready" for fully_automated=Yes audits
+- Output ONLY valid JSON, no markdown
+
 EOF
 
     local output_file="$AUDIT_CACHE_DIR/recommendations-phase-$phase_num.json"

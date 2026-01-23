@@ -144,7 +144,25 @@ task_108_discovery_diagrams() {
 
     local direction_context=""
     if [[ -f "$phase1_dir/direction-confirmed.json" ]]; then
-        direction_context=$(cat "$phase1_dir/direction-confirmed.json")
+        # Extract only key fields needed for diagrams, not full JSON
+        direction_context=$(jq -r '
+            "Approach: " + (.approach // "unspecified") + "\n" +
+            "Key Components: " + ((.components // []) | join(", ")) + "\n" +
+            "Architecture Style: " + (.architecture_style // "unspecified") + "\n" +
+            "Key Decisions: " + ((.key_decisions // [])[:5] | join("; "))
+        ' "$phase1_dir/direction-confirmed.json" 2>/dev/null || echo "Direction details not available")
+    fi
+
+    # Load tech stack from project config for accurate naming
+    local tech_stack_context=""
+    local project_config="$ATOMIC_OUTPUT_DIR/0-setup/project-config.json"
+    if [[ -f "$project_config" ]]; then
+        tech_stack_context=$(jq -r '
+            .extracted.constraints // {} |
+            "Tech Stack:\n" +
+            "- Infrastructure: " + (.infrastructure // "unspecified") + "\n" +
+            "- Technologies: " + ((.technical // []) | join(", "))
+        ' "$project_config" 2>/dev/null || echo "")
     fi
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -164,7 +182,7 @@ task_108_discovery_diagrams() {
 
         # Generate DOT file
         if _108_generate_diagram "$diagram_type" "$diagrams_dir" "$prompts_dir" \
-            "$approach_name" "$approach_summary" "$dialogue_context" "$direction_context"; then
+            "$approach_name" "$approach_summary" "$dialogue_context" "$direction_context" "$tech_stack_context"; then
 
             local dot_file="$diagrams_dir/$diagram_type.dot"
 
@@ -332,7 +350,7 @@ task_108_discovery_diagrams() {
                 read -p "  Which diagram? " regen_name
 
                 if _108_generate_diagram "$regen_name" "$diagrams_dir" "$prompts_dir" \
-                    "$approach_name" "$approach_summary" "$dialogue_context" "$direction_context"; then
+                    "$approach_name" "$approach_summary" "$dialogue_context" "$direction_context" "$tech_stack_context"; then
                     echo -e "  ${GREEN}✓${NC} Regenerated $regen_name.dot"
 
                     if [[ "$has_graphviz" == true ]]; then
@@ -372,11 +390,25 @@ _108_generate_diagram() {
     local approach_summary="$5"
     local vision="$6"
     local direction="$7"
+    local tech_stack="${8:-}"
 
     local prompt_file="$prompts_dir/diagram-$diagram_type.md"
     local output_file="$output_dir/$diagram_type.dot"
 
-    # Get diagram-specific instructions
+    # Complexity guidance per diagram type
+    local complexity_guidance=""
+    case "$diagram_type" in
+        system-context) complexity_guidance="Target: 3-8 nodes. Show system + external actors/systems only." ;;
+        container) complexity_guidance="Target: 5-15 nodes. Show major containers, not internal details." ;;
+        component) complexity_guidance="Target: 8-20 nodes. Show internal structure of ONE container." ;;
+        data-flow) complexity_guidance="Target: 5-12 nodes. Focus on main data paths, not edge cases." ;;
+        sequence) complexity_guidance="Target: 3-6 lifelines, 5-15 messages. Show ONE key flow." ;;
+        state) complexity_guidance="Target: 4-10 states. Show main states, not every edge case." ;;
+        deployment) complexity_guidance="Target: 6-15 nodes. Show infrastructure, not app internals." ;;
+        er-diagram) complexity_guidance="Target: 4-12 entities. Show core domain, not audit fields." ;;
+    esac
+
+    # Get diagram-specific instructions with mini-example
     local diagram_instructions=""
     case "$diagram_type" in
         system-context)
@@ -444,40 +476,68 @@ Use: record shape for entities with fields, edge labels for relationships"
             ;;
     esac
 
+    # Build context section, handling empty values gracefully
+    local context_section=""
+    [[ -n "$approach_name" && "$approach_name" != "unknown" ]] && context_section+="**Approach:** $approach_name"$'\n'
+    [[ -n "$approach_summary" ]] && context_section+="$approach_summary"$'\n\n'
+    [[ -n "$vision" ]] && context_section+="**Vision:** $vision"$'\n\n'
+    [[ -n "$direction" ]] && context_section+="**Direction:**"$'\n'"$direction"$'\n\n'
+    [[ -n "$tech_stack" ]] && context_section+="$tech_stack"$'\n'
+
+    # Default context if nothing available
+    [[ -z "$context_section" ]] && context_section="No specific project context provided. Create a representative diagram for a typical software system."
+
     cat > "$prompt_file" << EOF
 # Task: Generate $diagram_type Diagram
 
-You are a software architect generating a DOT (Graphviz) diagram.
+You are a software architect creating a DOT (Graphviz) diagram that will be reviewed by developers, architects, and stakeholders. The diagram should be understandable in 30 seconds.
 
 ## Project Context
 
-**Approach:** $approach_name
-$approach_summary
-
-**Vision:** $vision
-
-**Direction Details:**
-$direction
+$context_section
 
 ## Diagram Type: $diagram_type
 
 $diagram_instructions
 
+## Complexity Guidance
+
+$complexity_guidance
+
+## Quality Checklist (follow these)
+
+- [ ] All nodes have clear, specific labels (not generic "Service" or "Component")
+- [ ] All edges have meaningful labels describing the relationship/protocol
+- [ ] Logical groupings use subgraphs with descriptive labels
+- [ ] Node count is appropriate (see complexity guidance above)
+- [ ] No orphan nodes - everything connects to something
+- [ ] Labels use actual names from tech stack when provided
+
+## Anti-Patterns (avoid these)
+
+- Generic labels like "Service A", "Component 1", "Database" without specifics
+- Unlabeled edges (every arrow should explain what flows/happens)
+- More than 3 levels of subgraph nesting
+- Mixing concerns (don't put deployment details in a data flow diagram)
+- Too many nodes (causes visual overload) or too few (lacks useful detail)
+- Missing the system boundary for context/container diagrams
+
 ## DOT Format Requirements
 
-1. Start with: digraph $diagram_type {
-2. Include graph attributes: rankdir, splines, nodesep, ranksep
+1. Start with: digraph ${diagram_type//-/_} {
+2. Include: rankdir, splines=ortho, nodesep, ranksep
 3. Define node defaults: node [shape=..., style=..., fontname="Arial"]
 4. Define edge defaults: edge [fontname="Arial", fontsize=10]
-5. Use subgraph cluster_X for grouping with labels
-6. Use meaningful node IDs (snake_case)
-7. Add comments for sections
+5. Use subgraph cluster_X for grouping (cluster_ prefix required for boxes)
+6. Use snake_case node IDs that are meaningful
+7. Add // comments to organize sections
 
 ## Output
 
-Output ONLY the DOT code, nothing else. No markdown fences.
+Output ONLY valid DOT code. No markdown fences, no explanation, no preamble.
 
-Example structure:
+## Example Structure
+
 digraph example {
     // Graph settings
     rankdir=TB
@@ -493,21 +553,21 @@ digraph example {
     subgraph cluster_external {
         label="External"
         style=dashed
-        user [label="User", shape=ellipse]
+        user [label="End User", shape=ellipse]
     }
 
-    // System
+    // System boundary
     subgraph cluster_system {
-        label="System"
+        label="Order Management System"
         style=filled
         fillcolor="#F5F5F5"
-        component_a [label="Component A"]
-        component_b [label="Component B"]
+        order_api [label="Order API\\n[Node.js]"]
+        order_db [label="Orders DB\\n[PostgreSQL]", shape=cylinder]
     }
 
-    // Relationships
-    user -> component_a [label="uses"]
-    component_a -> component_b [label="calls"]
+    // Relationships with labels
+    user -> order_api [label="REST/HTTPS"]
+    order_api -> order_db [label="SQL queries"]
 }
 EOF
 
