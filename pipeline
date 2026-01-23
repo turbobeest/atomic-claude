@@ -1,0 +1,187 @@
+#!/bin/bash
+#
+# ATOMIC CLAUDE - Pipeline Control
+# Top-level commands for managing the entire pipeline
+#
+# Usage:
+#   ./pipeline status              Show full pipeline state
+#   ./pipeline reset <task_id>     Reset from task (clears subsequent phases)
+#   ./pipeline resume              Resume from last position
+#   ./pipeline run <phase>         Run specific phase
+#
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source libraries
+source "$SCRIPT_DIR/lib/atomic.sh"
+source "$SCRIPT_DIR/lib/task-state.sh"
+
+# Initialize task state file path
+TASK_STATE_FILE="$SCRIPT_DIR/.claude/task-state.json"
+
+show_help() {
+    echo ""
+    echo -e "${BOLD}ATOMIC CLAUDE Pipeline Control${NC}"
+    echo ""
+    echo "Usage: ./pipeline <command> [options]"
+    echo ""
+    echo "Commands:"
+    echo "  status              Show full pipeline state across all phases"
+    echo "  reset <task_id>     Reset pipeline from task (e.g., 204 for Phase 2, Task 04)"
+    echo "                      Clears all progress from that task forward"
+    echo "  resume              Resume from last position"
+    echo "  run <phase>         Run specific phase (e.g., run 1, run 2)"
+    echo ""
+    echo "Examples:"
+    echo "  ./pipeline status"
+    echo "      Shows which phases/tasks are complete, in progress, or pending"
+    echo ""
+    echo "  ./pipeline reset 204"
+    echo "      You're at task 405, discovered task 204 was wrong."
+    echo "      This resets Phase 2 from task 204 and clears Phases 3, 4, etc."
+    echo ""
+    echo "  ./pipeline resume"
+    echo "      Continues from wherever you left off"
+    echo ""
+    echo "  ./pipeline run 2"
+    echo "      Runs Phase 2 (Discovery)"
+    echo ""
+}
+
+cmd_status() {
+    if [[ ! -f "$TASK_STATE_FILE" ]]; then
+        echo ""
+        echo "No pipeline state found. Run a phase to initialize."
+        echo ""
+        return
+    fi
+
+    task_state_pipeline_status
+}
+
+cmd_reset() {
+    local task_id="$1"
+
+    if [[ -z "$task_id" ]]; then
+        echo "Error: Task ID required"
+        echo "Usage: ./pipeline reset <task_id>"
+        echo "Example: ./pipeline reset 204"
+        exit 1
+    fi
+
+    if [[ ! -f "$TASK_STATE_FILE" ]]; then
+        echo "No pipeline state found. Nothing to reset."
+        exit 1
+    fi
+
+    echo ""
+    echo -e "${YELLOW}This will reset the pipeline from task $task_id forward.${NC}"
+    echo -e "${YELLOW}All subsequent tasks and phases will be cleared.${NC}"
+    echo ""
+    read -p "Continue? [y/N]: " confirm
+
+    if [[ ! "$confirm" =~ ^[Yy] ]]; then
+        echo "Aborted."
+        exit 0
+    fi
+
+    task_state_pipeline_reset "$task_id"
+}
+
+cmd_resume() {
+    if [[ ! -f "$TASK_STATE_FILE" ]]; then
+        echo ""
+        echo "No pipeline state found. Starting from Phase 0."
+        echo ""
+        exec bash "$SCRIPT_DIR/phases/0-setup/run.sh"
+    fi
+
+    local current_phase
+    current_phase=$(jq -r '.current_phase // ""' "$TASK_STATE_FILE")
+
+    if [[ -z "$current_phase" || "$current_phase" == "null" ]]; then
+        echo ""
+        echo "No active phase. Starting from Phase 0."
+        echo ""
+        exec bash "$SCRIPT_DIR/phases/0-setup/run.sh"
+    fi
+
+    # Extract phase number
+    local phase_num="${current_phase%%-*}"
+
+    echo ""
+    echo -e "Resuming Phase $phase_num ($current_phase)..."
+    echo ""
+
+    # Find and run the phase script
+    local phase_script
+    phase_script=$(find "$SCRIPT_DIR/phases" -maxdepth 2 -name "run.sh" -path "*/$current_phase/*" 2>/dev/null | head -1)
+
+    if [[ -z "$phase_script" ]]; then
+        # Try pattern match
+        phase_script=$(find "$SCRIPT_DIR/phases" -maxdepth 2 -name "run.sh" -path "*/$phase_num-*/*" 2>/dev/null | head -1)
+    fi
+
+    if [[ -n "$phase_script" && -f "$phase_script" ]]; then
+        exec bash "$phase_script"
+    else
+        echo "Error: Could not find run.sh for phase $current_phase"
+        exit 1
+    fi
+}
+
+cmd_run() {
+    local phase="$1"
+
+    if [[ -z "$phase" ]]; then
+        echo "Error: Phase number required"
+        echo "Usage: ./pipeline run <phase>"
+        echo "Example: ./pipeline run 2"
+        exit 1
+    fi
+
+    # Find phase directory
+    local phase_script
+    phase_script=$(find "$SCRIPT_DIR/phases" -maxdepth 2 -name "run.sh" -path "*/$phase-*/*" 2>/dev/null | head -1)
+
+    if [[ -n "$phase_script" && -f "$phase_script" ]]; then
+        echo ""
+        echo "Running Phase $phase..."
+        echo ""
+        exec bash "$phase_script"
+    else
+        echo "Error: Could not find Phase $phase"
+        echo ""
+        echo "Available phases:"
+        find "$SCRIPT_DIR/phases" -maxdepth 1 -type d -name "[0-9]*" | sort | while read -r dir; do
+            echo "  $(basename "$dir")"
+        done
+        exit 1
+    fi
+}
+
+# Main dispatch
+case "${1:-}" in
+    status)
+        cmd_status
+        ;;
+    reset)
+        cmd_reset "${2:-}"
+        ;;
+    resume)
+        cmd_resume
+        ;;
+    run)
+        cmd_run "${2:-}"
+        ;;
+    -h|--help|help|"")
+        show_help
+        ;;
+    *)
+        echo "Unknown command: $1"
+        show_help
+        exit 1
+        ;;
+esac
