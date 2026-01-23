@@ -104,6 +104,7 @@ task_205_prd_authoring() {
             "Audience: " + (.audience.primary // "Not specified") + "\n" +
             "Non-negotiables: " + ((.non_negotiables // []) | join("; "))
         ' "$phase1_dir/dialogue.json" 2>/dev/null || echo "No dialogue synthesis")
+    fi
 
     # ═══════════════════════════════════════════════════════════════════════════
     # STAGE 1: REQUIREMENTS SYNTHESIS
