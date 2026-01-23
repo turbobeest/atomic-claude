@@ -8,10 +8,11 @@ task_403_openspec_generation() {
     local tasks_file="$ATOMIC_ROOT/.taskmaster/tasks/tasks.json"
     local specs_dir="$ATOMIC_ROOT/.claude/specs"
     local progress_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/spec-progress.json"
+    local prompts_dir="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/prompts"
 
     atomic_step "OpenSpec Generation"
 
-    mkdir -p "$specs_dir" "$(dirname "$progress_file")"
+    mkdir -p "$specs_dir" "$prompts_dir" "$(dirname "$progress_file")"
 
     echo ""
     echo -e "  ${DIM}Generating OpenSpec definitions for each task.${NC}"
@@ -132,81 +133,127 @@ TEMPLATE
 
         echo -e "  ${CYAN}[${task_id}]${NC} Generating: ${task_title:0:60}"
 
-        # Generate spec (in real implementation, this would call an LLM)
-        # For now, create a template that can be filled in
+        # Build LLM prompt for OpenSpec generation
+        local prompt_file="$prompts_dir/openspec-t${task_id}.md"
+        local raw_spec="$prompts_dir/openspec-t${task_id}-raw.json"
 
-        jq -n \
-            --argjson id "$task_id" \
-            --arg title "$task_title" \
-            --arg desc "$task_desc" \
-            --arg criteria "$task_criteria" \
-            --arg complexity "$task_complexity" \
-            '{
-                "spec_id": "SPEC-T\($id)",
-                "task_id": $id,
-                "task_title": $title,
-                "task_description": $desc,
-                "acceptance_criteria": $criteria,
-                "complexity": $complexity,
+        # Get task dependencies
+        local task_deps=$(jq -r ".tasks[] | select(.id == $task_id) | .dependencies // [] | join(\", \")" "$tasks_file")
+        local task_category=$(jq -r ".tasks[] | select(.id == $task_id) | .category // \"feature\"" "$tasks_file")
+        local task_prd_section=$(jq -r ".tasks[] | select(.id == $task_id) | .prd_section // \"\"" "$tasks_file")
 
-                "test_strategy": {
-                    "unit_tests": [
-                        {
-                            "name": "test_\($title | gsub("[^a-zA-Z0-9]"; "_") | ascii_downcase)_basic",
-                            "description": "Verify basic functionality",
-                            "priority": "high"
-                        }
-                    ],
-                    "integration_tests": [],
-                    "scenarios": [
-                        {
-                            "name": "Happy path",
-                            "given": "Valid input conditions",
-                            "when": "The operation is performed",
-                            "then": "Expected outcome occurs"
-                        }
-                    ]
-                },
+        cat > "$prompt_file" << PROMPT
+# Task: Generate OpenSpec for Task $task_id
 
-                "interfaces": {
-                    "inputs": [],
-                    "outputs": [],
-                    "errors": [
-                        {
-                            "code": "INVALID_INPUT",
-                            "condition": "Invalid input provided",
-                            "message": "The provided input is invalid"
-                        }
-                    ]
-                },
+You are a specification writer creating a detailed OpenSpec for TDD implementation.
 
-                "edge_cases": [
-                    {
-                        "scenario": "Empty input",
-                        "expected_behavior": "Handle gracefully with appropriate error"
-                    },
-                    {
-                        "scenario": "Maximum input size",
-                        "expected_behavior": "Process within acceptable time limits"
-                    }
-                ],
+## Task Details
 
-                "security_requirements": [
-                    {
-                        "requirement": "Input validation",
-                        "validation": "All inputs must be validated before processing"
-                    }
-                ],
+- **ID**: $task_id
+- **Title**: $task_title
+- **Category**: $task_category
+- **Complexity**: $task_complexity
+- **Dependencies**: ${task_deps:-None}
+- **PRD Section**: ${task_prd_section:-Not specified}
 
-                "generated_at": (now | todate),
-                "status": "draft"
-            }' > "$spec_file"
+## Description
 
-        if [[ -f "$spec_file" ]]; then
-            echo -e "       ${GREEN}✓${NC} Created spec-t${task_id}.json"
-            ((generated++))
+$task_desc
+
+## Acceptance Criteria
+
+$task_criteria
+
+## Tech Stack Context
+
+$(cat "$ATOMIC_ROOT/docs/prd/PRD.md" 2>/dev/null | sed -n '/### 2\.1 Tech Stack/,/### 2\.2/p' | head -30 || echo "Tech stack not available")
+
+## OpenSpec Requirements
+
+Generate a detailed specification that includes:
+
+1. **Test Strategy**: Specific unit tests and integration tests with descriptive names
+2. **Scenarios**: Given/When/Then format for each acceptance criterion
+3. **Interfaces**: Input parameters, output types, error codes
+4. **Edge Cases**: At least 3-5 realistic edge cases
+5. **Security Requirements**: Input validation, authorization checks if applicable
+
+## Quality Checklist
+
+- [ ] Test names are specific (not "test_basic")
+- [ ] Scenarios cover all acceptance criteria
+- [ ] Edge cases are realistic for this task type
+- [ ] Error codes are specific (not generic INVALID_INPUT)
+- [ ] Security requirements match task category
+
+## Output Format
+
+Generate ONLY valid JSON matching this structure:
+
+{
+  "spec_id": "SPEC-T$task_id",
+  "task_id": $task_id,
+  "task_title": "$task_title",
+  "task_description": "...",
+  "acceptance_criteria": "...",
+  "complexity": "$task_complexity",
+  "test_strategy": {
+    "unit_tests": [
+      {"name": "test_specific_behavior", "description": "...", "priority": "high|medium|low"}
+    ],
+    "integration_tests": [
+      {"name": "test_integration_with_x", "description": "...", "dependencies": ["component"]}
+    ],
+    "scenarios": [
+      {"name": "Descriptive scenario name", "given": "...", "when": "...", "then": "..."}
+    ]
+  },
+  "interfaces": {
+    "inputs": [{"name": "param", "type": "string", "required": true, "validation": "..."}],
+    "outputs": [{"name": "result", "type": "object", "description": "..."}],
+    "errors": [{"code": "SPECIFIC_ERROR", "condition": "...", "message": "...", "http_status": 400}]
+  },
+  "edge_cases": [
+    {"scenario": "Specific edge case", "expected_behavior": "Detailed expected behavior"}
+  ],
+  "security_requirements": [
+    {"requirement": "Specific requirement", "validation": "How to verify", "severity": "high|medium|low"}
+  ],
+  "generated_at": "$(date -Iseconds)",
+  "status": "draft"
+}
+
+Output ONLY the JSON, no markdown wrapper.
+PROMPT
+
+        # Call LLM to generate spec
+        if atomic_invoke "$prompt_file" "$raw_spec" "OpenSpec T$task_id" --model=sonnet; then
+            # Validate and copy if valid JSON
+            if jq -e . "$raw_spec" &>/dev/null; then
+                cp "$raw_spec" "$spec_file"
+                echo -e "       ${GREEN}✓${NC} Created spec-t${task_id}.json"
+                ((generated++))
+            else
+                echo -e "       ${YELLOW}!${NC} Invalid JSON - attempting repair"
+                # Try to extract JSON from markdown
+                if grep -q '```json' "$raw_spec"; then
+                    sed -n '/```json/,/```/p' "$raw_spec" | sed '1d;$d' > "${raw_spec}.tmp"
+                    if jq -e . "${raw_spec}.tmp" &>/dev/null; then
+                        mv "${raw_spec}.tmp" "$spec_file"
+                        echo -e "       ${GREEN}✓${NC} Repaired and created spec-t${task_id}.json"
+                        ((generated++))
+                    else
+                        rm -f "${raw_spec}.tmp"
+                        echo -e "       ${RED}✗${NC} Could not repair JSON"
+                        ((failed++))
+                    fi
+                else
+                    echo -e "       ${RED}✗${NC} Invalid output format"
+                    ((failed++))
+                fi
+            fi
         else
-            echo -e "       ${RED}✗${NC} Failed to create spec"
+            echo -e "       ${RED}✗${NC} LLM invocation failed"
             ((failed++))
         fi
 
