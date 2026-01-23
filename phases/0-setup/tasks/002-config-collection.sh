@@ -132,15 +132,31 @@ $(head -200 "$ref" 2>/dev/null || true)
     cat > "$prompt_file" << 'PROMPT_HEADER'
 # Task: Extract Configuration from Project Setup
 
-You are parsing project initialization files to extract configuration values.
-Output ONLY valid JSON - no markdown, no explanation, no code blocks.
+You are a **configuration parser** specializing in extracting structured data from semi-structured documents. Your role is to read project initialization files and output a validated JSON configuration.
 
-## Rules:
-1. For fields with explicit values in the setup: use that exact value
-2. For fields marked "infer": analyze reference materials to derive a project-specific value
-3. For fields marked "default [X]": use the literal value X shown in brackets
-4. For fields marked "detect": use the auto-detected values I provide below
-5. If a required value cannot be determined from any source, use null
+## Output Requirements
+
+Output ONLY valid JSON - no markdown wrappers, no explanation text, no code blocks.
+Start with `{` and end with `}`.
+
+## Extraction Rules
+
+1. **Explicit values**: Use the exact value from the setup file
+2. **"infer" fields**: Analyze reference materials to derive a project-specific value
+3. **"default [X]" fields**: Use the literal value X shown in brackets
+4. **"detect" fields**: Use the auto-detected values provided below
+5. **Missing required values**: Use `null` (do NOT invent values)
+6. **Malformed input**: Extract what you can, use defaults for the rest
+
+## Edge Cases
+
+| Situation | Response |
+|-----------|----------|
+| Setup file is mostly empty | Use defaults for all fields, note in constraints |
+| Conflicting values | Prefer explicit setup.md values over inferred |
+| Unknown project type | Default to "new-component" |
+| Invalid enum value | Use closest valid option or default |
+| Truncated input | Process what's available, don't fail |
 
 ## Detected Values:
 PROMPT_HEADER
@@ -216,6 +232,45 @@ PROMPT_HEADER
     "compliance": ["array of strings"] or null,
     "dependencies": ["array of strings"] or null
   }
+}
+
+## Example Output
+
+For a Node.js API project with TypeScript and PostgreSQL:
+
+{
+  "project": {
+    "name": "order-service",
+    "description": "REST API for order management",
+    "type": "new-api",
+    "primary_goal": "Build a scalable order processing service"
+  },
+  "repository": {
+    "url": "https://github.com/acme/order-service",
+    "default_branch": "main",
+    "pr_strategy": "feature-branch",
+    "commit_strategy": "per-task",
+    "push_strategy": "on-close",
+    "commit_format": "conventional"
+  },
+  "sandbox": {
+    "allowed_paths": null,
+    "forbidden_paths": [".env*", "secrets/", "*.key"],
+    "forbidden_commands": ["rm -rf /"],
+    "command_approval_mode": "cautious",
+    "network_access": "fetch-only",
+    "blocked_ips": ["169.254.169.254/32"]
+  },
+  "mcp": {"enabled": false, "servers": [], "tool_permissions": "none"},
+  "pipeline": {"mode": "component", "skip_phases": [], "human_gates": [0, 2, 5]},
+  "agents": {
+    "phase_0": "default", "phase_1": "infer", "phase_2": "infer",
+    "phase_3": "infer", "phase_4": "infer", "phase_5": "infer",
+    "phase_6": "infer", "phase_7": "infer", "phase_8": "infer", "phase_9": "infer"
+  },
+  "llm": {"primary_provider": "anthropic", "primary_model": null, "fast_model": null, "local_fallback": false},
+  "gardener": {"model": "infer", "threshold_percent": 75, "fallback_chain": [], "preserve_recent_exchanges": 4, "preserve_opening": true},
+  "constraints": {"technical": ["TypeScript", "PostgreSQL"], "infrastructure": "AWS", "compliance": null, "dependencies": ["express", "pg"]}
 }
 
 ## Setup Content (setup.md):

@@ -536,7 +536,7 @@ $complexity_guidance
 
 Output ONLY valid DOT code. No markdown fences, no explanation, no preamble.
 
-## Example Structure
+## Good Example
 
 digraph example {
     // Graph settings
@@ -569,6 +569,27 @@ digraph example {
     user -> order_api [label="REST/HTTPS"]
     order_api -> order_db [label="SQL queries"]
 }
+
+## Bad Example (DO NOT do this)
+
+digraph bad {
+    // No graph settings
+    a -> b -> c -> d  // Generic labels, no context
+    service [label="Service"]  // Vague - which service?
+    db [label="Database"]  // Vague - what database?
+    service -> db  // No label - what flows here?
+    // Missing system boundary
+    // No technology annotations
+}
+
+## Error Recovery
+
+If you're unsure about something:
+- Use placeholder text like "[TBD: specific service name]" rather than generic "Service"
+- For unknown tech, use "[Technology TBD]" in the label
+- If relationships are unclear, add "?" to the label: "calls? (verify)"
+
+Always output SYNTACTICALLY valid DOT even if the content needs refinement.
 EOF
 
     # Use atomic_invoke if available, otherwise create template

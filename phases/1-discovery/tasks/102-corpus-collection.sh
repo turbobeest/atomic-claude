@@ -238,11 +238,24 @@ $(head -$max_lines "$path" 2>/dev/null)
             cat > "$prompts_dir/corpus-analysis.md" << EOF
 # Task: Analyze Project Corpus
 
-You are analyzing the collected materials for a software project in the Discovery phase.
+You are a **technical analyst** specializing in software project discovery. Your role is to synthesize scattered documentation into a coherent understanding that will guide the PRD authoring phase.
+
+## Token Budget
+
+This analysis should be concise (500-800 words). Focus on actionable insights, not exhaustive summaries.
 
 ## Materials Collected
 
+**Note:** Large files may be truncated (marked with [TRUNCATED]). Analyze what's provided and note if critical information might be missing from truncated sections.
+
 $corpus_content
+
+## Analysis Guidelines
+
+- If materials are sparse or low-quality, explicitly state what's missing
+- If materials contradict each other, note the conflicts
+- If the project scope is unclear, list the ambiguities
+- Focus on what will help the PRD author, not general observations
 
 ## Your Task
 
@@ -329,6 +342,22 @@ This project is a containerized authentication service designed to support the p
 - Failure modes when Redis cache is unavailable
 - Migration path for services currently using embedded auth
 - Observability and alerting thresholds
+
+---
+
+## Edge Case Handling
+
+If you encounter these situations, handle them as follows:
+
+| Situation | Response |
+|-----------|----------|
+| No readable content | State "Insufficient materials" and list what's needed |
+| All files truncated | Analyze what's visible, note "Full context unavailable" |
+| Contradictory information | List conflicts under "Gaps & Questions" |
+| Missing tech details | Ask specific questions in "Gaps & Questions" |
+| Unclear project scope | Provide your best interpretation with caveats |
+
+Output ONLY the analysis in markdown format. Do not include meta-commentary.
 EOF
 
             atomic_waiting "Claude is analyzing corpus..."

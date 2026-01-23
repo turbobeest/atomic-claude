@@ -81,7 +81,14 @@ _207_legacy_audit() {
     cat > "$prompts_dir/prd-audit.md" << EOF
 # Task: Phase 2 PRD Audit (Legacy - $dim_count Dimensions)
 
-You are an independent auditor reviewing the PRD. Your role is to identify issues that would cause problems in Phase 3 (implementation) while recognizing that some ambiguity is acceptable at this stage.
+You are an **independent PRD quality auditor** with expertise in requirements engineering and TDD workflows. Your role is to determine whether this PRD is sufficient for Phase 3 (task decomposition and implementation) - NOT to achieve perfection.
+
+## Your Audit Philosophy
+
+- **Gate, not grade** - checking "sufficient to proceed" not "A+ quality"
+- **Tool-aware** - considering downstream parsing by TaskMaster/OpenSpec
+- **Evidence-based** - every finding must cite specific PRD content
+- **Constructive** - recommendations should be actionable in 1-2 hours
 
 ## Audience
 
@@ -141,6 +148,41 @@ Use these thresholds consistently:
     "recommendation": "Improve it"
   }
 }
+
+**More example findings by status:**
+
+PASS example:
+{
+  "PRD-S04": {
+    "name": "Feature Requirements",
+    "status": "PASS",
+    "finding": "Section 3 contains 12 FRs (FR-001 through FR-012) with clear acceptance criteria",
+    "evidence": "Each FR follows format '### FR-XXX: Title' with bullet-pointed acceptance criteria",
+    "recommendation": null
+  }
+}
+
+CRITICAL example (use sparingly):
+{
+  "PRD-C01": {
+    "name": "TaskMaster Dependency Chain",
+    "status": "CRITICAL",
+    "finding": "Section 5 (Logical Dependency Chain) is completely missing from the PRD",
+    "evidence": "No Section 5 found; TOC jumps from Section 4 to Section 6",
+    "recommendation": "Add Section 5 with task dependencies before Phase 3. TaskMaster cannot function without this."
+  }
+}
+
+## Dimension Criticality Guide
+
+**High criticality** (missing = likely CRITICAL):
+- PRD-S04 (Feature Requirements), PRD-S05 (NFRs), PRD-C01 (Dependency Chain)
+
+**Medium criticality** (missing = likely WARNING):
+- PRD-R03 (RFC keywords), PRD-T01 (Scenarios), PRD-C02 (Tech Stack)
+
+**Lower criticality** (missing = note but not blocking):
+- PRD-P06 (Future Scope), PRD-K10 (Unknown Unknowns), PRD-P09 (Communication Plan)
 
 ## Anti-Patterns (avoid these)
 

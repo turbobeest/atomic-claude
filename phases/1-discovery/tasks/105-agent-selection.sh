@@ -235,9 +235,9 @@ EOF
     fi
 
     cat > "$suggestion_prompt" << EOF
-# Task: Suggest expert agents for this project
+# Task: Suggest Expert Agents for Development Pipeline
 
-Based on the project context, select the most valuable agents from the available list.
+You are an **agent-selector** specializing in matching project requirements to available AI agents. Your role is to analyze project context and recommend the most valuable agents from the available catalog.
 
 ## Project Context
 
@@ -247,26 +247,52 @@ Based on the project context, select the most valuable agents from the available
 
 ## Available Expert Agents
 
-IMPORTANT: You may ONLY suggest agents from this list. Do not invent agent names.
+**CRITICAL**: You may ONLY suggest agents from this list. Do not invent agent names.
+If the list is empty or says "not available", suggest common agent types with a note that they need verification.
 
 $agent_list
 
-## Your Task
+## Selection Criteria
 
-1. Select 5-8 agents from the list above that would be most valuable for this project
-2. Explain briefly (1 sentence) why each agent is relevant to THIS project
-3. Note any gaps where no existing agent fits the project's needs
+Prioritize agents that:
+1. Match the tech stack (e.g., if using Go, suggest Go-specific agents)
+2. Address compliance needs (e.g., security-auditor for SOC2 projects)
+3. Cover critical development phases (testing, code review, deployment)
+4. Fill gaps in the default pipeline agents
 
 ## Output Format
 
-Output ONLY valid JSON (no markdown, no explanation):
+Output ONLY valid JSON (no markdown wrapper, no explanation text):
+
+\`\`\`json
 {
     "suggested_agents": [
-        {"name": "exact-agent-name-from-list", "reason": "Why this agent is relevant"},
-        {"name": "another-agent-name", "reason": "Why this agent is relevant"}
+        {"name": "exact-agent-name-from-list", "reason": "Why relevant to THIS project"}
     ],
-    "gaps": ["Description of any capability gaps not covered by available agents"]
+    "gaps": ["Description of capability gaps not covered"]
 }
+\`\`\`
+
+## Example Output
+
+For a Node.js e-commerce project with PCI compliance:
+
+{
+    "suggested_agents": [
+        {"name": "security-auditor", "reason": "PCI compliance requires security validation"},
+        {"name": "api-designer", "reason": "E-commerce needs well-designed REST APIs"},
+        {"name": "performance-analyst", "reason": "Transaction throughput is critical"},
+        {"name": "test-strategist", "reason": "Payment flows need comprehensive test coverage"},
+        {"name": "code-reviewer", "reason": "Quality gate for financial code"}
+    ],
+    "gaps": ["No PCI-DSS specific compliance agent available"]
+}
+
+## Edge Cases
+
+- If agent list is empty: Return {"suggested_agents": [], "gaps": ["Agent manifest unavailable"]}
+- If project context is vague: Suggest general-purpose agents (code-reviewer, test-strategist)
+- If tech stack is unusual: Note in gaps that specialized agents may be needed
 EOF
 
     echo -e "  ${DIM}Analyzing project context for agent suggestions...${NC}"
@@ -394,25 +420,45 @@ What would work best for you?"
         fi
 
         cat > "$prompts_dir/agent-response.md" << EOF
-# Task: Continue agent selection conversation
+# Task: Continue Agent Selection Conversation
 
-The human said: "$human_response"
+You are an **agent-selector assistant** helping a developer choose agents for their pipeline. Be conversational, helpful, and specific.
 
-## Context
-- We're helping them select agents for their development pipeline
-- Currently selected agents: $(printf '%s\n' "${selected_experts[@]}" | paste -sd, -)
+## Human Input
+
+"$human_response"
+
+## Current State
+
+- Already selected agents: $(printf '%s\n' "${selected_experts[@]}" | paste -sd, - || echo "none yet")
+- Phase: Agent selection for development pipeline
 
 ## Available Agents (ONLY suggest from this list)
+
 $available_agents_list
 
-## Your Task
-Respond helpfully to their input:
-1. If they describe a need, suggest SPECIFIC agents from the list above
-2. If they mention an agent name, confirm it exists in the list
-3. Ask if they want to add suggested agents to their selection
+## Response Guidelines
 
-Keep response concise (3-5 sentences). Be helpful and specific.
-If suggesting agents, format as: "I recommend **agent-name** for [reason]."
+1. **If they describe a need**: Suggest 1-3 SPECIFIC agents from the list with brief reasons
+2. **If they mention an agent name**: Confirm it exists in the list (or note if it doesn't)
+3. **If they're unsure**: Offer to browse categories or explain agent types
+4. **If they want to proceed**: Confirm their selections and offer to move to phase mapping
+
+## Response Format
+
+Keep response concise (3-5 sentences). Format agent suggestions as:
+"I recommend **agent-name** because [specific reason for THIS project]."
+
+## Example Responses
+
+User says "I need help with security":
+"For security, I recommend **security-auditor** for vulnerability scanning and **penetration-tester** for active testing. Would you like to add these to your selection?"
+
+User says "what's a code-reviewer do":
+"The **code-reviewer** agent analyzes code changes for quality, patterns, and potential issues before merge. It's useful in Phase 6 (Code Review). Want me to add it?"
+
+User mentions unknown agent:
+"I don't see 'magic-fixer' in the available agents. Did you mean **bug-fixer** or **auto-repair**? Or I can search for similar agents."
 EOF
 
         atomic_waiting "Thinking..."

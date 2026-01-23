@@ -203,11 +203,27 @@ _109_legacy_audit() {
     cat > "$prompts_dir/phase-audit.md" << EOF
 # Task: Phase 1 Discovery Audit (Legacy Mode)
 
-You are an independent auditor reviewing Phase 1 (Discovery) outputs. Your job is to identify gaps that would cause problems in later phases, while recognizing that Discovery outputs are inherently exploratory.
+You are an **independent quality auditor** with expertise in SDLC gate reviews. Your role is to determine whether Phase 1 (Discovery) outputs are sufficient to proceed to Phase 2 (PRD authoring) - NOT to achieve perfection.
+
+## Your Audit Philosophy
+
+- **Discovery is exploratory** - expect ambiguity and iteration
+- **Gate, not grade** - you're checking "sufficient to proceed" not "A+ quality"
+- **Evidence-based** - every finding must cite specific artifact content
+- **Constructive** - recommendations should be actionable in 1-2 hours
 
 ## Artifacts to Review
 
+**Note**: If an expected artifact is missing, note it explicitly. If a file shows [TRUNCATED], evidence may be in omitted content - note this uncertainty.
+
 $artifacts
+
+## Missing Artifact Handling
+
+If critical artifacts are absent (e.g., no dialogue.json, no corpus.json):
+- Mark the relevant dimension as WARNING (not CRITICAL) if the gap is recoverable
+- Mark as CRITICAL only if PRD authoring would be impossible without this content
+- Recommend what minimal content is needed before proceeding
 
 ## Dimensions to Audit
 
@@ -218,13 +234,30 @@ $(for dim in "${selected_dims[@]}"; do
     echo ""
 done)
 
-## Scoring Criteria
+## Scoring Criteria and Thresholds
 
-**PASS**: Clear evidence the requirement is met. Artifacts explicitly support the claim. Sufficient to proceed to Phase 2.
+**PASS** (proceed freely):
+- Clear evidence in artifacts supporting the dimension
+- Sufficient detail for PRD author to work with
+- Example: "Vision statement in dialogue.json specifies problem, audience, and desired outcome"
 
-**WARNING**: Partially met OR evidence is ambiguous OR minor gaps exist. Does NOT block progress but should be noted. Issues can be addressed in later phases.
+**WARNING** (proceed with note):
+- Partially met OR evidence is ambiguous OR minor gaps exist
+- PRD author can work around it or clarify during Phase 2
+- Does NOT block progress
+- Example: "Constraints mentioned in conversation but not formally captured in synthesis"
 
-**CRITICAL**: Clearly not met OR missing essential elements OR would cause downstream failures in Phase 2 (PRD). Must be addressed before proceeding.
+**CRITICAL** (must address before proceeding):
+- Would cause PRD author to be blocked or make incorrect assumptions
+- Missing essential elements that cannot be inferred
+- Example: "No vision or problem statement exists - PRD cannot be written"
+- **Use sparingly**: Most Discovery gaps are WARNING, not CRITICAL
+
+## Threshold for Proceeding
+
+- **Proceed**: 0 CRITICAL findings
+- **Proceed with caution**: 0 CRITICAL + any number of WARNINGs
+- **Do not proceed**: 1+ CRITICAL findings
 
 ## Calibration Guidelines
 
