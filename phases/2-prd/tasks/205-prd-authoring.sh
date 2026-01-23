@@ -47,9 +47,9 @@ task_205_prd_authoring() {
     local setup_context=""
     local tech_stack_context=""
 
-    # Load Phase 1 approach (truncated)
+    # Load Phase 1 approach (summarized)
     if [[ -f "$phase1_dir/selected-approach.json" ]]; then
-        approach_context=$(atomic_context_truncate "$phase1_dir/selected-approach.json" 100)
+        approach_context=$(atomic_context_summarize "$phase1_dir/selected-approach.json" "selected approach from Phase 1" 100)
     fi
 
     # Load interview data (extract key fields, not full dump)
@@ -106,6 +106,35 @@ task_205_prd_authoring() {
         ' "$phase1_dir/dialogue.json" 2>/dev/null || echo "No dialogue synthesis")
     fi
 
+    # Load consensus document from deliberation (CRITICAL for context)
+    local consensus_context=""
+    if [[ -f "$phase1_dir/consensus.md" ]]; then
+        consensus_context=$(atomic_context_summarize "$phase1_dir/consensus.md" "deliberation consensus" 150)
+    fi
+
+    # Load first-principles analysis if available
+    local first_principles_context=""
+    if [[ -f "$phase1_dir/first-principles.md" ]]; then
+        first_principles_context=$(atomic_context_summarize "$phase1_dir/first-principles.md" "first principles analysis" 100)
+    fi
+
+    # Load selected approach document for full rationale
+    local approach_rationale=""
+    if [[ -f "$phase1_dir/selected-approach.md" ]]; then
+        approach_rationale=$(atomic_context_summarize "$phase1_dir/selected-approach.md" "approach rationale" 100)
+    fi
+
+    # Load Phase 1 closeout for summary metrics
+    local closeout_context=""
+    local closeout_file="$ATOMIC_ROOT/.claude/closeout/phase-01-closeout.json"
+    if [[ -f "$closeout_file" ]]; then
+        closeout_context=$(jq -r '
+            "Materials collected: " + (.corpus_count // 0 | tostring) + "\n" +
+            "Selected approach: " + (.selected_approach // "Not specified") + "\n" +
+            "Deliberation completed: " + (.deliberation_status // "unknown")
+        ' "$closeout_file" 2>/dev/null || echo "No closeout data")
+    fi
+
     # ═══════════════════════════════════════════════════════════════════════════
     # STAGE 1: REQUIREMENTS SYNTHESIS
     # ═══════════════════════════════════════════════════════════════════════════
@@ -120,13 +149,22 @@ task_205_prd_authoring() {
 
 You are a requirements engineer synthesizing project requirements for downstream tool consumption (TaskMaster, OpenSpec).
 
-## Project Context
+## Project Context (from Phase 1 Discovery)
 
-### Vision & Goals (from Discovery)
+### Vision & Goals
 $dialogue_context
+
+### Discovery Consensus
+$consensus_context
 
 ### Selected Approach
 $approach_context
+
+### Approach Rationale
+$approach_rationale
+
+### First Principles Analysis
+$first_principles_context
 
 ### Interview Responses
 $interview_context
@@ -139,6 +177,9 @@ $tech_stack_context
 
 ### Reference Materials (Corpus)
 $corpus_context
+
+### Phase 1 Summary
+$closeout_context
 
 ## Requirements Format Standards
 

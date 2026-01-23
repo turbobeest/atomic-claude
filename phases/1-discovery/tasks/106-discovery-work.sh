@@ -299,8 +299,8 @@ EOF
     # Orchestrator opens
     local opening_prompt="$prompts_dir/opening.md"
 
-    # Use truncated context to protect token budget
-    local truncated_context=$(atomic_context_truncate "$context_file" 300)
+    # Use smart summarization to protect token budget while preserving key info
+    local truncated_context=$(atomic_context_summarize "$context_file" "discovery context" 300)
 
     cat > "$opening_prompt" << EOF
 # Role: Orchestrator
@@ -442,7 +442,7 @@ EOF
     local primary_model=$(atomic_get_model primary)
     conversation_json=$(atomic_context_adjudicate "$conversation_json" "Discovery Deliberation" "$primary_model")
 
-    local final_context=$(atomic_context_truncate "$context_file" 200)
+    local final_context=$(atomic_context_summarize "$context_file" "deliberation context" 200)
     local final_exchanges=$(echo "$conversation_json" | jq -r '.exchanges[] | "**\(.agent):** \(.message)"')
 
     cat > "$prompts_dir/final-consensus.md" << EOF
@@ -581,8 +581,8 @@ _106_generate_approaches() {
     local prompts_dir="$3"
     local approaches_file="$4"
 
-    # Truncate context and use sliding window for exchanges
-    local ctx_summary=$(atomic_context_truncate "$context_file" 250)
+    # Summarize context and use sliding window for exchanges
+    local ctx_summary=$(atomic_context_summarize "$context_file" "approach generation context" 250)
     local recent_discussion=$(echo "$conversation_json" | jq -r '.exchanges[-12:] | .[] | "**\(.agent):** \(.message)"')
 
     cat > "$prompts_dir/generate-approaches.md" << EOF
@@ -641,9 +641,9 @@ _106_first_principles() {
     local conversation_json="$3"
     local prompts_dir="$4"
 
-    # Truncate context, approaches file is usually small
-    local ctx_summary=$(atomic_context_truncate "$context_file" 150)
-    local approaches_content=$(atomic_context_truncate "$approaches_file" 200)
+    # Summarize context, approaches file is usually small
+    local ctx_summary=$(atomic_context_summarize "$context_file" "first principles context" 150)
+    local approaches_content=$(atomic_context_summarize "$approaches_file" "solution approaches" 200)
 
     cat > "$prompts_dir/first-principles.md" << EOF
 # First Principles Analysis
@@ -781,8 +781,8 @@ _106_agent_response() {
         *) agent_persona="You are an expert in ${agent//-/ }. Draw on your specialized knowledge to provide insights." ;;
     esac
 
-    # Use truncated context and recent exchanges
-    local ctx_summary=$(atomic_context_truncate "$context_file" 150)
+    # Use summarized context and recent exchanges
+    local ctx_summary=$(atomic_context_summarize "$context_file" "direction confirmation context" 150)
     local recent_exchanges=$(echo "$conversation_json" | jq -r '.exchanges[-6:] | .[] | "**\(.agent):** \(.message)"')
 
     cat > "$prompts_dir/agent-direct.md" << EOF

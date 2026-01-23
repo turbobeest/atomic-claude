@@ -214,7 +214,7 @@ EOF
 )
 
     # Update project config
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --argjson repos "$repos_config" \
        --argjson providers "$providers_config" \
        '.repositories = $repos | .providers = $providers' \

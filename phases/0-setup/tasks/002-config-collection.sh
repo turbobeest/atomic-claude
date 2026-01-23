@@ -306,7 +306,7 @@ PROMPT_SCHEMA
             atomic_success "Configuration extracted successfully"
 
             # Merge into main config
-            local tmp=$(mktemp)
+            local tmp=$(atomic_mktemp)
             jq -s '.[0] * {extracted: .[1]}' "$config_file" "$extracted_file" > "$tmp" && mv "$tmp" "$config_file"
         else
             # Claude might have output markdown, try to extract JSON
@@ -315,7 +315,7 @@ PROMPT_SCHEMA
                 sed -n '/```json/,/```/p' "$extracted_file" | sed '1d;$d' > "${extracted_file}.clean"
                 if jq . "${extracted_file}.clean" > /dev/null 2>&1; then
                     mv "${extracted_file}.clean" "$extracted_file"
-                    local tmp=$(mktemp)
+                    local tmp=$(atomic_mktemp)
                     jq -s '.[0] * {extracted: .[1]}' "$config_file" "$extracted_file" > "$tmp" && mv "$tmp" "$config_file"
                     atomic_success "Configuration extracted successfully"
                 else
@@ -497,7 +497,7 @@ task_002_config_guided() {
     echo ""
 
     # Build config JSON (using --arg for safe string handling)
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --arg name "$project_name" \
        --arg desc "$description" \
        --arg type "$project_type" \
@@ -613,7 +613,7 @@ task_002_config_quick() {
     local detected_repo=$(git remote get-url origin 2>/dev/null || true)
 
     # Build config with all defaults (using --arg for safe string handling)
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --arg name "$project_name" \
        --arg goal "$primary_goal" \
        --arg repo "${detected_repo:-}" \

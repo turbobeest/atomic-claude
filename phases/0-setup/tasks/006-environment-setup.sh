@@ -539,7 +539,7 @@ _006_record_context() {
     atomic_context_decision "$status_msg" "environment"
 
     # Update config with environment status
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --argjson req_total "$_006_REQUIRED_TOTAL" \
        --argjson req_installed "$_006_REQUIRED_INSTALLED" \
        --argjson rec_total "$_006_RECOMMENDED_TOTAL" \

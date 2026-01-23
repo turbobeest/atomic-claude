@@ -555,6 +555,9 @@ EOF
 
     atomic_context_artifact "corpus" "$corpus_json" "Collected project corpus"
     atomic_context_artifact "corpus_index" "$corpus_index" "Corpus index document"
+    if [[ -f "$analysis_file" ]]; then
+        atomic_context_artifact "corpus_analysis" "$analysis_file" "LLM analysis of corpus materials"
+    fi
     atomic_context_decision "Corpus collected: $total_materials materials, $total_links links" "corpus_collection"
 
     atomic_success "Corpus collection complete"

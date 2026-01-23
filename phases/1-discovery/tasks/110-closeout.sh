@@ -233,7 +233,10 @@ EOF
     echo -e "  ${GREEN}✓${NC} Generated phase-01-closeout.json"
     echo ""
 
-    atomic_context_decision "Phase 1 closeout completed" "closeout"
+    # Register closeout artifacts for downstream phases
+    atomic_context_artifact "phase1_closeout_md" "$closeout_file" "Phase 1 closeout summary (markdown)"
+    atomic_context_artifact "phase1_closeout_json" "$closeout_json" "Phase 1 closeout data (JSON)"
+    atomic_context_decision "Phase 1 closeout completed: $corpus_count materials, approach=$approach_name" "closeout"
 
     # ═══════════════════════════════════════════════════════════════════════════
     # SESSION END

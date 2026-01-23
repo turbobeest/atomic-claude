@@ -127,7 +127,7 @@ _003_approve_config() {
     local config_file="$1"
 
     # Flatten extracted into main config
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq '.project = .extracted.project |
         .repository = .extracted.repository |
         .sandbox = .extracted.sandbox |
@@ -184,7 +184,7 @@ _003_edit_field() {
             read -p "  New project name [$old_val]: " new_name
             new_name=${new_name:-$old_val}
             if atomic_validate_project_name "$new_name" >/dev/null 2>&1; then
-                local tmp=$(mktemp)
+                local tmp=$(atomic_mktemp)
                 jq --arg val "$new_name" '.extracted.project.name = $val' "$config_file" > "$tmp" && mv "$tmp" "$config_file"
                 _003_show_change "Project Name" "$old_val" "$new_name"
             else
@@ -195,7 +195,7 @@ _003_edit_field() {
             local old_val=$(echo "$extracted" | jq -r '.project.description // "not set"')
             read -p "  New description: " new_desc
             new_desc=${new_desc:-$old_val}
-            local tmp=$(mktemp)
+            local tmp=$(atomic_mktemp)
             jq --arg val "$new_desc" '.extracted.project.description = $val' "$config_file" > "$tmp" && mv "$tmp" "$config_file"
             _003_show_change "Description" "$old_val" "$new_desc"
             ;;
@@ -203,7 +203,7 @@ _003_edit_field() {
             local old_val=$(echo "$extracted" | jq -r '.repository.url // "not set"')
             read -p "  New repository URL [$old_val]: " new_url
             new_url=${new_url:-$old_val}
-            local tmp=$(mktemp)
+            local tmp=$(atomic_mktemp)
             jq --arg val "$new_url" '.extracted.repository.url = $val' "$config_file" > "$tmp" && mv "$tmp" "$config_file"
             _003_show_change "Repository URL" "$old_val" "$new_url"
             ;;
@@ -222,7 +222,7 @@ _003_edit_field() {
                 3) new_mode="library" ;;
                 4) new_mode="prototype" ;;
             esac
-            local tmp=$(mktemp)
+            local tmp=$(atomic_mktemp)
             jq ".extracted.pipeline.mode = \"$new_mode\"" "$config_file" > "$tmp" && mv "$tmp" "$config_file"
             _003_show_change "Pipeline Mode" "$old_val" "$new_mode"
             ;;
@@ -241,7 +241,7 @@ _003_edit_field() {
                 3) new_provider="google" ;;
                 4) new_provider="local" ;;
             esac
-            local tmp=$(mktemp)
+            local tmp=$(atomic_mktemp)
             jq ".extracted.llm.primary_provider = \"$new_provider\"" "$config_file" > "$tmp" && mv "$tmp" "$config_file"
             _003_show_change "LLM Provider" "$old_val" "$new_provider"
             ;;
@@ -258,7 +258,7 @@ _003_edit_field() {
                 2) new_network="fetch-only" ;;
                 3) new_network="full" ;;
             esac
-            local tmp=$(mktemp)
+            local tmp=$(atomic_mktemp)
             jq ".extracted.sandbox.network_access = \"$new_network\"" "$config_file" > "$tmp" && mv "$tmp" "$config_file"
             _003_show_change "Network Access" "$old_val" "$new_network"
             ;;
@@ -275,7 +275,7 @@ _003_edit_field() {
                 2) new_cmd="cautious" ;;
                 3) new_cmd="auto" ;;
             esac
-            local tmp=$(mktemp)
+            local tmp=$(atomic_mktemp)
             jq ".extracted.sandbox.command_approval_mode = \"$new_cmd\"" "$config_file" > "$tmp" && mv "$tmp" "$config_file"
             _003_show_change "Command Approval" "$old_val" "$new_cmd"
             ;;

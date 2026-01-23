@@ -293,7 +293,12 @@ EOF
     echo -e "  ${GREEN}✓${NC} Generated phase-05-closeout.json"
     echo ""
 
-    atomic_context_decision "Phase 5 closeout completed" "closeout"
+    # Register closeout artifacts for downstream phases
+    atomic_context_artifact "phase5_closeout_md" "$closeout_file" "Phase 5 closeout summary (markdown)"
+    atomic_context_artifact "phase5_closeout_json" "$closeout_json" "Phase 5 closeout data (JSON)"
+    atomic_context_artifact "testing_directory" "$testing_dir" "TDD testing records directory"
+    [[ -f "$validation_file" ]] && atomic_context_artifact "validation_report" "$validation_file" "TDD validation report"
+    atomic_context_decision "Phase 5 closeout completed: $completed_tasks/$total_tasks tasks, ${unit_coverage}% coverage" "closeout"
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # SESSION END

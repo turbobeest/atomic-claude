@@ -72,7 +72,7 @@ task_004_api_keys() {
             echo ""
             _004_configure_provider "$backup_provider" "$secrets_file" "backup"
             # Update config with backup provider
-            local tmp=$(mktemp)
+            local tmp=$(atomic_mktemp)
             jq ".llm.backup_provider = \"$backup_provider\"" "$config_file" > "$tmp" && mv "$tmp" "$config_file"
         fi
     fi
@@ -137,7 +137,7 @@ _004_collect_anthropic() {
         echo -e "  ${GREEN}✓${NC} Found in environment: ${DIM}$masked${NC}"
         read -p "    Use this key? [Y/n]: " use_env
         if [[ ! "$use_env" =~ ^[Nn] ]]; then
-            local tmp=$(mktemp)
+            local tmp=$(atomic_mktemp)
             jq --arg key "$key_name" --arg val "$ANTHROPIC_API_KEY" '.[$key] = $val' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
             atomic_success "Anthropic key saved (from env)"
             return 0
@@ -167,7 +167,7 @@ _004_collect_anthropic() {
         fi
     fi
 
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --arg key "$key_name" --arg val "$api_key" '.[$key] = $val' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
     atomic_success "Anthropic key saved"
 }
@@ -187,7 +187,7 @@ _004_collect_openai() {
         echo -e "  ${GREEN}✓${NC} Found in environment: ${DIM}$masked${NC}"
         read -p "    Use this key? [Y/n]: " use_env
         if [[ ! "$use_env" =~ ^[Nn] ]]; then
-            local tmp=$(mktemp)
+            local tmp=$(atomic_mktemp)
             jq --arg key "$key_name" --arg val "$OPENAI_API_KEY" '.[$key] = $val' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
             atomic_success "OpenAI key saved (from env)"
             return 0
@@ -215,7 +215,7 @@ _004_collect_openai() {
         fi
     fi
 
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --arg key "$key_name" --arg val "$api_key" '.[$key] = $val' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
     atomic_success "OpenAI key saved"
 }
@@ -235,7 +235,7 @@ _004_collect_google() {
         echo -e "  ${GREEN}✓${NC} Found in environment: ${DIM}$masked${NC}"
         read -p "    Use this key? [Y/n]: " use_env
         if [[ ! "$use_env" =~ ^[Nn] ]]; then
-            local tmp=$(mktemp)
+            local tmp=$(atomic_mktemp)
             jq --arg key "$key_name" --arg val "$GOOGLE_API_KEY" '.[$key] = $val' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
             atomic_success "Google AI key saved (from env)"
             return 0
@@ -253,7 +253,7 @@ _004_collect_google() {
     local masked=$(_004_mask_key "$api_key")
     echo -e "    Entered: ${DIM}$masked${NC}"
 
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --arg key "$key_name" --arg val "$api_key" '.[$key] = $val' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
     atomic_success "Google AI key saved"
 }
@@ -283,7 +283,7 @@ _004_collect_ollama() {
     read -p "    Ollama host [http://localhost:11434]: " ollama_host
     ollama_host=${ollama_host:-http://localhost:11434}
 
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --arg val "$ollama_host" '.ollama_host = $val' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
     atomic_success "Ollama configured"
 }
@@ -310,7 +310,7 @@ _004_collect_bedrock() {
     read -p "    AWS Profile [default]: " aws_profile
     aws_profile=${aws_profile:-default}
 
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --arg region "$aws_region" --arg profile "$aws_profile" \
         '.aws_region = $region | .aws_profile = $profile' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
     atomic_success "AWS Bedrock configured"
@@ -333,7 +333,7 @@ _004_collect_azure() {
         echo -e "    Entered: ${DIM}$masked${NC}"
     fi
 
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --arg endpoint "$azure_endpoint" --arg deployment "$azure_deployment" --arg key "$azure_key" \
         '.azure_endpoint = $endpoint | .azure_deployment = $deployment | .azure_api_key = $key' \
         "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"

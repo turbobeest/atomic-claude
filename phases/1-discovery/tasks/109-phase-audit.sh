@@ -330,12 +330,17 @@ EOF
 
     local audit_raw="$prompts_dir/audit-raw.json"
     if atomic_invoke "$prompts_dir/phase-audit.md" "$audit_raw" "Phase 1 audit" --model=sonnet; then
-        if jq -e . "$audit_raw" &>/dev/null; then
+        # Try to fix common JSON issues (markdown wrapping, etc.)
+        local fixed_json=$(atomic_json_fix "$audit_raw")
+        echo "$fixed_json" > "$audit_raw"
+
+        # Validate against expected schema
+        if atomic_json_validate "$audit_raw" "overall_status,summary" "summary:object,findings:object" "Phase 1 Audit"; then
             cp "$audit_raw" "$audit_file"
             atomic_success "Audit complete"
         else
-            atomic_warn "Invalid audit output"
-            echo '{"overall_status": "WARNING", "summary": {"passed": 0, "warnings": 1, "critical": 0}}' > "$audit_file"
+            atomic_warn "Invalid audit output structure - using fallback"
+            echo '{"overall_status": "WARNING", "summary": {"passed": 0, "warnings": 1, "critical": 0}, "validation_error": "Schema validation failed"}' > "$audit_file"
         fi
     else
         atomic_error "Audit failed"
@@ -400,7 +405,7 @@ EOF
                 return 1
                 ;;
             defer)
-                local tmp=$(mktemp)
+                local tmp=$(atomic_mktemp)
                 jq '.deferred = true | .deferred_by = "human"' "$audit_file" > "$tmp"
                 mv "$tmp" "$audit_file"
                 echo -e "  ${GREEN}✓${NC} Issues deferred"

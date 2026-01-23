@@ -261,7 +261,12 @@ EOF
     echo -e "  ${GREEN}✓${NC} Generated phase-09-closeout.json"
     echo ""
 
-    atomic_context_decision "Phase 9 closeout completed - PROJECT COMPLETE" "closeout"
+    # Register final project artifacts
+    atomic_context_artifact "phase9_closeout_md" "$closeout_file" "Phase 9 final closeout summary (markdown)"
+    atomic_context_artifact "phase9_closeout_json" "$closeout_json" "Phase 9 final closeout data (JSON)"
+    [[ -f "$execution_file" ]] && atomic_context_artifact "release_execution" "$execution_file" "Release execution record"
+    [[ -f "$confirmation_file" ]] && atomic_context_artifact "release_confirmation" "$confirmation_file" "Release confirmation record"
+    atomic_context_decision "Phase 9 closeout completed - PROJECT COMPLETE: v$version released via $channel" "closeout"
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # PROJECT COMPLETE

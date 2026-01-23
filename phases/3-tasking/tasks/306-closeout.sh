@@ -256,7 +256,12 @@ EOF
     echo -e "  ${GREEN}✓${NC} Generated phase-03-closeout.json"
     echo ""
 
-    atomic_context_decision "Phase 3 closeout completed" "closeout"
+    # Register closeout artifacts for downstream phases
+    atomic_context_artifact "phase3_closeout_md" "$closeout_file" "Phase 3 closeout summary (markdown)"
+    atomic_context_artifact "phase3_closeout_json" "$closeout_json" "Phase 3 closeout data (JSON)"
+    atomic_context_artifact "tasks_json" "$tasks_file" "TaskMaster tasks definition"
+    [[ -f "$packages_file" ]] && atomic_context_artifact "work_packages" "$packages_file" "Work packages report"
+    atomic_context_decision "Phase 3 closeout completed: $task_count tasks, $package_count packages" "closeout"
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # SESSION END

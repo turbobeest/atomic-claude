@@ -256,7 +256,12 @@ EOF
     echo -e "  ${GREEN}✓${NC} Generated phase-08-closeout.json"
     echo ""
 
-    atomic_context_decision "Phase 8 closeout completed" "closeout"
+    # Register closeout artifacts for downstream phases
+    atomic_context_artifact "phase8_closeout_md" "$closeout_file" "Phase 8 closeout summary (markdown)"
+    atomic_context_artifact "phase8_closeout_json" "$closeout_json" "Phase 8 closeout data (JSON)"
+    [[ -f "$artifacts_file" ]] && atomic_context_artifact "deployment_artifacts" "$artifacts_file" "Deployment artifacts manifest"
+    [[ -f "$approval_file" ]] && atomic_context_artifact "deployment_approval" "$approval_file" "Deployment approval record"
+    atomic_context_decision "Phase 8 closeout completed: v$version packaged" "closeout"
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # SESSION END

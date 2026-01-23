@@ -103,6 +103,8 @@ task_207_prd_approval() {
                 echo -e "  ${GREEN}╚═══════════════════════════════════════════════════════════╝${NC}"
                 echo ""
 
+                # Register approval artifact for downstream phases
+                atomic_context_artifact "prd_approval" "$approval_file" "PRD approval record"
                 atomic_context_decision "PRD approved by $approver_name" "approval"
                 atomic_success "PRD approved - ready for Phase 3"
 
@@ -122,6 +124,8 @@ task_207_prd_approval() {
                         "requested_at": (now | todate)
                     }' > "$approval_file"
 
+                # Register revision request artifact
+                atomic_context_artifact "prd_revision_request" "$approval_file" "PRD revision request"
                 atomic_context_decision "PRD revision requested: $revision_notes" "revision"
                 atomic_warn "Revision requested - returning to authoring"
 

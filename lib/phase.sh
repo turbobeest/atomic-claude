@@ -25,6 +25,176 @@ CURRENT_PHASE=""
 CURRENT_PHASE_NAME=""
 PHASE_START_TIME=""
 PHASE_TASKS_RUN=0
+PHASE_SNAPSHOT_DIR=""
+
+# ============================================================================
+# PHASE SNAPSHOTS & ROLLBACK
+# ============================================================================
+
+# Create a snapshot of phase state before execution
+# Usage: phase_snapshot "0-setup"
+phase_snapshot() {
+    local phase_id="$1"
+    PHASE_SNAPSHOT_DIR="$ATOMIC_STATE_DIR/snapshots/$phase_id-$(date +%Y%m%d-%H%M%S)"
+
+    mkdir -p "$PHASE_SNAPSHOT_DIR"
+
+    # Snapshot task state
+    if [[ -f "$ATOMIC_ROOT/.claude/task-state.json" ]]; then
+        cp "$ATOMIC_ROOT/.claude/task-state.json" "$PHASE_SNAPSHOT_DIR/task-state.json"
+    fi
+
+    # Snapshot session state
+    if [[ -f "$ATOMIC_STATE_DIR/session.json" ]]; then
+        cp "$ATOMIC_STATE_DIR/session.json" "$PHASE_SNAPSHOT_DIR/session.json"
+    fi
+
+    # Snapshot context
+    if [[ -d "$ATOMIC_STATE_DIR/context" ]]; then
+        cp -r "$ATOMIC_STATE_DIR/context" "$PHASE_SNAPSHOT_DIR/context"
+    fi
+
+    # Record snapshot metadata
+    cat > "$PHASE_SNAPSHOT_DIR/metadata.json" << EOF
+{
+    "phase_id": "$phase_id",
+    "timestamp": "$(date -Iseconds)",
+    "snapshot_dir": "$PHASE_SNAPSHOT_DIR"
+}
+EOF
+
+    echo "$PHASE_SNAPSHOT_DIR"
+}
+
+# Rollback to a previous snapshot
+# Usage: phase_rollback "$snapshot_dir"
+phase_rollback() {
+    local snapshot_dir="$1"
+
+    if [[ ! -d "$snapshot_dir" ]]; then
+        echo "ERROR: Snapshot directory not found: $snapshot_dir" >&2
+        return 1
+    fi
+
+    echo "Rolling back to snapshot: $snapshot_dir"
+
+    # Restore task state
+    if [[ -f "$snapshot_dir/task-state.json" ]]; then
+        cp "$snapshot_dir/task-state.json" "$ATOMIC_ROOT/.claude/task-state.json"
+        echo "  Restored: task-state.json"
+    fi
+
+    # Restore session state
+    if [[ -f "$snapshot_dir/session.json" ]]; then
+        cp "$snapshot_dir/session.json" "$ATOMIC_STATE_DIR/session.json"
+        echo "  Restored: session.json"
+    fi
+
+    # Restore context
+    if [[ -d "$snapshot_dir/context" ]]; then
+        rm -rf "$ATOMIC_STATE_DIR/context"
+        cp -r "$snapshot_dir/context" "$ATOMIC_STATE_DIR/context"
+        echo "  Restored: context/"
+    fi
+
+    echo "Rollback complete"
+    return 0
+}
+
+# List available snapshots
+# Usage: phase_list_snapshots
+phase_list_snapshots() {
+    local snapshot_base="$ATOMIC_STATE_DIR/snapshots"
+
+    if [[ ! -d "$snapshot_base" ]]; then
+        echo "No snapshots found"
+        return 0
+    fi
+
+    echo "Available snapshots:"
+    for snapshot in "$snapshot_base"/*; do
+        if [[ -d "$snapshot" && -f "$snapshot/metadata.json" ]]; then
+            local phase_id timestamp
+            phase_id=$(jq -r '.phase_id' "$snapshot/metadata.json" 2>/dev/null || echo "unknown")
+            timestamp=$(jq -r '.timestamp' "$snapshot/metadata.json" 2>/dev/null || echo "unknown")
+            echo "  $snapshot"
+            echo "    Phase: $phase_id"
+            echo "    Time: $timestamp"
+        fi
+    done
+}
+
+# Cleanup old snapshots (keep last N per phase)
+# Usage: phase_cleanup_snapshots [keep_count]
+phase_cleanup_snapshots() {
+    local keep_count="${1:-3}"
+    local snapshot_base="$ATOMIC_STATE_DIR/snapshots"
+
+    if [[ ! -d "$snapshot_base" ]]; then
+        return 0
+    fi
+
+    # Group by phase and remove old ones
+    for phase_dir in "$snapshot_base"/*; do
+        if [[ -d "$phase_dir" ]]; then
+            local phase_id="${phase_dir##*/}"
+            phase_id="${phase_id%%-[0-9]*}"
+
+            # Count snapshots for this phase
+            local snapshots
+            mapfile -t snapshots < <(ls -d "$snapshot_base/$phase_id"-* 2>/dev/null | sort -r)
+
+            # Remove excess
+            local i=0
+            for snap in "${snapshots[@]}"; do
+                ((i++))
+                if [[ $i -gt $keep_count ]]; then
+                    rm -rf "$snap"
+                    echo "Removed old snapshot: $snap"
+                fi
+            done
+        fi
+    done
+}
+
+# Validate that a task ID exists for the current phase
+# Usage: phase_validate_task_id "101"
+# Returns: 0 if valid, 1 if invalid
+phase_validate_task_id() {
+    local task_id="$1"
+    local phase_id="${CURRENT_PHASE:-}"
+
+    # Must be numeric
+    if [[ ! "$task_id" =~ ^[0-9]+$ ]]; then
+        echo "Task ID must be numeric"
+        return 1
+    fi
+
+    # Extract phase number from task ID (first digit for single-digit phases)
+    local task_phase="${task_id:0:1}"
+
+    # If we have a current phase, validate against it
+    if [[ -n "$phase_id" ]]; then
+        local current_phase_num="${phase_id%%-*}"
+        if [[ "$task_phase" != "$current_phase_num" ]]; then
+            echo "Task $task_id is not in current phase ($current_phase_num)"
+            return 1
+        fi
+    fi
+
+    # Check if task script exists
+    local phase_dir="$ATOMIC_ROOT/phases/${task_phase}-"*/
+    if [[ -d $phase_dir ]]; then
+        local task_script
+        task_script=$(find "$phase_dir/tasks" -name "${task_id}-*.sh" 2>/dev/null | head -1)
+        if [[ -z "$task_script" ]]; then
+            echo "Task $task_id not found in phase $task_phase"
+            return 1
+        fi
+    fi
+
+    return 0
+}
 
 # ============================================================================
 # PHASE LIFECYCLE
@@ -33,6 +203,15 @@ PHASE_TASKS_RUN=0
 phase_start() {
     local phase_id="$1"
     local phase_name="$2"
+
+    # Validate dependencies before starting phase
+    if ! atomic_validate_deps; then
+        echo "ERROR: Cannot start phase - missing dependencies" >&2
+        return 1
+    fi
+
+    # Create snapshot before starting (for rollback capability)
+    PHASE_SNAPSHOT_DIR=$(phase_snapshot "$phase_id")
 
     CURRENT_PHASE="$phase_id"
     CURRENT_PHASE_NAME="$phase_name"
@@ -103,10 +282,23 @@ phase_checkpoint() {
         echo '{"checkpoints":[]}' > "$checkpoint_file"
     fi
 
-    local tmp_file=$(mktemp)
-    jq ".checkpoints += [{\"name\": \"$checkpoint_name\", \"timestamp\": \"$(date -Iseconds)\", \"data\": $checkpoint_data}]" \
-        "$checkpoint_file" > "$tmp_file" && mv "$tmp_file" "$checkpoint_file"
+    local tmp_file
+    tmp_file=$(atomic_mktemp) || { echo "ERROR: Failed to create temp file for checkpoint" >&2; return 1; }
 
+    if ! jq ".checkpoints += [{\"name\": \"$checkpoint_name\", \"timestamp\": \"$(date -Iseconds)\", \"data\": $checkpoint_data}]" \
+        "$checkpoint_file" > "$tmp_file" 2>/dev/null; then
+        echo "ERROR: jq failed in phase_checkpoint" >&2
+        rm -f "$tmp_file" 2>/dev/null
+        return 1
+    fi
+
+    if [[ ! -s "$tmp_file" ]] || ! jq empty "$tmp_file" 2>/dev/null; then
+        echo "ERROR: Invalid JSON output in phase_checkpoint" >&2
+        rm -f "$tmp_file" 2>/dev/null
+        return 1
+    fi
+
+    mv "$tmp_file" "$checkpoint_file"
     atomic_info "Checkpoint saved: $checkpoint_name"
 }
 
@@ -259,13 +451,14 @@ phase_task_interactive() {
                     echo ""
                     echo -e "  ${DIM}Enter task ID to jump to (e.g., 101, 105):${NC}"
                     read -p "  Jump to: " jump_target
-                    if [[ "$jump_target" =~ ^[0-9]+$ ]]; then
+                    local validation_error
+                    if validation_error=$(phase_validate_task_id "$jump_target" 2>&1); then
                         task_state_reset_from "$jump_target"
                         TASK_RESUME_AT="$jump_target"
                         atomic_info "Jumping to task $jump_target..."
                         return $TASK_CONTINUE
                     else
-                        atomic_error "Invalid task ID"
+                        atomic_error "Invalid task ID: $validation_error"
                     fi
                     ;;
                 q|Q)
@@ -303,13 +496,14 @@ phase_task_interactive() {
                     echo ""
                     echo -e "  ${DIM}Enter task ID to jump to (e.g., 101, 105):${NC}"
                     read -p "  Jump to: " jump_target
-                    if [[ "$jump_target" =~ ^[0-9]+$ ]]; then
+                    local validation_error
+                    if validation_error=$(phase_validate_task_id "$jump_target" 2>&1); then
                         task_state_reset_from "$jump_target"
                         TASK_RESUME_AT="$jump_target"
                         atomic_info "Jumping to task $jump_target..."
                         return $TASK_CONTINUE
                     else
-                        atomic_error "Invalid task ID"
+                        atomic_error "Invalid task ID: $validation_error"
                     fi
                     ;;
                 s|S)

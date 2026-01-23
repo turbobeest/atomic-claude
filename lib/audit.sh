@@ -342,7 +342,7 @@ audit_get_recommendations() {
     echo -e "  ${DIM}Phase $phase_num has $audit_count applicable audits (filtered from 2,190)${NC}" >&2
 
     # Build prompt for AI with improved structure
-    local prompt_file=$(mktemp)
+    local prompt_file=$(atomic_mktemp)
     cat > "$prompt_file" << EOF
 # Task: Prioritize Audits for Phase $phase_num ($phase_name)
 
@@ -573,6 +573,12 @@ EOF
     echo "$report" > "$report_file"
     echo -e "  ${GREEN}✓${NC} Report saved: $report_file"
 
+    # Register audit artifacts for downstream tasks
+    atomic_context_artifact "phase${phase_num}_audit_report" "$report_file" "Phase $phase_num audit results"
+    local recommendations_file="$output_dir/phase-$phase_num-recommendations.json"
+    [[ -f "$recommendations_file" ]] && atomic_context_artifact "phase${phase_num}_audit_recommendations" "$recommendations_file" "Phase $phase_num audit recommendations"
+    atomic_context_decision "Phase $phase_num audit: $passed passed, $failed failed, $warnings warnings" "audit"
+
     # Return status based on mode
     local mode="${_AUDIT_CONFIG[default_mode]:-gate-high}"
     local severity_filter="${_AUDIT_CONFIG[severity_filter]:-high+}"
@@ -625,18 +631,66 @@ EOF
         return 0
     fi
 
-    # Read audit file and execute checks
-    # For now, generate a placeholder result
-    # TODO: Implement full audit file parsing and execution
-    cat <<EOF
+    # Read audit file content
+    local audit_content
+    audit_content=$(cat "$audit_file" 2>/dev/null) || {
+        cat <<EOF
+{
+    "audit_id": "$audit_id",
+    "name": "$audit_name",
+    "status": "error",
+    "severity": "low",
+    "message": "Failed to read audit file",
+    "findings": []
+}
+EOF
+        return 0
+    }
+
+    # Extract severity from audit file if present
+    local severity="medium"
+    if echo "$audit_content" | grep -qi "severity.*high"; then
+        severity="high"
+    elif echo "$audit_content" | grep -qi "severity.*low"; then
+        severity="low"
+    elif echo "$audit_content" | grep -qi "severity.*critical"; then
+        severity="critical"
+    fi
+
+    # Extract checklist items from markdown
+    local checklist_items
+    checklist_items=$(echo "$audit_content" | grep -E '^\s*[-*]\s*\[[ x]\]' | wc -l)
+
+    # For simple audits (no complex checks), return basic pass
+    if [[ $checklist_items -eq 0 ]]; then
+        cat <<EOF
 {
     "audit_id": "$audit_id",
     "name": "$audit_name",
     "status": "pass",
-    "severity": "medium",
-    "message": "Audit completed",
+    "severity": "$severity",
+    "message": "Audit reviewed - no automated checks defined",
     "findings": [],
-    "audit_file": "$audit_file"
+    "audit_file": "$audit_file",
+    "requires_manual_review": true
+}
+EOF
+        return 0
+    fi
+
+    # Count items (basic static analysis)
+    local total_items=$checklist_items
+    cat <<EOF
+{
+    "audit_id": "$audit_id",
+    "name": "$audit_name",
+    "status": "pending",
+    "severity": "$severity",
+    "message": "Audit has $total_items checklist items requiring review",
+    "findings": [],
+    "audit_file": "$audit_file",
+    "checklist_items": $total_items,
+    "requires_manual_review": true
 }
 EOF
 }
@@ -810,17 +864,48 @@ audit_run_phase() {
             audit_run_phase "$phase_num" "$phase_name"
             ;;
         3)
-            # Add audit
+            # Add audit by ID
             read -p "  Enter audit ID to add: " add_id
-            # TODO: Implement add functionality
-            echo -e "  ${YELLOW}!${NC} Add functionality not yet implemented"
+            if [[ -n "$add_id" ]]; then
+                # Check if already in recommendations
+                local exists
+                exists=$(echo "$recommendations" | jq -r --arg id "$add_id" '.recommendations[] | select(.audit_id == $id) | .audit_id')
+                if [[ -n "$exists" ]]; then
+                    echo -e "  ${YELLOW}!${NC} Audit $add_id already in recommendations"
+                else
+                    # Add to recommendations with manual status
+                    recommendations=$(echo "$recommendations" | jq --arg id "$add_id" '
+                        .recommendations += [{
+                            "audit_id": $id,
+                            "name": "Manual audit: " + $id,
+                            "relevance": "user-added",
+                            "dependency_status": "ready",
+                            "added_manually": true
+                        }]
+                    ')
+                    echo "$recommendations" > "$AUDIT_OUTPUT_DIR/phase-$phase_num-recommendations.json"
+                    echo -e "  ${GREEN}✓${NC} Added audit $add_id to recommendations"
+                fi
+            fi
             audit_run_phase "$phase_num" "$phase_name"
             ;;
         4)
-            # Remove audit
+            # Remove audit by ID
             read -p "  Enter audit ID to remove: " remove_id
-            # TODO: Implement remove functionality
-            echo -e "  ${YELLOW}!${NC} Remove functionality not yet implemented"
+            if [[ -n "$remove_id" ]]; then
+                local before_count after_count
+                before_count=$(echo "$recommendations" | jq '.recommendations | length')
+                recommendations=$(echo "$recommendations" | jq --arg id "$remove_id" '
+                    .recommendations |= map(select(.audit_id != $id))
+                ')
+                after_count=$(echo "$recommendations" | jq '.recommendations | length')
+                if [[ "$before_count" -ne "$after_count" ]]; then
+                    echo "$recommendations" > "$AUDIT_OUTPUT_DIR/phase-$phase_num-recommendations.json"
+                    echo -e "  ${GREEN}✓${NC} Removed audit $remove_id from recommendations"
+                else
+                    echo -e "  ${YELLOW}!${NC} Audit $remove_id not found in recommendations"
+                fi
+            fi
             audit_run_phase "$phase_num" "$phase_name"
             ;;
         5)

@@ -519,7 +519,7 @@ _008_assess_cpu() {
     fi
 
     # Update report
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --arg model "$cpu_model" --argjson cores "$cpu_cores" --arg arch "$cpu_arch" \
         '.capabilities.cpu = {"model": $model, "cores": $cores, "architecture": $arch}' \
         "$report_file" > "$tmp" && mv "$tmp" "$report_file"
@@ -584,7 +584,7 @@ _008_assess_gpu() {
     fi
 
     # Update report
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --arg name "$gpu_name" --arg vram "$gpu_vram" --argjson cuda "$has_cuda" --argjson metal "$has_metal" \
         '.capabilities.gpu = {"name": $name, "vram": $vram, "cuda": $cuda, "metal": $metal}' \
         "$report_file" > "$tmp" && mv "$tmp" "$report_file"
@@ -633,7 +633,7 @@ _008_assess_memory() {
     fi
 
     # Update report
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --argjson total "$total_mb" --argjson avail "$avail_mb" \
         '.capabilities.memory = {"total_mb": $total, "available_mb": $avail}' \
         "$report_file" > "$tmp" && mv "$tmp" "$report_file"
@@ -683,7 +683,7 @@ _008_assess_storage() {
     fi
 
     # Update report
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     echo "$storage_json" | jq --slurpfile r "$report_file" '$r[0] | .capabilities.storage = input' - > "$tmp" && mv "$tmp" "$report_file"
 
     echo ""
@@ -743,7 +743,7 @@ _008_assess_network() {
         '.wan = {"download_mbps": $dl, "latency_ms": $wan_lat, "api_latency_ms": $api_lat}')
 
     # Update report
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     echo "$network_json" | jq --slurpfile r "$report_file" '$r[0] | .capabilities.network = input' - > "$tmp" && mv "$tmp" "$report_file"
 
     echo ""
@@ -777,7 +777,7 @@ _008_show_summary() {
     echo -e "  ${DIM}System: ${cores} cores, ${mem_gb}GB RAM${has_gpu:+, GPU}${NC}"
 
     # Update report with summary
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --argjson pass "$_008_CHECKS_PASS" --argjson fail "$_008_CHECKS_FAIL" --argjson warn "$_008_CHECKS_WARN" \
         '.summary = {"passed": $pass, "failed": $fail, "warnings": $warn}' \
         "$report_file" > "$tmp" && mv "$tmp" "$report_file"
@@ -793,7 +793,7 @@ _008_add_check() {
     local level="$4"
     local version="$5"
 
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --arg name "$name" --arg status "$status" --arg level "$level" --arg ver "$version" \
         '.checks += [{"name": $name, "status": $status, "level": $level, "version": $ver}]' \
         "$report_file" > "$tmp" && mv "$tmp" "$report_file"
@@ -816,7 +816,7 @@ _008_record_context() {
     atomic_context_decision "$msg" "validation"
 
     # Copy capabilities to main config
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --slurpfile cap "$report_file" '.system_capabilities = $cap[0].capabilities' "$config_file" > "$tmp" && mv "$tmp" "$config_file"
 
     # Register report as artifact

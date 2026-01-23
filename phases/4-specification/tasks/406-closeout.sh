@@ -256,7 +256,11 @@ EOF
     echo -e "  ${GREEN}✓${NC} Generated phase-04-closeout.json"
     echo ""
 
-    atomic_context_decision "Phase 4 closeout completed" "closeout"
+    # Register closeout artifacts for downstream phases
+    atomic_context_artifact "phase4_closeout_md" "$closeout_file" "Phase 4 closeout summary (markdown)"
+    atomic_context_artifact "phase4_closeout_json" "$closeout_json" "Phase 4 closeout data (JSON)"
+    atomic_context_artifact "specs_directory" "$specs_dir" "OpenSpec definitions directory"
+    atomic_context_decision "Phase 4 closeout completed: $spec_count specs, $tasks_with_tdd tasks with TDD" "closeout"
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # SESSION END

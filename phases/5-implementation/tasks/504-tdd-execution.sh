@@ -98,6 +98,10 @@ task_504_tdd_execution() {
         local spec_content=$(cat "$spec_file")
         local test_strategy=$(jq -r '.test_strategy' "$spec_file")
 
+        # Initialize error context accumulator for this task
+        local error_context_file="$testing_dir/tdd-t${task_id}-errors.json"
+        echo '{"task_id": '$task_id', "phases": {}, "accumulated_errors": [], "retry_count": 0}' > "$error_context_file"
+
         # ─────────────────────────────────────────────────────────────────
         # RED PHASE - Write Failing Tests
         # ─────────────────────────────────────────────────────────────────
@@ -107,8 +111,11 @@ task_504_tdd_execution() {
         echo -e "  ${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo ""
 
-        local red_result=$(_504_execute_red "$task_id" "$spec_file" "$prompts_dir" "$testing_dir" "$test_framework")
+        local red_result=$(_504_execute_red "$task_id" "$spec_file" "$prompts_dir" "$testing_dir" "$test_framework" "$error_context_file")
         local red_status=$(echo "$red_result" | jq -r '.status // "failed"')
+
+        # Accumulate RED phase result into error context
+        _504_accumulate_error "$error_context_file" "red" "$red_result"
 
         if [[ "$red_status" != "completed" ]]; then
             echo -e "  ${RED}✗${NC} RED phase failed - skipping task"
@@ -117,7 +124,7 @@ task_504_tdd_execution() {
         fi
 
         # Update subtask status
-        local temp_file=$(mktemp)
+        local temp_file=$(atomic_mktemp)
         jq --argjson task_id "$task_id" \
             '(.tasks[] | select(.id == $task_id) | .subtasks[0].status) = "completed"' \
             "$tasks_file" > "$temp_file" && mv "$temp_file" "$tasks_file"
@@ -133,8 +140,11 @@ task_504_tdd_execution() {
         echo ""
 
         local test_file=$(echo "$red_result" | jq -r '.test_file // ""')
-        local green_result=$(_504_execute_green "$task_id" "$spec_file" "$test_file" "$prompts_dir" "$src_dir" "$test_framework")
+        local green_result=$(_504_execute_green "$task_id" "$spec_file" "$test_file" "$prompts_dir" "$src_dir" "$test_framework" "$error_context_file")
         local green_status=$(echo "$green_result" | jq -r '.status // "failed"')
+
+        # Accumulate GREEN phase result into error context
+        _504_accumulate_error "$error_context_file" "green" "$green_result"
 
         if [[ "$green_status" != "completed" ]]; then
             echo -e "  ${RED}✗${NC} GREEN phase failed"
@@ -157,7 +167,10 @@ task_504_tdd_execution() {
         echo ""
 
         local impl_file=$(echo "$green_result" | jq -r '.impl_file // ""')
-        local refactor_result=$(_504_execute_refactor "$task_id" "$impl_file" "$test_file" "$prompts_dir" "$test_framework")
+        local refactor_result=$(_504_execute_refactor "$task_id" "$impl_file" "$test_file" "$prompts_dir" "$test_framework" "$error_context_file")
+
+        # Accumulate REFACTOR phase result into error context
+        _504_accumulate_error "$error_context_file" "refactor" "$refactor_result"
 
         jq --argjson task_id "$task_id" \
             '(.tasks[] | select(.id == $task_id) | .subtasks[2].status) = "completed"' \
@@ -173,7 +186,10 @@ task_504_tdd_execution() {
         echo -e "  ${MAGENTA}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo ""
 
-        local verify_result=$(_504_execute_verify "$task_id" "$impl_file" "$prompts_dir")
+        local verify_result=$(_504_execute_verify "$task_id" "$impl_file" "$prompts_dir" "$error_context_file")
+
+        # Accumulate VERIFY phase result into error context
+        _504_accumulate_error "$error_context_file" "verify" "$verify_result"
 
         jq --argjson task_id "$task_id" \
             '(.tasks[] | select(.id == $task_id) | .subtasks[3].status) = "completed"' \
@@ -246,8 +262,18 @@ task_504_tdd_execution() {
             "completed_at": (now | todate)
         }' > "$progress_file"
 
-    atomic_context_artifact "$progress_file" "tdd-progress" "TDD execution progress"
-    atomic_context_decision "TDD execution: $completed tasks completed" "tdd-execution"
+    # Register artifacts for downstream tasks
+    atomic_context_artifact "tdd_progress" "$progress_file" "TDD execution progress summary"
+    atomic_context_artifact "testing_dir" "$testing_dir" "Directory containing per-task TDD records"
+
+    # Register individual task records for traceability
+    for tdd_record in "$testing_dir"/tdd-t*.json; do
+        [[ -f "$tdd_record" ]] || continue
+        local record_name=$(basename "$tdd_record" .json)
+        atomic_context_artifact "$record_name" "$tdd_record" "TDD cycle record for task"
+    done
+
+    atomic_context_decision "TDD execution: $completed tasks completed, $skipped skipped, $failed failed" "tdd-execution"
 
     atomic_success "TDD Execution complete"
 
@@ -258,6 +284,69 @@ task_504_tdd_execution() {
 # TDD PHASE HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# Accumulate error context from phase execution
+# Usage: _504_accumulate_error "$error_file" "phase_name" "$phase_result"
+_504_accumulate_error() {
+    local error_file="$1"
+    local phase_name="$2"
+    local phase_result="$3"
+
+    # Validate error file exists
+    [[ -f "$error_file" ]] || echo '{"phases": {}, "accumulated_errors": []}' > "$error_file"
+
+    local status=$(echo "$phase_result" | jq -r '.status // "unknown"')
+    local error=$(echo "$phase_result" | jq -r '.error // empty')
+    local test_output=$(echo "$phase_result" | jq -r '.test_output // empty')
+
+    # Update the error context file
+    local tmp=$(atomic_mktemp)
+    jq --arg phase "$phase_name" \
+       --arg status "$status" \
+       --arg error "$error" \
+       --arg output "$test_output" \
+       --arg timestamp "$(date -Iseconds)" \
+       '.phases[$phase] = {
+            "status": $status,
+            "error": (if $error != "" then $error else null end),
+            "test_output": (if $output != "" then $output else null end),
+            "timestamp": $timestamp
+        } |
+        if $status == "failed" then
+            .accumulated_errors += [{
+                "phase": $phase,
+                "error": $error,
+                "output": $output,
+                "timestamp": $timestamp
+            }]
+        else . end' \
+        "$error_file" > "$tmp" && mv "$tmp" "$error_file"
+}
+
+# Get accumulated error context for prompts
+# Usage: error_context=$(_504_get_error_context "$error_file")
+_504_get_error_context() {
+    local error_file="$1"
+
+    if [[ ! -f "$error_file" ]]; then
+        echo ""
+        return
+    fi
+
+    local errors=$(jq -r '.accumulated_errors' "$error_file")
+    local error_count=$(echo "$errors" | jq 'length')
+
+    if [[ "$error_count" -eq 0 ]]; then
+        echo ""
+        return
+    fi
+
+    echo "## Previous Errors in This Task"
+    echo ""
+    echo "The following errors occurred in earlier phases. Learn from them:"
+    echo ""
+    echo "$errors" | jq -r '.[] | "### \(.phase | ascii_upcase) Phase Error\n\(.error // "Unknown error")\n\nOutput:\n```\n\(.output // "No output")\n```\n"'
+}
+
 # RED PHASE: Write failing tests based on OpenSpec
 _504_execute_red() {
     local task_id="$1"
@@ -265,6 +354,7 @@ _504_execute_red() {
     local prompts_dir="$3"
     local testing_dir="$4"
     local test_framework="$5"
+    local error_context_file="${6:-}"  # Error context from previous attempts
 
     local prompt_file="$prompts_dir/red-t${task_id}.md"
     local output_file="$prompts_dir/red-t${task_id}-output.md"
@@ -395,6 +485,7 @@ _504_execute_green() {
     local prompts_dir="$4"
     local src_dir="$5"
     local test_framework="$6"
+    local error_context_file="${7:-}"  # Error context from previous phases
 
     local prompt_file="$prompts_dir/green-t${task_id}.md"
     local output_file="$prompts_dir/green-t${task_id}-output.md"
@@ -411,10 +502,18 @@ _504_execute_green() {
     local spec_content=$(cat "$spec_file")
     local test_content=$(cat "$test_file" 2>/dev/null || echo "Test file not found")
 
+    # Get accumulated error context from previous phases
+    local error_context=""
+    if [[ -n "$error_context_file" && -f "$error_context_file" ]]; then
+        error_context=$(_504_get_error_context "$error_context_file")
+    fi
+
     cat > "$prompt_file" << PROMPT
 # Task: GREEN Phase - Implement to Pass Tests for Task $task_id
 
 You are a code-implementer agent in the GREEN phase of TDD. Write the MINIMAL code to make all tests pass.
+
+$error_context
 
 ## OpenSpec
 
@@ -491,6 +590,7 @@ _504_execute_refactor() {
     local test_file="$3"
     local prompts_dir="$4"
     local test_framework="$5"
+    local error_context_file="${6:-}"  # Error context from previous phases
 
     local prompt_file="$prompts_dir/refactor-t${task_id}.md"
     local output_file="$prompts_dir/refactor-t${task_id}-output.md"
@@ -504,10 +604,18 @@ _504_execute_refactor() {
     local impl_content=$(cat "$impl_file")
     local test_content=$(cat "$test_file" 2>/dev/null || echo "")
 
+    # Get accumulated error context from previous phases
+    local error_context=""
+    if [[ -n "$error_context_file" && -f "$error_context_file" ]]; then
+        error_context=$(_504_get_error_context "$error_context_file")
+    fi
+
     cat > "$prompt_file" << PROMPT
 # Task: REFACTOR Phase - Clean Up Code for Task $task_id
 
 You are a code-reviewer agent in the REFACTOR phase. Improve code quality while ensuring tests still pass.
+
+$error_context
 
 ## Current Implementation
 
@@ -579,6 +687,7 @@ _504_execute_verify() {
     local task_id="$1"
     local impl_file="$2"
     local prompts_dir="$3"
+    local error_context_file="${4:-}"  # Error context from previous phases
 
     local prompt_file="$prompts_dir/verify-t${task_id}.md"
     local output_file="$prompts_dir/verify-t${task_id}-output.json"
@@ -591,10 +700,18 @@ _504_execute_verify() {
 
     local impl_content=$(cat "$impl_file")
 
+    # Get accumulated error context from previous phases
+    local error_context=""
+    if [[ -n "$error_context_file" && -f "$error_context_file" ]]; then
+        error_context=$(_504_get_error_context "$error_context_file")
+    fi
+
     cat > "$prompt_file" << PROMPT
 # Task: VERIFY Phase - Security Review for Task $task_id
 
 You are a security-scanner agent. Review the code for security issues.
+
+$error_context
 
 ## Code to Review
 

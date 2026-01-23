@@ -23,6 +23,97 @@
 # STATE FILE MANAGEMENT
 # ============================================================================
 
+# Use atomic_mktemp if available (from atomic.sh), else fall back to mktemp
+_task_state_mktemp() {
+    if type -t atomic_mktemp &>/dev/null; then
+        atomic_mktemp
+    else
+        mktemp
+    fi
+}
+
+# Lock file for concurrent access protection
+TASK_STATE_LOCK_FILE=""
+
+# Acquire lock on state file
+# Usage: _task_state_lock
+_task_state_lock() {
+    if [[ -z "$TASK_STATE_LOCK_FILE" ]]; then
+        TASK_STATE_LOCK_FILE="${TASK_STATE_FILE}.lock"
+    fi
+
+    # Use flock if available, otherwise skip locking
+    if command -v flock &>/dev/null; then
+        exec 200>"$TASK_STATE_LOCK_FILE"
+        if ! flock -w 10 200; then
+            echo "ERROR: Failed to acquire state file lock after 10s" >&2
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# Release lock on state file
+# Usage: _task_state_unlock
+_task_state_unlock() {
+    if command -v flock &>/dev/null && [[ -n "$TASK_STATE_LOCK_FILE" ]]; then
+        flock -u 200 2>/dev/null || true
+    fi
+}
+
+# Safe jq update with error handling and file locking
+# Usage: _task_state_jq_update "jq_filter" [jq_args...]
+# Applies jq filter to TASK_STATE_FILE with validation
+_task_state_jq_update() {
+    local filter="$1"
+    shift
+
+    # Acquire lock for concurrent safety
+    _task_state_lock || return 1
+
+    local tmp
+    tmp=$(_task_state_mktemp) || {
+        echo "ERROR: Failed to create temp file for state update" >&2
+        _task_state_unlock
+        return 1
+    }
+
+    # Run jq and capture exit code
+    if ! jq "$@" "$filter" "$TASK_STATE_FILE" > "$tmp" 2>/dev/null; then
+        echo "ERROR: jq filter failed: $filter" >&2
+        rm -f "$tmp" 2>/dev/null
+        _task_state_unlock
+        return 1
+    fi
+
+    # Validate output is non-empty
+    if [[ ! -s "$tmp" ]]; then
+        echo "ERROR: jq produced empty output for: $filter" >&2
+        rm -f "$tmp" 2>/dev/null
+        _task_state_unlock
+        return 1
+    fi
+
+    # Validate output is valid JSON
+    if ! jq empty "$tmp" 2>/dev/null; then
+        echo "ERROR: jq produced invalid JSON for: $filter" >&2
+        rm -f "$tmp" 2>/dev/null
+        _task_state_unlock
+        return 1
+    fi
+
+    # Atomically replace state file
+    if ! mv "$tmp" "$TASK_STATE_FILE"; then
+        echo "ERROR: Failed to update state file" >&2
+        rm -f "$tmp" 2>/dev/null
+        _task_state_unlock
+        return 1
+    fi
+
+    _task_state_unlock
+    return 0
+}
+
 TASK_STATE_FILE=""
 
 task_state_init() {
@@ -44,8 +135,7 @@ EOF
     fi
 
     # Ensure phase entry exists
-    local tmp=$(mktemp)
-    jq --arg phase "$phase_id" '
+    _task_state_jq_update '
         .current_phase = $phase |
         if .phases[$phase] == null then
             .phases[$phase] = {
@@ -54,7 +144,7 @@ EOF
                 "completed": false
             }
         else . end
-    ' "$TASK_STATE_FILE" > "$tmp" && mv "$tmp" "$TASK_STATE_FILE"
+    ' --arg phase "$phase_id"
 }
 
 # ============================================================================
@@ -159,8 +249,7 @@ task_state_start() {
 
     [[ -z "$phase_id" ]] && return 1
 
-    local tmp=$(mktemp)
-    jq --arg phase "$phase_id" --arg task "$task_id" --arg name "$task_name" '
+    _task_state_jq_update '
         .current_task = $task |
         .phases[$phase].tasks[$task] = {
             "name": $name,
@@ -169,7 +258,7 @@ task_state_start() {
             "completed_at": null,
             "artifacts": []
         }
-    ' "$TASK_STATE_FILE" > "$tmp" && mv "$tmp" "$TASK_STATE_FILE"
+    ' --arg phase "$phase_id" --arg task "$task_id" --arg name "$task_name"
 }
 
 # Mark a task as complete
@@ -190,14 +279,13 @@ task_state_complete() {
         artifacts_json=$(printf '%s\n' "${artifacts[@]}" | jq -R . | jq -s .)
     fi
 
-    local tmp=$(mktemp)
-    jq --arg phase "$phase_id" --arg task "$task_id" --arg name "$task_name" \
-       --argjson artifacts "$artifacts_json" '
+    _task_state_jq_update '
         .current_task = null |
         .phases[$phase].tasks[$task].status = "complete" |
         .phases[$phase].tasks[$task].completed_at = (now | todate) |
         .phases[$phase].tasks[$task].artifacts = $artifacts
-    ' "$TASK_STATE_FILE" > "$tmp" && mv "$tmp" "$TASK_STATE_FILE"
+    ' --arg phase "$phase_id" --arg task "$task_id" --arg name "$task_name" \
+      --argjson artifacts "$artifacts_json"
 }
 
 # Mark a task as failed
@@ -210,12 +298,11 @@ task_state_fail() {
 
     [[ -z "$phase_id" ]] && return 1
 
-    local tmp=$(mktemp)
-    jq --arg phase "$phase_id" --arg task "$task_id" --arg error "$error_msg" '
+    _task_state_jq_update '
         .phases[$phase].tasks[$task].status = "failed" |
         .phases[$phase].tasks[$task].error = $error |
         .phases[$phase].tasks[$task].failed_at = (now | todate)
-    ' "$TASK_STATE_FILE" > "$tmp" && mv "$tmp" "$TASK_STATE_FILE"
+    ' --arg phase "$phase_id" --arg task "$task_id" --arg error "$error_msg"
 }
 
 # ============================================================================
@@ -232,8 +319,7 @@ task_state_reset_from() {
 
     [[ -z "$phase_id" ]] && return 1
 
-    local tmp=$(mktemp)
-    jq --arg phase "$phase_id" --arg from "$from_task" '
+    _task_state_jq_update '
         .current_task = $from |
         .phases[$phase].tasks |= with_entries(
             if (.key >= $from) then
@@ -241,7 +327,7 @@ task_state_reset_from() {
                 .value.completed_at = null
             else . end
         )
-    ' "$TASK_STATE_FILE" > "$tmp" && mv "$tmp" "$TASK_STATE_FILE"
+    ' --arg phase "$phase_id" --arg from "$from_task"
 
     echo "Reset to task $from_task - all subsequent tasks marked pending"
 }
@@ -254,12 +340,11 @@ task_state_clear_phase() {
 
     [[ -z "$phase_id" ]] && return 1
 
-    local tmp=$(mktemp)
-    jq --arg phase "$phase_id" '
+    _task_state_jq_update '
         .current_task = null |
         .phases[$phase].tasks = {} |
         .phases[$phase].completed = false
-    ' "$TASK_STATE_FILE" > "$tmp" && mv "$tmp" "$TASK_STATE_FILE"
+    ' --arg phase "$phase_id"
 
     echo "Cleared all task state for phase $phase_id"
 }
@@ -272,12 +357,11 @@ task_state_phase_complete() {
 
     [[ -z "$phase_id" ]] && return 1
 
-    local tmp=$(mktemp)
-    jq --arg phase "$phase_id" '
+    _task_state_jq_update '
         .current_task = null |
         .phases[$phase].completed = true |
         .phases[$phase].completed_at = (now | todate)
-    ' "$TASK_STATE_FILE" > "$tmp" && mv "$tmp" "$TASK_STATE_FILE"
+    ' --arg phase "$phase_id"
 }
 
 # ============================================================================
@@ -337,8 +421,7 @@ task_state_pipeline_reset() {
             # This is the target phase - reset from the specific task
             echo -e "  ${YELLOW}→${NC} Phase $phase_num: Resetting from task $target_task"
 
-            local tmp=$(mktemp)
-            jq --arg phase "$phase_entry" --arg from "$target_task" '
+            _task_state_jq_update '
                 .phases[$phase].completed = false |
                 .phases[$phase].completed_at = null |
                 .phases[$phase].tasks |= with_entries(
@@ -347,7 +430,7 @@ task_state_pipeline_reset() {
                         .value.completed_at = null
                     else . end
                 )
-            ' "$TASK_STATE_FILE" > "$tmp" && mv "$tmp" "$TASK_STATE_FILE"
+            ' --arg phase "$phase_entry" --arg from "$target_task"
 
             # Count reset tasks
             local reset_count
@@ -362,12 +445,11 @@ task_state_pipeline_reset() {
             # This phase comes after target - clear entirely
             echo -e "  ${RED}✗${NC} Phase $phase_num: Clearing all tasks"
 
-            local tmp=$(mktemp)
-            jq --arg phase "$phase_entry" '
+            _task_state_jq_update '
                 .phases[$phase].completed = false |
                 .phases[$phase].completed_at = null |
                 .phases[$phase].tasks = {}
-            ' "$TASK_STATE_FILE" > "$tmp" && mv "$tmp" "$TASK_STATE_FILE"
+            ' --arg phase "$phase_entry"
 
             phases_cleared=$((phases_cleared + 1))
             started_clearing=true
@@ -385,11 +467,10 @@ task_state_pipeline_reset() {
     ' "$TASK_STATE_FILE" | head -1)
 
     if [[ -n "$target_phase_id" ]]; then
-        local tmp=$(mktemp)
-        jq --arg phase "$target_phase_id" --arg task "$target_task" '
+        _task_state_jq_update '
             .current_phase = $phase |
             .current_task = $task
-        ' "$TASK_STATE_FILE" > "$tmp" && mv "$tmp" "$TASK_STATE_FILE"
+        ' --arg phase "$target_phase_id" --arg task "$target_task"
     fi
 
     echo ""

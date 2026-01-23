@@ -184,7 +184,7 @@ task_404_tdd_subtask_injection() {
             ]')
 
         # Update tasks.json with subtasks
-        local temp_file=$(mktemp)
+        local temp_file=$(atomic_mktemp)
         jq --argjson task_id "$task_id" --argjson subtasks "$subtasks_json" \
             '(.tasks[] | select(.id == $task_id)).subtasks = $subtasks' \
             "$tasks_file" > "$temp_file" && mv "$temp_file" "$tasks_file"

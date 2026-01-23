@@ -276,7 +276,12 @@ EOF
     echo -e "  ${GREEN}✓${NC} Generated phase-07-closeout.json"
     echo ""
 
-    atomic_context_decision "Phase 7 closeout completed" "closeout"
+    # Register closeout artifacts for downstream phases
+    atomic_context_artifact "phase7_closeout_md" "$closeout_file" "Phase 7 closeout summary (markdown)"
+    atomic_context_artifact "phase7_closeout_json" "$closeout_json" "Phase 7 closeout data (JSON)"
+    [[ -f "$report_file" ]] && atomic_context_artifact "integration_report" "$report_file" "Integration testing report"
+    [[ -f "$approval_file" ]] && atomic_context_artifact "integration_approval" "$approval_file" "Integration approval record"
+    atomic_context_decision "Phase 7 closeout completed: $e2e_passed/$e2e_total E2E, $criteria_passed/$criteria_total acceptance" "closeout"
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # SESSION END

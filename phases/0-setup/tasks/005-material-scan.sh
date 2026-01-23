@@ -113,7 +113,7 @@ _005_detect_key_files() {
     fi
 
     # Update manifest
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     printf '%s\n' "${key_files[@]}" | jq -R . | jq -s '.' | \
         jq --slurpfile m "$manifest_file" '$m[0] | .key_files = input' - > "$tmp" && mv "$tmp" "$manifest_file"
 
@@ -185,12 +185,12 @@ _005_infer_project_type() {
     # Update config with inferred type if not already set
     local current_type=$(jq -r '.project.type // "unknown"' "$config_file" 2>/dev/null)
     if [[ "$current_type" == "unknown" || "$current_type" == "null" ]]; then
-        local tmp=$(mktemp)
+        local tmp=$(atomic_mktemp)
         jq ".project.type = \"$inferred_type\" | .project.language = \"$inferred_lang\"" "$config_file" > "$tmp" && mv "$tmp" "$config_file"
     fi
 
     # Update manifest
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --arg lang "$inferred_lang" --arg type "$inferred_type" \
         '.inferred = { "language": $lang, "type": $type }' "$manifest_file" > "$tmp" && mv "$tmp" "$manifest_file"
 
@@ -201,7 +201,7 @@ _005_infer_project_type() {
         echo -e "    Framework: ${DIM}${indicators[*]}${NC}"
         echo ""
 
-        local tmp=$(mktemp)
+        local tmp=$(atomic_mktemp)
         printf '%s\n' "${indicators[@]}" | jq -R . | jq -s '.' | \
             jq --slurpfile m "$manifest_file" '$m[0] | .project_indicators = input' - > "$tmp" && mv "$tmp" "$manifest_file"
     fi
@@ -234,11 +234,11 @@ _005_scan_documentation() {
     echo ""
 
     # Update manifest
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --argjson count "$count" --argjson loc "$loc" \
         '.summary.documentation = { "count": $count, "lines": $loc }' "$manifest_file" > "$tmp" && mv "$tmp" "$manifest_file"
 
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     echo "$docs" | jq -R 'select(length > 0)' | jq -s '.' | \
         jq --slurpfile m "$manifest_file" '$m[0] | .files.documentation = input' - > "$tmp" && mv "$tmp" "$manifest_file"
 }
@@ -266,10 +266,10 @@ _005_scan_configuration() {
     echo ""
 
     # Update manifest
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --argjson count "$count" '.summary.configuration = { "count": $count }' "$manifest_file" > "$tmp" && mv "$tmp" "$manifest_file"
 
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     echo "$configs" | jq -R 'select(length > 0)' | jq -s '.' | \
         jq --slurpfile m "$manifest_file" '$m[0] | .files.configuration = input' - > "$tmp" && mv "$tmp" "$manifest_file"
 }
@@ -306,11 +306,11 @@ _005_scan_source_code() {
     echo ""
 
     # Update manifest
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --argjson count "$count" --argjson loc "$loc" \
         '.summary.source_code = { "count": $count, "lines": $loc }' "$manifest_file" > "$tmp" && mv "$tmp" "$manifest_file"
 
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     echo "$code" | jq -R 'select(length > 0)' | jq -s '.[0:50]' | \
         jq --slurpfile m "$manifest_file" '$m[0] | .files.source_code = input' - > "$tmp" && mv "$tmp" "$manifest_file"
 }
@@ -344,10 +344,10 @@ _005_scan_tests() {
     echo ""
 
     # Update manifest
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --argjson count "$count" '.summary.tests = { "count": $count }' "$manifest_file" > "$tmp" && mv "$tmp" "$manifest_file"
 
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     echo "$tests" | jq -R 'select(length > 0)' | jq -s '.' | \
         jq --slurpfile m "$manifest_file" '$m[0] | .files.tests = input' - > "$tmp" && mv "$tmp" "$manifest_file"
 }
@@ -359,7 +359,7 @@ _005_calculate_totals() {
     local total_files=$(jq '[.summary.documentation.count, .summary.configuration.count, .summary.source_code.count, .summary.tests.count] | add // 0' "$manifest_file")
     local total_loc=$(jq '[.summary.documentation.lines, .summary.source_code.lines] | add // 0' "$manifest_file")
 
-    local tmp=$(mktemp)
+    local tmp=$(atomic_mktemp)
     jq --argjson files "$total_files" --argjson loc "$total_loc" \
         '.summary.total = { "files": $files, "lines": $loc }' "$manifest_file" > "$tmp" && mv "$tmp" "$manifest_file"
 }

@@ -72,10 +72,10 @@ _207_legacy_audit() {
     echo -e "  ${GREEN}✓${NC} Selected $profile profile ($dim_count dimensions)"
     echo ""
 
-    # Build audit prompt with truncated PRD content
+    # Build audit prompt with summarized PRD content
     local prd_content=""
     if [[ -f "$prd_file" ]]; then
-        prd_content=$(atomic_context_truncate "$prd_file" 400)
+        prd_content=$(atomic_context_summarize "$prd_file" "PRD document for audit" 400)
     fi
 
     cat > "$prompts_dir/prd-audit.md" << EOF

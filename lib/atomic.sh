@@ -26,6 +26,148 @@ CLAUDE_MAX_TURNS="${CLAUDE_MAX_TURNS:-1}"
 CLAUDE_TIMEOUT="${CLAUDE_TIMEOUT:-300}"
 
 # ============================================================================
+# TEMP FILE MANAGEMENT
+# ============================================================================
+
+# Global array to track temp files for cleanup
+declare -a _ATOMIC_TEMP_FILES=()
+
+# Cleanup function called on EXIT/ERR
+_atomic_cleanup_temp_files() {
+    local file
+    for file in "${_ATOMIC_TEMP_FILES[@]:-}"; do
+        [[ -f "$file" ]] && rm -f "$file" 2>/dev/null
+    done
+    _ATOMIC_TEMP_FILES=()
+}
+
+# Register cleanup trap (only once)
+if [[ -z "${_ATOMIC_TRAP_SET:-}" ]]; then
+    trap '_atomic_cleanup_temp_files' EXIT
+    _ATOMIC_TRAP_SET=1
+fi
+
+# Create a tracked temp file that will be cleaned up on exit
+# Usage: local tmp=$(atomic_mktemp)
+atomic_mktemp() {
+    local tmp
+    tmp=$(command mktemp) || return 1
+    _ATOMIC_TEMP_FILES+=("$tmp")
+    echo "$tmp"
+}
+
+# Remove a temp file from tracking (call after successful mv/rm)
+# Usage: atomic_mktemp_done "$tmp"
+atomic_mktemp_done() {
+    local file="$1"
+    local i
+    for i in "${!_ATOMIC_TEMP_FILES[@]}"; do
+        if [[ "${_ATOMIC_TEMP_FILES[$i]}" == "$file" ]]; then
+            unset '_ATOMIC_TEMP_FILES[i]'
+            break
+        fi
+    done
+}
+
+# ============================================================================
+# DEPENDENCY VALIDATION
+# ============================================================================
+
+# Required dependencies for ATOMIC CLAUDE
+declare -a ATOMIC_REQUIRED_DEPS=("jq" "git")
+declare -a ATOMIC_OPTIONAL_DEPS=("claude" "curl" "ollama")
+
+# Validate all required dependencies are available
+# Usage: atomic_validate_deps [--strict]
+# --strict: Also require optional dependencies
+# Returns: 0 if all required deps available, 1 if missing
+atomic_validate_deps() {
+    local strict="${1:-false}"
+    local missing_required=()
+    local missing_optional=()
+    local dep
+
+    # Check required dependencies
+    for dep in "${ATOMIC_REQUIRED_DEPS[@]}"; do
+        if ! command -v "$dep" &>/dev/null; then
+            missing_required+=("$dep")
+        fi
+    done
+
+    # Check optional dependencies
+    for dep in "${ATOMIC_OPTIONAL_DEPS[@]}"; do
+        if ! command -v "$dep" &>/dev/null; then
+            missing_optional+=("$dep")
+        fi
+    done
+
+    # Report missing required
+    if [[ ${#missing_required[@]} -gt 0 ]]; then
+        echo "ERROR: Missing required dependencies:" >&2
+        for dep in "${missing_required[@]}"; do
+            echo "  - $dep" >&2
+        done
+        echo "" >&2
+        echo "Install missing dependencies and try again." >&2
+        return 1
+    fi
+
+    # Report missing optional (warning only unless strict)
+    if [[ ${#missing_optional[@]} -gt 0 ]]; then
+        if [[ "$strict" == "--strict" ]] || [[ "$strict" == "true" ]]; then
+            echo "ERROR: Missing optional dependencies (strict mode):" >&2
+            for dep in "${missing_optional[@]}"; do
+                echo "  - $dep" >&2
+            done
+            return 1
+        else
+            # Just warn about missing optional deps
+            for dep in "${missing_optional[@]}"; do
+                echo "WARN: Optional dependency not found: $dep" >&2
+            done
+        fi
+    fi
+
+    return 0
+}
+
+# Check if a specific dependency is available
+# Usage: atomic_has_dep "claude"
+atomic_has_dep() {
+    local dep="$1"
+    command -v "$dep" &>/dev/null
+}
+
+# Validate dependencies and print status
+# Usage: atomic_deps_status
+atomic_deps_status() {
+    echo "Dependency Status:"
+    echo "=================="
+    echo ""
+    echo "Required:"
+    for dep in "${ATOMIC_REQUIRED_DEPS[@]}"; do
+        if command -v "$dep" &>/dev/null; then
+            local version
+            version=$("$dep" --version 2>/dev/null | head -1 || echo "installed")
+            echo "  [OK] $dep - $version"
+        else
+            echo "  [MISSING] $dep"
+        fi
+    done
+    echo ""
+    echo "Optional:"
+    for dep in "${ATOMIC_OPTIONAL_DEPS[@]}"; do
+        if command -v "$dep" &>/dev/null; then
+            local version
+            version=$("$dep" --version 2>/dev/null | head -1 || echo "installed")
+            echo "  [OK] $dep - $version"
+        else
+            echo "  [MISSING] $dep"
+        fi
+    done
+}
+
+# ============================================================================
 # COLORS & OUTPUT
 # ============================================================================
 
@@ -175,15 +317,43 @@ atomic_state_set() {
     local key="$1"
     local value="$2"
     local state_file="$ATOMIC_STATE_DIR/session.json"
-    local tmp_file=$(mktemp)
-    jq ".$key = $value" "$state_file" > "$tmp_file" && mv "$tmp_file" "$state_file"
+    local tmp_file
+    tmp_file=$(atomic_mktemp) || { echo "ERROR: Failed to create temp file" >&2; return 1; }
+
+    if ! jq ".$key = $value" "$state_file" > "$tmp_file" 2>/dev/null; then
+        echo "ERROR: jq failed in atomic_state_set for key: $key" >&2
+        rm -f "$tmp_file" 2>/dev/null
+        return 1
+    fi
+
+    if [[ ! -s "$tmp_file" ]] || ! jq empty "$tmp_file" 2>/dev/null; then
+        echo "ERROR: Invalid JSON output in atomic_state_set" >&2
+        rm -f "$tmp_file" 2>/dev/null
+        return 1
+    fi
+
+    mv "$tmp_file" "$state_file"
 }
 
 atomic_state_increment() {
     local key="$1"
     local state_file="$ATOMIC_STATE_DIR/session.json"
-    local tmp_file=$(mktemp)
-    jq ".$key = (.$key + 1)" "$state_file" > "$tmp_file" && mv "$tmp_file" "$state_file"
+    local tmp_file
+    tmp_file=$(atomic_mktemp) || { echo "ERROR: Failed to create temp file" >&2; return 1; }
+
+    if ! jq ".$key = (.$key + 1)" "$state_file" > "$tmp_file" 2>/dev/null; then
+        echo "ERROR: jq failed in atomic_state_increment for key: $key" >&2
+        rm -f "$tmp_file" 2>/dev/null
+        return 1
+    fi
+
+    if [[ ! -s "$tmp_file" ]] || ! jq empty "$tmp_file" 2>/dev/null; then
+        echo "ERROR: Invalid JSON output in atomic_state_increment" >&2
+        rm -f "$tmp_file" 2>/dev/null
+        return 1
+    fi
+
+    mv "$tmp_file" "$state_file"
 }
 
 # ============================================================================
@@ -209,12 +379,16 @@ atomic_invoke() {
     local format=""
     local timeout="$CLAUDE_TIMEOUT"
     local use_stdin=false
+    local max_retries="${ATOMIC_MAX_RETRIES:-2}"
+    local retry_delay="${ATOMIC_RETRY_DELAY:-5}"
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --model=*) model="${1#*=}" ;;
             --format=*) format="${1#*=}" ;;
             --timeout=*) timeout="${1#*=}" ;;
+            --retries=*) max_retries="${1#*=}" ;;
+            --retry-delay=*) retry_delay="${1#*=}" ;;
             --stdin) use_stdin=true ;;
             *) atomic_warn "Unknown option: $1" ;;
         esac
@@ -256,15 +430,38 @@ $stdin_content"
     atomic_waiting "Invoking Claude..."
     echo ""
 
-    # THE ATOMIC INVOCATION
+    # THE ATOMIC INVOCATION (with retry logic)
     local start_time=$(date +%s)
     local exit_code=0
+    local attempt=1
+    local total_duration=0
 
-    if timeout "$timeout" claude -p "$prompt_content" --model "$model" --dangerously-skip-permissions > "$output_file" 2>&1; then
-        exit_code=0
-    else
-        exit_code=$?
-    fi
+    while [[ $attempt -le $((max_retries + 1)) ]]; do
+        local attempt_start=$(date +%s)
+
+        if timeout "$timeout" claude -p "$prompt_content" --model "$model" --dangerously-skip-permissions > "$output_file" 2>&1; then
+            exit_code=0
+            break
+        else
+            exit_code=$?
+        fi
+
+        local attempt_end=$(date +%s)
+        local attempt_duration=$((attempt_end - attempt_start))
+        total_duration=$((total_duration + attempt_duration))
+
+        # Check if it's a timeout (exit code 124) and we have retries left
+        if [[ $exit_code -eq 124 ]] && [[ $attempt -lt $((max_retries + 1)) ]]; then
+            atomic_warn "Timeout on attempt $attempt/$((max_retries + 1)), retrying in ${retry_delay}s..."
+            sleep "$retry_delay"
+            # Exponential backoff
+            retry_delay=$((retry_delay * 2))
+            ((attempt++))
+        else
+            # Not a timeout or no retries left
+            break
+        fi
+    done
 
     local end_time=$(date +%s)
     local duration=$((end_time - start_time))
@@ -291,7 +488,11 @@ $stdin_content"
         atomic_state_increment "tasks_completed"
         return 0
     else
-        atomic_error "Claude task failed (exit code: $exit_code)"
+        if [[ $exit_code -eq 124 ]]; then
+            atomic_error "Claude task timed out after $attempt attempt(s)"
+        else
+            atomic_error "Claude task failed (exit code: $exit_code)"
+        fi
         atomic_substep "Check output file for details: $output_file"
         atomic_state_increment "tasks_failed"
         return $exit_code
@@ -470,6 +671,196 @@ atomic_validate_project_name() {
     return 0
 }
 
+# Sanitize a string for safe use in file paths
+# Removes/replaces dangerous characters
+# Usage: atomic_sanitize_path "user input"
+atomic_sanitize_path() {
+    local input="$1"
+    local sanitized
+
+    # Remove null bytes
+    sanitized="${input//$'\0'/}"
+
+    # Remove path traversal patterns
+    sanitized="${sanitized//\.\./}"
+
+    # Remove leading/trailing whitespace
+    sanitized="${sanitized#"${sanitized%%[![:space:]]*}"}"
+    sanitized="${sanitized%"${sanitized##*[![:space:]]}"}"
+
+    # Replace potentially dangerous characters with underscores
+    sanitized=$(echo "$sanitized" | tr -cd 'A-Za-z0-9._-/')
+
+    echo "$sanitized"
+}
+
+# Sanitize a string for safe use in shell commands
+# More restrictive than path sanitization
+# Usage: atomic_sanitize_string "user input"
+atomic_sanitize_string() {
+    local input="$1"
+    local sanitized
+
+    # Remove null bytes and newlines
+    sanitized="${input//$'\0'/}"
+    sanitized="${sanitized//$'\n'/ }"
+    sanitized="${sanitized//$'\r'/}"
+
+    # Remove shell-dangerous characters
+    sanitized=$(echo "$sanitized" | tr -cd 'A-Za-z0-9 ._-')
+
+    echo "$sanitized"
+}
+
+# Validate a file path is safe
+# Returns 0 if safe, 1 if dangerous
+# Usage: atomic_validate_path "/some/path"
+atomic_validate_path() {
+    local path="$1"
+
+    # Check for null bytes
+    if [[ "$path" == *$'\0'* ]]; then
+        echo "Path contains null byte"
+        return 1
+    fi
+
+    # Check for path traversal
+    if [[ "$path" == *".."* ]]; then
+        echo "Path contains directory traversal"
+        return 1
+    fi
+
+    # Check for suspicious patterns
+    if [[ "$path" =~ ^\~|^\$|^\||^\; ]]; then
+        echo "Path contains suspicious prefix"
+        return 1
+    fi
+
+    return 0
+}
+
+# ============================================================================
+# CONFIG SCHEMA VALIDATION
+# ============================================================================
+
+# Validate models.json configuration
+# Usage: atomic_validate_models_config [config_file]
+atomic_validate_models_config() {
+    local config_file="${1:-$ATOMIC_ROOT/config/models.json}"
+
+    # Check file exists
+    if [[ ! -f "$config_file" ]]; then
+        echo "Models config not found: $config_file"
+        return 1
+    fi
+
+    # Check valid JSON
+    if ! jq empty "$config_file" 2>/dev/null; then
+        echo "Invalid JSON in models config"
+        return 1
+    fi
+
+    # Check required structure
+    if ! jq -e '.models' "$config_file" >/dev/null 2>&1; then
+        echo "Missing required 'models' key in config"
+        return 1
+    fi
+
+    # Check at least one provider exists
+    local provider_count
+    provider_count=$(jq '.models | keys | length' "$config_file")
+    if [[ "$provider_count" -lt 1 ]]; then
+        echo "No providers defined in models config"
+        return 1
+    fi
+
+    # Validate each model has required fields
+    local invalid_models
+    invalid_models=$(jq -r '
+        [.models | to_entries[] | .value | to_entries[] |
+         select(.value.context_window == null or .value.cost_tier == null) |
+         .key] | join(", ")
+    ' "$config_file")
+
+    if [[ -n "$invalid_models" ]]; then
+        echo "Models missing required fields (context_window, cost_tier): $invalid_models"
+        return 1
+    fi
+
+    return 0
+}
+
+# Validate project-config.json
+# Usage: atomic_validate_project_config [config_file]
+atomic_validate_project_config() {
+    local config_file="${1:-$ATOMIC_OUTPUT_DIR/0-setup/project-config.json}"
+
+    # Check file exists
+    if [[ ! -f "$config_file" ]]; then
+        echo "Project config not found: $config_file"
+        return 1
+    fi
+
+    # Check valid JSON
+    if ! jq empty "$config_file" 2>/dev/null; then
+        echo "Invalid JSON in project config"
+        return 1
+    fi
+
+    # Check required structure
+    local missing_fields=()
+
+    if ! jq -e '.project' "$config_file" >/dev/null 2>&1; then
+        missing_fields+=("project")
+    fi
+
+    if ! jq -e '.project.name' "$config_file" >/dev/null 2>&1; then
+        missing_fields+=("project.name")
+    fi
+
+    if [[ ${#missing_fields[@]} -gt 0 ]]; then
+        echo "Missing required fields: ${missing_fields[*]}"
+        return 1
+    fi
+
+    # Validate project name
+    local project_name
+    project_name=$(jq -r '.project.name // ""' "$config_file")
+    if ! atomic_validate_project_name "$project_name" >/dev/null 2>&1; then
+        echo "Invalid project name: $(atomic_validate_project_name "$project_name")"
+        return 1
+    fi
+
+    return 0
+}
+
+# Validate all configuration files
+# Usage: atomic_validate_all_configs
+atomic_validate_all_configs() {
+    local errors=()
+
+    # Validate models config if it exists
+    if [[ -f "$ATOMIC_ROOT/config/models.json" ]]; then
+        if ! atomic_validate_models_config; then
+            errors+=("models.json")
+        fi
+    fi
+
+    # Validate project config if it exists
+    if [[ -f "$ATOMIC_OUTPUT_DIR/0-setup/project-config.json" ]]; then
+        if ! atomic_validate_project_config; then
+            errors+=("project-config.json")
+        fi
+    fi
+
+    if [[ ${#errors[@]} -gt 0 ]]; then
+        echo "Config validation failed for: ${errors[*]}"
+        return 1
+    fi
+
+    return 0
+}
+
 # Get project name from config (or fallback to directory name)
 atomic_get_project_name() {
     local config_file="$ATOMIC_OUTPUT_DIR/0-setup/project-config.json"
@@ -596,7 +987,7 @@ EOF
     fi
 }
 
-# Record a decision to the context
+# Record a decision to the context (simple version)
 # Usage: atomic_context_decision "Selected guided setup mode" "user_choice"
 atomic_context_decision() {
     local decision="$1"
@@ -604,13 +995,72 @@ atomic_context_decision() {
     local decisions_file="$ATOMIC_CONTEXT_DIR/decisions.json"
 
     if [[ -f "$decisions_file" ]]; then
-        local tmp=$(mktemp)
+        local tmp=$(atomic_mktemp)
         jq ". + [{
             \"decision\": \"$decision\",
             \"category\": \"$category\",
             \"timestamp\": \"$(date -Iseconds)\",
-            \"task\": \"$(atomic_state_get current_task)\"
+            \"task\": \"$(atomic_state_get current_task)\",
+            \"phase\": \"${CURRENT_PHASE:-unknown}\"
         }]" "$decisions_file" > "$tmp" && mv "$tmp" "$decisions_file"
+    fi
+}
+
+# Record a decision with full rationale (enhanced version)
+# Usage: atomic_context_decision_with_rationale \
+#          "decision" "category" "rationale" "alternatives" "impact"
+atomic_context_decision_with_rationale() {
+    local decision="$1"
+    local category="${2:-general}"
+    local rationale="${3:-}"
+    local alternatives="${4:-}"  # Comma-separated list
+    local impact="${5:-}"
+    local decisions_file="$ATOMIC_CONTEXT_DIR/decisions.json"
+
+    # Convert alternatives to JSON array
+    local alternatives_json="[]"
+    if [[ -n "$alternatives" ]]; then
+        alternatives_json=$(echo "$alternatives" | tr ',' '\n' | jq -R . | jq -s .)
+    fi
+
+    if [[ -f "$decisions_file" ]]; then
+        local tmp=$(atomic_mktemp)
+        jq --arg decision "$decision" \
+           --arg category "$category" \
+           --arg rationale "$rationale" \
+           --argjson alternatives "$alternatives_json" \
+           --arg impact "$impact" \
+           --arg timestamp "$(date -Iseconds)" \
+           --arg task "$(atomic_state_get current_task)" \
+           --arg phase "${CURRENT_PHASE:-unknown}" \
+           '. + [{
+               "decision": $decision,
+               "category": $category,
+               "timestamp": $timestamp,
+               "task": $task,
+               "phase": $phase,
+               "rationale": (if $rationale != "" then $rationale else null end),
+               "alternatives_considered": $alternatives,
+               "impact_assessment": (if $impact != "" then $impact else null end)
+           }]' "$decisions_file" > "$tmp" && mv "$tmp" "$decisions_file"
+    fi
+
+    # Also log to decision log for human review
+    local decision_log="$ATOMIC_CONTEXT_DIR/decision-log.md"
+    if [[ -d "$ATOMIC_CONTEXT_DIR" ]]; then
+        {
+            echo ""
+            echo "## Decision: $decision"
+            echo ""
+            echo "- **Category:** $category"
+            echo "- **Phase:** ${CURRENT_PHASE:-unknown}"
+            echo "- **Timestamp:** $(date -Iseconds)"
+            [[ -n "$rationale" ]] && echo "- **Rationale:** $rationale"
+            [[ -n "$alternatives" ]] && echo "- **Alternatives Considered:** $alternatives"
+            [[ -n "$impact" ]] && echo "- **Impact:** $impact"
+            echo ""
+            echo "---"
+        } >> "$decision_log"
     fi
 }
 
@@ -623,7 +1073,7 @@ atomic_context_artifact() {
     local artifacts_file="$ATOMIC_CONTEXT_DIR/artifacts.json"
 
     if [[ -f "$artifacts_file" ]]; then
-        local tmp=$(mktemp)
+        local tmp=$(atomic_mktemp)
         jq ".artifacts += [{
             \"path\": \"$file_path\",
             \"description\": \"$description\",
@@ -1026,7 +1476,7 @@ DEFAULTMODELS
 
         if [[ "$exists" == "null" ]]; then
             local context_window=$(atomic_infer_context_window "$model")
-            local tmp=$(mktemp)
+            local tmp=$(atomic_mktemp)
             jq --arg model "$model" --argjson ctx "$context_window" '
                 .models.ollama[$model] = {
                     "context_window": $ctx,
@@ -1200,6 +1650,441 @@ atomic_estimate_tokens() {
     echo $((char_count / 4))
 }
 
+# Check token budget for a task before execution
+# Usage: atomic_check_token_budget "$context_content" "Task Name"
+# Returns: 0 if OK, 1 if over budget (with warning)
+atomic_check_token_budget() {
+    local content="$1"
+    local task_name="${2:-Current task}"
+    local model="${3:-$(atomic_get_model primary)}"
+    local reserve_pct="${4:-30}"  # Reserve 30% for output by default
+
+    local token_limit=$(atomic_model_token_limit "$model")
+    local estimated_tokens=$(atomic_estimate_tokens "$content")
+    local usable_budget=$((token_limit * (100 - reserve_pct) / 100))
+    local usage_pct=$((estimated_tokens * 100 / usable_budget))
+
+    # Log token budget status
+    if [[ $estimated_tokens -gt $usable_budget ]]; then
+        atomic_warn "Token budget EXCEEDED for $task_name"
+        echo "  Context: ~$estimated_tokens tokens (budget: $usable_budget for $model)" >&2
+        echo "  Action: Context will be auto-gardened before invocation" >&2
+        return 1
+    elif [[ $usage_pct -ge 80 ]]; then
+        atomic_substep "Token budget HIGH for $task_name: ${usage_pct}% of $usable_budget tokens"
+    elif [[ $usage_pct -ge 50 ]]; then
+        atomic_substep "Token budget OK for $task_name: ${usage_pct}% of $usable_budget tokens"
+    fi
+
+    return 0
+}
+
+# Get token budget summary for display
+# Usage: summary=$(atomic_token_budget_summary "$file1" "$file2" ...)
+atomic_token_budget_summary() {
+    local total_tokens=0
+    local file_summaries=()
+
+    for file in "$@"; do
+        if [[ -f "$file" ]]; then
+            local content=$(cat "$file")
+            local tokens=$(atomic_estimate_tokens "$content")
+            total_tokens=$((total_tokens + tokens))
+            file_summaries+=("$(basename "$file"): ~$tokens tokens")
+        fi
+    done
+
+    local model=$(atomic_get_model primary)
+    local limit=$(atomic_model_token_limit "$model")
+    local usage_pct=$((total_tokens * 100 / limit))
+
+    echo "Token Budget Summary (model: $model, limit: $limit)"
+    echo "═════════════════════════════════════════"
+    for summary in "${file_summaries[@]}"; do
+        echo "  $summary"
+    done
+    echo "─────────────────────────────────────────"
+    echo "  TOTAL: ~$total_tokens tokens (${usage_pct}% of limit)"
+}
+
+# ============================================================================
+# JSON SCHEMA VALIDATION
+# ============================================================================
+
+# Validate JSON structure against expected schema
+# Usage: atomic_json_validate "$json_file" "required_fields" "optional_types"
+# Example: atomic_json_validate "$file" "status,findings" "findings:array,status:string"
+# Returns: 0 if valid, 1 if invalid (with error message on stderr)
+atomic_json_validate() {
+    local json_file="$1"
+    local required_fields="${2:-}"
+    local field_types="${3:-}"
+    local schema_name="${4:-JSON output}"
+
+    # Check file exists and is readable
+    if [[ ! -f "$json_file" ]]; then
+        echo "VALIDATION ERROR: $schema_name - File not found: $json_file" >&2
+        return 1
+    fi
+
+    # Check syntax first
+    if ! jq -e . "$json_file" &>/dev/null; then
+        echo "VALIDATION ERROR: $schema_name - Invalid JSON syntax" >&2
+        # Try to extract JSON from markdown if present
+        if grep -q '```json' "$json_file"; then
+            local extracted=$(sed -n '/```json/,/```/p' "$json_file" | sed '1d;$d')
+            if echo "$extracted" | jq -e . &>/dev/null; then
+                # Fix the file by extracting the JSON
+                echo "$extracted" > "$json_file"
+                echo "VALIDATION WARNING: Extracted JSON from markdown wrapper" >&2
+            else
+                return 1
+            fi
+        else
+            return 1
+        fi
+    fi
+
+    local errors=()
+
+    # Check required fields
+    if [[ -n "$required_fields" ]]; then
+        IFS=',' read -ra fields <<< "$required_fields"
+        for field in "${fields[@]}"; do
+            field=$(echo "$field" | xargs)  # Trim whitespace
+            if ! jq -e ".$field" "$json_file" &>/dev/null; then
+                errors+=("Missing required field: $field")
+            fi
+        done
+    fi
+
+    # Check field types
+    if [[ -n "$field_types" ]]; then
+        IFS=',' read -ra types <<< "$field_types"
+        for type_spec in "${types[@]}"; do
+            type_spec=$(echo "$type_spec" | xargs)
+            local field_name="${type_spec%%:*}"
+            local expected_type="${type_spec##*:}"
+
+            # Only check if field exists
+            if jq -e ".$field_name" "$json_file" &>/dev/null; then
+                local actual_type=$(jq -r ".$field_name | type" "$json_file")
+                if [[ "$actual_type" != "$expected_type" ]]; then
+                    errors+=("Field '$field_name' should be $expected_type, got $actual_type")
+                fi
+            fi
+        done
+    fi
+
+    # Report errors
+    if [[ ${#errors[@]} -gt 0 ]]; then
+        echo "VALIDATION ERROR: $schema_name - Structure validation failed:" >&2
+        for err in "${errors[@]}"; do
+            echo "  - $err" >&2
+        done
+        return 1
+    fi
+
+    return 0
+}
+
+# Validate and fix common LLM JSON output issues
+# Usage: fixed_json=$(atomic_json_fix "$json_file")
+atomic_json_fix() {
+    local json_file="$1"
+    local json_content
+
+    if [[ ! -f "$json_file" ]]; then
+        echo "{}"
+        return 1
+    fi
+
+    json_content=$(cat "$json_file")
+
+    # If already valid, return as-is
+    if echo "$json_content" | jq -e . &>/dev/null; then
+        echo "$json_content"
+        return 0
+    fi
+
+    # Try to extract JSON from markdown code blocks
+    if echo "$json_content" | grep -q '```'; then
+        local extracted=$(echo "$json_content" | sed -n '/```json\|```JSON\|```/,/```/p' | sed '1d;$d')
+        if echo "$extracted" | jq -e . &>/dev/null; then
+            echo "$extracted"
+            return 0
+        fi
+    fi
+
+    # Try to find JSON object in the content
+    local json_start=$(echo "$json_content" | grep -n '^{' | head -1 | cut -d: -f1)
+    if [[ -n "$json_start" ]]; then
+        local extracted=$(echo "$json_content" | tail -n +"$json_start")
+        if echo "$extracted" | jq -e . &>/dev/null; then
+            echo "$extracted"
+            return 0
+        fi
+    fi
+
+    # Could not fix, return original for error reporting
+    echo "$json_content"
+    return 1
+}
+
+# ============================================================================
+# CONTEXT HANDOFF VERIFICATION
+# ============================================================================
+
+# Verify that required context from previous phases exists
+# Usage: atomic_verify_context_handoff "$phase_num" "artifact1,artifact2"
+# Returns: 0 if all present, 1 if missing (with warnings)
+atomic_verify_context_handoff() {
+    local current_phase="${1:-$CURRENT_PHASE}"
+    local required_artifacts="${2:-}"  # Comma-separated list of artifact keys
+    local strict="${3:-false}"  # If true, fail on missing artifacts
+
+    local phase_num=${current_phase%%[-_]*}  # Extract number from "1-discovery"
+    phase_num=${phase_num:-0}
+
+    local artifacts_file="$ATOMIC_CONTEXT_DIR/artifacts.json"
+    local decisions_file="$ATOMIC_CONTEXT_DIR/decisions.json"
+    local missing=()
+    local warnings=()
+
+    echo ""
+    echo "CONTEXT HANDOFF VERIFICATION (Phase $phase_num)"
+    echo "═════════════════════════════════════════════════"
+
+    # Check if context directory exists
+    if [[ ! -d "$ATOMIC_CONTEXT_DIR" ]]; then
+        echo "  WARNING: Context directory not found"
+        warnings+=("Context directory missing")
+    fi
+
+    # Check artifacts file
+    if [[ -f "$artifacts_file" ]]; then
+        local artifact_count=$(jq '.artifacts | length' "$artifacts_file" 2>/dev/null || echo 0)
+        echo "  Artifacts registered: $artifact_count"
+    else
+        echo "  WARNING: No artifacts file found"
+        warnings+=("Artifacts file missing")
+    fi
+
+    # Check decisions file
+    if [[ -f "$decisions_file" ]]; then
+        local decision_count=$(jq 'length' "$decisions_file" 2>/dev/null || echo 0)
+        echo "  Decisions recorded: $decision_count"
+    else
+        echo "  WARNING: No decisions file found"
+        warnings+=("Decisions file missing")
+    fi
+
+    # Verify required artifacts if specified
+    if [[ -n "$required_artifacts" && -f "$artifacts_file" ]]; then
+        echo ""
+        echo "  Required Artifacts:"
+        IFS=',' read -ra artifacts <<< "$required_artifacts"
+        for artifact in "${artifacts[@]}"; do
+            artifact=$(echo "$artifact" | xargs)  # Trim whitespace
+            local found=$(jq -r ".artifacts[] | select(.path | contains(\"$artifact\")) | .path" "$artifacts_file" 2>/dev/null | head -1)
+            if [[ -n "$found" ]]; then
+                echo "    ✓ $artifact: $found"
+            else
+                echo "    ✗ $artifact: NOT FOUND"
+                missing+=("$artifact")
+            fi
+        done
+    fi
+
+    # Phase-specific checks
+    echo ""
+    echo "  Phase Continuity:"
+
+    case "$phase_num" in
+        1)
+            # Phase 1 should have Phase 0 closeout
+            local closeout="$ATOMIC_ROOT/.claude/closeout/phase-00-closeout.json"
+            if [[ -f "$closeout" ]]; then
+                echo "    ✓ Phase 0 closeout present"
+            else
+                echo "    ✗ Phase 0 closeout missing"
+                warnings+=("Phase 0 closeout missing")
+            fi
+            ;;
+        2)
+            # Phase 2 should have dialogue.json from Phase 1
+            local dialogue="$ATOMIC_OUTPUT_DIR/1-discovery/dialogue.json"
+            [[ -f "$dialogue" ]] && echo "    ✓ Discovery dialogue present" || warnings+=("Discovery dialogue missing")
+
+            local approach="$ATOMIC_OUTPUT_DIR/1-discovery/selected-approach.json"
+            [[ -f "$approach" ]] && echo "    ✓ Selected approach present" || warnings+=("Selected approach missing")
+            ;;
+        3)
+            # Phase 3 should have PRD
+            local prd="$ATOMIC_ROOT/docs/prd/PRD.md"
+            [[ -f "$prd" ]] && echo "    ✓ PRD document present" || missing+=("PRD document")
+            ;;
+        4|5|6)
+            # Phases 4-6 should have tasks.json
+            local tasks="$ATOMIC_ROOT/.taskmaster/tasks/tasks.json"
+            [[ -f "$tasks" ]] && echo "    ✓ Tasks file present" || missing+=("Tasks file")
+            ;;
+    esac
+
+    echo ""
+    echo "─────────────────────────────────────────────────"
+
+    # Summary
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo "  MISSING: ${missing[*]}"
+        if [[ "$strict" == "true" ]]; then
+            echo "  STATUS: FAIL (strict mode)"
+            return 1
+        else
+            echo "  STATUS: WARN (continuing with gaps)"
+        fi
+    elif [[ ${#warnings[@]} -gt 0 ]]; then
+        echo "  WARNINGS: ${warnings[*]}"
+        echo "  STATUS: PASS (with warnings)"
+    else
+        echo "  STATUS: PASS"
+    fi
+
+    echo ""
+
+    # Log verification to decisions
+    atomic_context_decision "Context handoff verified for Phase $phase_num: ${#missing[@]} missing, ${#warnings[@]} warnings" "handoff_verification"
+
+    return 0
+}
+
+# Quick check for essential handoff (used by entry validation tasks)
+# Usage: atomic_handoff_ready || return 1
+atomic_handoff_ready() {
+    local phase="${1:-$CURRENT_PHASE}"
+
+    # Check context directory
+    [[ -d "$ATOMIC_CONTEXT_DIR" ]] || return 1
+
+    # Check summary exists
+    [[ -f "$ATOMIC_CONTEXT_DIR/summary.md" ]] || return 1
+
+    return 0
+}
+
+# ============================================================================
+# DIFF TRACKING FOR ITERATIVE OUTPUTS
+# ============================================================================
+
+# Save baseline version before iteration
+# Usage: atomic_diff_baseline "$file" "iteration_name"
+atomic_diff_baseline() {
+    local file="$1"
+    local iteration_name="${2:-baseline}"
+    local diff_dir="${ATOMIC_STATE_DIR:-$ATOMIC_ROOT/.claude}/diffs"
+
+    mkdir -p "$diff_dir"
+
+    if [[ ! -f "$file" ]]; then
+        echo "DIFF: No file to baseline: $file" >&2
+        return 1
+    fi
+
+    local filename=$(basename "$file")
+    local baseline_file="$diff_dir/${filename}.${iteration_name}.baseline"
+
+    cp "$file" "$baseline_file"
+    echo "DIFF: Baseline saved: $baseline_file"
+
+    # Return baseline path for later comparison
+    echo "$baseline_file"
+}
+
+# Generate diff between baseline and current version
+# Usage: atomic_diff_generate "$baseline_file" "$current_file" "description"
+atomic_diff_generate() {
+    local baseline_file="$1"
+    local current_file="$2"
+    local description="${3:-Changes}"
+    local diff_dir="${ATOMIC_STATE_DIR:-$ATOMIC_ROOT/.claude}/diffs"
+
+    mkdir -p "$diff_dir"
+
+    if [[ ! -f "$baseline_file" ]]; then
+        echo "DIFF: Baseline not found: $baseline_file" >&2
+        return 1
+    fi
+
+    if [[ ! -f "$current_file" ]]; then
+        echo "DIFF: Current file not found: $current_file" >&2
+        return 1
+    fi
+
+    local filename=$(basename "$current_file")
+    local timestamp=$(date +%Y%m%d-%H%M%S)
+    local diff_file="$diff_dir/${filename}.${timestamp}.diff"
+    local summary_file="$diff_dir/${filename}.${timestamp}.summary.json"
+
+    # Generate unified diff
+    diff -u "$baseline_file" "$current_file" > "$diff_file" 2>/dev/null || true
+
+    # Calculate diff statistics
+    local lines_added=$(grep -c '^+[^+]' "$diff_file" 2>/dev/null || echo 0)
+    local lines_removed=$(grep -c '^-[^-]' "$diff_file" 2>/dev/null || echo 0)
+    local lines_changed=$((lines_added + lines_removed))
+
+    # Generate summary JSON
+    jq -n \
+        --arg desc "$description" \
+        --arg baseline "$baseline_file" \
+        --arg current "$current_file" \
+        --arg diff "$diff_file" \
+        --argjson added "$lines_added" \
+        --argjson removed "$lines_removed" \
+        --argjson changed "$lines_changed" \
+        '{
+            "description": $desc,
+            "timestamp": (now | todate),
+            "baseline": $baseline,
+            "current": $current,
+            "diff_file": $diff,
+            "statistics": {
+                "lines_added": $added,
+                "lines_removed": $removed,
+                "total_changed": $changed
+            }
+        }' > "$summary_file"
+
+    # Display summary
+    echo ""
+    echo "DIFF SUMMARY: $description"
+    echo "─────────────────────────────────────────"
+    echo "  Lines added:   +$lines_added"
+    echo "  Lines removed: -$lines_removed"
+    echo "  Total changed: $lines_changed"
+    echo "  Diff saved:    $diff_file"
+    echo ""
+
+    # Register as artifact
+    atomic_context_artifact "diff_${filename}_${timestamp}" "$diff_file" "Diff: $description"
+
+    echo "$diff_file"
+}
+
+# Track iterative refinement (combines baseline + diff in one call)
+# Usage: atomic_diff_track "$file" "before_refinement" "after_refinement"
+atomic_diff_track() {
+    local file="$1"
+    local before_label="${2:-before}"
+    local after_label="${3:-after}"
+
+    local baseline=$(atomic_diff_baseline "$file" "$before_label")
+
+    # Return baseline for later use
+    # Caller should update the file, then call atomic_diff_generate
+    echo "$baseline"
+}
+
 # ============================================================================
 # CONTEXT HELPERS (Truncation, Windowing, Validation, Adjudication)
 # ============================================================================
@@ -1225,6 +2110,161 @@ atomic_context_truncate() {
     fi
 }
 
+# Smart summarize file content using LLM
+# Usage: content=$(atomic_context_summarize "$file" "corpus analysis" 150)
+# This replaces blind truncation with intelligent summarization
+atomic_context_summarize() {
+    local file="$1"
+    local context_desc="${2:-document}"
+    local target_lines="${3:-200}"
+    local cache_dir="${ATOMIC_STATE_DIR:-$ATOMIC_ROOT/.claude}/summary-cache"
+
+    if [[ ! -f "$file" ]]; then
+        echo "(file not found: $file)"
+        return 1
+    fi
+
+    local total_lines=$(wc -l < "$file")
+    local filename=$(basename "$file")
+
+    # If content is small enough, return as-is
+    if [[ $total_lines -le $((target_lines + 50)) ]]; then
+        cat "$file"
+        return 0
+    fi
+
+    mkdir -p "$cache_dir"
+
+    # Generate cache key based on file content hash and target lines
+    local file_hash=$(md5sum "$file" 2>/dev/null | cut -d' ' -f1 || shasum "$file" | cut -d' ' -f1)
+    local cache_key="${filename}-${file_hash:0:12}-${target_lines}"
+    local cache_file="$cache_dir/$cache_key.summary"
+
+    # Check cache first
+    if [[ -f "$cache_file" ]]; then
+        cat "$cache_file"
+        return 0
+    fi
+
+    # Determine file type and extraction strategy
+    local file_type="text"
+    local key_sections=""
+
+    case "$filename" in
+        *.json)
+            file_type="json"
+            # For JSON, extract top-level structure
+            key_sections=$(jq -r 'keys | "Top-level keys: " + (. | join(", "))' "$file" 2>/dev/null || echo "")
+            ;;
+        *.md)
+            file_type="markdown"
+            # For markdown, extract headers
+            key_sections=$(grep -E '^#{1,3} ' "$file" 2>/dev/null | head -20 | sed 's/^/  /' || echo "")
+            ;;
+        *dialogue*.json|*conversation*.json)
+            file_type="dialogue"
+            # For dialogues, extract first and last exchanges
+            key_sections=$(jq -r '
+                if .conversation then
+                    "Exchanges: \(.conversation | length)\n" +
+                    "Opening: \(.conversation[0].content[:200] // "N/A")...\n" +
+                    "Recent: \(.conversation[-1].content[:200] // "N/A")..."
+                else
+                    "Structure: \(keys | join(", "))"
+                end
+            ' "$file" 2>/dev/null || echo "")
+            ;;
+    esac
+
+    # Build summarization prompt
+    local prompt_file=$(atomic_mktemp)
+    local summary_output=$(atomic_mktemp)
+
+    cat > "$prompt_file" << SUMMARY_PROMPT
+# Task: Summarize $context_desc
+
+You are a context-preservation assistant. Summarize this content for an LLM that will use it in a later task. Your goal is to preserve ALL important information while reducing size.
+
+## Original Content ($total_lines lines, type: $file_type)
+
+$(head -$((target_lines * 2)) "$file")
+
+$(if [[ $total_lines -gt $((target_lines * 2)) ]]; then
+    echo "... [${total_lines} total lines - content continues] ..."
+    echo ""
+    echo "## Final Section"
+    tail -50 "$file"
+fi)
+
+## Key Structural Elements
+$key_sections
+
+## Summarization Requirements
+
+1. **Preserve Critical Information**
+   - Names, IDs, versions, paths
+   - Decisions and their rationale
+   - Key findings and conclusions
+   - Technical specifications
+
+2. **Condense Repetitive Content**
+   - Merge similar items into counts ("12 similar tasks...")
+   - Summarize patterns instead of listing all instances
+
+3. **Maintain Context Chain**
+   - Include enough for the next task to understand provenance
+   - Reference source file: $filename
+
+4. **Target Size**: Approximately $target_lines lines
+
+## Output Format
+
+Return ONLY the summarized content, optimized for downstream LLM consumption.
+Start directly with the summary - no preamble.
+SUMMARY_PROMPT
+
+    # Use haiku for speed (summarization doesn't need opus)
+    if atomic_invoke "$prompt_file" "$summary_output" "Summarizing $context_desc" --model=haiku 2>/dev/null; then
+        if [[ -s "$summary_output" ]]; then
+            # Add provenance header and cache
+            {
+                echo "[SUMMARY of $filename ($total_lines lines -> ~$target_lines lines)]"
+                echo ""
+                cat "$summary_output"
+                echo ""
+                echo "[End summary - original: $file]"
+            } | tee "$cache_file"
+            rm -f "$prompt_file" "$summary_output"
+            return 0
+        fi
+    fi
+
+    # Fallback to smart truncation with structural preservation
+    rm -f "$prompt_file" "$summary_output"
+
+    echo "[CONDENSED: $filename ($total_lines lines)]"
+    echo ""
+
+    if [[ "$file_type" == "json" ]]; then
+        echo "## Structure"
+        echo "$key_sections"
+        echo ""
+        echo "## Content Preview"
+        head -$((target_lines - 20)) "$file"
+    elif [[ "$file_type" == "markdown" ]]; then
+        echo "## Headers"
+        echo "$key_sections"
+        echo ""
+        echo "## Content"
+        head -$((target_lines - 30)) "$file"
+    else
+        head -$target_lines "$file"
+    fi
+
+    echo ""
+    echo "[CONDENSED: Showing ~$target_lines of $total_lines lines with structure]"
+}
+
 # Sliding window for JSON conversation arrays
 # Usage: windowed_json=$(atomic_context_window "$dialogue_json" 12)
 atomic_context_window() {
@@ -1246,6 +2286,84 @@ atomic_context_window() {
     else
         echo "$json" | jq --argjson win "$window_size" '
             .conversation = .conversation[-$win:]
+        '
+    fi
+}
+
+# Auto-garden dialogue JSON when approaching token threshold
+# Usage: gardened_json=$(atomic_context_autogarden "$dialogue_json" 8000)
+# This automatically manages dialogue size, applying summarization when needed
+atomic_context_autogarden() {
+    local dialogue_json="$1"
+    local max_tokens="${2:-8000}"  # Target token budget for dialogue
+    local preserve_opening="${3:-true}"
+
+    # Check if this looks like valid JSON with exchanges
+    if ! echo "$dialogue_json" | jq -e '.exchanges or .conversation' &>/dev/null; then
+        echo "$dialogue_json"
+        return 0
+    fi
+
+    # Determine key name (exchanges vs conversation)
+    local key_name="exchanges"
+    if echo "$dialogue_json" | jq -e '.conversation' &>/dev/null; then
+        key_name="conversation"
+    fi
+
+    # Count exchanges and estimate tokens
+    local exchange_count=$(echo "$dialogue_json" | jq ".$key_name | length")
+    local char_count=$(echo "$dialogue_json" | jq -r ".$key_name | tostring | length")
+    local estimated_tokens=$((char_count / 4))
+
+    # If under budget, return as-is
+    if [[ $estimated_tokens -le $max_tokens ]]; then
+        echo "$dialogue_json"
+        return 0
+    fi
+
+    # Calculate target window size (aim for 70% of budget to leave room)
+    local target_chars=$((max_tokens * 4 * 70 / 100))
+    local avg_chars_per_exchange=$((char_count / exchange_count))
+    local target_window=$((target_chars / avg_chars_per_exchange))
+
+    # Ensure minimum window of 6
+    [[ $target_window -lt 6 ]] && target_window=6
+
+    # Apply windowing with smart summarization of omitted content
+    if [[ "$preserve_opening" == "true" && $exchange_count -gt $((target_window + 4)) ]]; then
+        local omitted_start=2
+        local omitted_end=$((exchange_count - target_window))
+        local omitted_count=$((omitted_end - omitted_start))
+
+        # Create a summary of omitted exchanges
+        local omitted_summary
+        local jq_filter=".${key_name}[${omitted_start}:${omitted_end}] | group_by(.agent // .role) | map(\"  \" + (.[0].agent // .[0].role) + \": \" + (. | length | tostring) + \" messages\") | join(\"\n\")"
+        omitted_summary=$(echo "$dialogue_json" | jq -r "$jq_filter")
+
+        # Build gardened dialogue
+        echo "$dialogue_json" | jq --argjson win "$target_window" --arg omitted "[$omitted_count exchanges omitted]
+Speakers in omitted section:
+$omitted_summary" --arg key "$key_name" '
+            .[$key] as $conv |
+            .[$key] = ($conv[:2] +
+                [{"role": "system", "agent": "context-manager", "content": $omitted, "gardened": true}] +
+                $conv[-$win:]) |
+            .gardening = {
+                "original_exchanges": ($conv | length),
+                "retained_exchanges": ($win + 2),
+                "omitted_exchanges": (($conv | length) - $win - 2),
+                "estimated_tokens_saved": (((($conv | length) - $win - 2) * 4 * 200) / 4)
+            }
+        '
+    else
+        # Simple windowing without opening preservation
+        echo "$dialogue_json" | jq --argjson win "$target_window" --arg key "$key_name" '
+            .[$key] = .[$key][-$win:] |
+            .gardening = {
+                "original_exchanges": (.[$key] | length),
+                "retained_exchanges": $win,
+                "type": "tail_only"
+            }
         '
     fi
 }
@@ -1300,7 +2418,20 @@ atomic_context_adjudicate() {
     fi
 
     atomic_substep "Context threshold exceeded (~$estimated_tokens of $threshold tokens for $primary_model)"
-    atomic_substep "Invoking context gardener..."
+
+    # STAGE 1: Try simple auto-gardening first (no LLM call)
+    local gardened_json=$(atomic_context_autogarden "$dialogue_json" $threshold)
+    local gardened_text=$(echo "$gardened_json" | jq -r '(.conversation // .exchanges) | map(.content // .message) | join(" ")' 2>/dev/null)
+    local gardened_tokens=$(atomic_estimate_tokens "$gardened_text")
+
+    if [[ $gardened_tokens -lt $threshold ]]; then
+        atomic_substep "Auto-gardening reduced context to ~$gardened_tokens tokens"
+        echo "$gardened_json"
+        return 0
+    fi
+
+    # STAGE 2: Auto-gardening wasn't enough, invoke full LLM adjudication
+    atomic_substep "Auto-gardening insufficient (~$gardened_tokens tokens), invoking LLM context gardener..."
 
     # Build adjudication prompt
     local full_conversation=$(echo "$dialogue_json" | jq -r '.conversation | map("\(.role): \(.content)") | join("\n\n")' 2>/dev/null)
