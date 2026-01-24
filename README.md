@@ -28,8 +28,10 @@ SCRIPT ──prompt.md──► CLAUDE ──output.json──► SCRIPT ──p
 ## Quick Start
 
 ```bash
-# Run Phase 00 (Setup)
-./phases/00-setup/run.sh
+# Run the main CLI
+./main.sh run 0          # Run Phase 0 (Setup)
+./main.sh status         # Check pipeline status
+./main.sh list           # List all phases
 
 # The script will:
 # 1. Collect configuration (user input)
@@ -43,18 +45,29 @@ SCRIPT ──prompt.md──► CLAUDE ──output.json──► SCRIPT ──p
 
 ```
 ATOMIC-CLAUDE/
+├── main.sh            # CLI entry point
 ├── lib/
 │   ├── atomic.sh      # Core invocation: atomic_invoke()
-│   └── phase.sh       # Phase lifecycle management
+│   ├── phase.sh       # Phase lifecycle management
+│   ├── audit.sh       # Phase auditing system
+│   └── intro.sh       # Terminal UI effects
+│
+├── config/
+│   └── models.json    # Provider & model configuration
 │
 ├── phases/
-│   ├── 00-setup/
-│   │   ├── run.sh     # Main phase script
-│   │   └── prompts/   # Bounded prompt templates
-│   ├── 01-ideation/
-│   └── ...
+│   ├── 0-setup/       # Project initialization
+│   ├── 1-discovery/   # Requirements gathering
+│   ├── 2-prd/         # PRD authoring
+│   ├── 3-tasking/     # Task decomposition
+│   ├── 4-specification/ # OpenSpec generation
+│   ├── 5-implementation/ # TDD cycles
+│   ├── 6-code-review/ # Review & refinement
+│   ├── 7-integration/ # Integration testing
+│   ├── 8-deployment-prep/ # Release preparation
+│   └── 9-release/     # Deployment
 │
-├── .state/            # Runtime state
+├── .claude/           # Runtime state
 ├── .outputs/          # Phase outputs
 └── .logs/             # Invocation logs
 ```
