@@ -29,7 +29,8 @@ Options:
   -h, --help        Show this help message
 
 Examples:
-  $(basename "$0") run 00-setup     # Run the setup phase
+  $(basename "$0") run 0            # Run Phase 0 (Setup)
+  $(basename "$0") run 1-discovery  # Run Phase 1 by name
   $(basename "$0") status           # Check where you are
   $(basename "$0") list             # See all phases
 
