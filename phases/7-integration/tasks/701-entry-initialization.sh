@@ -8,6 +8,12 @@ task_701_entry_initialization() {
     local closeout_file="$ATOMIC_ROOT/.claude/closeout/phase-06-closeout.json"
     local config_file="$ATOMIC_ROOT/project-config.json"
 
+    echo ""
+    echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}  PHASE 07 - INTEGRATION${NC}"
+    echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+
     atomic_step "Entry & Initialization"
 
     echo ""

@@ -6,23 +6,68 @@
 
 task_904_release_execution() {
     local release_dir="$ATOMIC_ROOT/.claude/release"
+    local prompts_dir="$release_dir/prompts"
     local setup_file="$release_dir/setup.json"
     local execution_file="$release_dir/execution.json"
     local announcement_file="$release_dir/announcement.md"
 
     atomic_step "Release Execution"
 
-    mkdir -p "$release_dir"
+    mkdir -p "$release_dir" "$prompts_dir"
 
     echo ""
     echo -e "  ${DIM}Executing release to distribution channels.${NC}"
     echo ""
+
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # LOAD RELEASE AGENTS FROM TASK 903 SELECTION
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    local agents_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/release-agents.json"
+    local agent_repo="${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}"
+
+    # Agent prompts (loaded from agents repository if available)
+    local announcement_agent_prompt=""
+
+    if [[ -f "$agents_file" ]]; then
+        echo -e "  ${DIM}Loading release agents from selection...${NC}"
+        echo ""
+
+        # Parse agents array - format is "agent-name:model"
+        local agents_array=$(jq -r '.agents[]' "$agents_file" 2>/dev/null)
+
+        for agent_entry in $agents_array; do
+            local agent_name="${agent_entry%%:*}"
+            local agent_file="$agent_repo/pipeline-agents/$agent_name.md"
+
+            if [[ -f "$agent_file" ]]; then
+                case "$agent_name" in
+                    *announcement*|*writer*)
+                        announcement_agent_prompt=$(cat "$agent_file")
+                        echo -e "  ${YELLOW}✓${NC} Loaded agent: $agent_name (Announcement)"
+                        ;;
+                esac
+            fi
+        done
+
+        echo ""
+    else
+        echo -e "  ${YELLOW}!${NC} No agent selection found - using built-in prompts"
+        echo ""
+    fi
 
     # Load configuration
     local version="0.1.0"
     if [[ -f "$setup_file" ]]; then
         version=$(jq -r '.release.version // "0.1.0"' "$setup_file")
     fi
+
+    # Gather project context
+    local prd_file="$ATOMIC_ROOT/.claude/prd/prd.md"
+    local changelog_file="$ATOMIC_ROOT/CHANGELOG.md"
+    local project_context=""
+    [[ -f "$prd_file" ]] && project_context+="## PRD\n$(cat "$prd_file" | head -100)\n\n"
+    [[ -f "$changelog_file" ]] && project_context+="## Changelog\n$(cat "$changelog_file" | head -50)\n\n"
 
     # Future sections (hidden for now - internal release only):
     # # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -92,11 +137,60 @@ task_904_release_execution() {
     echo -e "  ${BOLD}- INTERNAL RELEASE NOTES${NC}"
     echo ""
 
+    local announce_prompt_file="$prompts_dir/announcement-prompt.md"
+
+    # Build announcement prompt
+    if [[ -n "$announcement_agent_prompt" ]]; then
+        echo "$announcement_agent_prompt" > "$announce_prompt_file"
+        cat >> "$announce_prompt_file" << 'PROMPT'
+
+---
+
+# Announcement Writing Task
+
+Apply your technical writing expertise to draft internal release notes.
+PROMPT
+    else
+        cat > "$announce_prompt_file" << 'PROMPT'
+# Announcement Writing
+
+You are an announcement writer agent drafting internal release notes.
+PROMPT
+    fi
+
+    cat >> "$announce_prompt_file" << PROMPT
+
+## Release Details
+
+- Version: $version
+- Channel: internal
+
+## Project Context
+
+$project_context
+
+## Instructions
+
+Draft internal release notes for stakeholders. Include:
+1. Release summary
+2. What's new (features, changes)
+3. Artifacts available
+4. Next steps
+
+Return as markdown suitable for internal distribution.
+PROMPT
+
     echo -e "  ${DIM}[announcement-writer] Drafting internal release notes...${NC}"
     echo ""
 
-    # Generate internal release notes
-    cat > "$announcement_file" << EOF
+    # Call LLM for announcement
+    local announce_response=$(atomic_llm_call "$announce_prompt_file" "haiku" 2>/dev/null)
+
+    # Generate internal release notes (using LLM response or fallback)
+    if [[ -n "$announce_response" ]]; then
+        echo "$announce_response" > "$announcement_file"
+    else
+        cat > "$announcement_file" << EOF
 # Internal Release Notes - v$version
 
 ## Release Summary
@@ -122,6 +216,7 @@ Version $version has been completed and is ready for internal use.
 - Stakeholder review
 - External release planning (if applicable)
 EOF
+    fi
 
     local announcement_status="success"
 

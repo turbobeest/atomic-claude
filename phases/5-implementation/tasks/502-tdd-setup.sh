@@ -147,7 +147,9 @@ task_502_tdd_setup() {
     echo ""
 
     # Calculate optimal worker count (max 4, or task_count if fewer)
-    local cpu_count=$(nproc 2>/dev/null || echo 4)
+    # Cross-platform CPU count detection
+    local cpu_count
+    cpu_count=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
     local optimal_workers=$((cpu_count > 4 ? 4 : cpu_count))
     optimal_workers=$((optimal_workers > task_count ? task_count : optimal_workers))
 

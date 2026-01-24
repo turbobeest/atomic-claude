@@ -27,7 +27,7 @@ task_101_entry_validation() {
 EOF
     echo -e "${NC}"
     echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "                       ${BOLD}[ PHASE 1 OF 10 ]${NC}"
+    echo -e "                       ${BOLD}[ PHASE 01 - DISCOVERY ]${NC}"
     echo ""
 
     atomic_step "Entry Validation"
@@ -137,13 +137,6 @@ EOF
     # WELCOME MESSAGE
     # ═══════════════════════════════════════════════════════════════════════════
 
-    echo ""
-    echo -e "${CYAN}    ╔╦╗ ╦ ╔═╗ ╔═╗ ╔═╗ ╦  ╦ ╔═╗ ╦═╗ ╦ ╦${NC}"
-    echo -e "${CYAN}     ║║ ║ ╚═╗ ║   ║ ║ ╚╗╔╝ ║╣  ╠╦╝ ╚╦╝${NC}"
-    echo -e "${CYAN}    ═╩╝ ╩ ╚═╝ ╚═╝ ╚═╝  ╚╝  ╚═╝ ╩╚═  ╩ ${NC}"
-    echo -e "${DIM}    ─────────────────────────────────────${NC}"
-    echo ""
-    echo -e "  ${DIM}Phase 1${NC}"
     echo ""
     echo -e "  Welcome. This is where your project takes shape."
     echo -e "  We'll explore your vision, gather context, and"

@@ -198,6 +198,16 @@ _007_install_cmd() {
                 *) echo "https://docs.docker.com/get-docker/" ;;
             esac
             ;;
+        graphviz)
+            case "$os_type" in
+                macos) echo "brew install graphviz" ;;
+                debian) echo "sudo apt install graphviz" ;;
+                redhat) echo "sudo dnf install graphviz" ;;
+                arch) echo "sudo pacman -S graphviz" ;;
+                windows) echo "winget install Graphviz.Graphviz" ;;
+                *) echo "https://graphviz.org/download/" ;;
+            esac
+            ;;
         python)
             case "$os_type" in
                 macos) echo "brew install python" ;;
@@ -307,6 +317,17 @@ _007_show_required_tools() {
         echo -e "      ${DIM}Note: Install globally for faster startup${NC}"
     fi
 
+    # graphviz (for DOT → SVG diagram rendering)
+    ((_007_REQUIRED_TOTAL++))
+    if command -v dot &>/dev/null; then
+        local ver=$(dot -V 2>&1 | head -1 | awk '{print $5}')
+        echo -e "    ${GREEN}✓${NC} graphviz ($ver)"
+        ((_007_REQUIRED_INSTALLED++))
+    else
+        echo -e "    ${RED}✗${NC} graphviz - ${BOLD}REQUIRED${NC} (diagram rendering)"
+        echo -e "      ${DIM}$(_007_install_cmd graphviz "$os_type")${NC}"
+    fi
+
     echo ""
 }
 
@@ -336,6 +357,10 @@ _007_recheck_required() {
     # task-master-ai
     ((_007_REQUIRED_TOTAL++))
     command -v task-master &>/dev/null && ((_007_REQUIRED_INSTALLED++))
+
+    # graphviz
+    ((_007_REQUIRED_TOTAL++))
+    command -v dot &>/dev/null && ((_007_REQUIRED_INSTALLED++))
 }
 
 # Show recommended tools

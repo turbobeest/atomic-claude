@@ -18,8 +18,10 @@ task_203_prd_interview() {
 
     echo ""
     echo -e "${DIM}  ┌─────────────────────────────────────────────────────────┐${NC}"
-    echo -e "${DIM}  │ OPTIONAL: Confirmatory interview to gather PRD inputs. │${NC}"
-    echo -e "${DIM}  │ Skip if no stakeholders available or defaults are OK.  │${NC}"
+    echo -e "${DIM}  │ Confirmatory interview to refine PRD inputs.           │${NC}"
+    echo -e "${DIM}  │                                                         │${NC}"
+    echo -e "${DIM}  │ You may answer as yourself, on behalf of stakeholders, │${NC}"
+    echo -e "${DIM}  │ or use sensible defaults to proceed quickly.           │${NC}"
     echo -e "${DIM}  └─────────────────────────────────────────────────────────┘${NC}"
     echo ""
 

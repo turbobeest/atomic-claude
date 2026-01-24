@@ -30,7 +30,7 @@ EXPERT_AGENTS_DIR=""
 # Load agent repo path from Phase 0 config or use defaults
 _105_load_agent_config() {
     local setup_config="$ATOMIC_OUTPUT_DIR/0-setup/project-config.json"
-    local default_repo="/mnt/walnut-drive/dev/agents"
+    local default_repo="$ATOMIC_ROOT/repos/agents"
 
     # Try to load from Phase 0 config
     if [[ -f "$setup_config" ]]; then
@@ -58,7 +58,7 @@ task_105_agent_selection() {
     # Check for jq dependency
     if ! command -v jq &>/dev/null; then
         atomic_error "jq is required for agent selection"
-        echo -e "  ${DIM}Install with: apt install jq / brew install jq${NC}"
+        echo -e "  ${DIM}Install with: apt install jq / brew install jq / winget install jqlang.jq${NC}"
         return 1
     fi
 
@@ -110,7 +110,9 @@ EOF
             1)
                 echo ""
                 echo -e "  ${DIM}Cloning agents repository...${NC}"
-                git clone https://github.com/turbobeest/agents "$AGENT_REPO" 2>/dev/null
+                # Get configured URL or use default
+                local agent_repo_url=$(jq -r '.agents.repository_url // "https://github.com/turbobeest/agents"' "$setup_config" 2>/dev/null || echo "https://github.com/turbobeest/agents")
+                git clone "$agent_repo_url" "$AGENT_REPO" 2>/dev/null
                 if [[ $? -ne 0 ]]; then
                     echo -e "  ${YELLOW}!${NC} Clone failed - using defaults"
                     _105_use_builtin_agents

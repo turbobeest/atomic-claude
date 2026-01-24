@@ -30,7 +30,7 @@ task_106_discovery_work() {
     # Check for jq dependency
     if ! command -v jq &>/dev/null; then
         atomic_error "jq is required for discovery conversation"
-        echo -e "  ${DIM}Install with: apt install jq / brew install jq${NC}"
+        echo -e "  ${DIM}Install with: apt install jq / brew install jq / winget install jqlang.jq${NC}"
         return 1
     fi
 

@@ -9,6 +9,7 @@ task_403_openspec_generation() {
     local specs_dir="$ATOMIC_ROOT/.claude/specs"
     local progress_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/spec-progress.json"
     local prompts_dir="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/prompts"
+    local roster_file="$ATOMIC_ROOT/.claude/agent-roster.json"
 
     atomic_step "OpenSpec Generation"
 
@@ -17,6 +18,67 @@ task_403_openspec_generation() {
     echo ""
     echo -e "  ${DIM}Generating OpenSpec definitions for each task.${NC}"
     echo ""
+
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # LOAD SELECTED AGENTS
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    local spec_writer_prompt=""
+    local interface_definer_prompt=""
+    local test_strategist_prompt=""
+    local security_specifier_prompt=""
+    local edge_case_hunter_prompt=""
+
+    # Get agent repo path from Phase 0 config
+    local agent_repo="${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}"
+
+    if [[ -f "$roster_file" ]]; then
+        echo -e "  ${DIM}Loading agents from roster...${NC}"
+        echo ""
+
+        local selected_agents=$(jq -r '.agents[]?' "$roster_file" 2>/dev/null)
+
+        for agent in $selected_agents; do
+            local agent_file="$agent_repo/pipeline-agents/$agent.md"
+            if [[ -f "$agent_file" ]]; then
+                case "$agent" in
+                    spec-writer)
+                        spec_writer_prompt=$(cat "$agent_file")
+                        echo -e "  ${GREEN}✓${NC} Loaded agent: $agent"
+                        ;;
+                    interface-definer)
+                        interface_definer_prompt=$(cat "$agent_file")
+                        echo -e "  ${GREEN}✓${NC} Loaded agent: $agent"
+                        ;;
+                    test-strategist)
+                        test_strategist_prompt=$(cat "$agent_file")
+                        echo -e "  ${GREEN}✓${NC} Loaded agent: $agent"
+                        ;;
+                    security-specifier)
+                        security_specifier_prompt=$(cat "$agent_file")
+                        echo -e "  ${GREEN}✓${NC} Loaded agent: $agent"
+                        ;;
+                    edge-case-hunter)
+                        edge_case_hunter_prompt=$(cat "$agent_file")
+                        echo -e "  ${GREEN}✓${NC} Loaded agent: $agent"
+                        ;;
+                    tdd-structurer)
+                        # Used in Task 404
+                        echo -e "  ${GREEN}✓${NC} Found agent: $agent (for Task 404)"
+                        ;;
+                    *)
+                        echo -e "  ${DIM}✓${NC} Agent: $agent (no prompt to load)"
+                        ;;
+                esac
+            else
+                echo -e "  ${YELLOW}!${NC} Agent file not found: $agent_file"
+            fi
+        done
+        echo ""
+    else
+        echo -e "  ${DIM}No agent roster found - using built-in specification logic${NC}"
+        echo ""
+    fi
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # GENERATION MODE SELECTION
@@ -142,12 +204,30 @@ TEMPLATE
         local task_category=$(jq -r ".tasks[] | select(.id == $task_id) | .category // \"feature\"" "$tasks_file")
         local task_prd_section=$(jq -r ".tasks[] | select(.id == $task_id) | .prd_section // \"\"" "$tasks_file")
 
-        cat > "$prompt_file" << PROMPT
+        # Build prompt with loaded agent expertise if available
+        if [[ -n "$spec_writer_prompt" ]]; then
+            echo "$spec_writer_prompt" > "$prompt_file"
+            cat >> "$prompt_file" << PROMPT
+
+---
+
+# Task: Generate OpenSpec for Task $task_id
+
+Apply your specification expertise to create a detailed OpenSpec for TDD implementation.
+
+## Task Details
+PROMPT
+        else
+            cat > "$prompt_file" << PROMPT
 # Task: Generate OpenSpec for Task $task_id
 
 You are a specification writer creating a detailed OpenSpec for TDD implementation.
 
 ## Task Details
+PROMPT
+        fi
+
+        cat >> "$prompt_file" << PROMPT
 
 - **ID**: $task_id
 - **Title**: $task_title
@@ -185,6 +265,46 @@ Generate a detailed specification that includes:
 - [ ] Edge cases are realistic for this task type
 - [ ] Error codes are specific (not generic INVALID_INPUT)
 - [ ] Security requirements match task category
+PROMPT
+
+        # Add supplementary agent expertise if available
+        if [[ -n "$interface_definer_prompt" || -n "$test_strategist_prompt" || -n "$security_specifier_prompt" || -n "$edge_case_hunter_prompt" ]]; then
+            cat >> "$prompt_file" << SUPPLEMENTARY
+
+## Additional Expert Guidance
+
+SUPPLEMENTARY
+            if [[ -n "$interface_definer_prompt" ]]; then
+                cat >> "$prompt_file" << SUPPLEMENTARY
+### Interface Design (from interface-definer agent)
+Focus on precise input/output contracts. Define clear validation rules, error conditions, and data types.
+
+SUPPLEMENTARY
+            fi
+            if [[ -n "$test_strategist_prompt" ]]; then
+                cat >> "$prompt_file" << SUPPLEMENTARY
+### Test Strategy (from test-strategist agent)
+Design comprehensive test coverage. Include unit, integration, and scenario-based tests with clear priorities.
+
+SUPPLEMENTARY
+            fi
+            if [[ -n "$security_specifier_prompt" ]]; then
+                cat >> "$prompt_file" << SUPPLEMENTARY
+### Security Requirements (from security-specifier agent)
+Identify authentication, authorization, input validation, and data protection requirements.
+
+SUPPLEMENTARY
+            fi
+            if [[ -n "$edge_case_hunter_prompt" ]]; then
+                cat >> "$prompt_file" << SUPPLEMENTARY
+### Edge Cases (from edge-case-hunter agent)
+Find boundary conditions, error paths, and unusual scenarios that could cause failures.
+
+SUPPLEMENTARY
+            fi
+        fi
+
+        cat >> "$prompt_file" << PROMPT
 
 ## Output Format
 

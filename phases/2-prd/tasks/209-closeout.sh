@@ -18,7 +18,7 @@ task_209_closeout() {
     echo -e "${DIM}  ┌─────────────────────────────────────────────────────────┐${NC}"
     echo -e "${DIM}  │ PHASE CLOSEOUT                                          │${NC}"
     echo -e "${DIM}  │                                                         │${NC}"
-    echo -e "${DIM}  │ Final review before moving to Phase 3 (Architecture).  │${NC}"
+    echo -e "${DIM}  │ Final review before moving to Phase 3 (Tasking).  │${NC}"
     echo -e "${DIM}  └─────────────────────────────────────────────────────────┘${NC}"
     echo ""
 
@@ -98,7 +98,7 @@ task_209_closeout() {
         checklist+=("Validation:SKIP")
     fi
 
-    echo -e "  ${GREEN}[PASS]${NC} ${GREEN}✓${NC} Ready for Architecture"
+    echo -e "  ${GREEN}[PASS]${NC} ${GREEN}✓${NC} Ready for Tasking"
     echo ""
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -198,7 +198,7 @@ done)
 
 ## Next Phase
 
-**Phase 3: Architecture**
+**Phase 3: Tasking**
 
 In the next phase, we will:
 - Design system architecture based on PRD
@@ -270,7 +270,7 @@ EOF
     echo -e "${GREEN}║${NC}  ─────────────────────────────────────────────────────────── ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}                                                               ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}      ${BOLD}Phase 2 Complete!${NC}                                       ${GREEN}║${NC}"
-    echo -e "${GREEN}║${NC}      ${DIM}Great work. See you in Architecture.${NC}                    ${GREEN}║${NC}"
+    echo -e "${GREEN}║${NC}      ${DIM}Great work. See you in Tasking.${NC}                    ${GREEN}║${NC}"
     echo -e "${GREEN}║${NC}                                                               ${GREEN}║${NC}"
     echo -e "${GREEN}╚═══════════════════════════════════════════════════════════════╝${NC}"
     echo ""

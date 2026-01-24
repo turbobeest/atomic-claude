@@ -102,6 +102,103 @@ _atomic_ensure_config() {
 }
 
 # ============================================================================
+# MODEL FALLBACK RESOLUTION
+# ============================================================================
+
+# Cache for Claude availability check
+_CLAUDE_AVAILABLE=""
+_CLAUDE_CHECK_TIME=0
+
+# Check if Claude API is available (with caching)
+_atomic_is_claude_available() {
+    local config_file="$ATOMIC_ROOT/config/models.json"
+    local now fallback_enabled timeout
+    now=$(date +%s)
+    local cache_ttl=60  # Cache for 60 seconds
+
+    # Return cached result if fresh
+    if [[ -n "$_CLAUDE_AVAILABLE" && $((now - _CLAUDE_CHECK_TIME)) -lt $cache_ttl ]]; then
+        [[ "$_CLAUDE_AVAILABLE" == "true" ]] && return 0 || return 1
+    fi
+
+    # Check if fallback is enabled
+    fallback_enabled=$(jq -r '.fallback_behavior.enabled // true' "$config_file" 2>/dev/null)
+    if [[ "$fallback_enabled" != "true" ]]; then
+        _CLAUDE_AVAILABLE="true"
+        _CLAUDE_CHECK_TIME=$now
+        return 0
+    fi
+
+    # Get timeout from config
+    timeout=$(jq -r '.fallback_behavior.offline_detection_timeout // 5' "$config_file" 2>/dev/null)
+
+    # Try to reach Claude API (quick health check via claude-local)
+    if timeout "$timeout" "$CLAUDE_LOCAL_PATH/invoke.sh" --provider=max --health-check &>/dev/null 2>&1; then
+        _CLAUDE_AVAILABLE="true"
+        _CLAUDE_CHECK_TIME=$now
+        return 0
+    fi
+
+    _CLAUDE_AVAILABLE="false"
+    _CLAUDE_CHECK_TIME=$now
+    return 1
+}
+
+# Resolve model with fallback support
+# Usage: _atomic_resolve_model "sonnet" → returns model and provider
+# Output format: "model:provider" (e.g., "sonnet:max" or "llama3.1:70b:ollama")
+_atomic_resolve_model() {
+    local requested_model="$1"
+    local config_file="$ATOMIC_ROOT/config/models.json"
+    local is_claude_tier fallbacks base_name matched log_fallback
+
+    # Check if it's a Claude tier (opus/sonnet/haiku)
+    is_claude_tier=$(jq -r --arg m "$requested_model" '.tier_mapping[$m] // empty' "$config_file" 2>/dev/null)
+
+    if [[ -z "$is_claude_tier" ]]; then
+        # Not a Claude tier - return as-is with current provider
+        echo "$requested_model:$CLAUDE_PROVIDER"
+        return 0
+    fi
+
+    # Check if Claude is available
+    if _atomic_is_claude_available; then
+        # Claude available - use requested model
+        echo "$requested_model:$CLAUDE_PROVIDER"
+        return 0
+    fi
+
+    # Claude unavailable - find Ollama fallback
+    fallbacks=$(jq -r --arg m "$requested_model" '.tier_mapping[$m].ollama_fallbacks // []' "$config_file" 2>/dev/null)
+    local ollama_host="${CLAUDE_OLLAMA_HOST:-http://localhost:11434}"
+
+    # Get list of available Ollama models
+    local available_models=""
+    if available_models=$(curl -s --connect-timeout 3 "$ollama_host/api/tags" 2>/dev/null | jq -r '.models[].name' 2>/dev/null); then
+        # Check each fallback in order
+        for fallback in $(echo "$fallbacks" | jq -r '.[]'); do
+            # Check if this model is available (exact or partial match)
+            base_name=$(echo "$fallback" | cut -d: -f1)
+            if echo "$available_models" | grep -q "^$fallback$" || echo "$available_models" | grep -q "^$base_name"; then
+                # Found available fallback
+                matched=$(echo "$available_models" | grep "^$base_name" | head -1)
+                log_fallback=$(jq -r '.fallback_behavior.log_fallback_events // true' "$config_file" 2>/dev/null)
+                if [[ "$log_fallback" == "true" ]]; then
+                    echo "[FALLBACK] Claude unavailable, using Ollama model: $matched (requested: $requested_model)" >&2
+                fi
+                echo "$matched:ollama"
+                return 0
+            fi
+        done
+    fi
+
+    # No fallback available - return original (will fail at invoke time)
+    echo "[WARN] No Ollama fallback available for $requested_model" >&2
+    echo "$requested_model:$CLAUDE_PROVIDER"
+    return 1
+}
+
+# ============================================================================
 # TEMP FILE MANAGEMENT
 # ============================================================================
 
@@ -273,7 +370,8 @@ TERM_WIDTH="${COLUMNS:-72}"
 # Usage: atomic_h1 "PHASE 1: DISCOVERY"
 atomic_h1() {
     local title="$1"
-    local dots=$(printf '∙%.0s' $(seq 1 $TERM_WIDTH))
+    local dots
+    dots=$(printf '∙%.0s' $(seq 1 $TERM_WIDTH))
     echo ""
     echo -e "${LIGHT_BLUE}${dots}${NC}"
     echo -e "${LIGHT_BLUE}  ⬢ ${title}${NC}"
@@ -296,9 +394,10 @@ atomic_h2() {
 atomic_entry_banner() {
     local phase_title="$1"
     local task_num="$2"
-    local bar=$(printf '═%.0s' $(seq 1 $TERM_WIDTH))
-    local inner_width=$((TERM_WIDTH - ${#phase_title} - ${#task_num} - 12))
-    local dashes=$(printf '─%.0s' $(seq 1 $inner_width))
+    local bar inner_width dashes
+    bar=$(printf '═%.0s' $(seq 1 $TERM_WIDTH))
+    inner_width=$((TERM_WIDTH - ${#phase_title} - ${#task_num} - 12))
+    dashes=$(printf '─%.0s' $(seq 1 $inner_width))
     echo ""
     echo -e "${LIGHT_BLUE}${bar}${NC}"
     echo -e "${LIGHT_BLUE}  ▶▶ ${phase_title} ${dashes} [${task_num}]${NC}"
@@ -309,8 +408,9 @@ atomic_entry_banner() {
 # Usage: atomic_closeout_banner "Phase 1 Complete"
 atomic_closeout_banner() {
     local message="${1:-CLOSEOUT}"
-    local padding=$((TERM_WIDTH - ${#message} - 10))
-    local spaces=$(printf ' %.0s' $(seq 1 $padding))
+    local padding spaces
+    padding=$((TERM_WIDTH - ${#message} - 10))
+    spaces=$(printf ' %.0s' $(seq 1 $padding))
     echo ""
     echo -e "${spaces}${LIGHT_GREY}▪▪▪ ${message} ▪▪▪${NC}"
     echo ""
@@ -323,6 +423,11 @@ atomic_closeout_banner() {
 # Track if sticky bar is active
 _ATOMIC_STICKY_BAR_ACTIVE=false
 
+# Check if tput is available and functional
+_atomic_has_tput() {
+    command -v tput >/dev/null 2>&1 && tput cols >/dev/null 2>&1
+}
+
 # Initialize sticky mode bar (reserves line 0 for the bar)
 # Call once at start of LLM task
 atomic_mode_bar_init() {
@@ -333,14 +438,20 @@ atomic_mode_bar_init() {
     _ATOMIC_STICKY_PROVIDER="$provider"
     _ATOMIC_STICKY_MODEL="$model"
 
-    # Set up scroll region to leave line 0 for the bar
-    tput sc              # Save cursor
-    tput cup 0 0         # Move to top
-    tput el              # Clear line
-    _atomic_render_mode_bar "$provider" "$model"
-    tput csr 1 $(($(tput lines) - 1))  # Set scroll region (line 1 to bottom)
-    tput rc              # Restore cursor
-    tput cup 1 0         # Move to line 1
+    # Set up scroll region to leave line 0 for the bar (requires tput)
+    if _atomic_has_tput; then
+        tput sc              # Save cursor
+        tput cup 0 0         # Move to top
+        tput el              # Clear line
+        _atomic_render_mode_bar "$provider" "$model"
+        tput csr 1 $(($(tput lines) - 1))  # Set scroll region (line 1 to bottom)
+        tput rc              # Restore cursor
+        tput cup 1 0         # Move to line 1
+    else
+        # Fallback: just print the mode indicator
+        _atomic_render_mode_bar "$provider" "$model"
+        echo ""
+    fi
 }
 
 # Update the sticky mode bar (call when status changes)
@@ -350,10 +461,13 @@ atomic_mode_bar_update() {
 
     [[ "$_ATOMIC_STICKY_BAR_ACTIVE" != "true" ]] && return
 
-    tput sc              # Save cursor
-    tput cup 0 0         # Move to top
-    _atomic_render_mode_bar "$provider" "$model"
-    tput rc              # Restore cursor
+    if _atomic_has_tput; then
+        tput sc              # Save cursor
+        tput cup 0 0         # Move to top
+        _atomic_render_mode_bar "$provider" "$model"
+        tput rc              # Restore cursor
+    fi
+    # No-op fallback: mode bar was printed inline initially
 }
 
 # Remove sticky mode bar and restore normal scrolling
@@ -361,18 +475,25 @@ atomic_mode_bar_clear() {
     [[ "$_ATOMIC_STICKY_BAR_ACTIVE" != "true" ]] && return
 
     _ATOMIC_STICKY_BAR_ACTIVE=false
-    tput csr 0 $(($(tput lines) - 1))  # Reset scroll region to full screen
-    tput sc
-    tput cup 0 0
-    tput el              # Clear the bar line
-    tput rc
+    if _atomic_has_tput; then
+        tput csr 0 $(($(tput lines) - 1))  # Reset scroll region to full screen
+        tput sc
+        tput cup 0 0
+        tput el              # Clear the bar line
+        tput rc
+    fi
+    # No-op fallback: inline mode bar stays visible (acceptable)
 }
 
 # Render the mode bar content (internal)
 _atomic_render_mode_bar() {
     local provider="${1:-$CLAUDE_PROVIDER}"
     local model="${2:-$CLAUDE_MODEL}"
-    local width="${COLUMNS:-$(tput cols)}"
+    local width="${COLUMNS:-80}"
+    # Try to get terminal width if tput available
+    if _atomic_has_tput; then
+        width=$(tput cols 2>/dev/null || echo 80)
+    fi
 
     # Determine mode label, status, and color based on provider
     local mode_label status_label bg_color fg_color
@@ -419,10 +540,11 @@ _atomic_render_mode_bar() {
     # Build the bar content
     local content="  ${mode_label}   |   ${model}   |   ${status_label}  "
     local content_len=${#content}
-    local padding=$(( (width - content_len) / 2 ))
+    local padding left_pad right_pad
+    padding=$(( (width - content_len) / 2 ))
     [[ $padding -lt 0 ]] && padding=0
-    local left_pad=$(printf '%*s' "$padding" '')
-    local right_pad=$(printf '%*s' "$((width - content_len - padding))" '')
+    left_pad=$(printf '%*s' "$padding" '')
+    right_pad=$(printf '%*s' "$((width - content_len - padding))" '')
 
     # Print the bar (no newline - we're on line 0)
     echo -ne "${bg_color}${fg_color}${BOLD}${left_pad}${content}${right_pad}${NC}"
@@ -703,6 +825,21 @@ atomic_invoke() {
         atomic_substep "Role '$role' → Provider '$provider'"
     fi
 
+    # Model fallback resolution (for airgapped/offline environments)
+    local skip_fallback="${ATOMIC_SKIP_FALLBACK:-false}"
+    local resolved resolved_model resolved_provider
+    if [[ "$skip_fallback" != "true" && "$provider" != "ollama" ]]; then
+        resolved=$(_atomic_resolve_model "$model")
+        if [[ -n "$resolved" && "$resolved" != *"WARN"* ]]; then
+            resolved_model=$(echo "$resolved" | cut -d: -f1)
+            resolved_provider=$(echo "$resolved" | cut -d: -f2)
+            if [[ "$resolved_model" != "$model" || "$resolved_provider" != "$provider" ]]; then
+                model="$resolved_model"
+                provider="$resolved_provider"
+            fi
+        fi
+    fi
+
     atomic_step "ATOMIC TASK: $description"
 
     # Determine prompt content
@@ -753,13 +890,14 @@ $stdin_content"
     invoke_cmd=$(_atomic_build_invoke_cmd "$prompt_content" "$model" "$provider" "$ollama_host")
 
     # THE ATOMIC INVOCATION (with retry logic)
-    local start_time=$(date +%s)
+    local start_time end_time duration attempt_start attempt_end attempt_duration
+    start_time=$(date +%s)
     local exit_code=0
     local attempt=1
     local total_duration=0
 
     while [[ $attempt -le $((max_retries + 1)) ]]; do
-        local attempt_start=$(date +%s)
+        attempt_start=$(date +%s)
 
         if timeout "$timeout" bash -c "$invoke_cmd" > "$output_file" 2>&1; then
             exit_code=0
@@ -768,8 +906,8 @@ $stdin_content"
             exit_code=$?
         fi
 
-        local attempt_end=$(date +%s)
-        local attempt_duration=$((attempt_end - attempt_start))
+        attempt_end=$(date +%s)
+        attempt_duration=$((attempt_end - attempt_start))
         total_duration=$((total_duration + attempt_duration))
 
         # Check if it's a timeout (exit code 124) and we have retries left
@@ -785,8 +923,8 @@ $stdin_content"
         fi
     done
 
-    local end_time=$(date +%s)
-    local duration=$((end_time - start_time))
+    end_time=$(date +%s)
+    duration=$((end_time - start_time))
 
     # Log the invocation (project-prefixed log file)
     local log_file
@@ -1371,7 +1509,8 @@ atomic_context_decision() {
     local decisions_file="$ATOMIC_CONTEXT_DIR/decisions.json"
 
     if [[ -f "$decisions_file" ]]; then
-        local tmp=$(atomic_mktemp)
+        local tmp
+        tmp=$(atomic_mktemp)
         jq ". + [{
             \"decision\": \"$decision\",
             \"category\": \"$category\",
@@ -1400,7 +1539,8 @@ atomic_context_decision_with_rationale() {
     fi
 
     if [[ -f "$decisions_file" ]]; then
-        local tmp=$(atomic_mktemp)
+        local tmp
+        tmp=$(atomic_mktemp)
         jq --arg decision "$decision" \
            --arg category "$category" \
            --arg rationale "$rationale" \
@@ -1449,7 +1589,8 @@ atomic_context_artifact() {
     local artifacts_file="$ATOMIC_CONTEXT_DIR/artifacts.json"
 
     if [[ -f "$artifacts_file" ]]; then
-        local tmp=$(atomic_mktemp)
+        local tmp
+        tmp=$(atomic_mktemp)
         jq ".artifacts += [{
             \"path\": \"$file_path\",
             \"description\": \"$description\",
@@ -1473,10 +1614,11 @@ $(cat "$ATOMIC_CONTEXT_DIR/summary.md")
     fi
 
     # Add each requested file
+    local filename extension
     for file in "$@"; do
         if [[ -f "$file" ]]; then
-            local filename=$(basename "$file")
-            local extension="${filename##*.}"
+            filename=$(basename "$file")
+            extension="${filename##*.}"
 
             context+="---
 === $filename ===
@@ -1553,7 +1695,8 @@ atomic_preflight_check() {
 
     atomic_substep "Running pre-flight context check..."
 
-    local preflight_prompt=$(cat << EOF
+    local preflight_prompt
+    preflight_prompt=$(cat << EOF
 # Pre-flight Context Check
 
 You are about to help with: **$task_description**
@@ -1576,9 +1719,10 @@ EOF
 )
 
     # Quick check with haiku
+    local sufficient
     if atomic_invoke "$preflight_prompt" "$preflight_output" "Context sufficiency check" --model=haiku --format=json; then
         # Parse result
-        local sufficient=$(jq -r '.sufficient // "unknown"' "$preflight_output" 2>/dev/null || echo "unknown")
+        sufficient=$(jq -r '.sufficient // "unknown"' "$preflight_output" 2>/dev/null || echo "unknown")
 
         if [[ "$sufficient" == "yes" ]]; then
             atomic_success "Context check: sufficient"
@@ -1600,11 +1744,12 @@ EOF
 # Allows user to add more context when pre-flight indicates insufficiency
 atomic_amend_context() {
     local preflight_file="$ATOMIC_CONTEXT_DIR/preflight-check.json"
+    local missing questions
 
     # Display what's missing
     if [[ -f "$preflight_file" ]]; then
-        local missing=$(jq -r '.missing[]? // empty' "$preflight_file" 2>/dev/null)
-        local questions=$(jq -r '.questions[]? // empty' "$preflight_file" 2>/dev/null)
+        missing=$(jq -r '.missing[]? // empty' "$preflight_file" 2>/dev/null)
+        questions=$(jq -r '.questions[]? // empty' "$preflight_file" 2>/dev/null)
 
         if [[ -n "$missing" ]]; then
             echo ""
@@ -1761,7 +1906,8 @@ atomic_context_refresh() {
 
     atomic_substep "Refreshing context summary..."
 
-    local refresh_prompt=$(cat << EOF
+    local refresh_prompt
+    refresh_prompt=$(cat << EOF
 # Task: Update Project Context Summary
 
 You are maintaining a rolling context summary for a software development pipeline.
@@ -1840,7 +1986,8 @@ DEFAULTMODELS
     atomic_substep "Discovering Ollama models..."
 
     # Get list of installed models
-    local ollama_models=$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')
+    local ollama_models exists context_window
+    ollama_models=$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')
 
     [[ -z "$ollama_models" ]] && return 0
 
@@ -1848,11 +1995,12 @@ DEFAULTMODELS
     while IFS= read -r model; do
         [[ -z "$model" ]] && continue
 
-        local exists=$(jq -r ".models.ollama[\"$model\"] // null" "$discovered_file" 2>/dev/null)
+        exists=$(jq -r ".models.ollama[\"$model\"] // null" "$discovered_file" 2>/dev/null)
 
         if [[ "$exists" == "null" ]]; then
-            local context_window=$(atomic_infer_context_window "$model")
-            local tmp=$(atomic_mktemp)
+            context_window=$(atomic_infer_context_window "$model")
+            local tmp
+        tmp=$(atomic_mktemp)
             jq --arg model "$model" --argjson ctx "$context_window" '
                 .models.ollama[$model] = {
                     "context_window": $ctx,
@@ -1905,7 +2053,8 @@ atomic_model_token_limit() {
     esac
 
     # Check Ollama models
-    local limit=$(jq -r ".models.ollama[\"${model}\"].context_window // null" "$discovered_file" 2>/dev/null)
+    local limit
+    limit=$(jq -r ".models.ollama[\"${model}\"].context_window // null" "$discovered_file" 2>/dev/null)
 
     if [[ "$limit" != "null" && -n "$limit" ]]; then
         echo "$limit"
@@ -2004,8 +2153,9 @@ atomic_gardener_config() {
         ["preserve_opening"]=true
     )
 
+    local value
     if [[ -f "$project_config" ]]; then
-        local value=$(jq -r ".extracted.gardener.${key} // empty" "$project_config" 2>/dev/null)
+        value=$(jq -r ".extracted.gardener.${key} // empty" "$project_config" 2>/dev/null)
         [[ -n "$value" && "$value" != "null" ]] && echo "$value" && return
     fi
 
@@ -2034,11 +2184,12 @@ atomic_check_token_budget() {
     local task_name="${2:-Current task}"
     local model="${3:-$(atomic_get_model primary)}"
     local reserve_pct="${4:-30}"  # Reserve 30% for output by default
+    local token_limit estimated_tokens usable_budget usage_pct
 
-    local token_limit=$(atomic_model_token_limit "$model")
-    local estimated_tokens=$(atomic_estimate_tokens "$content")
-    local usable_budget=$((token_limit * (100 - reserve_pct) / 100))
-    local usage_pct=$((estimated_tokens * 100 / usable_budget))
+    token_limit=$(atomic_model_token_limit "$model")
+    estimated_tokens=$(atomic_estimate_tokens "$content")
+    usable_budget=$((token_limit * (100 - reserve_pct) / 100))
+    usage_pct=$((estimated_tokens * 100 / usable_budget))
 
     # Log token budget status
     if [[ $estimated_tokens -gt $usable_budget ]]; then
@@ -2060,19 +2211,20 @@ atomic_check_token_budget() {
 atomic_token_budget_summary() {
     local total_tokens=0
     local file_summaries=()
+    local content tokens model limit usage_pct
 
     for file in "$@"; do
         if [[ -f "$file" ]]; then
-            local content=$(cat "$file")
-            local tokens=$(atomic_estimate_tokens "$content")
+            content=$(cat "$file")
+            tokens=$(atomic_estimate_tokens "$content")
             total_tokens=$((total_tokens + tokens))
             file_summaries+=("$(basename "$file"): ~$tokens tokens")
         fi
     done
 
-    local model=$(atomic_get_model primary)
-    local limit=$(atomic_model_token_limit "$model")
-    local usage_pct=$((total_tokens * 100 / limit))
+    model=$(atomic_get_model primary)
+    limit=$(atomic_model_token_limit "$model")
+    usage_pct=$((total_tokens * 100 / limit))
 
     echo "Token Budget Summary (model: $model, limit: $limit)"
     echo "═════════════════════════════════════════"
@@ -2107,11 +2259,12 @@ atomic_json_validate() {
     if ! jq -e . "$json_file" &>/dev/null; then
         echo "VALIDATION ERROR: $schema_name - Invalid JSON syntax" >&2
         # Try to extract JSON from markdown if present
+        local extracted_md
         if grep -q '```json' "$json_file"; then
-            local extracted=$(sed -n '/```json/,/```/p' "$json_file" | sed '1d;$d')
-            if echo "$extracted" | jq -e . &>/dev/null; then
+            extracted_md=$(sed -n '/```json/,/```/p' "$json_file" | sed '1d;$d')
+            if echo "$extracted_md" | jq -e . &>/dev/null; then
                 # Fix the file by extracting the JSON
-                echo "$extracted" > "$json_file"
+                echo "$extracted_md" > "$json_file"
                 echo "VALIDATION WARNING: Extracted JSON from markdown wrapper" >&2
             else
                 return 1
@@ -2135,16 +2288,17 @@ atomic_json_validate() {
     fi
 
     # Check field types
+    local field_name expected_type actual_type
     if [[ -n "$field_types" ]]; then
         IFS=',' read -ra types <<< "$field_types"
         for type_spec in "${types[@]}"; do
             type_spec=$(echo "$type_spec" | xargs)
-            local field_name="${type_spec%%:*}"
-            local expected_type="${type_spec##*:}"
+            field_name="${type_spec%%:*}"
+            expected_type="${type_spec##*:}"
 
             # Only check if field exists
             if jq -e ".$field_name" "$json_file" &>/dev/null; then
-                local actual_type=$(jq -r ".$field_name | type" "$json_file")
+                actual_type=$(jq -r ".$field_name | type" "$json_file")
                 if [[ "$actual_type" != "$expected_type" ]]; then
                     errors+=("Field '$field_name' should be $expected_type, got $actual_type")
                 fi
@@ -2184,8 +2338,9 @@ atomic_json_fix() {
     fi
 
     # Try to extract JSON from markdown code blocks
+    local extracted json_start
     if echo "$json_content" | grep -q '```'; then
-        local extracted=$(echo "$json_content" | sed -n '/```json\|```JSON\|```/,/```/p' | sed '1d;$d')
+        extracted=$(echo "$json_content" | sed -n '/```json\|```JSON\|```/,/```/p' | sed '1d;$d')
         if echo "$extracted" | jq -e . &>/dev/null; then
             echo "$extracted"
             return 0
@@ -2193,9 +2348,9 @@ atomic_json_fix() {
     fi
 
     # Try to find JSON object in the content
-    local json_start=$(echo "$json_content" | grep -n '^{' | head -1 | cut -d: -f1)
+    json_start=$(echo "$json_content" | grep -n '^{' | head -1 | cut -d: -f1)
     if [[ -n "$json_start" ]]; then
-        local extracted=$(echo "$json_content" | tail -n +"$json_start")
+        extracted=$(echo "$json_content" | tail -n +"$json_start")
         if echo "$extracted" | jq -e . &>/dev/null; then
             echo "$extracted"
             return 0
@@ -2238,8 +2393,9 @@ atomic_verify_context_handoff() {
     fi
 
     # Check artifacts file
+    local artifact_count decision_count found
     if [[ -f "$artifacts_file" ]]; then
-        local artifact_count=$(jq '.artifacts | length' "$artifacts_file" 2>/dev/null || echo 0)
+        artifact_count=$(jq '.artifacts | length' "$artifacts_file" 2>/dev/null || echo 0)
         echo "  Artifacts registered: $artifact_count"
     else
         echo "  WARNING: No artifacts file found"
@@ -2248,7 +2404,7 @@ atomic_verify_context_handoff() {
 
     # Check decisions file
     if [[ -f "$decisions_file" ]]; then
-        local decision_count=$(jq 'length' "$decisions_file" 2>/dev/null || echo 0)
+        decision_count=$(jq 'length' "$decisions_file" 2>/dev/null || echo 0)
         echo "  Decisions recorded: $decision_count"
     else
         echo "  WARNING: No decisions file found"
@@ -2262,7 +2418,7 @@ atomic_verify_context_handoff() {
         IFS=',' read -ra artifacts <<< "$required_artifacts"
         for artifact in "${artifacts[@]}"; do
             artifact=$(echo "$artifact" | xargs)  # Trim whitespace
-            local found=$(jq -r ".artifacts[] | select(.path | contains(\"$artifact\")) | .path" "$artifacts_file" 2>/dev/null | head -1)
+            found=$(jq -r ".artifacts[] | select(.path | contains(\"$artifact\")) | .path" "$artifacts_file" 2>/dev/null | head -1)
             if [[ -n "$found" ]]; then
                 echo "    ✓ $artifact: $found"
             else
@@ -2366,7 +2522,8 @@ atomic_diff_baseline() {
         return 1
     fi
 
-    local filename=$(basename "$file")
+    local filename
+    filename=$(basename "$file")
     local baseline_file="$diff_dir/${filename}.${iteration_name}.baseline"
 
     cp "$file" "$baseline_file"
@@ -2396,8 +2553,9 @@ atomic_diff_generate() {
         return 1
     fi
 
-    local filename=$(basename "$current_file")
-    local timestamp=$(date +%Y%m%d-%H%M%S)
+    local filename timestamp lines_added lines_removed lines_changed
+    filename=$(basename "$current_file")
+    timestamp=$(date +%Y%m%d-%H%M%S)
     local diff_file="$diff_dir/${filename}.${timestamp}.diff"
     local summary_file="$diff_dir/${filename}.${timestamp}.summary.json"
 
@@ -2405,9 +2563,9 @@ atomic_diff_generate() {
     diff -u "$baseline_file" "$current_file" > "$diff_file" 2>/dev/null || true
 
     # Calculate diff statistics
-    local lines_added=$(grep -c '^+[^+]' "$diff_file" 2>/dev/null || echo 0)
-    local lines_removed=$(grep -c '^-[^-]' "$diff_file" 2>/dev/null || echo 0)
-    local lines_changed=$((lines_added + lines_removed))
+    lines_added=$(grep -c '^+[^+]' "$diff_file" 2>/dev/null || echo 0)
+    lines_removed=$(grep -c '^-[^-]' "$diff_file" 2>/dev/null || echo 0)
+    lines_changed=$((lines_added + lines_removed))
 
     # Generate summary JSON
     jq -n \
@@ -2453,8 +2611,9 @@ atomic_diff_track() {
     local file="$1"
     local before_label="${2:-before}"
     local after_label="${3:-after}"
+    local baseline
 
-    local baseline=$(atomic_diff_baseline "$file" "$before_label")
+    baseline=$(atomic_diff_baseline "$file" "$before_label")
 
     # Return baseline for later use
     # Caller should update the file, then call atomic_diff_generate
@@ -2476,7 +2635,8 @@ atomic_context_truncate() {
         return 1
     fi
 
-    local total_lines=$(wc -l < "$file")
+    local total_lines
+    total_lines=$(wc -l < "$file")
     if [[ $total_lines -le $max_lines ]]; then
         cat "$file"
     else
@@ -2500,8 +2660,9 @@ atomic_context_summarize() {
         return 1
     fi
 
-    local total_lines=$(wc -l < "$file")
-    local filename=$(basename "$file")
+    local total_lines filename
+    total_lines=$(wc -l < "$file")
+    filename=$(basename "$file")
 
     # If content is small enough, return as-is
     if [[ $total_lines -le $((target_lines + 50)) ]]; then
@@ -2512,8 +2673,9 @@ atomic_context_summarize() {
     mkdir -p "$cache_dir"
 
     # Generate cache key based on file content hash and target lines
-    local file_hash=$(md5sum "$file" 2>/dev/null | cut -d' ' -f1 || shasum "$file" | cut -d' ' -f1)
-    local cache_key="${filename}-${file_hash:0:12}-${target_lines}"
+    local file_hash cache_key
+    file_hash=$(md5sum "$file" 2>/dev/null | cut -d' ' -f1 || shasum "$file" | cut -d' ' -f1)
+    cache_key="${filename}-${file_hash:0:12}-${target_lines}"
     local cache_file="$cache_dir/$cache_key.summary"
 
     # Check cache first
@@ -2553,8 +2715,9 @@ atomic_context_summarize() {
     esac
 
     # Build summarization prompt
-    local prompt_file=$(atomic_mktemp)
-    local summary_output=$(atomic_mktemp)
+    local prompt_file summary_output
+    prompt_file=$(atomic_mktemp)
+    summary_output=$(atomic_mktemp)
 
     cat > "$prompt_file" << SUMMARY_PROMPT
 # Task: Summarize $context_desc
@@ -2687,9 +2850,10 @@ atomic_context_autogarden() {
     fi
 
     # Count exchanges and estimate tokens
-    local exchange_count=$(echo "$dialogue_json" | jq ".$key_name | length")
-    local char_count=$(echo "$dialogue_json" | jq -r ".$key_name | tostring | length")
-    local estimated_tokens=$((char_count / 4))
+    local exchange_count char_count estimated_tokens
+    exchange_count=$(echo "$dialogue_json" | jq ".$key_name | length")
+    char_count=$(echo "$dialogue_json" | jq -r ".$key_name | tostring | length")
+    estimated_tokens=$((char_count / 4))
 
     # If under budget, return as-is
     if [[ $estimated_tokens -le $max_tokens ]]; then
@@ -2698,9 +2862,10 @@ atomic_context_autogarden() {
     fi
 
     # Calculate target window size (aim for 70% of budget to leave room)
-    local target_chars=$((max_tokens * 4 * 70 / 100))
-    local avg_chars_per_exchange=$((char_count / exchange_count))
-    local target_window=$((target_chars / avg_chars_per_exchange))
+    local target_chars avg_chars_per_exchange target_window
+    target_chars=$((max_tokens * 4 * 70 / 100))
+    avg_chars_per_exchange=$((char_count / exchange_count))
+    target_window=$((target_chars / avg_chars_per_exchange))
 
     # Ensure minimum window of 6
     [[ $target_window -lt 6 ]] && target_window=6
@@ -2774,18 +2939,21 @@ atomic_context_adjudicate() {
     mkdir -p "$output_dir"
 
     # Get configuration
-    local threshold_pct=$(atomic_gardener_config "threshold_percent")
-    local preserve_recent=$(atomic_gardener_config "preserve_recent_exchanges")
-    local preserve_opening=$(atomic_gardener_config "preserve_opening")
-    local fallback_chain=$(atomic_gardener_config "fallback_chain")
+    local threshold_pct preserve_recent preserve_opening fallback_chain
+    threshold_pct=$(atomic_gardener_config "threshold_percent")
+    preserve_recent=$(atomic_gardener_config "preserve_recent_exchanges")
+    preserve_opening=$(atomic_gardener_config "preserve_opening")
+    fallback_chain=$(atomic_gardener_config "fallback_chain")
 
     # Calculate threshold based on primary model
-    local token_limit=$(atomic_model_token_limit "$primary_model")
-    local threshold=$((token_limit * threshold_pct / 100))
+    local token_limit threshold
+    token_limit=$(atomic_model_token_limit "$primary_model")
+    threshold=$((token_limit * threshold_pct / 100))
 
     # Estimate current conversation size
-    local conversation_text=$(echo "$dialogue_json" | jq -r '.conversation | map(.content) | join(" ")' 2>/dev/null)
-    local estimated_tokens=$(atomic_estimate_tokens "$conversation_text")
+    local conversation_text estimated_tokens
+    conversation_text=$(echo "$dialogue_json" | jq -r '.conversation | map(.content) | join(" ")' 2>/dev/null)
+    estimated_tokens=$(atomic_estimate_tokens "$conversation_text")
 
     if [[ $estimated_tokens -lt $threshold ]]; then
         # Under threshold, no adjudication needed
@@ -2796,9 +2964,10 @@ atomic_context_adjudicate() {
     atomic_substep "Context threshold exceeded (~$estimated_tokens of $threshold tokens for $primary_model)"
 
     # STAGE 1: Try simple auto-gardening first (no LLM call)
-    local gardened_json=$(atomic_context_autogarden "$dialogue_json" $threshold)
-    local gardened_text=$(echo "$gardened_json" | jq -r '(.conversation // .exchanges) | map(.content // .message) | join(" ")' 2>/dev/null)
-    local gardened_tokens=$(atomic_estimate_tokens "$gardened_text")
+    local gardened_json gardened_text gardened_tokens
+    gardened_json=$(atomic_context_autogarden "$dialogue_json" $threshold)
+    gardened_text=$(echo "$gardened_json" | jq -r '(.conversation // .exchanges) | map(.content // .message) | join(" ")' 2>/dev/null)
+    gardened_tokens=$(atomic_estimate_tokens "$gardened_text")
 
     if [[ $gardened_tokens -lt $threshold ]]; then
         atomic_substep "Auto-gardening reduced context to ~$gardened_tokens tokens"
@@ -2810,9 +2979,10 @@ atomic_context_adjudicate() {
     atomic_substep "Auto-gardening insufficient (~$gardened_tokens tokens), invoking LLM context gardener..."
 
     # Build adjudication prompt
-    local full_conversation=$(echo "$dialogue_json" | jq -r '.conversation | map("\(.role): \(.content)") | join("\n\n")' 2>/dev/null)
+    local full_conversation prompt
+    full_conversation=$(echo "$dialogue_json" | jq -r '.conversation | map("\(.role): \(.content)") | join("\n\n")' 2>/dev/null)
 
-    local prompt=$(cat << ADJUDICATE_PROMPT
+    prompt=$(cat << ADJUDICATE_PROMPT
 # Task: Adjudicate Conversation Context
 
 You are a context gardener. This conversation has exceeded its token budget and needs intelligent compression.
@@ -2845,7 +3015,8 @@ ADJUDICATE_PROMPT
 )
 
     # Try gardener model with fallback chain
-    local gardener_model=$(atomic_get_model gardener)
+    local gardener_model
+    gardener_model=$(atomic_get_model gardener)
     local models_to_try=("$gardener_model")
 
     # Add fallback chain
@@ -2869,7 +3040,8 @@ ADJUDICATE_PROMPT
 
     if [[ "$success" == true ]]; then
         # Merge adjudication into dialogue JSON
-        local adjudication=$(cat "$output_file")
+        local adjudication
+        adjudication=$(cat "$output_file")
 
         # Build new conversation: opening (if preserved) + level-set + recent exchanges
         echo "$dialogue_json" | jq \

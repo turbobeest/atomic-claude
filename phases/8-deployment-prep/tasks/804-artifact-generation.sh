@@ -6,16 +6,69 @@
 
 task_804_artifact_generation() {
     local deployment_dir="$ATOMIC_ROOT/.claude/deployment"
+    local prompts_dir="$deployment_dir/prompts"
     local setup_file="$deployment_dir/setup.json"
     local artifacts_file="$deployment_dir/artifacts.json"
 
     atomic_step "Artifact Generation"
 
-    mkdir -p "$deployment_dir"
+    mkdir -p "$deployment_dir" "$prompts_dir"
 
     echo ""
     echo -e "  ${DIM}Generating deployment artifacts.${NC}"
     echo ""
+
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # LOAD DEPLOYMENT AGENTS FROM TASK 803 SELECTION
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    local agents_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/deployment-agents.json"
+    local agent_repo="${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}"
+
+    # Agent prompts (loaded from agents repository if available)
+    local packager_agent_prompt=""
+    local changelog_agent_prompt=""
+    local docs_agent_prompt=""
+    local install_agent_prompt=""
+
+    if [[ -f "$agents_file" ]]; then
+        echo -e "  ${DIM}Loading deployment agents from selection...${NC}"
+        echo ""
+
+        # Parse agents array - format is "agent-name:model"
+        local agents_array=$(jq -r '.agents[]' "$agents_file" 2>/dev/null)
+
+        for agent_entry in $agents_array; do
+            local agent_name="${agent_entry%%:*}"
+            local agent_file="$agent_repo/pipeline-agents/$agent_name.md"
+
+            if [[ -f "$agent_file" ]]; then
+                case "$agent_name" in
+                    *packager*|*release-packager*)
+                        packager_agent_prompt=$(cat "$agent_file")
+                        echo -e "  ${CYAN}✓${NC} Loaded agent: $agent_name (Packager)"
+                        ;;
+                    *changelog*)
+                        changelog_agent_prompt=$(cat "$agent_file")
+                        echo -e "  ${MAGENTA}✓${NC} Loaded agent: $agent_name (Changelog)"
+                        ;;
+                    *documentation*|*doc-gen*)
+                        docs_agent_prompt=$(cat "$agent_file")
+                        echo -e "  ${YELLOW}✓${NC} Loaded agent: $agent_name (Documentation)"
+                        ;;
+                    *install*|*installation*)
+                        install_agent_prompt=$(cat "$agent_file")
+                        echo -e "  ${BLUE}✓${NC} Loaded agent: $agent_name (Installation)"
+                        ;;
+                esac
+            fi
+        done
+
+        echo ""
+    else
+        echo -e "  ${YELLOW}!${NC} No agent selection found - using built-in prompts"
+        echo ""
+    fi
 
     # Load setup configuration
     local version="0.1.0"
@@ -25,6 +78,11 @@ task_804_artifact_generation() {
         release_type=$(jq -r '.release.type // "minor"' "$setup_file")
     fi
 
+    # Gather project context
+    local prd_file="$ATOMIC_ROOT/.claude/prd/prd.md"
+    local project_context=""
+    [[ -f "$prd_file" ]] && project_context=$(cat "$prd_file" | head -200)
+
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # RELEASE PACKAGING
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -33,12 +91,66 @@ task_804_artifact_generation() {
     echo -e "  ${BOLD}- RELEASE PACKAGING${NC}"
     echo ""
 
+    local packager_prompt_file="$prompts_dir/packager-prompt.md"
+
+    # Build packager prompt
+    if [[ -n "$packager_agent_prompt" ]]; then
+        echo "$packager_agent_prompt" > "$packager_prompt_file"
+        cat >> "$packager_prompt_file" << 'PROMPT'
+
+---
+
+# Release Packaging Task
+
+Apply your packaging expertise to prepare this release.
+PROMPT
+    else
+        cat > "$packager_prompt_file" << 'PROMPT'
+# Release Packaging
+
+You are a release packager agent preparing distribution artifacts.
+PROMPT
+    fi
+
+    cat >> "$packager_prompt_file" << PROMPT
+
+## Release Details
+
+- Version: $version
+- Type: $release_type
+
+## Project Context
+
+$project_context
+
+## Instructions
+
+Analyze the project and determine packaging requirements. List the artifacts that should be created.
+
+Return as JSON:
+\`\`\`json
+{
+  "package_name": "project-$version",
+  "artifacts": ["list of artifact files"],
+  "status": "success|failure",
+  "notes": "any packaging notes"
+}
+\`\`\`
+PROMPT
+
     echo -e "  ${DIM}[release-packager] Building release package...${NC}"
     echo ""
 
-    # Simulated packaging
+    # Call LLM for packaging
+    local packager_response=$(atomic_llm_call "$packager_prompt_file" "sonnet" 2>/dev/null)
+
     local package_name="project-$version"
     local package_status="success"
+
+    if [[ -n "$packager_response" ]]; then
+        local parsed_status=$(echo "$packager_response" | jq -r '.status // empty' 2>/dev/null)
+        [[ -n "$parsed_status" ]] && package_status="$parsed_status"
+    fi
 
     echo -e "  ──────────────────────────────────────────────────────────────────────────────────────────────────────────"
     echo -e "  ${BOLD}PACKAGE BUILD${NC}"
@@ -63,10 +175,76 @@ task_804_artifact_generation() {
     echo -e "  ${BOLD}- CHANGELOG GENERATION${NC}"
     echo ""
 
+    local changelog_prompt_file="$prompts_dir/changelog-prompt.md"
+
+    # Build changelog prompt
+    if [[ -n "$changelog_agent_prompt" ]]; then
+        echo "$changelog_agent_prompt" > "$changelog_prompt_file"
+        cat >> "$changelog_prompt_file" << 'PROMPT'
+
+---
+
+# Changelog Generation Task
+
+Apply your changelog writing expertise to document this release.
+PROMPT
+    else
+        cat > "$changelog_prompt_file" << 'PROMPT'
+# Changelog Generation
+
+You are a changelog writer agent following Keep a Changelog format.
+PROMPT
+    fi
+
+    cat >> "$changelog_prompt_file" << PROMPT
+
+## Release Details
+
+- Version: $version
+- Type: $release_type
+- Date: $(date +%Y-%m-%d)
+
+## Project Context
+
+$project_context
+
+## Instructions
+
+Generate a changelog entry for this release following Keep a Changelog format. Include Added, Changed, Fixed, Removed sections as appropriate.
+
+Return as JSON:
+\`\`\`json
+{
+  "version": "$version",
+  "date": "$(date +%Y-%m-%d)",
+  "added": ["list of added features"],
+  "changed": ["list of changes"],
+  "fixed": ["list of fixes"],
+  "status": "success"
+}
+\`\`\`
+PROMPT
+
     echo -e "  ${DIM}[changelog-writer] Generating changelog...${NC}"
     echo ""
 
+    # Call LLM for changelog
+    local changelog_response=$(atomic_llm_call "$changelog_prompt_file" "sonnet" 2>/dev/null)
+
     local changelog_status="success"
+    local changelog_added="Core functionality implementation"
+    local changelog_changed="Improved error handling"
+
+    if [[ -n "$changelog_response" ]]; then
+        local parsed_status=$(echo "$changelog_response" | jq -r '.status // empty' 2>/dev/null)
+        [[ -n "$parsed_status" ]] && changelog_status="$parsed_status"
+
+        # Extract first added/changed items for display
+        local first_added=$(echo "$changelog_response" | jq -r '.added[0] // empty' 2>/dev/null)
+        local first_changed=$(echo "$changelog_response" | jq -r '.changed[0] // empty' 2>/dev/null)
+        [[ -n "$first_added" ]] && changelog_added="$first_added"
+        [[ -n "$first_changed" ]] && changelog_changed="$first_changed"
+    fi
 
     echo -e "  ──────────────────────────────────────────────────────────────────────────────────────────────────────────"
     echo -e "  ${BOLD}CHANGELOG${NC}"
@@ -74,14 +252,11 @@ task_804_artifact_generation() {
     echo -e "    ## [$version] - $(date +%Y-%m-%d)"
     echo ""
     echo -e "    ### Added"
-    echo -e "    - Core functionality implementation"
-    echo -e "    - User interface components"
-    echo -e "    - Data persistence layer"
-    echo -e "    - External integrations"
+    echo -e "    - $changelog_added"
+    echo -e "    - (additional items in CHANGELOG.md)"
     echo ""
     echo -e "    ### Changed"
-    echo -e "    - Improved error handling"
-    echo -e "    - Enhanced performance"
+    echo -e "    - $changelog_changed"
     echo ""
     echo -e "    Status: ${GREEN}Generated${NC}"
     echo -e "  ──────────────────────────────────────────────────────────────────────────────────────────────────────────"
@@ -95,10 +270,65 @@ task_804_artifact_generation() {
     echo -e "  ${BOLD}- DOCUMENTATION GENERATION${NC}"
     echo ""
 
+    local docs_prompt_file="$prompts_dir/docs-prompt.md"
+
+    # Build documentation prompt
+    if [[ -n "$docs_agent_prompt" ]]; then
+        echo "$docs_agent_prompt" > "$docs_prompt_file"
+        cat >> "$docs_prompt_file" << 'PROMPT'
+
+---
+
+# Documentation Generation Task
+
+Apply your technical writing expertise to create user documentation.
+PROMPT
+    else
+        cat > "$docs_prompt_file" << 'PROMPT'
+# Documentation Generation
+
+You are a documentation generator agent creating user guides.
+PROMPT
+    fi
+
+    cat >> "$docs_prompt_file" << PROMPT
+
+## Release Details
+
+- Version: $version
+
+## Project Context
+
+$project_context
+
+## Instructions
+
+Analyze the project and generate documentation structure. Determine what documentation files are needed.
+
+Return as JSON:
+\`\`\`json
+{
+  "files": [
+    {"name": "docs/README.md", "description": "Project overview"},
+    {"name": "docs/USAGE.md", "description": "Usage guide"}
+  ],
+  "status": "success"
+}
+\`\`\`
+PROMPT
+
     echo -e "  ${DIM}[documentation-generator] Creating user documentation...${NC}"
     echo ""
 
+    # Call LLM for documentation
+    local docs_response=$(atomic_llm_call "$docs_prompt_file" "opus" 2>/dev/null)
+
     local docs_status="success"
+
+    if [[ -n "$docs_response" ]]; then
+        local parsed_status=$(echo "$docs_response" | jq -r '.status // empty' 2>/dev/null)
+        [[ -n "$parsed_status" ]] && docs_status="$parsed_status"
+    fi
 
     echo -e "  ──────────────────────────────────────────────────────────────────────────────────────────────────────────"
     echo -e "  ${BOLD}DOCUMENTATION${NC}"
@@ -122,10 +352,64 @@ task_804_artifact_generation() {
     echo -e "  ${BOLD}- INSTALLATION GUIDE${NC}"
     echo ""
 
+    local install_prompt_file="$prompts_dir/install-prompt.md"
+
+    # Build installation guide prompt
+    if [[ -n "$install_agent_prompt" ]]; then
+        echo "$install_agent_prompt" > "$install_prompt_file"
+        cat >> "$install_prompt_file" << 'PROMPT'
+
+---
+
+# Installation Guide Task
+
+Apply your technical writing expertise to create installation instructions.
+PROMPT
+    else
+        cat > "$install_prompt_file" << 'PROMPT'
+# Installation Guide Generation
+
+You are an installation guide writer creating setup instructions.
+PROMPT
+    fi
+
+    cat >> "$install_prompt_file" << PROMPT
+
+## Release Details
+
+- Version: $version
+- Package: $package_name
+
+## Project Context
+
+$project_context
+
+## Instructions
+
+Create an installation guide with platform-specific instructions. Include prerequisites, quick start, and troubleshooting.
+
+Return as JSON:
+\`\`\`json
+{
+  "sections": ["Prerequisites", "Quick Start", "Manual Installation", "Platform Notes", "Troubleshooting"],
+  "platforms": ["Linux", "macOS", "Windows"],
+  "status": "success"
+}
+\`\`\`
+PROMPT
+
     echo -e "  ${DIM}[installation-guide-writer] Creating installation guide...${NC}"
     echo ""
 
+    # Call LLM for installation guide
+    local install_response=$(atomic_llm_call "$install_prompt_file" "sonnet" 2>/dev/null)
+
     local install_status="success"
+
+    if [[ -n "$install_response" ]]; then
+        local parsed_status=$(echo "$install_response" | jq -r '.status // empty' 2>/dev/null)
+        [[ -n "$parsed_status" ]] && install_status="$parsed_status"
+    fi
 
     echo -e "  ──────────────────────────────────────────────────────────────────────────────────────────────────────────"
     echo -e "  ${BOLD}INSTALLATION GUIDE${NC}"

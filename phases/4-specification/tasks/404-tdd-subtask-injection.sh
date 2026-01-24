@@ -9,6 +9,7 @@ task_404_tdd_subtask_injection() {
     local specs_dir="$ATOMIC_ROOT/.claude/specs"
     local backup_file="$ATOMIC_ROOT/.taskmaster/tasks/tasks.json.pre-tdd-backup"
     local injection_report="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/tdd-injection.json"
+    local roster_file="$ATOMIC_ROOT/.claude/agent-roster.json"
 
     atomic_step "TDD Subtask Injection"
 
@@ -17,6 +18,27 @@ task_404_tdd_subtask_injection() {
     echo ""
     echo -e "  ${DIM}Injecting TDD subtasks (RED/GREEN/REFACTOR/VERIFY) into tasks.json.${NC}"
     echo ""
+
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # LOAD TDD-STRUCTURER AGENT (for future LLM-based enhancement)
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    local tdd_structurer_prompt=""
+    local agent_repo="${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}"
+
+    if [[ -f "$roster_file" ]]; then
+        local has_tdd_agent=$(jq -r '.agents[] | select(. == "tdd-structurer")' "$roster_file" 2>/dev/null)
+        if [[ -n "$has_tdd_agent" ]]; then
+            local agent_file="$agent_repo/pipeline-agents/tdd-structurer.md"
+            if [[ -f "$agent_file" ]]; then
+                tdd_structurer_prompt=$(cat "$agent_file")
+                echo -e "  ${GREEN}✓${NC} Loaded agent: tdd-structurer"
+                echo ""
+            fi
+        fi
+    fi
+    # Note: tdd_structurer_prompt is available for future LLM-based subtask generation
+    # Current implementation uses template-based injection for speed
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # TDD CYCLE EDUCATION

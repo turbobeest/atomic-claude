@@ -4,12 +4,56 @@
 # WarGames-style typing animation
 #
 
-# Terminal colors - that green CRT glow
-WOPR_GREEN='\033[0;32m'
-WOPR_BRIGHT='\033[1;32m'
-WOPR_DIM='\033[2;32m'
-WOPR_BLINK='\033[5;32m'
-NC='\033[0m'
+# ─────────────────────────────────────────────────────────────────────────────
+# CROSS-PLATFORM TERMINAL DETECTION
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Detect if we're in a real terminal with ANSI support
+_detect_terminal_capabilities() {
+    # Check if stdout is a terminal
+    if [[ ! -t 1 ]]; then
+        export TERM_HAS_COLORS=false
+        export TERM_HAS_TPUT=false
+        return
+    fi
+
+    # Check for Windows native terminals (CMD, PowerShell without ANSI)
+    case "${TERM:-dumb}" in
+        dumb|unknown|"")
+            export TERM_HAS_COLORS=false
+            export TERM_HAS_TPUT=false
+            return
+            ;;
+    esac
+
+    # Check if tput is available and works
+    if command -v tput >/dev/null 2>&1 && tput cols >/dev/null 2>&1; then
+        export TERM_HAS_TPUT=true
+    else
+        export TERM_HAS_TPUT=false
+    fi
+
+    # Most modern terminals support ANSI colors
+    export TERM_HAS_COLORS=true
+}
+
+# Initialize terminal capabilities
+_detect_terminal_capabilities
+
+# Terminal colors - that green CRT glow (with fallback for no-color terminals)
+if [[ "${TERM_HAS_COLORS:-true}" == "true" ]]; then
+    WOPR_GREEN='\033[0;32m'
+    WOPR_BRIGHT='\033[1;32m'
+    WOPR_DIM='\033[2;32m'
+    WOPR_BLINK='\033[5;32m'
+    NC='\033[0m'
+else
+    WOPR_GREEN=''
+    WOPR_BRIGHT=''
+    WOPR_DIM=''
+    WOPR_BLINK=''
+    NC=''
+fi
 
 # Typing speed (seconds between characters)
 TYPING_SPEED=0.04
@@ -61,16 +105,25 @@ wopr_cursor() {
 
 # Clear screen with retro effect
 wopr_clear() {
-    # Quick scan-line clear effect
-    local lines=$(tput lines)
-    for ((i=0; i<lines; i++)); do
-        tput cup $i 0
-        echo -ne "${WOPR_DIM}"
-        printf '%*s' "$(tput cols)" '' | tr ' ' '░'
-        echo -ne "${NC}"
-        sleep 0.01
-    done
-    clear
+    # Quick scan-line clear effect (with cross-platform fallback)
+    if [[ "${TERM_HAS_TPUT:-false}" == "true" ]]; then
+        local lines=$(tput lines 2>/dev/null || echo 24)
+        local cols=$(tput cols 2>/dev/null || echo 80)
+        for ((i=0; i<lines; i++)); do
+            tput cup $i 0 2>/dev/null
+            echo -ne "${WOPR_DIM}"
+            printf '%*s' "$cols" '' | tr ' ' '░'
+            echo -ne "${NC}"
+            sleep 0.01
+        done
+    fi
+    # Use clear command or ANSI escape sequence
+    if command -v clear >/dev/null 2>&1; then
+        clear
+    else
+        # ANSI escape: clear screen and move cursor to home
+        printf '\033[2J\033[H'
+    fi
 }
 
 # The main intro sequence
@@ -233,4 +286,4 @@ EOF
 }
 
 # Export for use in other scripts
-export -f wopr_type wopr_line wopr_fast wopr_cursor wopr_intro wopr_intro_quick
+export -f wopr_type wopr_line wopr_fast wopr_cursor wopr_clear wopr_intro wopr_intro_quick

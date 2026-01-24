@@ -27,6 +27,69 @@ task_603_comprehensive_review() {
     echo ""
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # LOAD REVIEW AGENTS FROM TASK 602 SELECTION
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    local agents_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/review-agents.json"
+    local agent_repo="${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}"
+
+    # Agent prompts (loaded from agents repository if available)
+    export _603_DEEP_CODE_AGENT_PROMPT=""
+    export _603_ARCH_AGENT_PROMPT=""
+    export _603_PERF_AGENT_PROMPT=""
+    export _603_DOC_AGENT_PROMPT=""
+
+    if [[ -f "$agents_file" ]]; then
+        echo -e "  ${DIM}Loading review agents from selection...${NC}"
+        echo ""
+
+        # Load Deep Code Reviewer agent
+        local deep_agent=$(jq -r '.review_agents.deep_code.name // ""' "$agents_file")
+        if [[ -n "$deep_agent" ]]; then
+            local agent_file="$agent_repo/pipeline-agents/$deep_agent.md"
+            if [[ -f "$agent_file" ]]; then
+                _603_DEEP_CODE_AGENT_PROMPT=$(cat "$agent_file")
+                echo -e "  ${CYAN}✓${NC} Loaded agent: $deep_agent"
+            fi
+        fi
+
+        # Load Architecture Compliance agent
+        local arch_agent=$(jq -r '.review_agents.architecture.name // ""' "$agents_file")
+        if [[ -n "$arch_agent" ]]; then
+            local agent_file="$agent_repo/pipeline-agents/$arch_agent.md"
+            if [[ -f "$agent_file" ]]; then
+                _603_ARCH_AGENT_PROMPT=$(cat "$agent_file")
+                echo -e "  ${MAGENTA}✓${NC} Loaded agent: $arch_agent"
+            fi
+        fi
+
+        # Load Performance Analyzer agent
+        local perf_agent=$(jq -r '.review_agents.performance.name // ""' "$agents_file")
+        if [[ -n "$perf_agent" ]]; then
+            local agent_file="$agent_repo/pipeline-agents/$perf_agent.md"
+            if [[ -f "$agent_file" ]]; then
+                _603_PERF_AGENT_PROMPT=$(cat "$agent_file")
+                echo -e "  ${YELLOW}✓${NC} Loaded agent: $perf_agent"
+            fi
+        fi
+
+        # Load Documentation Reviewer agent
+        local doc_agent=$(jq -r '.review_agents.documentation.name // ""' "$agents_file")
+        if [[ -n "$doc_agent" ]]; then
+            local agent_file="$agent_repo/pipeline-agents/$doc_agent.md"
+            if [[ -f "$agent_file" ]]; then
+                _603_DOC_AGENT_PROMPT=$(cat "$agent_file")
+                echo -e "  ${BLUE}✓${NC} Loaded agent: $doc_agent"
+            fi
+        fi
+
+        echo ""
+    else
+        echo -e "  ${YELLOW}!${NC} No agent selection found - using built-in prompts"
+        echo ""
+    fi
+
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # REVIEW SCOPE DISCOVERY
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -419,10 +482,26 @@ _603_deep_code_review() {
     local output_file="$2"
     local prompt_file="${output_file%.json}-prompt.md"
 
-    cat > "$prompt_file" << 'PROMPT'
+    # Use loaded agent prompt if available, otherwise use built-in
+    if [[ -n "$_603_DEEP_CODE_AGENT_PROMPT" ]]; then
+        echo "$_603_DEEP_CODE_AGENT_PROMPT" > "$prompt_file"
+        cat >> "$prompt_file" << 'PROMPT'
+
+---
+
+# Deep Code Review Task
+
+Apply your code review expertise to the following code.
+PROMPT
+    else
+        cat > "$prompt_file" << 'PROMPT'
 # Deep Code Review
 
 You are a senior code reviewer performing a thorough code analysis.
+PROMPT
+    fi
+
+    cat >> "$prompt_file" << 'PROMPT'
 
 ## Review Focus Areas
 
@@ -499,10 +578,26 @@ _603_architecture_review() {
     local output_file="$2"
     local prompt_file="${output_file%.json}-prompt.md"
 
-    cat > "$prompt_file" << 'PROMPT'
+    # Use loaded agent prompt if available, otherwise use built-in
+    if [[ -n "$_603_ARCH_AGENT_PROMPT" ]]; then
+        echo "$_603_ARCH_AGENT_PROMPT" > "$prompt_file"
+        cat >> "$prompt_file" << 'PROMPT'
+
+---
+
+# Architecture Compliance Review Task
+
+Apply your architectural expertise to the following code.
+PROMPT
+    else
+        cat > "$prompt_file" << 'PROMPT'
 # Architecture Compliance Review
 
 You are a software architect reviewing code for architectural compliance.
+PROMPT
+    fi
+
+    cat >> "$prompt_file" << 'PROMPT'
 
 ## Review Focus Areas
 
@@ -577,10 +672,26 @@ _603_performance_review() {
     local output_file="$2"
     local prompt_file="${output_file%.json}-prompt.md"
 
-    cat > "$prompt_file" << 'PROMPT'
+    # Use loaded agent prompt if available, otherwise use built-in
+    if [[ -n "$_603_PERF_AGENT_PROMPT" ]]; then
+        echo "$_603_PERF_AGENT_PROMPT" > "$prompt_file"
+        cat >> "$prompt_file" << 'PROMPT'
+
+---
+
+# Performance Analysis Review Task
+
+Apply your performance engineering expertise to the following code.
+PROMPT
+    else
+        cat > "$prompt_file" << 'PROMPT'
 # Performance Analysis Review
 
 You are a performance engineer reviewing code for efficiency issues.
+PROMPT
+    fi
+
+    cat >> "$prompt_file" << 'PROMPT'
 
 ## Review Focus Areas
 
@@ -658,10 +769,26 @@ _603_documentation_review() {
     local output_file="$3"
     local prompt_file="${output_file%.json}-prompt.md"
 
-    cat > "$prompt_file" << 'PROMPT'
+    # Use loaded agent prompt if available, otherwise use built-in
+    if [[ -n "$_603_DOC_AGENT_PROMPT" ]]; then
+        echo "$_603_DOC_AGENT_PROMPT" > "$prompt_file"
+        cat >> "$prompt_file" << 'PROMPT'
+
+---
+
+# Documentation Review Task
+
+Apply your technical writing expertise to the following code.
+PROMPT
+    else
+        cat > "$prompt_file" << 'PROMPT'
 # Documentation Review
 
 You are a technical writer reviewing code documentation quality.
+PROMPT
+    fi
+
+    cat >> "$prompt_file" << 'PROMPT'
 
 ## Review Focus Areas
 

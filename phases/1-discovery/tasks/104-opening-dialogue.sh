@@ -27,7 +27,7 @@ task_104_opening_dialogue() {
     # Check for jq dependency
     if ! command -v jq &>/dev/null; then
         atomic_error "jq is required for dialogue processing"
-        echo -e "  ${DIM}Install with: apt install jq / brew install jq${NC}"
+        echo -e "  ${DIM}Install with: apt install jq / brew install jq / winget install jqlang.jq${NC}"
         return 1
     fi
 

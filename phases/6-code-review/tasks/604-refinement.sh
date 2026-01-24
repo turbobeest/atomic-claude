@@ -26,6 +26,28 @@ task_604_refinement() {
     echo -e "  ${DIM}Addressing review findings and applying code improvements.${NC}"
     echo ""
 
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # LOAD CODE REFINER AGENT FROM TASK 602 SELECTION
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    local agents_selection_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/review-agents.json"
+    local agent_repo="${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}"
+
+    # Agent prompt (loaded from agents repository if available)
+    export _604_REFINER_AGENT_PROMPT=""
+
+    if [[ -f "$agents_selection_file" ]]; then
+        local refiner_agent=$(jq -r '.review_agents.refiner.name // ""' "$agents_selection_file")
+        if [[ -n "$refiner_agent" ]]; then
+            local agent_file="$agent_repo/pipeline-agents/$refiner_agent.md"
+            if [[ -f "$agent_file" ]]; then
+                _604_REFINER_AGENT_PROMPT=$(cat "$agent_file")
+                echo -e "  ${GREEN}✓${NC} Loaded agent: $refiner_agent"
+                echo ""
+            fi
+        fi
+    fi
+
     # Load findings
     local total_critical=0
     local total_major=0
@@ -354,11 +376,26 @@ _604_apply_fix() {
         fi
     fi
 
-    # Build the fix prompt
-    cat > "$prompt_file" << PROMPT
+    # Build the fix prompt - use loaded agent if available
+    if [[ -n "$_604_REFINER_AGENT_PROMPT" ]]; then
+        echo "$_604_REFINER_AGENT_PROMPT" > "$prompt_file"
+        cat >> "$prompt_file" << PROMPT
+
+---
+
+# Code Fix Request
+
+Apply your code refinement expertise to fix the issue described below.
+PROMPT
+    else
+        cat > "$prompt_file" << PROMPT
 # Code Fix Request
 
 You are a code-refiner agent. Apply a minimal, targeted fix for the issue described below.
+PROMPT
+    fi
+
+    cat >> "$prompt_file" << PROMPT
 
 ## Issue Details
 

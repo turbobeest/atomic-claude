@@ -16,6 +16,7 @@ task_504_tdd_execution() {
     local testing_dir="$ATOMIC_ROOT/.claude/testing"
     local progress_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/tdd-progress.json"
     local setup_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/tdd-setup.json"
+    local agents_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/selected-agents.json"
     local prompts_dir="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/prompts"
     local src_dir="$ATOMIC_ROOT/src"
 
@@ -26,6 +27,76 @@ task_504_tdd_execution() {
     echo ""
     echo -e "  ${DIM}Executing TDD cycles with real LLM agents.${NC}"
     echo ""
+
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # LOAD SELECTED AGENTS
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    # Agent prompts (loaded from agents repository if available)
+    export _504_RED_AGENT_PROMPT=""
+    export _504_GREEN_AGENT_PROMPT=""
+    export _504_REFACTOR_AGENT_PROMPT=""
+    export _504_VERIFY_AGENT_PROMPT=""
+
+    local agent_repo="${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}"
+
+    if [[ -f "$agents_file" ]]; then
+        echo -e "  ${DIM}Loading TDD agents from selection...${NC}"
+        echo ""
+
+        # Load RED agent (test-writer)
+        local red_agent=$(jq -r '.tdd_agents.red.name // ""' "$agents_file")
+        if [[ -n "$red_agent" ]]; then
+            local agent_file="$agent_repo/pipeline-agents/$red_agent.md"
+            if [[ -f "$agent_file" ]]; then
+                _504_RED_AGENT_PROMPT=$(cat "$agent_file")
+                echo -e "  ${RED}✓${NC} Loaded RED agent: $red_agent"
+            else
+                echo -e "  ${YELLOW}!${NC} RED agent file not found: $agent_file"
+            fi
+        fi
+
+        # Load GREEN agent (code-implementer)
+        local green_agent=$(jq -r '.tdd_agents.green.name // ""' "$agents_file")
+        if [[ -n "$green_agent" ]]; then
+            local agent_file="$agent_repo/pipeline-agents/$green_agent.md"
+            if [[ -f "$agent_file" ]]; then
+                _504_GREEN_AGENT_PROMPT=$(cat "$agent_file")
+                echo -e "  ${GREEN}✓${NC} Loaded GREEN agent: $green_agent"
+            else
+                echo -e "  ${YELLOW}!${NC} GREEN agent file not found: $agent_file"
+            fi
+        fi
+
+        # Load REFACTOR agent (code-reviewer)
+        local refactor_agent=$(jq -r '.tdd_agents.refactor.name // ""' "$agents_file")
+        if [[ -n "$refactor_agent" ]]; then
+            local agent_file="$agent_repo/pipeline-agents/$refactor_agent.md"
+            if [[ -f "$agent_file" ]]; then
+                _504_REFACTOR_AGENT_PROMPT=$(cat "$agent_file")
+                echo -e "  ${CYAN}✓${NC} Loaded REFACTOR agent: $refactor_agent"
+            else
+                echo -e "  ${YELLOW}!${NC} REFACTOR agent file not found: $agent_file"
+            fi
+        fi
+
+        # Load VERIFY agent (security-scanner)
+        local verify_agent=$(jq -r '.tdd_agents.verify.name // ""' "$agents_file")
+        if [[ -n "$verify_agent" ]]; then
+            local agent_file="$agent_repo/pipeline-agents/$verify_agent.md"
+            if [[ -f "$agent_file" ]]; then
+                _504_VERIFY_AGENT_PROMPT=$(cat "$agent_file")
+                echo -e "  ${MAGENTA}✓${NC} Loaded VERIFY agent: $verify_agent"
+            else
+                echo -e "  ${YELLOW}!${NC} VERIFY agent file not found: $agent_file"
+            fi
+        fi
+
+        echo ""
+    else
+        echo -e "  ${DIM}No agent selection found - using built-in TDD prompts${NC}"
+        echo ""
+    fi
 
     # Load setup configuration
     local exec_mode="sequential"
@@ -370,10 +441,26 @@ _504_execute_red() {
     local spec_content=$(cat "$spec_file")
     local test_strategy=$(jq -r '.test_strategy' "$spec_file")
 
-    cat > "$prompt_file" << PROMPT
+    # Build prompt with loaded agent expertise if available
+    if [[ -n "$_504_RED_AGENT_PROMPT" ]]; then
+        echo "$_504_RED_AGENT_PROMPT" > "$prompt_file"
+        cat >> "$prompt_file" << PROMPT
+
+---
+
+# Task: RED Phase - Write Failing Tests for Task $task_id
+
+Apply your test-writing expertise in the RED phase of TDD. Write tests that will FAIL because no implementation exists yet.
+PROMPT
+    else
+        cat > "$prompt_file" << PROMPT
 # Task: RED Phase - Write Failing Tests for Task $task_id
 
 You are a test-writer agent in the RED phase of TDD. Write tests that will FAIL because no implementation exists yet.
+PROMPT
+    fi
+
+    cat >> "$prompt_file" << PROMPT
 
 ## OpenSpec
 
@@ -508,7 +595,23 @@ _504_execute_green() {
         error_context=$(_504_get_error_context "$error_context_file")
     fi
 
-    cat > "$prompt_file" << PROMPT
+    # Build prompt with loaded agent expertise if available
+    if [[ -n "$_504_GREEN_AGENT_PROMPT" ]]; then
+        echo "$_504_GREEN_AGENT_PROMPT" > "$prompt_file"
+        cat >> "$prompt_file" << PROMPT
+
+---
+
+# Task: GREEN Phase - Implement to Pass Tests for Task $task_id
+
+Apply your implementation expertise in the GREEN phase of TDD. Write the MINIMAL code to make all tests pass.
+
+$error_context
+
+## OpenSpec
+PROMPT
+    else
+        cat > "$prompt_file" << PROMPT
 # Task: GREEN Phase - Implement to Pass Tests for Task $task_id
 
 You are a code-implementer agent in the GREEN phase of TDD. Write the MINIMAL code to make all tests pass.
@@ -516,6 +619,10 @@ You are a code-implementer agent in the GREEN phase of TDD. Write the MINIMAL co
 $error_context
 
 ## OpenSpec
+PROMPT
+    fi
+
+    cat >> "$prompt_file" << PROMPT
 
 $spec_content
 
@@ -610,7 +717,23 @@ _504_execute_refactor() {
         error_context=$(_504_get_error_context "$error_context_file")
     fi
 
-    cat > "$prompt_file" << PROMPT
+    # Build prompt with loaded agent expertise if available
+    if [[ -n "$_504_REFACTOR_AGENT_PROMPT" ]]; then
+        echo "$_504_REFACTOR_AGENT_PROMPT" > "$prompt_file"
+        cat >> "$prompt_file" << PROMPT
+
+---
+
+# Task: REFACTOR Phase - Clean Up Code for Task $task_id
+
+Apply your refactoring expertise in the REFACTOR phase. Improve code quality while ensuring tests still pass.
+
+$error_context
+
+## Current Implementation
+PROMPT
+    else
+        cat > "$prompt_file" << PROMPT
 # Task: REFACTOR Phase - Clean Up Code for Task $task_id
 
 You are a code-reviewer agent in the REFACTOR phase. Improve code quality while ensuring tests still pass.
@@ -618,6 +741,10 @@ You are a code-reviewer agent in the REFACTOR phase. Improve code quality while 
 $error_context
 
 ## Current Implementation
+PROMPT
+    fi
+
+    cat >> "$prompt_file" << PROMPT
 
 $impl_content
 
@@ -706,7 +833,23 @@ _504_execute_verify() {
         error_context=$(_504_get_error_context "$error_context_file")
     fi
 
-    cat > "$prompt_file" << PROMPT
+    # Build prompt with loaded agent expertise if available
+    if [[ -n "$_504_VERIFY_AGENT_PROMPT" ]]; then
+        echo "$_504_VERIFY_AGENT_PROMPT" > "$prompt_file"
+        cat >> "$prompt_file" << PROMPT
+
+---
+
+# Task: VERIFY Phase - Security Review for Task $task_id
+
+Apply your security expertise to review this code for security issues.
+
+$error_context
+
+## Code to Review
+PROMPT
+    else
+        cat > "$prompt_file" << PROMPT
 # Task: VERIFY Phase - Security Review for Task $task_id
 
 You are a security-scanner agent. Review the code for security issues.
@@ -714,6 +857,10 @@ You are a security-scanner agent. Review the code for security issues.
 $error_context
 
 ## Code to Review
+PROMPT
+    fi
+
+    cat >> "$prompt_file" << PROMPT
 
 $impl_content
 

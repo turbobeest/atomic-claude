@@ -136,6 +136,46 @@ task_205_prd_authoring() {
     fi
 
     # ═══════════════════════════════════════════════════════════════════════════
+    # LOAD SELECTED AGENTS
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    local agents_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/selected-agents.json"
+    local agent_repo="$ATOMIC_ROOT/repos/agents"
+    local req_engineer_prompt=""
+    local prd_writer_prompt=""
+
+    if [[ -f "$agents_file" ]]; then
+        echo -e "  ${DIM}Loading selected agents...${NC}"
+        local selected=$(jq -r '.selected[]' "$agents_file" 2>/dev/null)
+
+        # Load agent prompts from repository
+        for agent in $selected; do
+            local agent_file="$agent_repo/pipeline-agents/$agent.md"
+            if [[ -f "$agent_file" ]]; then
+                case "$agent" in
+                    *requirements-engineer*)
+                        req_engineer_prompt=$(cat "$agent_file" | sed -n '/^---$/,/^---$/!p' | tail -n +2)
+                        echo -e "    ${GREEN}✓${NC} Loaded $agent"
+                        ;;
+                    *prd-writer*)
+                        prd_writer_prompt=$(cat "$agent_file" | sed -n '/^---$/,/^---$/!p' | tail -n +2)
+                        echo -e "    ${GREEN}✓${NC} Loaded $agent"
+                        ;;
+                    *)
+                        echo -e "    ${DIM}•${NC} Additional agent: $agent"
+                        ;;
+                esac
+            else
+                echo -e "    ${YELLOW}○${NC} Agent file not found: $agent"
+            fi
+        done
+        echo ""
+    else
+        echo -e "  ${DIM}Using default agent prompts (no selected-agents.json)${NC}"
+        echo ""
+    fi
+
+    # ═══════════════════════════════════════════════════════════════════════════
     # STAGE 1: REQUIREMENTS SYNTHESIS
     # ═══════════════════════════════════════════════════════════════════════════
 
@@ -144,10 +184,22 @@ task_205_prd_authoring() {
     echo -e "${CYAN}╚═══════════════════════════════════════════════════════════╝${NC}"
     echo ""
 
+    # Use loaded agent prompt or fall back to default
+    local req_engineer_persona=""
+    if [[ -n "$req_engineer_prompt" ]]; then
+        req_engineer_persona="## Agent Instructions (from agents repository)
+
+$req_engineer_prompt
+
+---
+
+"
+    fi
+
     cat > "$prompts_dir/requirements-synthesis.md" << EOF
 # Task: Requirements Synthesis
 
-You are a requirements engineer synthesizing project requirements for downstream tool consumption (TaskMaster, OpenSpec).
+${req_engineer_persona}You are a requirements engineer synthesizing project requirements for downstream tool consumption (TaskMaster, OpenSpec).
 
 ## Project Context (from Phase 1 Discovery)
 
@@ -292,10 +344,22 @@ EOF
     local fr_count=$(echo "$requirements_json" | jq '.functional_requirements | length' 2>/dev/null || echo "0")
     local nfr_count=$(echo "$requirements_json" | jq '.non_functional_requirements | length' 2>/dev/null || echo "0")
 
+    # Use loaded agent prompt or fall back to default
+    local prd_writer_persona=""
+    if [[ -n "$prd_writer_prompt" ]]; then
+        prd_writer_persona="## Agent Instructions (from agents repository)
+
+$prd_writer_prompt
+
+---
+
+"
+    fi
+
     cat > "$prompts_dir/prd-writing.md" << EOF
 # Task: PRD Writing (TaskMaster & OpenSpec Compatible)
 
-You are a PRD writer creating a formal Product Requirements Document that will be consumed by:
+${prd_writer_persona}You are a PRD writer creating a formal Product Requirements Document that will be consumed by:
 1. **TaskMaster** - for automatic task decomposition (needs Logical Dependency Chain, explicit tech stack)
 2. **OpenSpec** - for spec-driven development (needs SHALL/SHOULD/MAY language, WHEN/THEN scenarios)
 

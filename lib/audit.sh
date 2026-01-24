@@ -19,6 +19,25 @@
 set -euo pipefail
 
 # ============================================================================
+# CROSS-PLATFORM HELPERS
+# ============================================================================
+
+# Get file modification time as epoch (cross-platform)
+# Usage: _audit_file_mtime "/path/to/file"
+_audit_file_mtime() {
+    local file="$1"
+    if stat -c %Y "$file" 2>/dev/null; then
+        # GNU stat
+        return 0
+    elif stat -f %m "$file" 2>/dev/null; then
+        # BSD/macOS stat
+        return 0
+    else
+        echo 0
+    fi
+}
+
+# ============================================================================
 # CONFIGURATION
 # ============================================================================
 
@@ -120,9 +139,10 @@ _audit_fetch_inventory_csv() {
     # Try cached version
     local cache_file="$AUDIT_CACHE_DIR/AUDIT-INVENTORY.csv"
     local cache_age_limit=$((24 * 60 * 60))  # 24 hours
+    local cache_age
 
     if [[ -f "$cache_file" ]]; then
-        local cache_age=$(($(date +%s) - $(stat -c %Y "$cache_file" 2>/dev/null || echo 0)))
+        cache_age=$(($(date +%s) - $(_audit_file_mtime "$cache_file")))
         if [[ $cache_age -lt $cache_age_limit ]]; then
             cat "$cache_file"
             return 0
@@ -151,14 +171,15 @@ audit_get_phase_audits() {
         return 1
     fi
 
-    local csv_content=$(_audit_fetch_inventory_csv)
+    local csv_content header col_index
+    csv_content=$(_audit_fetch_inventory_csv)
     if [[ -z "$csv_content" ]]; then
         return 1
     fi
 
     # Get header and find column index for the phase
-    local header=$(echo "$csv_content" | head -1)
-    local col_index=$(echo "$header" | tr ',' '\n' | grep -n "^${phase_column}$" | cut -d: -f1)
+    header=$(echo "$csv_content" | head -1)
+    col_index=$(echo "$header" | tr ',' '\n' | grep -n "^${phase_column}$" | cut -d: -f1)
 
     if [[ -z "$col_index" ]]; then
         echo "ERROR: Column '$phase_column' not found in CSV" >&2
@@ -176,13 +197,14 @@ audit_get_phase_audits() {
 audit_format_for_llm() {
     local phase_num="$1"
     local max_audits="${2:-200}"
+    local filtered count
 
-    local filtered=$(audit_get_phase_audits "$phase_num")
+    filtered=$(audit_get_phase_audits "$phase_num")
     if [[ -z "$filtered" ]]; then
         return 1
     fi
 
-    local count=$(echo "$filtered" | tail -n +2 | wc -l)
+    count=$(echo "$filtered" | tail -n +2 | wc -l)
     local phase_column="${AUDIT_PHASE_COLUMNS[$phase_num]}"
 
     echo "## Audits Available for Phase $phase_num ($phase_column)"
@@ -229,9 +251,10 @@ audit_fetch_menu() {
     # Try cached version
     local cache_file="$AUDIT_CACHE_DIR/AUDIT-MENU.md"
     local cache_age_limit=$((24 * 60 * 60))  # 24 hours
+    local cache_age
 
     if [[ -f "$cache_file" ]]; then
-        local cache_age=$(($(date +%s) - $(stat -c %Y "$cache_file" 2>/dev/null || echo 0)))
+        cache_age=$(($(date +%s) - $(_audit_file_mtime "$cache_file")))
         if [[ $cache_age -lt $cache_age_limit ]]; then
             cat "$cache_file"
             return 0
@@ -261,12 +284,13 @@ audit_gather_context() {
     audit_init
 
     local context=""
+    local project_name project_type project_desc
 
     # Project info
     if [[ -f "$AUDIT_CONFIG_FILE" ]]; then
-        local project_name=$(jq -r '.project.name // "unknown"' "$AUDIT_CONFIG_FILE")
-        local project_type=$(jq -r '.project.type // "unknown"' "$AUDIT_CONFIG_FILE")
-        local project_desc=$(jq -r '.project.description // ""' "$AUDIT_CONFIG_FILE")
+        project_name=$(jq -r '.project.name // "unknown"' "$AUDIT_CONFIG_FILE")
+        project_type=$(jq -r '.project.type // "unknown"' "$AUDIT_CONFIG_FILE")
+        project_desc=$(jq -r '.project.description // ""' "$AUDIT_CONFIG_FILE")
 
         context+="PROJECT:\n"
         context+="  Name: $project_name\n"
@@ -308,7 +332,8 @@ audit_gather_context() {
     fi
 
     # Compliance requirements (if configured)
-    local compliance=$(jq -r '.compliance // "standard security practices"' "$AUDIT_CONFIG_FILE" 2>/dev/null || echo "standard security practices")
+    local compliance
+    compliance=$(jq -r '.compliance // "standard security practices"' "$AUDIT_CONFIG_FILE" 2>/dev/null || echo "standard security practices")
     context+="\nCOMPLIANCE REQUIREMENTS: $compliance\n"
 
     echo -e "$context"
@@ -327,12 +352,13 @@ audit_get_recommendations() {
     audit_init
 
     # Gather context
-    local context=$(audit_gather_context "$phase_num" "$phase_name")
+    local context audit_list audit_count prompt_file
+    context=$(audit_gather_context "$phase_num" "$phase_name")
 
     # Get phase-filtered audit list (much smaller than full 2,200)
     local phase_column="${AUDIT_PHASE_COLUMNS[$phase_num]:-}"
-    local audit_list=$(audit_format_for_llm "$phase_num" 150)
-    local audit_count=$(audit_get_phase_audits "$phase_num" 2>/dev/null | tail -n +2 | wc -l)
+    audit_list=$(audit_format_for_llm "$phase_num" 150)
+    audit_count=$(audit_get_phase_audits "$phase_num" 2>/dev/null | tail -n +2 | wc -l)
 
     if [[ -z "$audit_list" ]]; then
         echo "ERROR: Could not fetch audits for phase $phase_num" >&2
@@ -342,7 +368,7 @@ audit_get_recommendations() {
     echo -e "  ${DIM}Phase $phase_num has $audit_count applicable audits (filtered from 2,190)${NC}" >&2
 
     # Build prompt for AI with improved structure
-    local prompt_file=$(atomic_mktemp)
+    prompt_file=$(atomic_mktemp)
     cat > "$prompt_file" << EOF
 # Task: Prioritize Audits for Phase $phase_num ($phase_name)
 
@@ -433,10 +459,11 @@ EOF
 # Present recommendations to user and get approval
 audit_present_recommendations() {
     local recommendations_json="$1"
+    local ready_count needs_deps_count total_count summary
 
-    local ready_count=$(echo "$recommendations_json" | jq '[.recommendations[] | select(.dependency_status == "ready")] | length')
-    local needs_deps_count=$(echo "$recommendations_json" | jq '[.recommendations[] | select(.dependency_status == "needs-deps")] | length')
-    local total_count=$(echo "$recommendations_json" | jq '.recommendations | length')
+    ready_count=$(echo "$recommendations_json" | jq '[.recommendations[] | select(.dependency_status == "ready")] | length')
+    needs_deps_count=$(echo "$recommendations_json" | jq '[.recommendations[] | select(.dependency_status == "needs-deps")] | length')
+    total_count=$(echo "$recommendations_json" | jq '.recommendations | length')
 
     echo ""
     echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
@@ -445,7 +472,7 @@ audit_present_recommendations() {
     echo ""
 
     # Summary
-    local summary=$(echo "$recommendations_json" | jq -r '.summary // ""')
+    summary=$(echo "$recommendations_json" | jq -r '.summary // ""')
     if [[ -n "$summary" ]]; then
         echo -e "  ${DIM}$summary${NC}"
         echo ""
@@ -500,7 +527,8 @@ audit_execute() {
 
     mkdir -p "$output_dir"
 
-    local phase_num=$(echo "$recommendations_json" | jq -r '.phase')
+    local phase_num ready_audits audit_count audit audit_id audit_name result status
+    phase_num=$(echo "$recommendations_json" | jq -r '.phase')
     local report_file="$output_dir/phase-$phase_num-report.json"
     local results=()
 
@@ -511,23 +539,23 @@ audit_execute() {
     echo ""
 
     # Get ready audits
-    local ready_audits=$(echo "$recommendations_json" | jq -c '[.recommendations[] | select(.dependency_status == "ready")]')
-    local audit_count=$(echo "$ready_audits" | jq 'length')
+    ready_audits=$(echo "$recommendations_json" | jq -c '[.recommendations[] | select(.dependency_status == "ready")]')
+    audit_count=$(echo "$ready_audits" | jq 'length')
 
     local passed=0
     local failed=0
     local warnings=0
 
     for ((i=0; i<audit_count; i++)); do
-        local audit=$(echo "$ready_audits" | jq -c ".[$i]")
-        local audit_id=$(echo "$audit" | jq -r '.audit_id')
-        local audit_name=$(echo "$audit" | jq -r '.name')
+        audit=$(echo "$ready_audits" | jq -c ".[$i]")
+        audit_id=$(echo "$audit" | jq -r '.audit_id')
+        audit_name=$(echo "$audit" | jq -r '.name')
 
         echo -e "  ${DIM}[$((i+1))/$audit_count]${NC} $audit_id: $audit_name"
 
         # Execute audit
-        local result=$(_audit_execute_single "$audit_id" "$audit_name")
-        local status=$(echo "$result" | jq -r '.status')
+        result=$(_audit_execute_single "$audit_id" "$audit_name")
+        status=$(echo "$result" | jq -r '.status')
 
         case "$status" in
             pass)
@@ -554,7 +582,8 @@ audit_execute() {
     echo ""
 
     # Generate report
-    local report=$(cat <<EOF
+    local report
+    report=$(cat <<EOF
 {
     "phase": $phase_num,
     "timestamp": "$(date -Iseconds)",
@@ -590,7 +619,8 @@ EOF
                 ;;
             gate-high|gate-critical)
                 # Check if any high/critical failures
-                local high_fails=$(printf '%s\n' "${results[@]}" | jq -s '[.[] | select(.status == "fail" and (.severity == "high" or .severity == "critical"))] | length')
+                local high_fails
+                high_fails=$(printf '%s\n' "${results[@]}" | jq -s '[.[] | select(.status == "fail" and (.severity == "high" or .severity == "critical"))] | length')
                 if [[ "$high_fails" -gt 0 ]]; then
                     return 1
                 fi
@@ -703,9 +733,10 @@ EOF
 audit_generate_dependency_manifest() {
     local recommendations_json="$1"
     local output_file="${2:-$AUDIT_OUTPUT_DIR/dependency-manifest.md}"
+    local needs_deps dep_count
 
-    local needs_deps=$(echo "$recommendations_json" | jq -c '[.recommendations[] | select(.dependency_status == "needs-deps")]')
-    local dep_count=$(echo "$needs_deps" | jq 'length')
+    needs_deps=$(echo "$recommendations_json" | jq -c '[.recommendations[] | select(.dependency_status == "needs-deps")]')
+    dep_count=$(echo "$needs_deps" | jq 'length')
 
     cat > "$output_file" << EOF
 # Audit Dependency Manifest
@@ -836,7 +867,8 @@ audit_run_phase() {
     echo -e "  ${DIM}Analyzing phase context and generating audit recommendations...${NC}"
     echo ""
 
-    local recommendations=$(audit_get_recommendations "$phase_num" "$phase_name")
+    local recommendations choice
+    recommendations=$(audit_get_recommendations "$phase_num" "$phase_name")
 
     if [[ -z "$recommendations" ]] || ! echo "$recommendations" | jq -e . &>/dev/null; then
         echo -e "  ${RED}✗${NC} Failed to generate recommendations"
@@ -847,7 +879,7 @@ audit_run_phase() {
     echo "$recommendations" > "$AUDIT_OUTPUT_DIR/phase-$phase_num-recommendations.json"
 
     # Present to user
-    local choice=$(audit_present_recommendations "$recommendations")
+    choice=$(audit_present_recommendations "$recommendations")
 
     case "$choice" in
         1)

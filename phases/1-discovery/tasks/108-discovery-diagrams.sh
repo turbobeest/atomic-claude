@@ -41,7 +41,7 @@ task_108_discovery_diagrams() {
     # Check for graphviz
     if ! command -v dot &>/dev/null; then
         echo -e "  ${YELLOW}!${NC} graphviz not installed - SVG generation will be skipped"
-        echo -e "    ${DIM}Install with: sudo apt install graphviz${NC}"
+        echo -e "    ${DIM}Install with: apt install graphviz / brew install graphviz / winget install Graphviz.Graphviz${NC}"
         echo ""
         local has_graphviz=false
     else

@@ -64,9 +64,13 @@ task_004_api_keys() {
         esac
     done
 
-    # Secure the file
-    chmod 600 "$secrets_file"
-    atomic_substep "Credentials file secured (chmod 600)"
+    # Secure the file (Unix-like systems only)
+    if [[ "$(uname -s)" != MINGW* && "$(uname -s)" != CYGWIN* && "$(uname -s)" != MSYS* ]]; then
+        chmod 600 "$secrets_file" 2>/dev/null && \
+            atomic_substep "Credentials file secured (chmod 600)"
+    else
+        atomic_substep "Credentials file saved (Windows: manual permissions recommended)"
+    fi
 
     # Add to gitignore
     _004_update_gitignore

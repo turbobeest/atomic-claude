@@ -32,6 +32,57 @@ task_303_task_decomposition() {
     echo ""
 
     # ─────────────────────────────────────────────────────────────────────────────
+    # LOAD SELECTED AGENTS
+    # ─────────────────────────────────────────────────────────────────────────────
+
+    local decomposer_prompt=""
+    local validator_prompt=""
+
+    # Get agent repo path from Phase 0 config
+    local agent_repo="${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}"
+
+    if [[ -f "$agents_file" ]]; then
+        # Load decomposition agent prompts from agents repository
+        local decomposition_agents=$(jq -r '.decomposition_agents[]?' "$agents_file" 2>/dev/null)
+
+        for agent in $decomposition_agents; do
+            local agent_file="$agent_repo/pipeline-agents/$agent.md"
+            if [[ -f "$agent_file" ]]; then
+                case "$agent" in
+                    *task-decomposer*)
+                        decomposer_prompt=$(cat "$agent_file")
+                        echo -e "  ${GREEN}✓${NC} Loaded agent: $agent"
+                        ;;
+                    *dependency-mapper*)
+                        # Will be used in Task 304
+                        echo -e "  ${GREEN}✓${NC} Found agent: $agent (for Task 304)"
+                        ;;
+                esac
+            else
+                echo -e "  ${YELLOW}!${NC} Agent file not found: $agent_file"
+            fi
+        done
+
+        # Load validation agents
+        local validation_agents=$(jq -r '.validation_agents[]?' "$agents_file" 2>/dev/null)
+        for agent in $validation_agents; do
+            local agent_file="$agent_repo/pipeline-agents/$agent.md"
+            if [[ -f "$agent_file" ]]; then
+                case "$agent" in
+                    *task-validator*)
+                        validator_prompt=$(cat "$agent_file")
+                        echo -e "  ${GREEN}✓${NC} Loaded agent: $agent"
+                        ;;
+                esac
+            fi
+        done
+        echo ""
+    else
+        echo -e "  ${DIM}No agent selection found - using built-in decomposition logic${NC}"
+        echo ""
+    fi
+
+    # ─────────────────────────────────────────────────────────────────────────────
     # PRD EXTRACTION
     # ─────────────────────────────────────────────────────────────────────────────
 
@@ -77,10 +128,26 @@ task_303_task_decomposition() {
     echo ""
 
     # Build the decomposition prompt following PRD-TEMPLATE v3.0 structure
-    cat > "$prompts_dir/task-decomposition.md" << PROMPT_HEADER
+    # If we have a loaded agent prompt, use it; otherwise use built-in logic
+    if [[ -n "$decomposer_prompt" ]]; then
+        echo "$decomposer_prompt" > "$prompts_dir/task-decomposition.md"
+        cat >> "$prompts_dir/task-decomposition.md" << PROMPT_HEADER
+
+---
+
+# Task: PRD to TaskMaster Decomposition
+
+Apply your task decomposition expertise to the PRD below, following PRD-TEMPLATE v3.0 structure.
+PROMPT_HEADER
+    else
+        cat > "$prompts_dir/task-decomposition.md" << PROMPT_HEADER
 # Task: PRD to TaskMaster Decomposition
 
 You are a task-decomposer agent. Your job is to break down the PRD into atomic, implementable tasks following PRD-TEMPLATE v3.0 structure.
+PROMPT_HEADER
+    fi
+
+    cat >> "$prompts_dir/task-decomposition.md" << PROMPT_HEADER
 
 ## Token Budget Warning
 

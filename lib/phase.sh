@@ -28,6 +28,29 @@ PHASE_TASKS_RUN=0
 PHASE_SNAPSHOT_DIR=""
 
 # ============================================================================
+# CROSS-PLATFORM HELPERS
+# ============================================================================
+
+# Convert epoch timestamp to ISO 8601 format (cross-platform)
+# Usage: _phase_epoch_to_iso 1706123456
+_phase_epoch_to_iso() {
+    local epoch="$1"
+    if date -d "@$epoch" -Iseconds 2>/dev/null; then
+        # GNU date
+        return 0
+    elif date -r "$epoch" -Iseconds 2>/dev/null; then
+        # BSD/macOS date
+        return 0
+    elif date -r "$epoch" +%Y-%m-%dT%H:%M:%S%z 2>/dev/null; then
+        # BSD/macOS date fallback format
+        return 0
+    else
+        # Fallback: just return the epoch
+        echo "$epoch"
+    fi
+}
+
+# ============================================================================
 # PHASE SNAPSHOTS & ROLLBACK
 # ============================================================================
 
@@ -322,7 +345,8 @@ phase_verify() {
 }
 
 phase_complete() {
-    local end_time=$(date +%s)
+    local end_time
+    end_time=$(date +%s)
     local duration=$((end_time - PHASE_START_TIME))
     local project_name
     project_name=$(atomic_get_project_name)
@@ -351,8 +375,8 @@ phase_complete() {
   "phase_name": "$CURRENT_PHASE_NAME",
   "tasks_run": $PHASE_TASKS_RUN,
   "duration_seconds": $duration,
-  "started_at": "$(date -d "@$PHASE_START_TIME" -Iseconds)",
-  "completed_at": "$(date -Iseconds)",
+  "started_at": "$(_phase_epoch_to_iso "$PHASE_START_TIME")",
+  "completed_at": "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)",
   "status": "complete",
   "git_tag": "$git_tag"
 }
@@ -535,9 +559,10 @@ phase_run_tasks() {
     local total=${#tasks[@]}
 
     # Extract task IDs and names from function names (task_001_foo_bar -> "001", "Foo Bar")
+    local id name
     for task in "${tasks[@]}"; do
         # Extract the 3-digit ID
-        local id=$(echo "$task" | sed -n 's/task_\([0-9]\{3\}\)_.*/\1/p')
+        id=$(echo "$task" | sed -n 's/task_\([0-9]\{3\}\)_.*/\1/p')
         if [[ -z "$id" ]]; then
             # Fallback: try 2-digit format and convert
             id=$(echo "$task" | sed -n 's/task_\([0-9]\{2\}\)_.*/\1/p')
@@ -547,11 +572,11 @@ phase_run_tasks() {
         task_ids+=("$id")
 
         # Extract the name part after task_XXX_
-        local name="${task#task_[0-9][0-9][0-9]_}"
+        name="${task#task_[0-9][0-9][0-9]_}"
         [[ "$name" == "$task" ]] && name="${task#task_[0-9][0-9]_}"  # Try 2-digit
         name="${name//_/ }"  # Replace underscores with spaces
-        # Capitalize first letter of each word
-        name=$(echo "$name" | sed 's/\b\(.\)/\u\1/g')
+        # Capitalize first letter of each word (portable - works on BSD/GNU)
+        name=$(echo "$name" | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) substr($i,2)} 1')
         task_names+=("$name")
     done
 
@@ -730,7 +755,8 @@ phase_chain() {
     local next_phase_name="$3"
 
     # Extract next phase number from script path (e.g., "1-discovery" -> "1")
-    local next_phase_num=$(basename "$(dirname "$next_script")" | cut -d'-' -f1)
+    local next_phase_num
+    next_phase_num=$(basename "$(dirname "$next_script")" | cut -d'-' -f1)
 
     if [[ ! -f "$next_script" ]]; then
         atomic_error "Next phase script not found: $next_script"
