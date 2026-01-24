@@ -65,9 +65,17 @@ task_004_api_keys() {
     done
 
     # Secure the file (Unix-like systems only)
+    if [[ ! -f "$secrets_file" ]]; then
+        atomic_warn "Secrets file not created - configuration may have failed"
+        return 1
+    fi
+
     if [[ "$(uname -s)" != MINGW* && "$(uname -s)" != CYGWIN* && "$(uname -s)" != MSYS* ]]; then
-        chmod 600 "$secrets_file" 2>/dev/null && \
+        if chmod 600 "$secrets_file" 2>/dev/null; then
             atomic_substep "Credentials file secured (chmod 600)"
+        else
+            atomic_warn "Could not set file permissions on $secrets_file"
+        fi
     else
         atomic_substep "Credentials file saved (Windows: manual permissions recommended)"
     fi

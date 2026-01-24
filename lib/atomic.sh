@@ -51,9 +51,15 @@ _atomic_load_provider_config() {
         return 0  # Use defaults if config doesn't exist
     fi
 
+    # Validate JSON before parsing (prevents silent failures on corrupt config)
+    if ! jq -e '.' "$config_file" >/dev/null 2>&1; then
+        atomic_warn "Config file is invalid JSON: $config_file - using defaults"
+        return 0
+    fi
+
     # Load claude-local path
     local wrapper_path
-    wrapper_path=$(jq -r '.providers.claude_local_path // empty' "$config_file" 2>/dev/null)
+    wrapper_path=$(jq -r '.providers.claude_local_path // empty' "$config_file")
     if [[ -n "$wrapper_path" ]]; then
         # Resolve relative paths
         if [[ "$wrapper_path" != /* ]]; then
@@ -172,9 +178,10 @@ _atomic_resolve_model() {
     fallbacks=$(jq -r --arg m "$requested_model" '.tier_mapping[$m].ollama_fallbacks // []' "$config_file" 2>/dev/null)
     local ollama_host="${CLAUDE_OLLAMA_HOST:-http://localhost:11434}"
 
-    # Get list of available Ollama models
-    local available_models=""
-    if available_models=$(curl -s --connect-timeout 3 "$ollama_host/api/tags" 2>/dev/null | jq -r '.models[].name' 2>/dev/null); then
+    # Get list of available Ollama models (with proper pipeline error handling)
+    local available_models="" curl_output
+    curl_output=$(curl -s --connect-timeout 3 "$ollama_host/api/tags" 2>/dev/null)
+    if [[ -n "$curl_output" ]] && available_models=$(echo "$curl_output" | jq -r '.models[].name' 2>/dev/null) && [[ -n "$available_models" ]]; then
         # Check each fallback in order
         for fallback in $(echo "$fallbacks" | jq -r '.[]'); do
             # Check if this model is available (exact or partial match)
@@ -233,13 +240,17 @@ atomic_mktemp() {
 # Usage: atomic_mktemp_done "$tmp"
 atomic_mktemp_done() {
     local file="$1"
+    local new_array=()
     local i
+
+    # Rebuild array without the removed file (avoids sparse array issues)
     for i in "${!_ATOMIC_TEMP_FILES[@]}"; do
-        if [[ "${_ATOMIC_TEMP_FILES[$i]}" == "$file" ]]; then
-            unset '_ATOMIC_TEMP_FILES[i]'
-            break
+        if [[ "${_ATOMIC_TEMP_FILES[$i]}" != "$file" ]]; then
+            new_array+=("${_ATOMIC_TEMP_FILES[$i]}")
         fi
     done
+
+    _ATOMIC_TEMP_FILES=("${new_array[@]}")
 }
 
 # ============================================================================
@@ -248,7 +259,38 @@ atomic_mktemp_done() {
 
 # Required dependencies for ATOMIC CLAUDE
 declare -a ATOMIC_REQUIRED_DEPS=("jq" "git")
-declare -a ATOMIC_OPTIONAL_DEPS=("claude" "curl" "ollama")
+declare -a ATOMIC_OPTIONAL_DEPS=("claude" "curl" "ollama" "realpath")
+
+# Portable realpath fallback for systems without coreutils realpath
+# Usage: _atomic_realpath "$path"
+_atomic_realpath() {
+    local path="$1"
+    if command -v realpath >/dev/null 2>&1; then
+        realpath -m "$path" 2>/dev/null || echo "$path"
+    elif command -v greadlink >/dev/null 2>&1; then
+        # macOS with coreutils installed
+        greadlink -f "$path" 2>/dev/null || echo "$path"
+    elif [[ -d "$path" ]]; then
+        # Directory: cd and pwd
+        (cd "$path" 2>/dev/null && pwd) || echo "$path"
+    elif [[ -f "$path" ]]; then
+        # File: cd to parent and pwd + basename
+        local dir base
+        dir=$(dirname "$path")
+        base=$(basename "$path")
+        (cd "$dir" 2>/dev/null && echo "$(pwd)/$base") || echo "$path"
+    else
+        # Path doesn't exist: resolve parent if possible
+        local dir base
+        dir=$(dirname "$path")
+        base=$(basename "$path")
+        if [[ -d "$dir" ]]; then
+            (cd "$dir" 2>/dev/null && echo "$(pwd)/$base") || echo "$path"
+        else
+            echo "$path"
+        fi
+    fi
+}
 
 # Validate all required dependencies are available
 # Usage: atomic_validate_deps [--strict]
@@ -682,14 +724,25 @@ atomic_state_increment() {
 
 # Build the invocation command for the claude-local wrapper
 # Usage: _atomic_build_invoke_cmd <prompt> <model> <provider> <ollama_host>
-# Returns: Command string to execute
+# Returns: Command array elements separated by null bytes (use with read -d '')
+# Note: This function outputs a serialized command for safer execution
 _atomic_build_invoke_cmd() {
     local prompt="$1"
     local model="$2"
     local provider="$3"
     local ollama_host="$4"
 
-    # Escape prompt for shell
+    # Validate inputs (prevent injection)
+    if [[ "$model" == *"'"* || "$model" == *'"'* || "$model" == *'$'* ]]; then
+        atomic_error "Invalid characters in model name: $model"
+        return 1
+    fi
+    if [[ "$provider" == *"'"* || "$provider" == *'"'* || "$provider" == *'$'* ]]; then
+        atomic_error "Invalid characters in provider name: $provider"
+        return 1
+    fi
+
+    # Escape prompt for shell (single quotes with proper escaping)
     local escaped_prompt
     escaped_prompt=$(printf '%s' "$prompt" | sed "s/'/'\\\\''/g")
 
@@ -702,27 +755,36 @@ _atomic_build_invoke_cmd() {
     if [[ ! -d "$wrapper_path" ]]; then
         # Fallback to direct claude if wrapper not found
         atomic_warn "claude-local wrapper not found at $CLAUDE_LOCAL_PATH, falling back to direct claude"
-        echo "claude -p '$escaped_prompt' --model '$model' --dangerously-skip-permissions"
+        printf '%s\n' "claude -p '${escaped_prompt}' --model '${model}' --dangerously-skip-permissions"
         return
     fi
 
-    # Build command based on provider
-    local cmd="cd '$wrapper_path' && python -m local_launcher"
-    cmd="$cmd --provider '$provider'"
-    cmd="$cmd --model '$model'"
-    cmd="$cmd --no-banner"
-    cmd="$cmd --skip-checks"
+    # Escape wrapper path for shell
+    local escaped_wrapper_path
+    escaped_wrapper_path=$(printf '%s' "$wrapper_path" | sed "s/'/'\\\\''/g")
+
+    # Build command with proper quoting
+    local cmd="cd '${escaped_wrapper_path}' && python -m local_launcher"
+    cmd="${cmd} --provider '${provider}'"
+    cmd="${cmd} --model '${model}'"
+    cmd="${cmd} --no-banner"
+    cmd="${cmd} --skip-checks"
 
     # Add Ollama-specific options
     if [[ "$provider" == "ollama" ]]; then
-        cmd="$cmd --ollama-host '$ollama_host'"
-        cmd="$cmd --context-length '$CLAUDE_OLLAMA_CONTEXT'"
+        # Validate ollama_host format
+        if [[ ! "$ollama_host" =~ ^https?://[a-zA-Z0-9._-]+(:[0-9]+)?$ ]]; then
+            atomic_warn "Invalid Ollama host format, using default"
+            ollama_host="http://localhost:11434"
+        fi
+        cmd="${cmd} --ollama-host '${ollama_host}'"
+        cmd="${cmd} --context-length '${CLAUDE_OLLAMA_CONTEXT:-8192}'"
     fi
 
     # Add prompt
-    cmd="$cmd -p '$escaped_prompt'"
+    cmd="${cmd} -p '${escaped_prompt}'"
 
-    echo "$cmd"
+    printf '%s\n' "$cmd"
 }
 
 # Verify wrapper is available (call during init)
@@ -1018,6 +1080,8 @@ atomic_invoke_api() {
 # ============================================================================
 
 # atomic_chain runs a series of tasks, stopping on first failure
+# Tasks must be function names (no arguments supported for security)
+# Usage: atomic_chain "task_001_setup" "task_002_validate" "task_003_run"
 atomic_chain() {
     local tasks=("$@")
     local task_num=1
@@ -1026,8 +1090,20 @@ atomic_chain() {
     atomic_header "Running ${total_tasks} chained tasks"
 
     for task in "${tasks[@]}"; do
+        # Security: Only allow valid function names (alphanumeric + underscore)
+        if [[ ! "$task" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+            atomic_error "Invalid task name: $task (must be a function name)"
+            return 1
+        fi
+
+        # Verify the function exists
+        if ! declare -f "$task" >/dev/null 2>&1; then
+            atomic_error "Task function not found: $task"
+            return 1
+        fi
+
         atomic_step "Task $task_num/$total_tasks"
-        if ! eval "$task"; then
+        if ! "$task"; then
             atomic_error "Chain stopped at task $task_num"
             return 1
         fi
@@ -1238,7 +1314,7 @@ atomic_validate_path() {
         return 1
     fi
 
-    # Check for path traversal
+    # Check for path traversal patterns (raw string check first)
     if [[ "$path" == *".."* ]]; then
         echo "Path contains directory traversal"
         return 1
@@ -1247,6 +1323,44 @@ atomic_validate_path() {
     # Check for suspicious patterns
     if [[ "$path" =~ ^\~|^\$|^\||^\; ]]; then
         echo "Path contains suspicious prefix"
+        return 1
+    fi
+
+    # Check for encoded traversal attempts
+    if [[ "$path" == *"%2e"* || "$path" == *"%2E"* ]]; then
+        echo "Path contains encoded traversal"
+        return 1
+    fi
+
+    return 0
+}
+
+# Validate path is within allowed directory bounds
+# Usage: atomic_validate_path_bounds "$path" "$allowed_root"
+# Returns 0 if path resolves within allowed_root, 1 otherwise
+atomic_validate_path_bounds() {
+    local path="$1"
+    local allowed_root="${2:-$ATOMIC_ROOT}"
+
+    # Basic validation first
+    if ! atomic_validate_path "$path"; then
+        return 1
+    fi
+
+    # Resolve both paths to absolute (portable realpath)
+    local resolved_path resolved_root
+    if command -v realpath >/dev/null 2>&1; then
+        resolved_path=$(realpath -m "$path" 2>/dev/null) || resolved_path="$path"
+        resolved_root=$(realpath -m "$allowed_root" 2>/dev/null) || resolved_root="$allowed_root"
+    else
+        # Fallback for systems without realpath
+        resolved_path=$(cd "$(dirname "$path")" 2>/dev/null && pwd)/$(basename "$path") || resolved_path="$path"
+        resolved_root=$(cd "$allowed_root" 2>/dev/null && pwd) || resolved_root="$allowed_root"
+    fi
+
+    # Check if resolved path starts with allowed root
+    if [[ "$resolved_path" != "$resolved_root"* ]]; then
+        echo "Path escapes allowed directory: $allowed_root"
         return 1
     fi
 

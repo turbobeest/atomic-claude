@@ -130,8 +130,16 @@ task_504_tdd_execution() {
     echo -e "  ${BOLD}TDD CYCLE OVERVIEW${NC}"
     echo ""
 
-    local task_ids=$(jq -r '.tasks[] | select(.subtasks | length >= 4) | .id' "$tasks_file")
-    local task_count=$(echo "$task_ids" | wc -w)
+    local task_ids task_count
+    task_ids=$(jq -r '.tasks[] | select(.subtasks | length >= 4) | .id' "$tasks_file" 2>/dev/null)
+    task_count=$(echo "$task_ids" | wc -w)
+
+    # Validate we have tasks to process
+    if [[ -z "$task_ids" || "$task_count" -eq 0 ]]; then
+        atomic_warn "No tasks with subtasks found in $tasks_file"
+        atomic_info "Ensure Phase 3 (Task Decomposition) generated subtasks for tasks"
+        return 1
+    fi
 
     echo -e "  ${DIM}Tasks to process: $task_count${NC}"
     echo -e "  ${DIM}Execution mode: $exec_mode${NC}"
