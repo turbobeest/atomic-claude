@@ -248,7 +248,7 @@ provider_get_model() {
 }
 
 # ============================================================================
-# INVOCATION
+# INVOCATION (via claude-local wrapper)
 # ============================================================================
 
 # provider_invoke <prompt_file|prompt_string> <output_file> <task_type> [options]
@@ -258,6 +258,9 @@ provider_get_model() {
 #   --timeout=<seconds> Override timeout
 #   --format=json       Expect JSON output
 #
+# This now routes through atomic_invoke with --provider, which uses the
+# claude-local wrapper for unified model access (ollama/api/max).
+#
 provider_invoke() {
     local prompt="$1"
     local output_file="$2"
@@ -266,31 +269,12 @@ provider_invoke() {
 
     provider_init
 
+    # Get provider for this task type
     local provider=$(provider_get_for_task "$task_type")
-
-    case "$provider" in
-        primary)
-            _provider_invoke_api "$prompt" "$output_file" "$@"
-            ;;
-        ollama)
-            _provider_invoke_ollama "$prompt" "$output_file" "$task_type" "$@"
-            ;;
-        *)
-            echo "ERROR: Unknown provider: $provider" >&2
-            return 1
-            ;;
-    esac
-}
-
-# Invoke via Anthropic API (Claude Code)
-_provider_invoke_api() {
-    local prompt="$1"
-    local output_file="$2"
-    shift 2
-
-    local model="$CLAUDE_MODEL"
-    local timeout="$PROVIDER_API_TIMEOUT"
+    local model=""
+    local timeout=""
     local format=""
+    local ollama_host=""
 
     # Parse options
     while [[ $# -gt 0 ]]; do
@@ -298,129 +282,63 @@ _provider_invoke_api() {
             --model=*) model="${1#*=}"; shift ;;
             --timeout=*) timeout="${1#*=}"; shift ;;
             --format=*) format="${1#*=}"; shift ;;
+            --ollama-host=*) ollama_host="${1#*=}"; shift ;;
             *) shift ;;
         esac
     done
 
-    # Use atomic_invoke from atomic.sh
-    local opts=""
-    [[ -n "$format" ]] && opts="--format=$format"
-    [[ -n "$timeout" ]] && opts="$opts --timeout=$timeout"
+    # Map internal provider names to wrapper provider names
+    local wrapper_provider
+    case "$provider" in
+        primary)
+            wrapper_provider="${CLAUDE_PROVIDER:-max}"  # Use default provider (max/api)
+            ;;
+        ollama)
+            wrapper_provider="ollama"
+            # Get Ollama server host if not specified
+            if [[ -z "$ollama_host" ]]; then
+                local server=$(provider_get_ollama_server)
+                if [[ -n "$server" ]]; then
+                    ollama_host="http://$(echo "$server" | jq -r '.host')"
+                    # Get model from server config if not specified
+                    [[ -z "$model" ]] && model=$(echo "$server" | jq -r '.model')
+                fi
+            fi
+            ;;
+        *)
+            wrapper_provider="$provider"
+            ;;
+    esac
 
-    atomic_invoke "$prompt" "$output_file" "API task" --model="$model" $opts
-}
-
-# Invoke via Ollama
-_provider_invoke_ollama() {
-    local prompt="$1"
-    local output_file="$2"
-    local task_type="$3"
-    shift 3
-
-    local timeout="$PROVIDER_OLLAMA_TIMEOUT"
-    local format=""
-    local model_override=""
-
-    # Parse options
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --model=*) model_override="${1#*=}"; shift ;;
-            --timeout=*) timeout="${1#*=}"; shift ;;
-            --format=*) format="${1#*=}"; shift ;;
-            *) shift ;;
-        esac
-    done
-
-    # Get server and model
-    local server=$(provider_get_ollama_server)
-    if [[ -z "$server" ]]; then
-        # No healthy servers - try fallback
+    # Handle fallback if no Ollama server available
+    if [[ "$wrapper_provider" == "ollama" && -z "$ollama_host" ]]; then
         if [[ "${_PROVIDER_CONFIG[ollama_fallback_to_api]}" == "true" ]]; then
             echo "WARN: No healthy Ollama servers, falling back to API" >&2
-            _provider_invoke_api "$prompt" "$output_file" "$@"
-            return $?
+            wrapper_provider="${CLAUDE_PROVIDER:-max}"
         else
             echo "ERROR: No healthy Ollama servers and fallback disabled" >&2
             return 1
         fi
     fi
 
-    local host=$(echo "$server" | jq -r '.host')
-    local model=$(echo "$server" | jq -r '.model')
-
-    # Apply model override
-    if [[ -n "$model_override" ]]; then
-        model="$model_override"
-    elif [[ "$task_type" == "background" ]]; then
-        local bg_model=$(provider_get_model "background")
-        [[ -n "$bg_model" ]] && model="$bg_model"
-    fi
-
-    # Read prompt
-    local prompt_content=""
-    if [[ -f "$prompt" ]]; then
-        prompt_content=$(cat "$prompt")
-    else
-        prompt_content="$prompt"
-    fi
-
-    # Build request (Anthropic Messages API format - supported by Ollama 0.14+)
-    local request=$(cat <<EOF
-{
-    "model": "$model",
-    "max_tokens": 8192,
-    "messages": [
-        {
-            "role": "user",
-            "content": $(echo "$prompt_content" | jq -Rs .)
-        }
-    ]
-}
-EOF
-)
-
-    # Invoke Ollama
-    local response
-    response=$(curl -s --max-time "$timeout" \
-        -H "Content-Type: application/json" \
-        -d "$request" \
-        "http://$host/v1/messages" 2>&1)
-
-    local curl_exit=$?
-
-    if [[ $curl_exit -ne 0 ]]; then
-        echo "ERROR: Ollama request failed (exit $curl_exit)" >&2
-
-        # Try fallback
-        if [[ "${_PROVIDER_CONFIG[ollama_fallback_to_api]}" == "true" ]]; then
-            echo "WARN: Falling back to API" >&2
-            _provider_invoke_api "$prompt" "$output_file" "$@"
-            return $?
-        fi
-        return 1
-    fi
-
-    # Extract content from response
-    local content=$(echo "$response" | jq -r '.content[0].text // .content // .message.content // empty')
-
-    if [[ -z "$content" ]]; then
-        echo "ERROR: Empty response from Ollama" >&2
-        echo "$response" >&2
-        return 1
-    fi
-
-    # Write output
-    mkdir -p "$(dirname "$output_file")"
-    echo "$content" > "$output_file"
-
-    # Validate JSON if required
-    if [[ "$format" == "json" ]]; then
-        if ! jq -e . "$output_file" &>/dev/null; then
-            echo "WARN: Output is not valid JSON" >&2
+    # Set timeout based on provider if not specified
+    if [[ -z "$timeout" ]]; then
+        if [[ "$wrapper_provider" == "ollama" ]]; then
+            timeout="$PROVIDER_OLLAMA_TIMEOUT"
+        else
+            timeout="$PROVIDER_API_TIMEOUT"
         fi
     fi
 
-    return 0
+    # Build atomic_invoke options
+    local invoke_opts="--provider=$wrapper_provider"
+    [[ -n "$model" ]] && invoke_opts="$invoke_opts --model=$model"
+    [[ -n "$format" ]] && invoke_opts="$invoke_opts --format=$format"
+    [[ -n "$timeout" ]] && invoke_opts="$invoke_opts --timeout=$timeout"
+    [[ -n "$ollama_host" ]] && invoke_opts="$invoke_opts --ollama-host=$ollama_host"
+
+    # Invoke through atomic_invoke (which uses claude-local wrapper)
+    atomic_invoke "$prompt" "$output_file" "$task_type task" $invoke_opts
 }
 
 # ============================================================================

@@ -25,6 +25,82 @@ CLAUDE_MODEL="${CLAUDE_MODEL:-sonnet}"
 CLAUDE_MAX_TURNS="${CLAUDE_MAX_TURNS:-1}"
 CLAUDE_TIMEOUT="${CLAUDE_TIMEOUT:-300}"
 
+# Claude-local wrapper configuration
+CLAUDE_LOCAL_PATH="${CLAUDE_LOCAL_PATH:-$ATOMIC_ROOT/../claude-local}"
+CLAUDE_PROVIDER="${CLAUDE_PROVIDER:-max}"
+CLAUDE_OLLAMA_HOST="${CLAUDE_OLLAMA_HOST:-http://localhost:11434}"
+CLAUDE_OLLAMA_CONTEXT="${CLAUDE_OLLAMA_CONTEXT:-32768}"
+
+# Provider-to-role mapping (loaded from config/models.json)
+declare -A PROVIDER_ROLE_MAP
+PROVIDER_ROLE_MAP[primary]="${PROVIDER_ROLE_PRIMARY:-max}"
+PROVIDER_ROLE_MAP[fast]="${PROVIDER_ROLE_FAST:-ollama}"
+PROVIDER_ROLE_MAP[gardener]="${PROVIDER_ROLE_GARDENER:-ollama}"
+PROVIDER_ROLE_MAP[heavyweight]="${PROVIDER_ROLE_HEAVYWEIGHT:-max}"
+
+# ============================================================================
+# CONFIGURATION LOADER
+# ============================================================================
+
+# Load provider configuration from config/models.json
+# Called automatically on first invoke, or manually for refresh
+_atomic_load_provider_config() {
+    local config_file="$ATOMIC_ROOT/config/models.json"
+
+    if [[ ! -f "$config_file" ]]; then
+        return 0  # Use defaults if config doesn't exist
+    fi
+
+    # Load claude-local path
+    local wrapper_path
+    wrapper_path=$(jq -r '.providers.claude_local_path // empty' "$config_file" 2>/dev/null)
+    if [[ -n "$wrapper_path" ]]; then
+        # Resolve relative paths
+        if [[ "$wrapper_path" != /* ]]; then
+            wrapper_path="$ATOMIC_ROOT/$wrapper_path"
+        fi
+        CLAUDE_LOCAL_PATH="$wrapper_path"
+    fi
+
+    # Load default provider
+    local default_provider
+    default_provider=$(jq -r '.providers.default_provider // empty' "$config_file" 2>/dev/null)
+    [[ -n "$default_provider" ]] && CLAUDE_PROVIDER="$default_provider"
+
+    # Load Ollama settings
+    local ollama_host ollama_context ollama_model
+    ollama_host=$(jq -r '.providers.ollama.host // empty' "$config_file" 2>/dev/null)
+    ollama_context=$(jq -r '.providers.ollama.context_length // empty' "$config_file" 2>/dev/null)
+    ollama_model=$(jq -r '.providers.ollama.default_model // empty' "$config_file" 2>/dev/null)
+    [[ -n "$ollama_host" ]] && CLAUDE_OLLAMA_HOST="$ollama_host"
+    [[ -n "$ollama_context" ]] && CLAUDE_OLLAMA_CONTEXT="$ollama_context"
+    [[ -n "$ollama_model" ]] && CLAUDE_OLLAMA_MODEL="$ollama_model"
+
+    # Load role-to-provider mapping
+    local role_primary role_fast role_gardener role_heavyweight
+    role_primary=$(jq -r '.providers.role_routing.primary // empty' "$config_file" 2>/dev/null)
+    role_fast=$(jq -r '.providers.role_routing.fast // empty' "$config_file" 2>/dev/null)
+    role_gardener=$(jq -r '.providers.role_routing.gardener // empty' "$config_file" 2>/dev/null)
+    role_heavyweight=$(jq -r '.providers.role_routing.heavyweight // empty' "$config_file" 2>/dev/null)
+
+    [[ -n "$role_primary" ]] && PROVIDER_ROLE_MAP[primary]="$role_primary"
+    [[ -n "$role_fast" ]] && PROVIDER_ROLE_MAP[fast]="$role_fast"
+    [[ -n "$role_gardener" ]] && PROVIDER_ROLE_MAP[gardener]="$role_gardener"
+    [[ -n "$role_heavyweight" ]] && PROVIDER_ROLE_MAP[heavyweight]="$role_heavyweight"
+
+    _ATOMIC_CONFIG_LOADED=true
+}
+
+# Flag to track if config has been loaded
+_ATOMIC_CONFIG_LOADED=false
+
+# Ensure config is loaded (called by atomic_invoke)
+_atomic_ensure_config() {
+    if [[ "$_ATOMIC_CONFIG_LOADED" != "true" ]]; then
+        _atomic_load_provider_config
+    fi
+}
+
 # ============================================================================
 # TEMP FILE MANAGEMENT
 # ============================================================================
@@ -357,16 +433,111 @@ atomic_state_increment() {
 }
 
 # ============================================================================
+# CORE: INVOKE COMMAND BUILDER
+# ============================================================================
+
+# Build the invocation command for the claude-local wrapper
+# Usage: _atomic_build_invoke_cmd <prompt> <model> <provider> <ollama_host>
+# Returns: Command string to execute
+_atomic_build_invoke_cmd() {
+    local prompt="$1"
+    local model="$2"
+    local provider="$3"
+    local ollama_host="$4"
+
+    # Escape prompt for shell
+    local escaped_prompt
+    escaped_prompt=$(printf '%s' "$prompt" | sed "s/'/'\\\\''/g")
+
+    # Resolve wrapper path
+    local wrapper_path="$CLAUDE_LOCAL_PATH"
+    if [[ ! -d "$wrapper_path" ]]; then
+        # Try relative to ATOMIC_ROOT
+        wrapper_path="$ATOMIC_ROOT/../claude-local"
+    fi
+    if [[ ! -d "$wrapper_path" ]]; then
+        # Fallback to direct claude if wrapper not found
+        atomic_warn "claude-local wrapper not found at $CLAUDE_LOCAL_PATH, falling back to direct claude"
+        echo "claude -p '$escaped_prompt' --model '$model' --dangerously-skip-permissions"
+        return
+    fi
+
+    # Build command based on provider
+    local cmd="cd '$wrapper_path' && python -m local_launcher"
+    cmd="$cmd --provider '$provider'"
+    cmd="$cmd --model '$model'"
+    cmd="$cmd --no-banner"
+    cmd="$cmd --skip-checks"
+
+    # Add Ollama-specific options
+    if [[ "$provider" == "ollama" ]]; then
+        cmd="$cmd --ollama-host '$ollama_host'"
+        cmd="$cmd --context-length '$CLAUDE_OLLAMA_CONTEXT'"
+    fi
+
+    # Add prompt
+    cmd="$cmd -p '$escaped_prompt'"
+
+    echo "$cmd"
+}
+
+# Verify wrapper is available (call during init)
+_atomic_verify_wrapper() {
+    local wrapper_path="$CLAUDE_LOCAL_PATH"
+    if [[ ! -d "$wrapper_path" ]]; then
+        wrapper_path="$ATOMIC_ROOT/../claude-local"
+    fi
+
+    if [[ -d "$wrapper_path" && -f "$wrapper_path/local_launcher/__main__.py" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Get wrapper status for diagnostics
+atomic_wrapper_status() {
+    _atomic_ensure_config
+
+    local wrapper_path="$CLAUDE_LOCAL_PATH"
+    if [[ ! -d "$wrapper_path" ]]; then
+        wrapper_path="$ATOMIC_ROOT/../claude-local"
+    fi
+
+    echo "Claude-Local Wrapper Status:"
+    echo "  Path: $wrapper_path"
+    if [[ -d "$wrapper_path" ]]; then
+        echo "  Status: Found"
+        if [[ -f "$wrapper_path/local_launcher/__main__.py" ]]; then
+            echo "  Main module: OK"
+        else
+            echo "  Main module: MISSING"
+        fi
+    else
+        echo "  Status: NOT FOUND"
+    fi
+    echo "  Default provider: $CLAUDE_PROVIDER"
+    echo "  Ollama host: $CLAUDE_OLLAMA_HOST"
+    echo "  Role mapping:"
+    for role in "${!PROVIDER_ROLE_MAP[@]}"; do
+        echo "    $role → ${PROVIDER_ROLE_MAP[$role]}"
+    done
+}
+
+# ============================================================================
 # CORE: ATOMIC INVOKE
 # ============================================================================
 
 # atomic_invoke <prompt_file|prompt_string> <output_file> <description> [options]
 # Options:
-#   --model=<model>        Override default model (sonnet|opus|haiku)
+#   --model=<model>        Override default model (sonnet|opus|haiku|ollama-model)
+#   --provider=<provider>  Override provider (ollama|api|max)
+#   --role=<role>          Use role-based provider routing (primary|fast|gardener|heavyweight)
 #   --format=json          Expect JSON output, validate it
 #   --format=markdown      Expect markdown output
 #   --timeout=<seconds>    Override default timeout
 #   --stdin                Read additional context from stdin to append to prompt
+#   --ollama-host=<url>    Override Ollama host URL
 #
 atomic_invoke() {
     local prompt_source="$1"
@@ -374,26 +545,41 @@ atomic_invoke() {
     local description="$3"
     shift 3
 
+    # Ensure provider configuration is loaded
+    _atomic_ensure_config
+
     # Parse options
     local model="$CLAUDE_MODEL"
+    local provider="$CLAUDE_PROVIDER"
+    local role=""
     local format=""
     local timeout="$CLAUDE_TIMEOUT"
     local use_stdin=false
     local max_retries="${ATOMIC_MAX_RETRIES:-2}"
     local retry_delay="${ATOMIC_RETRY_DELAY:-5}"
+    local ollama_host="$CLAUDE_OLLAMA_HOST"
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --model=*) model="${1#*=}" ;;
+            --provider=*) provider="${1#*=}" ;;
+            --role=*) role="${1#*=}" ;;
             --format=*) format="${1#*=}" ;;
             --timeout=*) timeout="${1#*=}" ;;
             --retries=*) max_retries="${1#*=}" ;;
             --retry-delay=*) retry_delay="${1#*=}" ;;
             --stdin) use_stdin=true ;;
+            --ollama-host=*) ollama_host="${1#*=}" ;;
             *) atomic_warn "Unknown option: $1" ;;
         esac
         shift
     done
+
+    # Role-based provider routing
+    if [[ -n "$role" ]]; then
+        provider="${PROVIDER_ROLE_MAP[$role]:-$provider}"
+        atomic_substep "Role '$role' → Provider '$provider'"
+    fi
 
     atomic_step "ATOMIC TASK: $description"
 
@@ -420,6 +606,7 @@ $stdin_content"
 
     atomic_substep "Output: $output_file"
     atomic_substep "Model: $model"
+    atomic_substep "Provider: $provider"
 
     # Update state
     atomic_state_set "current_task" "\"$description\""
@@ -427,8 +614,12 @@ $stdin_content"
     # Create output directory if needed
     mkdir -p "$(dirname "$output_file")"
 
-    atomic_waiting "Invoking Claude..."
+    atomic_waiting "Invoking Claude via $provider..."
     echo ""
+
+    # Build the invocation command using claude-local wrapper
+    local invoke_cmd
+    invoke_cmd=$(_atomic_build_invoke_cmd "$prompt_content" "$model" "$provider" "$ollama_host")
 
     # THE ATOMIC INVOCATION (with retry logic)
     local start_time=$(date +%s)
@@ -439,7 +630,7 @@ $stdin_content"
     while [[ $attempt -le $((max_retries + 1)) ]]; do
         local attempt_start=$(date +%s)
 
-        if timeout "$timeout" claude -p "$prompt_content" --model "$model" --dangerously-skip-permissions > "$output_file" 2>&1; then
+        if timeout "$timeout" bash -c "$invoke_cmd" > "$output_file" 2>&1; then
             exit_code=0
             break
         else
@@ -470,7 +661,7 @@ $stdin_content"
     local log_file
     log_file=$(atomic_log_file)
     mkdir -p "$(dirname "$log_file")"
-    echo "[$(date -Iseconds)] task=\"$description\" model=$model duration=${duration}s exit=$exit_code output=$output_file" >> "$log_file"
+    echo "[$(date -Iseconds)] task=\"$description\" provider=$provider model=$model duration=${duration}s exit=$exit_code output=$output_file" >> "$log_file"
 
     if [[ $exit_code -eq 0 ]]; then
         atomic_success "Claude completed task (${duration}s)"
@@ -497,6 +688,57 @@ $stdin_content"
         atomic_state_increment "tasks_failed"
         return $exit_code
     fi
+}
+
+# ============================================================================
+# ROLE-BASED INVOCATION HELPERS
+# ============================================================================
+
+# atomic_invoke_fast - Use fast/cheap model (typically Ollama)
+# For: validation, extraction, simple tasks
+atomic_invoke_fast() {
+    atomic_invoke "$@" --role=fast
+}
+
+# atomic_invoke_primary - Use primary workhorse model (typically Max/API sonnet)
+# For: complex analysis, code generation, PRD authoring
+atomic_invoke_primary() {
+    atomic_invoke "$@" --role=primary
+}
+
+# atomic_invoke_heavyweight - Use most capable model (typically Max opus)
+# For: architecture decisions, critical reasoning, complex synthesis
+atomic_invoke_heavyweight() {
+    atomic_invoke "$@" --role=heavyweight
+}
+
+# atomic_invoke_gardener - Use context gardening model (typically Ollama haiku)
+# For: summarization, context compression, adjudication
+atomic_invoke_gardener() {
+    atomic_invoke "$@" --role=gardener
+}
+
+# atomic_invoke_ollama - Explicitly use Ollama provider
+# For: bulk operations, offline mode, cost-free tasks
+atomic_invoke_ollama() {
+    local model="${CLAUDE_OLLAMA_MODEL:-devstral:24b}"
+    atomic_invoke "$@" --provider=ollama --model="$model"
+}
+
+# atomic_invoke_max - Explicitly use Claude Max subscription
+# For: premium tasks requiring best quality
+atomic_invoke_max() {
+    local model="${1:-sonnet}"
+    shift
+    atomic_invoke "$@" --provider=max --model="$model"
+}
+
+# atomic_invoke_api - Explicitly use Anthropic API
+# For: programmatic access, specific API requirements
+atomic_invoke_api() {
+    local model="${1:-sonnet}"
+    shift
+    atomic_invoke "$@" --provider=api --model="$model"
 }
 
 # ============================================================================
