@@ -33,11 +33,11 @@ task_005_material_scan() {
 }
 EOF
 
-    # Scan for key files first
+    # Scan for key files first (pattern-matching known filenames, no LLM)
     _005_detect_key_files "$manifest_file"
 
-    # Infer project type
-    _005_infer_project_type "$manifest_file" "$config_file"
+    # Detect language/frameworks from key files (no type inference - left to Discovery)
+    _005_detect_stack "$manifest_file"
 
     # Scan different categories
     _005_scan_documentation "$manifest_file"
@@ -109,7 +109,7 @@ _005_detect_key_files() {
     [[ -f "Makefile" ]] && key_files+=("Makefile") && echo -e "    ${GREEN}✓${NC} Makefile"
 
     if [[ ${#key_files[@]} -eq 0 ]]; then
-        echo -e "    ${DIM}(none detected - greenfield project?)${NC}"
+        echo -e "    ${DIM}Greenfield project detected - no standard project files found.${NC}"
     fi
 
     # Update manifest
@@ -120,90 +120,54 @@ _005_detect_key_files() {
     echo ""
 }
 
-# Infer project type from key files
-_005_infer_project_type() {
+# Detect language/frameworks from key files (no type inference - left to Discovery phase)
+_005_detect_stack() {
     local manifest_file="$1"
-    local config_file="$2"
-    local indicators=()
-    local inferred_type="unknown"
-    local inferred_lang="unknown"
+    local languages=()
+    local frameworks=()
 
-    # Detect language/framework
+    # Detect languages and frameworks by pattern matching known files
     if [[ -f "package.json" ]]; then
-        inferred_lang="javascript"
         if [[ -f "tsconfig.json" ]]; then
-            inferred_lang="typescript"
+            languages+=("TypeScript")
+        else
+            languages+=("JavaScript")
         fi
         # Check for frameworks
-        if grep -q '"next"' package.json 2>/dev/null; then
-            indicators+=("next.js")
-            inferred_type="web-app"
-        elif grep -q '"react"' package.json 2>/dev/null; then
-            indicators+=("react")
-            inferred_type="web-app"
-        elif grep -q '"vue"' package.json 2>/dev/null; then
-            indicators+=("vue")
-            inferred_type="web-app"
-        elif grep -q '"express"' package.json 2>/dev/null; then
-            indicators+=("express")
-            inferred_type="api"
-        fi
+        grep -q '"next"' package.json 2>/dev/null && frameworks+=("Next.js")
+        grep -q '"react"' package.json 2>/dev/null && frameworks+=("React")
+        grep -q '"vue"' package.json 2>/dev/null && frameworks+=("Vue")
+        grep -q '"svelte"' package.json 2>/dev/null && frameworks+=("Svelte")
+        grep -q '"express"' package.json 2>/dev/null && frameworks+=("Express")
+        grep -q '"fastify"' package.json 2>/dev/null && frameworks+=("Fastify")
     fi
 
     if [[ -f "pyproject.toml" ]] || [[ -f "setup.py" ]] || [[ -f "requirements.txt" ]]; then
-        inferred_lang="python"
-        if [[ -f "manage.py" ]]; then
-            indicators+=("django")
-            inferred_type="web-app"
-        elif grep -q 'flask' requirements.txt 2>/dev/null || grep -q 'flask' pyproject.toml 2>/dev/null; then
-            indicators+=("flask")
-            inferred_type="api"
-        elif grep -q 'fastapi' requirements.txt 2>/dev/null || grep -q 'fastapi' pyproject.toml 2>/dev/null; then
-            indicators+=("fastapi")
-            inferred_type="api"
-        fi
+        languages+=("Python")
+        [[ -f "manage.py" ]] && frameworks+=("Django")
+        grep -qi 'flask' requirements.txt pyproject.toml 2>/dev/null && frameworks+=("Flask")
+        grep -qi 'fastapi' requirements.txt pyproject.toml 2>/dev/null && frameworks+=("FastAPI")
     fi
 
-    if [[ -f "Cargo.toml" ]]; then
-        inferred_lang="rust"
-        inferred_type="cli"
-    fi
+    [[ -f "Cargo.toml" ]] && languages+=("Rust")
+    [[ -f "go.mod" ]] && languages+=("Go")
+    [[ -f "Gemfile" ]] && languages+=("Ruby") && grep -q 'rails' Gemfile 2>/dev/null && frameworks+=("Rails")
+    [[ -f "pom.xml" ]] && languages+=("Java")
+    [[ -f "build.gradle" ]] && languages+=("Java/Kotlin")
 
-    if [[ -f "go.mod" ]]; then
-        inferred_lang="go"
-        inferred_type="cli"
-    fi
-
-    if [[ -f "Gemfile" ]]; then
-        inferred_lang="ruby"
-        if grep -q 'rails' Gemfile 2>/dev/null; then
-            indicators+=("rails")
-            inferred_type="web-app"
-        fi
-    fi
-
-    # Update config with inferred type if not already set
-    local current_type=$(jq -r '.project.type // "unknown"' "$config_file" 2>/dev/null)
-    if [[ "$current_type" == "unknown" || "$current_type" == "null" ]]; then
-        local tmp=$(atomic_mktemp)
-        jq ".project.type = \"$inferred_type\" | .project.language = \"$inferred_lang\"" "$config_file" > "$tmp" && mv "$tmp" "$config_file"
-    fi
-
-    # Update manifest
+    # Update manifest with detected stack (not inferred type)
     local tmp=$(atomic_mktemp)
-    jq --arg lang "$inferred_lang" --arg type "$inferred_type" \
-        '.inferred = { "language": $lang, "type": $type }' "$manifest_file" > "$tmp" && mv "$tmp" "$manifest_file"
+    local lang_json=$(printf '%s\n' "${languages[@]}" | jq -R . | jq -s '.' 2>/dev/null || echo '[]')
+    local fw_json=$(printf '%s\n' "${frameworks[@]}" | jq -R . | jq -s '.' 2>/dev/null || echo '[]')
+    jq --argjson langs "$lang_json" --argjson fws "$fw_json" \
+        '.detected_stack = { "languages": $langs, "frameworks": $fws }' "$manifest_file" > "$tmp" && mv "$tmp" "$manifest_file"
 
-    if [[ ${#indicators[@]} -gt 0 ]]; then
-        echo -e "  ${CYAN}Project Type${NC}"
-        echo -e "    Language:  ${BOLD}$inferred_lang${NC}"
-        echo -e "    Type:      ${BOLD}$inferred_type${NC}"
-        echo -e "    Framework: ${DIM}${indicators[*]}${NC}"
+    # Display if anything detected
+    if [[ ${#languages[@]} -gt 0 ]] || [[ ${#frameworks[@]} -gt 0 ]]; then
+        echo -e "  ${CYAN}Detected Stack${NC}"
+        [[ ${#languages[@]} -gt 0 ]] && echo -e "    Languages:  ${DIM}${languages[*]}${NC}"
+        [[ ${#frameworks[@]} -gt 0 ]] && echo -e "    Frameworks: ${DIM}${frameworks[*]}${NC}"
         echo ""
-
-        local tmp=$(atomic_mktemp)
-        printf '%s\n' "${indicators[@]}" | jq -R . | jq -s '.' | \
-            jq --slurpfile m "$manifest_file" '$m[0] | .project_indicators = input' - > "$tmp" && mv "$tmp" "$manifest_file"
     fi
 }
 
@@ -303,6 +267,14 @@ _005_scan_source_code() {
         done
         [[ $count -gt 5 ]] && echo -e "    ${DIM}... and $((count - 5)) more${NC}"
     fi
+
+    # Warn if file count is high - suggest external codebase strategy
+    if [[ $count -gt 100 ]]; then
+        echo ""
+        echo -e "    ${YELLOW}Note:${NC} Large codebase detected ($count files)."
+        echo -e "    ${DIM}Consider connecting to external codebases during development${NC}"
+        echo -e "    ${DIM}rather than embedding all reference material upfront.${NC}"
+    fi
     echo ""
 
     # Update manifest
@@ -383,15 +355,12 @@ _005_record_context() {
     local manifest_file="$1"
 
     local total_files=$(jq '.summary.total.files // 0' "$manifest_file")
-    local inferred_lang=$(jq -r '.inferred.language // "unknown"' "$manifest_file")
-    local inferred_type=$(jq -r '.inferred.type // "unknown"' "$manifest_file")
     local key_count=$(jq '.key_files | length' "$manifest_file")
+    local languages=$(jq -r '.detected_stack.languages // [] | join(", ")' "$manifest_file")
 
     # Build context message
-    local context_msg="Material scan: $total_files files"
-    [[ "$inferred_lang" != "unknown" ]] && context_msg+=", $inferred_lang"
-    [[ "$inferred_type" != "unknown" ]] && context_msg+=" $inferred_type"
-    context_msg+=", $key_count key files"
+    local context_msg="Material scan: $total_files files, $key_count key files"
+    [[ -n "$languages" ]] && context_msg+=", stack: $languages"
 
     atomic_context_decision "$context_msg" "discovery"
 

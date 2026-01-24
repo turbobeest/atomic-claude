@@ -1,34 +1,36 @@
 #!/bin/bash
 #
-# Task 006: Environment Setup
+# Task 007: Environment Setup
 # List required/recommended dependencies and give user opportunity to install
 #
 # Features:
 #   - Auto-detects OS for relevant install commands
 #   - Version checking (node >= 18, etc.)
 #   - Project-specific dependencies from package.json, requirements.txt, etc.
-#   - Language-specific tools based on inferred project type
+#   - Language-specific tools based on detected project type
+#   - Blocks if required tools are missing
+#   - Airgapped environment support notes
 #   - Status summary with counts
 #   - Records environment status to context
 #
 
 # Global counters for summary
-_006_REQUIRED_TOTAL=0
-_006_REQUIRED_INSTALLED=0
-_006_RECOMMENDED_TOTAL=0
-_006_RECOMMENDED_INSTALLED=0
+_007_REQUIRED_TOTAL=0
+_007_REQUIRED_INSTALLED=0
+_007_RECOMMENDED_TOTAL=0
+_007_RECOMMENDED_INSTALLED=0
 
-task_006_environment_setup() {
+task_007_environment_setup() {
     local config_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/project-config.json"
     local manifest_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/material-manifest.json"
 
     atomic_step "Environment Setup"
 
     # Reset counters
-    _006_REQUIRED_TOTAL=0
-    _006_REQUIRED_INSTALLED=0
-    _006_RECOMMENDED_TOTAL=0
-    _006_RECOMMENDED_INSTALLED=0
+    _007_REQUIRED_TOTAL=0
+    _007_REQUIRED_INSTALLED=0
+    _007_RECOMMENDED_TOTAL=0
+    _007_RECOMMENDED_INSTALLED=0
 
     echo ""
     echo -e "${DIM}  ┌─────────────────────────────────────────────────────────┐${NC}"
@@ -40,46 +42,78 @@ task_006_environment_setup() {
     echo ""
 
     # Detect OS
-    local os_type=$(_006_detect_os)
+    local os_type=$(_007_detect_os)
     echo -e "  ${DIM}Detected OS: $os_type${NC}"
     echo ""
 
     # Core required tools
-    _006_show_required_tools "$os_type"
+    _007_show_required_tools "$os_type"
 
     # Recommended tools
-    _006_show_recommended_tools "$os_type"
+    _007_show_recommended_tools "$os_type"
 
     # Project-specific dependencies
     local project_lang=$(jq -r '.project.language // "unknown"' "$config_file" 2>/dev/null)
-    _006_show_language_tools "$project_lang" "$os_type"
+    _007_show_language_tools "$project_lang" "$os_type"
 
     # Project dependencies from manifest files
-    _006_show_project_dependencies
+    _007_show_project_dependencies
 
     # Quick install commands
-    _006_show_quick_install "$os_type"
+    _007_show_quick_install "$os_type"
+
+    # Airgapped environment note
+    _007_show_airgap_note
 
     # Status summary
-    _006_show_summary
+    _007_show_summary
 
     echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    echo -e "  ${YELLOW}Open another terminal to install missing tools.${NC}"
-    echo -e "  ${YELLOW}When ready, return here and press Enter to validate.${NC}"
-    echo ""
 
-    read -p "  Press Enter when ready to continue... " _
+    # Check if required tools are missing
+    local missing=$(($_007_REQUIRED_TOTAL - $_007_REQUIRED_INSTALLED))
+    if [[ $missing -gt 0 ]]; then
+        echo -e "  ${RED}Cannot proceed with $missing missing required tool(s).${NC}"
+        echo ""
+        echo -e "  ${YELLOW}Open another terminal to install missing tools.${NC}"
+        echo -e "  ${YELLOW}When ready, return here and press Enter to re-check.${NC}"
+        echo ""
+
+        # Loop until all required tools are installed
+        while [[ $missing -gt 0 ]]; do
+            read -p "  Press Enter to re-check environment... " _
+            echo ""
+
+            # Re-check required tools
+            _007_REQUIRED_TOTAL=0
+            _007_REQUIRED_INSTALLED=0
+            _007_recheck_required "$os_type"
+
+            missing=$(($_007_REQUIRED_TOTAL - $_007_REQUIRED_INSTALLED))
+            if [[ $missing -gt 0 ]]; then
+                echo -e "  ${RED}Still missing $missing required tool(s).${NC}"
+                echo ""
+            fi
+        done
+
+        echo -e "  ${GREEN}All required tools now installed.${NC}"
+        echo ""
+    else
+        echo -e "  ${GREEN}All required tools installed.${NC}"
+        echo ""
+        read -p "  Press Enter to continue... " _
+    fi
 
     # Record to context
-    _006_record_context "$config_file"
+    _007_record_context "$config_file"
 
-    atomic_success "Ready for environment validation"
+    atomic_success "Environment validated"
     return 0
 }
 
 # Detect operating system
-_006_detect_os() {
+_007_detect_os() {
     case "$(uname -s)" in
         Darwin*)
             echo "macos"
@@ -105,7 +139,7 @@ _006_detect_os() {
 }
 
 # Get install command for OS
-_006_install_cmd() {
+_007_install_cmd() {
     local tool="$1"
     local os_type="$2"
 
@@ -116,6 +150,7 @@ _006_install_cmd() {
                 debian) echo "sudo apt install git" ;;
                 redhat) echo "sudo dnf install git" ;;
                 arch) echo "sudo pacman -S git" ;;
+                windows) echo "winget install Git.Git" ;;
                 *) echo "https://git-scm.com/downloads" ;;
             esac
             ;;
@@ -125,6 +160,7 @@ _006_install_cmd() {
                 debian) echo "sudo apt install jq" ;;
                 redhat) echo "sudo dnf install jq" ;;
                 arch) echo "sudo pacman -S jq" ;;
+                windows) echo "winget install jqlang.jq" ;;
                 *) echo "https://jqlang.github.io/jq/download/" ;;
             esac
             ;;
@@ -134,11 +170,15 @@ _006_install_cmd() {
                 debian) echo "curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt install nodejs" ;;
                 redhat) echo "curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash - && sudo dnf install nodejs" ;;
                 arch) echo "sudo pacman -S nodejs npm" ;;
+                windows) echo "winget install OpenJS.NodeJS.LTS" ;;
                 *) echo "https://nodejs.org/" ;;
             esac
             ;;
         claude)
             echo "npm install -g @anthropic-ai/claude-code"
+            ;;
+        task-master)
+            echo "npm install -g task-master-ai"
             ;;
         gh)
             case "$os_type" in
@@ -146,6 +186,7 @@ _006_install_cmd() {
                 debian) echo "sudo apt install gh" ;;
                 redhat) echo "sudo dnf install gh" ;;
                 arch) echo "sudo pacman -S github-cli" ;;
+                windows) echo "winget install GitHub.cli" ;;
                 *) echo "https://cli.github.com/" ;;
             esac
             ;;
@@ -153,6 +194,7 @@ _006_install_cmd() {
             case "$os_type" in
                 macos) echo "brew install --cask docker" ;;
                 debian) echo "sudo apt install docker.io" ;;
+                windows) echo "winget install Docker.DockerDesktop" ;;
                 *) echo "https://docs.docker.com/get-docker/" ;;
             esac
             ;;
@@ -162,6 +204,7 @@ _006_install_cmd() {
                 debian) echo "sudo apt install python3 python3-pip python3-venv" ;;
                 redhat) echo "sudo dnf install python3 python3-pip" ;;
                 arch) echo "sudo pacman -S python python-pip" ;;
+                windows) echo "winget install Python.Python.3.12" ;;
                 *) echo "https://python.org/" ;;
             esac
             ;;
@@ -172,6 +215,7 @@ _006_install_cmd() {
             case "$os_type" in
                 macos) echo "brew install go" ;;
                 debian) echo "sudo apt install golang" ;;
+                windows) echo "winget install GoLang.Go" ;;
                 *) echo "https://go.dev/dl/" ;;
             esac
             ;;
@@ -182,7 +226,7 @@ _006_install_cmd() {
 }
 
 # Check version meets minimum
-_006_check_version() {
+_007_check_version() {
     local tool="$1"
     local min_version="$2"
     local current_version="$3"
@@ -196,109 +240,138 @@ _006_check_version() {
 }
 
 # Show required tools
-_006_show_required_tools() {
+_007_show_required_tools() {
     local os_type="$1"
 
     echo -e "${CYAN}  REQUIRED TOOLS:${NC}"
     echo ""
 
     # git
-    ((_006_REQUIRED_TOTAL++))
+    ((_007_REQUIRED_TOTAL++))
     if command -v git &>/dev/null; then
         local ver=$(git --version 2>/dev/null | awk '{print $3}')
         echo -e "    ${GREEN}✓${NC} git ($ver)"
-        ((_006_REQUIRED_INSTALLED++))
+        ((_007_REQUIRED_INSTALLED++))
     else
         echo -e "    ${RED}✗${NC} git - ${BOLD}REQUIRED${NC}"
-        echo -e "      ${DIM}$(_006_install_cmd git "$os_type")${NC}"
+        echo -e "      ${DIM}$(_007_install_cmd git "$os_type")${NC}"
     fi
 
     # jq
-    ((_006_REQUIRED_TOTAL++))
+    ((_007_REQUIRED_TOTAL++))
     if command -v jq &>/dev/null; then
         local ver=$(jq --version 2>/dev/null | sed 's/jq-//')
         echo -e "    ${GREEN}✓${NC} jq ($ver)"
-        ((_006_REQUIRED_INSTALLED++))
+        ((_007_REQUIRED_INSTALLED++))
     else
         echo -e "    ${RED}✗${NC} jq - ${BOLD}REQUIRED${NC}"
-        echo -e "      ${DIM}$(_006_install_cmd jq "$os_type")${NC}"
+        echo -e "      ${DIM}$(_007_install_cmd jq "$os_type")${NC}"
     fi
 
     # node (with version check)
-    ((_006_REQUIRED_TOTAL++))
+    ((_007_REQUIRED_TOTAL++))
     if command -v node &>/dev/null; then
         local ver=$(node --version 2>/dev/null | sed 's/v//')
         local major_ver=$(echo "$ver" | cut -d. -f1)
         if [[ "$major_ver" -ge 18 ]]; then
             echo -e "    ${GREEN}✓${NC} node (v$ver)"
-            ((_006_REQUIRED_INSTALLED++))
+            ((_007_REQUIRED_INSTALLED++))
         else
             echo -e "    ${YELLOW}!${NC} node (v$ver) - ${BOLD}v18+ required${NC}"
-            echo -e "      ${DIM}$(_006_install_cmd node "$os_type")${NC}"
+            echo -e "      ${DIM}$(_007_install_cmd node "$os_type")${NC}"
         fi
     else
         echo -e "    ${RED}✗${NC} node - ${BOLD}REQUIRED${NC} (v18+)"
-        echo -e "      ${DIM}$(_006_install_cmd node "$os_type")${NC}"
+        echo -e "      ${DIM}$(_007_install_cmd node "$os_type")${NC}"
     fi
 
     # claude CLI
-    ((_006_REQUIRED_TOTAL++))
+    ((_007_REQUIRED_TOTAL++))
     if command -v claude &>/dev/null; then
         local ver=$(claude --version 2>/dev/null | head -1 || echo "installed")
         echo -e "    ${GREEN}✓${NC} claude CLI ($ver)"
-        ((_006_REQUIRED_INSTALLED++))
+        ((_007_REQUIRED_INSTALLED++))
     else
         echo -e "    ${RED}✗${NC} claude CLI - ${BOLD}REQUIRED${NC}"
-        echo -e "      ${DIM}$(_006_install_cmd claude "$os_type")${NC}"
+        echo -e "      ${DIM}$(_007_install_cmd claude "$os_type")${NC}"
+    fi
+
+    # task-master-ai (check global install only - npx fallback is slow)
+    ((_007_REQUIRED_TOTAL++))
+    if command -v task-master &>/dev/null; then
+        echo -e "    ${GREEN}✓${NC} task-master-ai"
+        ((_007_REQUIRED_INSTALLED++))
+    else
+        echo -e "    ${RED}✗${NC} task-master-ai - ${BOLD}REQUIRED${NC} (task decomposition)"
+        echo -e "      ${DIM}$(_007_install_cmd task-master "$os_type")${NC}"
+        echo -e "      ${DIM}Note: Install globally for faster startup${NC}"
     fi
 
     echo ""
 }
 
+# Re-check required tools (silent, just updates counters)
+_007_recheck_required() {
+    local os_type="$1"
+
+    # git
+    ((_007_REQUIRED_TOTAL++))
+    command -v git &>/dev/null && ((_007_REQUIRED_INSTALLED++))
+
+    # jq
+    ((_007_REQUIRED_TOTAL++))
+    command -v jq &>/dev/null && ((_007_REQUIRED_INSTALLED++))
+
+    # node (with version check)
+    ((_007_REQUIRED_TOTAL++))
+    if command -v node &>/dev/null; then
+        local major_ver=$(node --version 2>/dev/null | sed 's/v//' | cut -d. -f1)
+        [[ "$major_ver" -ge 18 ]] && ((_007_REQUIRED_INSTALLED++))
+    fi
+
+    # claude CLI
+    ((_007_REQUIRED_TOTAL++))
+    command -v claude &>/dev/null && ((_007_REQUIRED_INSTALLED++))
+
+    # task-master-ai
+    ((_007_REQUIRED_TOTAL++))
+    command -v task-master &>/dev/null && ((_007_REQUIRED_INSTALLED++))
+}
+
 # Show recommended tools
-_006_show_recommended_tools() {
+_007_show_recommended_tools() {
     local os_type="$1"
 
     echo -e "${CYAN}  RECOMMENDED TOOLS:${NC}"
     echo ""
 
-    # task-master-ai
-    ((_006_RECOMMENDED_TOTAL++))
-    if command -v task-master &>/dev/null || npx task-master-ai --version &>/dev/null 2>&1; then
-        echo -e "    ${GREEN}✓${NC} task-master-ai"
-        ((_006_RECOMMENDED_INSTALLED++))
-    else
-        echo -e "    ${YELLOW}○${NC} task-master-ai - Task decomposition"
-        echo -e "      ${DIM}npm install -g task-master-ai${NC}"
-    fi
-
     # gh
-    ((_006_RECOMMENDED_TOTAL++))
+    ((_007_RECOMMENDED_TOTAL++))
     if command -v gh &>/dev/null; then
         local ver=$(gh --version 2>/dev/null | head -1 | awk '{print $3}')
         echo -e "    ${GREEN}✓${NC} gh ($ver)"
-        ((_006_RECOMMENDED_INSTALLED++))
+        ((_007_RECOMMENDED_INSTALLED++))
     else
         echo -e "    ${YELLOW}○${NC} gh (GitHub CLI) - PR/issue management"
-        echo -e "      ${DIM}$(_006_install_cmd gh "$os_type")${NC}"
+        echo -e "      ${DIM}$(_007_install_cmd gh "$os_type")${NC}"
     fi
 
     # docker
-    ((_006_RECOMMENDED_TOTAL++))
+    ((_007_RECOMMENDED_TOTAL++))
     if command -v docker &>/dev/null; then
         local ver=$(docker --version 2>/dev/null | awk '{print $3}' | sed 's/,//')
         echo -e "    ${GREEN}✓${NC} docker ($ver)"
-        ((_006_RECOMMENDED_INSTALLED++))
+        ((_007_RECOMMENDED_INSTALLED++))
     else
         echo -e "    ${YELLOW}○${NC} docker - Containerized deployment"
-        echo -e "      ${DIM}$(_006_install_cmd docker "$os_type")${NC}"
+        echo -e "      ${DIM}$(_007_install_cmd docker "$os_type")${NC}"
     fi
 
     echo ""
 }
 
 # Show language-specific tools
-_006_show_language_tools() {
+_007_show_language_tools() {
     local lang="$1"
     local os_type="$2"
 
@@ -314,7 +387,7 @@ _006_show_language_tools() {
                 echo -e "    ${GREEN}✓${NC} python3 ($ver)"
             else
                 echo -e "    ${YELLOW}○${NC} python3"
-                echo -e "      ${DIM}$(_006_install_cmd python "$os_type")${NC}"
+                echo -e "      ${DIM}$(_007_install_cmd python "$os_type")${NC}"
             fi
 
             if command -v pip3 &>/dev/null || command -v pip &>/dev/null; then
@@ -360,7 +433,7 @@ _006_show_language_tools() {
                 echo -e "    ${GREEN}✓${NC} rustc ($ver)"
             else
                 echo -e "    ${YELLOW}○${NC} rust"
-                echo -e "      ${DIM}$(_006_install_cmd rust "$os_type")${NC}"
+                echo -e "      ${DIM}$(_007_install_cmd rust "$os_type")${NC}"
             fi
 
             if command -v cargo &>/dev/null; then
@@ -376,7 +449,7 @@ _006_show_language_tools() {
                 echo -e "    ${GREEN}✓${NC} go ($ver)"
             else
                 echo -e "    ${YELLOW}○${NC} go"
-                echo -e "      ${DIM}$(_006_install_cmd go "$os_type")${NC}"
+                echo -e "      ${DIM}$(_007_install_cmd go "$os_type")${NC}"
             fi
             ;;
 
@@ -400,79 +473,86 @@ _006_show_language_tools() {
     echo ""
 }
 
-# Show project-specific dependencies
-_006_show_project_dependencies() {
-    local has_deps=false
+# Show project-specific dependencies (header printed only once)
+_007_show_project_dependencies() {
+    local deps_found=()
 
-    # Check package.json
+    # Collect all dependency info first
     if [[ -f "package.json" ]]; then
         local dep_count=$(jq '(.dependencies // {}) | keys | length' package.json 2>/dev/null || echo 0)
         local dev_count=$(jq '(.devDependencies // {}) | keys | length' package.json 2>/dev/null || echo 0)
         if [[ "$dep_count" -gt 0 || "$dev_count" -gt 0 ]]; then
-            has_deps=true
-            echo -e "${CYAN}  PROJECT DEPENDENCIES:${NC}"
-            echo ""
-            echo -e "    ${DIM}package.json:${NC} $dep_count dependencies, $dev_count devDependencies"
-            if [[ -d "node_modules" ]]; then
-                echo -e "    ${GREEN}✓${NC} node_modules exists"
-            else
-                echo -e "    ${YELLOW}○${NC} Run: ${BOLD}npm install${NC}"
-            fi
-            echo ""
+            deps_found+=("package.json:$dep_count:$dev_count:node_modules")
         fi
     fi
 
-    # Check requirements.txt
     if [[ -f "requirements.txt" ]]; then
         local dep_count=$(grep -v '^#' requirements.txt 2>/dev/null | grep -c -v '^$' || echo 0)
-        has_deps=true
-        echo -e "${CYAN}  PROJECT DEPENDENCIES:${NC}"
-        echo ""
-        echo -e "    ${DIM}requirements.txt:${NC} ~$dep_count packages"
-        if [[ -d "venv" ]] || [[ -d ".venv" ]]; then
-            echo -e "    ${GREEN}✓${NC} Virtual environment exists"
-        else
-            echo -e "    ${YELLOW}○${NC} Run: ${BOLD}python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt${NC}"
-        fi
-        echo ""
+        deps_found+=("requirements.txt:$dep_count:0:venv")
     fi
 
-    # Check Cargo.toml
     if [[ -f "Cargo.toml" ]]; then
-        local dep_count=$(grep -c '^\[' Cargo.toml 2>/dev/null || echo 0)
-        has_deps=true
-        echo -e "${CYAN}  PROJECT DEPENDENCIES:${NC}"
-        echo ""
-        echo -e "    ${DIM}Cargo.toml:${NC} Rust project"
-        if [[ -f "Cargo.lock" ]]; then
-            echo -e "    ${GREEN}✓${NC} Cargo.lock exists"
-        else
-            echo -e "    ${YELLOW}○${NC} Run: ${BOLD}cargo build${NC}"
-        fi
-        echo ""
+        deps_found+=("Cargo.toml:rust:0:Cargo.lock")
     fi
 
-    # Check go.mod
     if [[ -f "go.mod" ]]; then
-        has_deps=true
-        echo -e "${CYAN}  PROJECT DEPENDENCIES:${NC}"
-        echo ""
-        echo -e "    ${DIM}go.mod:${NC} Go project"
-        if [[ -f "go.sum" ]]; then
-            echo -e "    ${GREEN}✓${NC} go.sum exists"
-        else
-            echo -e "    ${YELLOW}○${NC} Run: ${BOLD}go mod tidy${NC}"
-        fi
-        echo ""
+        deps_found+=("go.mod:go:0:go.sum")
     fi
+
+    # Only print if we found dependencies
+    [[ ${#deps_found[@]} -eq 0 ]] && return
+
+    echo -e "${CYAN}  PROJECT DEPENDENCIES:${NC}"
+    echo ""
+
+    for dep_info in "${deps_found[@]}"; do
+        IFS=':' read -r file count1 count2 check_target <<< "$dep_info"
+
+        case "$file" in
+            package.json)
+                echo -e "    ${DIM}package.json:${NC} $count1 dependencies, $count2 devDependencies"
+                if [[ -d "node_modules" ]]; then
+                    echo -e "    ${GREEN}✓${NC} node_modules exists"
+                else
+                    echo -e "    ${YELLOW}○${NC} Run: ${BOLD}npm install${NC}"
+                fi
+                ;;
+            requirements.txt)
+                echo -e "    ${DIM}requirements.txt:${NC} ~$count1 packages"
+                if [[ -d "venv" ]] || [[ -d ".venv" ]]; then
+                    echo -e "    ${GREEN}✓${NC} Virtual environment exists"
+                else
+                    echo -e "    ${YELLOW}○${NC} Run: ${BOLD}python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt${NC}"
+                fi
+                ;;
+            Cargo.toml)
+                echo -e "    ${DIM}Cargo.toml:${NC} Rust project"
+                if [[ -f "Cargo.lock" ]]; then
+                    echo -e "    ${GREEN}✓${NC} Cargo.lock exists"
+                else
+                    echo -e "    ${YELLOW}○${NC} Run: ${BOLD}cargo build${NC}"
+                fi
+                ;;
+            go.mod)
+                echo -e "    ${DIM}go.mod:${NC} Go project"
+                if [[ -f "go.sum" ]]; then
+                    echo -e "    ${GREEN}✓${NC} go.sum exists"
+                else
+                    echo -e "    ${YELLOW}○${NC} Run: ${BOLD}go mod tidy${NC}"
+                fi
+                ;;
+        esac
+    done
+
+    echo ""
 }
 
 # Show quick install commands
-_006_show_quick_install() {
+_007_show_quick_install() {
     local os_type="$1"
 
     # Only show if something is missing
-    if [[ $_006_REQUIRED_INSTALLED -eq $_006_REQUIRED_TOTAL ]]; then
+    if [[ $_007_REQUIRED_INSTALLED -eq $_007_REQUIRED_TOTAL ]]; then
         return
     fi
 
@@ -482,20 +562,25 @@ _006_show_quick_install() {
     case "$os_type" in
         macos)
             echo -e "    ${DIM}# All required tools:${NC}"
-            echo -e "    ${BOLD}brew install git jq node && npm install -g @anthropic-ai/claude-code${NC}"
-            echo ""
-            echo -e "    ${DIM}# Recommended extras:${NC}"
-            echo -e "    ${BOLD}npm install -g task-master-ai && brew install gh${NC}"
+            echo -e "    ${BOLD}brew install git jq node${NC}"
+            echo -e "    ${BOLD}npm install -g @anthropic-ai/claude-code task-master-ai${NC}"
             ;;
         debian)
             echo -e "    ${DIM}# All required tools:${NC}"
             echo -e "    ${BOLD}sudo apt update && sudo apt install -y git jq${NC}"
             echo -e "    ${BOLD}curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -${NC}"
-            echo -e "    ${BOLD}sudo apt install -y nodejs && npm install -g @anthropic-ai/claude-code${NC}"
+            echo -e "    ${BOLD}sudo apt install -y nodejs${NC}"
+            echo -e "    ${BOLD}npm install -g @anthropic-ai/claude-code task-master-ai${NC}"
             ;;
         arch)
             echo -e "    ${DIM}# All required tools:${NC}"
-            echo -e "    ${BOLD}sudo pacman -S git jq nodejs npm && npm install -g @anthropic-ai/claude-code${NC}"
+            echo -e "    ${BOLD}sudo pacman -S git jq nodejs npm${NC}"
+            echo -e "    ${BOLD}npm install -g @anthropic-ai/claude-code task-master-ai${NC}"
+            ;;
+        windows)
+            echo -e "    ${DIM}# All required tools (PowerShell as Admin):${NC}"
+            echo -e "    ${BOLD}winget install Git.Git jqlang.jq OpenJS.NodeJS.LTS${NC}"
+            echo -e "    ${BOLD}npm install -g @anthropic-ai/claude-code task-master-ai${NC}"
             ;;
         *)
             echo -e "    ${DIM}See tool-specific install commands above${NC}"
@@ -505,30 +590,46 @@ _006_show_quick_install() {
     echo ""
 }
 
+# Show airgapped environment note
+_007_show_airgap_note() {
+    echo -e "${DIM}  ┌─────────────────────────────────────────────────────────┐${NC}"
+    echo -e "${DIM}  │ ${NC}${YELLOW}Airgapped Environment?${NC}${DIM}                                  │${NC}"
+    echo -e "${DIM}  │                                                         │${NC}"
+    echo -e "${DIM}  │ Download these packages on a connected machine:         │${NC}"
+    echo -e "${DIM}  │   npm pack @anthropic-ai/claude-code                    │${NC}"
+    echo -e "${DIM}  │   npm pack task-master-ai                               │${NC}"
+    echo -e "${DIM}  │                                                         │${NC}"
+    echo -e "${DIM}  │ Transfer .tgz files and install with:                   │${NC}"
+    echo -e "${DIM}  │   npm install -g ./anthropic-ai-claude-code-*.tgz       │${NC}"
+    echo -e "${DIM}  │   npm install -g ./task-master-ai-*.tgz                 │${NC}"
+    echo -e "${DIM}  └─────────────────────────────────────────────────────────┘${NC}"
+    echo ""
+}
+
 # Show status summary
-_006_show_summary() {
+_007_show_summary() {
     echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 
     # Required status
-    if [[ $_006_REQUIRED_INSTALLED -eq $_006_REQUIRED_TOTAL ]]; then
-        echo -e "  ${GREEN}✓${NC} Required: ${BOLD}$_006_REQUIRED_INSTALLED/$_006_REQUIRED_TOTAL${NC} installed"
+    if [[ $_007_REQUIRED_INSTALLED -eq $_007_REQUIRED_TOTAL ]]; then
+        echo -e "  ${GREEN}✓${NC} Required: ${BOLD}$_007_REQUIRED_INSTALLED/$_007_REQUIRED_TOTAL${NC} installed"
     else
-        local missing=$(($_006_REQUIRED_TOTAL - $_006_REQUIRED_INSTALLED))
-        echo -e "  ${RED}✗${NC} Required: ${BOLD}$_006_REQUIRED_INSTALLED/$_006_REQUIRED_TOTAL${NC} installed (${RED}$missing missing${NC})"
+        local missing=$(($_007_REQUIRED_TOTAL - $_007_REQUIRED_INSTALLED))
+        echo -e "  ${RED}✗${NC} Required: ${BOLD}$_007_REQUIRED_INSTALLED/$_007_REQUIRED_TOTAL${NC} installed (${RED}$missing missing${NC})"
     fi
 
     # Recommended status
-    echo -e "  ${DIM}○${NC} Recommended: ${BOLD}$_006_RECOMMENDED_INSTALLED/$_006_RECOMMENDED_TOTAL${NC} installed"
+    echo -e "  ${DIM}○${NC} Recommended: ${BOLD}$_007_RECOMMENDED_INSTALLED/$_007_RECOMMENDED_TOTAL${NC} installed"
     echo ""
 }
 
 # Record environment status to context
-_006_record_context() {
+_007_record_context() {
     local config_file="$1"
 
-    local missing=$(($_006_REQUIRED_TOTAL - $_006_REQUIRED_INSTALLED))
-    local status_msg="Environment: $_006_REQUIRED_INSTALLED/$_006_REQUIRED_TOTAL required tools"
+    local missing=$(($_007_REQUIRED_TOTAL - $_007_REQUIRED_INSTALLED))
+    local status_msg="Environment: $_007_REQUIRED_INSTALLED/$_007_REQUIRED_TOTAL required tools"
 
     if [[ $missing -gt 0 ]]; then
         status_msg+=", $missing missing"
@@ -540,10 +641,10 @@ _006_record_context() {
 
     # Update config with environment status
     local tmp=$(atomic_mktemp)
-    jq --argjson req_total "$_006_REQUIRED_TOTAL" \
-       --argjson req_installed "$_006_REQUIRED_INSTALLED" \
-       --argjson rec_total "$_006_RECOMMENDED_TOTAL" \
-       --argjson rec_installed "$_006_RECOMMENDED_INSTALLED" \
+    jq --argjson req_total "$_007_REQUIRED_TOTAL" \
+       --argjson req_installed "$_007_REQUIRED_INSTALLED" \
+       --argjson rec_total "$_007_RECOMMENDED_TOTAL" \
+       --argjson rec_installed "$_007_RECOMMENDED_INSTALLED" \
        '.environment = {
            "required_total": $req_total,
            "required_installed": $req_installed,

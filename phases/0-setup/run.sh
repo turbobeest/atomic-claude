@@ -3,7 +3,7 @@
 # PHASE 0: SETUP
 # Configuration via Initialization Files, Guided Setup, or Quick Defaults
 #
-# Tasks: 001-008 (0xx range)
+# Tasks: 001-009 (0xx range)
 #
 # Three modes:
 #   DOCUMENT MODE: Parse initialization/ files, Claude extracts config (1 LLM task)
@@ -108,18 +108,23 @@ main() {
     result=$?
     [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
 
-    # Task 006: Environment Setup (list dependencies, install instructions)
-    phase_task_interactive "006" "Environment Setup" task_006_environment_setup
+    # Task 006: Reference Materials (guide user to gather enriching materials)
+    phase_task_interactive "006" "Reference Materials" task_006_reference_materials
     result=$?
     [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
 
-    # Task 007: Repository Setup (agents + audits + Ollama)
-    phase_task_interactive "007" "Repository Setup" task_007_repository_setup
+    # Task 007: Environment Setup (list dependencies, install instructions)
+    phase_task_interactive "007" "Environment Setup" task_007_environment_setup
     result=$?
     [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
 
-    # Task 008: Environment Check (validate installations + agents)
-    phase_task_interactive "008" "Environment Check" task_008_environment_check
+    # Task 008: Repository Setup (agents + audits + Ollama)
+    phase_task_interactive "008" "Repository Setup" task_008_repository_setup
+    result=$?
+    [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
+
+    # Task 009: Environment Check (validate installations + agents)
+    phase_task_interactive "009" "Environment Check" task_009_environment_check
     result=$?
     [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
 

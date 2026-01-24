@@ -51,7 +51,25 @@ _003_display_config() {
 
     echo -e "${CYAN}  PIPELINE${NC}"
     echo -e "    Mode:        $(echo "$extracted" | jq -r '.pipeline.mode // "component"')"
-    echo -e "    Human Gates: $(echo "$extracted" | jq -r '.pipeline.human_gates // [0,2,5,9] | join(", ")')"
+    # Show human gates with phase names
+    local gates=$(echo "$extracted" | jq -r '.pipeline.human_gates // [0,2,5,9] | .[]')
+    local gate_names=""
+    for g in $gates; do
+        case "$g" in
+            0) gate_names+="Setup, " ;;
+            1) gate_names+="Discovery, " ;;
+            2) gate_names+="PRD, " ;;
+            3) gate_names+="Tasking, " ;;
+            4) gate_names+="Spec, " ;;
+            5) gate_names+="Build, " ;;
+            6) gate_names+="Review, " ;;
+            7) gate_names+="Integration, " ;;
+            8) gate_names+="Deploy Prep, " ;;
+            9) gate_names+="Release, " ;;
+        esac
+    done
+    gate_names=${gate_names%, }  # Remove trailing comma
+    echo -e "    Human Gates: ${gate_names:-None}"
     echo ""
 
     echo -e "${CYAN}  SANDBOX${NC}"
@@ -59,8 +77,9 @@ _003_display_config() {
     echo -e "    Cmd Mode:    $(echo "$extracted" | jq -r '.sandbox.command_approval_mode // "cautious"')"
     echo ""
 
-    echo -e "${CYAN}  LLM PROVIDER${NC}"
+    echo -e "${CYAN}  DEFAULT LLM${NC}"
     echo -e "    Provider:    $(echo "$extracted" | jq -r '.llm.primary_provider // "anthropic"')"
+    echo -e "    ${DIM}(You can choose a different model before each LLM task)${NC}"
     echo ""
 
     # Check for any null/infer values that need attention
@@ -85,7 +104,7 @@ _003_prompt_action() {
     echo -e "  ${GREEN}[a]${NC} Approve configuration"
     echo -e "  ${YELLOW}[e]${NC} Edit a field"
     echo -e "  ${CYAN}[j]${NC} View raw JSON"
-    echo -e "  ${RED}[r]${NC} Restart configuration"
+    echo -e "  ${RED}[r]${NC} Restart entire setup from the beginning"
     echo ""
 
     while true; do

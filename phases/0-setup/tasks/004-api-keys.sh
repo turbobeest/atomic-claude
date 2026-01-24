@@ -15,15 +15,10 @@ task_004_api_keys() {
     local config_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/project-config.json"
     local secrets_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/secrets.json"
 
-    atomic_step "API Key Configuration"
-
-    local provider=$(jq -r '.llm.primary_provider // "anthropic"' "$config_file")
+    atomic_step "API Credentials"
 
     echo ""
-    echo -e "${DIM}  ┌─────────────────────────────────────────────────────────┐${NC}"
-    echo -e "${DIM}  │ API keys are stored locally and NEVER committed to git. │${NC}"
-    echo -e "${DIM}  │ File will be secured with chmod 600.                    │${NC}"
-    echo -e "${DIM}  └─────────────────────────────────────────────────────────┘${NC}"
+    echo -e "  ${DIM}Keys are stored locally and NEVER committed to git.${NC}"
     echo ""
 
     # Check if already configured
@@ -32,11 +27,11 @@ task_004_api_keys() {
         existing=$(jq -r 'keys[]' "$secrets_file" 2>/dev/null || true)
         existing=$(echo "$existing" | head -3 | tr '\n' ', ' | sed 's/,$//')
         if [[ -n "$existing" ]]; then
-            atomic_substep "Existing keys found: $existing"
+            atomic_substep "Existing credentials found: $existing"
             read -p "  Reconfigure? [y/N]: " reconfigure
             if [[ ! "$reconfigure" =~ ^[Yy] ]]; then
-                atomic_info "Keeping existing keys"
-                atomic_context_decision "API keys: kept existing configuration" "configuration"
+                atomic_info "Keeping existing credentials"
+                atomic_context_decision "API credentials: kept existing configuration" "configuration"
                 return 0
             fi
         fi
@@ -45,91 +40,77 @@ task_004_api_keys() {
     mkdir -p "$(dirname "$secrets_file")"
     echo '{}' > "$secrets_file"
 
-    # Configure primary provider
-    echo -e "  ${CYAN}Primary Provider: ${BOLD}$provider${NC}"
+    # Show what's available and let user configure what they need
+    # Note: Claude Code requires Claude models - only these providers work
+    echo -e "  ${BOLD}Which providers do you want to configure?${NC}"
+    echo -e "  ${DIM}You can select models from any configured provider per-task.${NC}"
     echo ""
-    _004_configure_provider "$provider" "$secrets_file" "primary"
+    echo -e "  ${CYAN}1.${NC} Claude Max (subscription - recommended)"
+    echo -e "  ${CYAN}2.${NC} Anthropic API (pay-per-token)"
+    echo -e "  ${CYAN}3.${NC} AWS Bedrock (Claude via AWS)"
+    echo -e "  ${CYAN}4.${NC} Ollama (local/LAN models)"
+    echo ""
+    echo -e "  ${DIM}Enter numbers separated by spaces (e.g., \"1 4\" for Max + Ollama)${NC}"
+    read -p "  Configure [1 4]: " provider_choices
+    provider_choices=${provider_choices:-"1 4"}
 
-    # Offer backup provider
-    echo ""
-    echo -e "  ${DIM}Configure a backup provider? (used if primary fails)${NC}"
-    read -p "  Add backup? [y/N]: " add_backup
-    if [[ "$add_backup" =~ ^[Yy] ]]; then
+    for choice in $provider_choices; do
         echo ""
-        echo -e "    ${DIM}1.${NC} anthropic"
-        echo -e "    ${DIM}2.${NC} openai"
-        echo -e "    ${DIM}3.${NC} google"
-        echo -e "    ${DIM}4.${NC} ollama (local)"
-        read -p "  Backup provider [1-4]: " backup_choice
-        local backup_provider=""
-        case "$backup_choice" in
-            1) backup_provider="anthropic" ;;
-            2) backup_provider="openai" ;;
-            3) backup_provider="google" ;;
-            4) backup_provider="ollama" ;;
+        case "$choice" in
+            1) _004_collect_max "$secrets_file" ;;
+            2) _004_collect_anthropic "$secrets_file" ;;
+            3) _004_collect_bedrock "$secrets_file" ;;
+            4) _004_collect_ollama "$secrets_file" ;;
         esac
-        if [[ -n "$backup_provider" && "$backup_provider" != "$provider" ]]; then
-            echo ""
-            _004_configure_provider "$backup_provider" "$secrets_file" "backup"
-            # Update config with backup provider
-            local tmp=$(atomic_mktemp)
-            jq ".llm.backup_provider = \"$backup_provider\"" "$config_file" > "$tmp" && mv "$tmp" "$config_file"
-        fi
-    fi
+    done
 
     # Secure the file
     chmod 600 "$secrets_file"
-    atomic_substep "Secrets file secured (chmod 600)"
+    atomic_substep "Credentials file secured (chmod 600)"
 
     # Add to gitignore
     _004_update_gitignore
 
     # Record to context (provider names only, never keys)
-    local configured_providers=$(jq -r 'keys | map(select(contains("key") or contains("host") or contains("endpoint"))) | length' "$secrets_file")
-    atomic_context_decision "API keys configured: $provider (primary)$([ -n "${backup_provider:-}" ] && echo ", $backup_provider (backup)")" "configuration"
+    local configured=$(jq -r 'keys | join(", ")' "$secrets_file")
+    atomic_context_decision "Credentials configured: $configured" "configuration"
 
     return 0
 }
 
-# Configure a specific provider
-_004_configure_provider() {
-    local provider="$1"
-    local secrets_file="$2"
-    local role="$3"  # "primary" or "backup"
+# Claude Max (subscription) - check for existing login
+_004_collect_max() {
+    local secrets_file="$1"
 
-    case "$provider" in
-        anthropic)
-            _004_collect_anthropic "$secrets_file" "$role"
-            ;;
-        openai)
-            _004_collect_openai "$secrets_file" "$role"
-            ;;
-        google)
-            _004_collect_google "$secrets_file" "$role"
-            ;;
-        ollama|local)
-            _004_collect_ollama "$secrets_file" "$role"
-            ;;
-        aws-bedrock)
-            _004_collect_bedrock "$secrets_file" "$role"
-            ;;
-        azure)
-            _004_collect_azure "$secrets_file" "$role"
-            ;;
-        *)
-            atomic_warn "Unknown provider: $provider"
-            ;;
-    esac
+    echo -e "  ${CYAN}Claude Max${NC}"
+    echo -e "  ${DIM}Uses your existing Claude subscription login${NC}"
+
+    # Check for existing credentials
+    local creds_file="$HOME/.claude/.credentials.json"
+    if [[ -f "$creds_file" ]]; then
+        echo -e "  ${GREEN}✓${NC} Claude login found"
+        local tmp=$(atomic_mktemp)
+        jq '.max_enabled = true' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
+        atomic_success "Claude Max ready"
+    else
+        echo -e "  ${YELLOW}!${NC} Not logged in"
+        echo -e "  ${DIM}Run 'claude' to login first, then re-run setup${NC}"
+        read -p "    Skip Max for now? [Y/n]: " skip_max
+        if [[ "$skip_max" =~ ^[Nn] ]]; then
+            atomic_warn "Please login with 'claude' command first"
+            return 1
+        fi
+    fi
 }
 
 # Anthropic API key collection
 _004_collect_anthropic() {
     local secrets_file="$1"
-    local role="$2"
     local key_name="anthropic_api_key"
-    [[ "$role" == "backup" ]] && key_name="anthropic_api_key_backup"
 
-    echo -e "  ${CYAN}Anthropic API Key${NC}"
+    echo -e "  ${CYAN}Anthropic API${NC}"
+
+    echo -e "  ${DIM}Pay-per-token API access${NC}"
 
     # Check environment variable first
     if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
@@ -139,12 +120,12 @@ _004_collect_anthropic() {
         if [[ ! "$use_env" =~ ^[Nn] ]]; then
             local tmp=$(atomic_mktemp)
             jq --arg key "$key_name" --arg val "$ANTHROPIC_API_KEY" '.[$key] = $val' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
-            atomic_success "Anthropic key saved (from env)"
+            atomic_success "Anthropic API key saved (from env)"
             return 0
         fi
     fi
 
-    echo -e "  ${DIM}Format: sk-ant-api03-...${NC}"
+    echo -e "  ${DIM}Format: sk-ant-...${NC}"
     read -s -p "    Key: " api_key
     echo ""
 
@@ -175,11 +156,9 @@ _004_collect_anthropic() {
 # OpenAI API key collection
 _004_collect_openai() {
     local secrets_file="$1"
-    local role="$2"
     local key_name="openai_api_key"
-    [[ "$role" == "backup" ]] && key_name="openai_api_key_backup"
 
-    echo -e "  ${CYAN}OpenAI API Key${NC}"
+    echo -e "  ${CYAN}OpenAI API${NC}"
 
     # Check environment variable first
     if [[ -n "${OPENAI_API_KEY:-}" ]]; then
@@ -223,11 +202,9 @@ _004_collect_openai() {
 # Google AI API key collection
 _004_collect_google() {
     local secrets_file="$1"
-    local role="$2"
     local key_name="google_api_key"
-    [[ "$role" == "backup" ]] && key_name="google_api_key_backup"
 
-    echo -e "  ${CYAN}Google AI API Key${NC}"
+    echo -e "  ${CYAN}Google AI API${NC}"
 
     # Check environment variable
     if [[ -n "${GOOGLE_API_KEY:-}" ]]; then
@@ -258,42 +235,69 @@ _004_collect_google() {
     atomic_success "Google AI key saved"
 }
 
-# Ollama (local) configuration
+# Ollama (local/LAN) configuration
 _004_collect_ollama() {
     local secrets_file="$1"
-    local role="$2"
 
-    echo -e "  ${CYAN}Ollama Configuration${NC}"
-    echo -e "  ${DIM}Ollama runs locally - no API key needed${NC}"
+    echo -e "  ${CYAN}Ollama (Local/LAN)${NC}"
+    echo -e "  ${DIM}Free local inference - no API key needed${NC}"
 
-    # Check if ollama is running
-    if command -v ollama &>/dev/null; then
-        echo -e "  ${GREEN}✓${NC} Ollama binary found"
-        if curl -s http://localhost:11434/api/tags &>/dev/null; then
-            echo -e "  ${GREEN}✓${NC} Ollama server is running"
-            local models=$(curl -s http://localhost:11434/api/tags | jq -r '.models[].name' 2>/dev/null | head -3 | tr '\n' ', ' | sed 's/,$//')
-            [[ -n "$models" ]] && echo -e "  ${DIM}Available models: $models${NC}"
-        else
-            atomic_warn "Ollama server not running (start with: ollama serve)"
-        fi
-    else
-        atomic_warn "Ollama not installed"
+    local hosts_found=()
+    local models_found=()
+
+    # Check localhost first
+    echo -e "  ${DIM}Scanning for Ollama servers...${NC}"
+    if curl -s --connect-timeout 2 http://localhost:11434/api/tags &>/dev/null; then
+        hosts_found+=("http://localhost:11434")
+        local models=$(curl -s http://localhost:11434/api/tags | jq -r '.models[].name' 2>/dev/null | head -5)
+        echo -e "  ${GREEN}✓${NC} localhost:11434"
+        for m in $models; do
+            echo -e "      ${DIM}$m${NC}"
+            models_found+=("$m")
+        done
     fi
 
-    read -p "    Ollama host [http://localhost:11434]: " ollama_host
-    ollama_host=${ollama_host:-http://localhost:11434}
+    # Report findings
+    if [[ ${#hosts_found[@]} -eq 0 ]]; then
+        echo -e "  ${YELLOW}!${NC} No Ollama servers found on localhost"
+        echo -e "  ${DIM}Start Ollama with: ollama serve${NC}"
+    fi
 
+    # Allow adding custom hosts
+    echo ""
+    echo -e "  ${DIM}Add additional Ollama hosts? (LAN servers, etc.)${NC}"
+    echo -e "  ${DIM}Enter hosts one per line, blank line to finish:${NC}"
+    while true; do
+        read -p "    Host: " custom_host
+        [[ -z "$custom_host" ]] && break
+
+        # Add http:// if missing
+        [[ "$custom_host" != http* ]] && custom_host="http://$custom_host"
+        # Add port if missing
+        [[ "$custom_host" != *:* ]] && custom_host="$custom_host:11434"
+
+        if curl -s --connect-timeout 2 "$custom_host/api/tags" &>/dev/null; then
+            echo -e "    ${GREEN}✓${NC} $custom_host responding"
+            hosts_found+=("$custom_host")
+        else
+            echo -e "    ${YELLOW}!${NC} $custom_host not responding (saved anyway)"
+            hosts_found+=("$custom_host")
+        fi
+    done
+
+    # Save all hosts
     local tmp=$(atomic_mktemp)
-    jq --arg val "$ollama_host" '.ollama_host = $val' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
-    atomic_success "Ollama configured"
+    local hosts_json=$(printf '%s\n' "${hosts_found[@]}" | jq -R . | jq -s .)
+    jq --argjson hosts "$hosts_json" '.ollama_hosts = $hosts' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
+
+    atomic_success "Ollama configured (${#hosts_found[@]} host(s))"
 }
 
 # AWS Bedrock configuration
 _004_collect_bedrock() {
     local secrets_file="$1"
-    local role="$2"
 
-    echo -e "  ${CYAN}AWS Bedrock Configuration${NC}"
+    echo -e "  ${CYAN}AWS Bedrock${NC}"
     echo -e "  ${DIM}Uses AWS credentials from environment or ~/.aws/credentials${NC}"
 
     # Check for existing AWS config
@@ -319,9 +323,8 @@ _004_collect_bedrock() {
 # Azure OpenAI configuration
 _004_collect_azure() {
     local secrets_file="$1"
-    local role="$2"
 
-    echo -e "  ${CYAN}Azure OpenAI Configuration${NC}"
+    echo -e "  ${CYAN}Azure OpenAI${NC}"
 
     read -p "    Endpoint URL: " azure_endpoint
     read -p "    Deployment Name: " azure_deployment

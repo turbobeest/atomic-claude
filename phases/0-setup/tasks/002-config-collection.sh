@@ -172,7 +172,7 @@ PROMPT_HEADER
   "project": {
     "name": "string (max 24 chars)",
     "description": "string",
-    "type": "new-monorepo|new-component|new-library|new-api|new-cli|existing|migration|refactor",
+    "type": "new-component|new-frontend|new-api|new-cli|new-library|new-monorepo|existing|migration|refactor",
     "primary_goal": "string"
   },
   "repository": {
@@ -409,24 +409,26 @@ task_002_config_guided() {
     # --- Project Type ---
     echo -e "${CYAN}  Project Type${NC}"
     echo -e "    ${DIM}1.${NC} new-component  - Standalone service/module"
-    echo -e "    ${DIM}2.${NC} new-monorepo   - Multi-package repository"
-    echo -e "    ${DIM}3.${NC} new-library    - Shared library/package"
-    echo -e "    ${DIM}4.${NC} new-api        - API service"
-    echo -e "    ${DIM}5.${NC} new-cli        - Command-line tool"
-    echo -e "    ${DIM}6.${NC} existing       - Add to existing codebase"
-    echo -e "    ${DIM}7.${NC} migration      - Technology migration"
+    echo -e "    ${DIM}2.${NC} new-frontend   - Web/mobile UI application"
+    echo -e "    ${DIM}3.${NC} new-api        - Backend API service"
+    echo -e "    ${DIM}4.${NC} new-cli        - Command-line tool"
+    echo -e "    ${DIM}5.${NC} new-library    - Shared library/package"
+    echo -e "    ${DIM}6.${NC} new-monorepo   - Multi-package repository"
+    echo -e "    ${DIM}7.${NC} existing       - Add to existing codebase"
+    echo -e "    ${DIM}8.${NC} migration      - Technology migration"
     local project_type=""
     while true; do
         read -p "    Type [1]: " type_choice
         type_choice=${type_choice:-1}
         case "$type_choice" in
             1) project_type="new-component" ;;
-            2) project_type="new-monorepo" ;;
-            3) project_type="new-library" ;;
-            4) project_type="new-api" ;;
-            5) project_type="new-cli" ;;
-            6) project_type="existing" ;;
-            7) project_type="migration" ;;
+            2) project_type="new-frontend" ;;
+            3) project_type="new-api" ;;
+            4) project_type="new-cli" ;;
+            5) project_type="new-library" ;;
+            6) project_type="new-monorepo" ;;
+            7) project_type="existing" ;;
+            8) project_type="migration" ;;
             *) atomic_error "Invalid choice"; continue ;;
         esac
         break
@@ -452,9 +454,9 @@ task_002_config_guided() {
 
     # --- Pipeline Mode ---
     echo -e "${CYAN}  Pipeline Mode${NC}"
-    echo -e "    ${DIM}1.${NC} component  - Skip deployment (phases 0-8)"
-    echo -e "    ${DIM}2.${NC} full       - All phases including deployment"
-    echo -e "    ${DIM}3.${NC} library    - Minimal for packages"
+    echo -e "    ${DIM}1.${NC} component  - Build and test, no deployment"
+    echo -e "    ${DIM}2.${NC} full       - Complete pipeline including deployment"
+    echo -e "    ${DIM}3.${NC} library    - Minimal for shared packages"
     echo -e "    ${DIM}4.${NC} prototype  - Quick validation only"
     local pipeline_mode=""
     while true; do
@@ -575,12 +577,7 @@ task_002_config_quick() {
     atomic_step "Quick Configuration"
 
     echo ""
-    echo -e "${DIM}  ┌─────────────────────────────────────────────────────────┐${NC}"
-    echo -e "${DIM}  │ QUICK MODE: Minimal input, sensible defaults            │${NC}"
-    echo -e "${DIM}  │                                                         │${NC}"
-    echo -e "${DIM}  │ Just provide a project name and optional goal.          │${NC}"
-    echo -e "${DIM}  │ Everything else will use production-ready defaults.     │${NC}"
-    echo -e "${DIM}  └─────────────────────────────────────────────────────────┘${NC}"
+    echo -e "  ${DIM}Using sensible defaults. Just name your project.${NC}"
     echo ""
 
     # --- Project Name (required) ---

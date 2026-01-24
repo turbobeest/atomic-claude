@@ -158,8 +158,17 @@ EOF
     wopr_type "for deterministic software development" "$TYPING_SPEED_FAST"
     echo -e "${NC}"
 
-    sleep "$DRAMATIC_PAUSE"
+    sleep "$LINE_PAUSE"
     echo ""
+
+    # Brief intro
+    echo -e "${WOPR_DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "    ${WOPR_DIM}ATOMIC CLAUDE guides you through a 10-phase pipeline:${NC}"
+    echo -e "    ${WOPR_DIM}Setup → Discovery → PRD → Tasks → Spec → Build → Review →${NC}"
+    echo -e "    ${WOPR_DIM}Integration → Deployment Prep → Release${NC}"
+    echo ""
+    echo -e "    ${WOPR_DIM}You stay in control. The script orchestrates; Claude assists.${NC}"
     echo ""
 
     # System info

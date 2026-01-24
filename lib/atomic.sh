@@ -317,6 +317,128 @@ atomic_closeout_banner() {
 }
 
 # ============================================================================
+# STICKY MODE INDICATOR BAR
+# ============================================================================
+
+# Track if sticky bar is active
+_ATOMIC_STICKY_BAR_ACTIVE=false
+
+# Initialize sticky mode bar (reserves line 0 for the bar)
+# Call once at start of LLM task
+atomic_mode_bar_init() {
+    local provider="${1:-$CLAUDE_PROVIDER}"
+    local model="${2:-$CLAUDE_MODEL}"
+
+    _ATOMIC_STICKY_BAR_ACTIVE=true
+    _ATOMIC_STICKY_PROVIDER="$provider"
+    _ATOMIC_STICKY_MODEL="$model"
+
+    # Set up scroll region to leave line 0 for the bar
+    tput sc              # Save cursor
+    tput cup 0 0         # Move to top
+    tput el              # Clear line
+    _atomic_render_mode_bar "$provider" "$model"
+    tput csr 1 $(($(tput lines) - 1))  # Set scroll region (line 1 to bottom)
+    tput rc              # Restore cursor
+    tput cup 1 0         # Move to line 1
+}
+
+# Update the sticky mode bar (call when status changes)
+atomic_mode_bar_update() {
+    local provider="${1:-$_ATOMIC_STICKY_PROVIDER}"
+    local model="${2:-$_ATOMIC_STICKY_MODEL}"
+
+    [[ "$_ATOMIC_STICKY_BAR_ACTIVE" != "true" ]] && return
+
+    tput sc              # Save cursor
+    tput cup 0 0         # Move to top
+    _atomic_render_mode_bar "$provider" "$model"
+    tput rc              # Restore cursor
+}
+
+# Remove sticky mode bar and restore normal scrolling
+atomic_mode_bar_clear() {
+    [[ "$_ATOMIC_STICKY_BAR_ACTIVE" != "true" ]] && return
+
+    _ATOMIC_STICKY_BAR_ACTIVE=false
+    tput csr 0 $(($(tput lines) - 1))  # Reset scroll region to full screen
+    tput sc
+    tput cup 0 0
+    tput el              # Clear the bar line
+    tput rc
+}
+
+# Render the mode bar content (internal)
+_atomic_render_mode_bar() {
+    local provider="${1:-$CLAUDE_PROVIDER}"
+    local model="${2:-$CLAUDE_MODEL}"
+    local width="${COLUMNS:-$(tput cols)}"
+
+    # Determine mode label, status, and color based on provider
+    local mode_label status_label bg_color fg_color
+    local is_online=false
+
+    case "$provider" in
+        max)
+            mode_label="MAX MODE"
+            # Check if we have credentials
+            if [[ -f "$HOME/.claude/.credentials.json" ]]; then
+                is_online=true
+            fi
+            ;;
+        api)
+            mode_label="API MODE"
+            # Check if API key is set
+            if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+                is_online=true
+            fi
+            ;;
+        ollama)
+            mode_label="OLLAMA MODE"
+            # Check if Ollama is reachable
+            if curl -s --connect-timeout 1 "${CLAUDE_OLLAMA_HOST:-http://localhost:11434}/api/tags" &>/dev/null 2>&1; then
+                is_online=true
+            fi
+            ;;
+        *)
+            mode_label="LOCAL MODE"
+            ;;
+    esac
+
+    # Set colors based on online/offline status
+    if $is_online; then
+        status_label="online"
+        bg_color='\033[42m'  # Green background
+        fg_color='\033[97m'  # Bright white text
+    else
+        status_label="OFFLINE"
+        bg_color='\033[41m'  # Red background
+        fg_color='\033[97m'  # Bright white text
+    fi
+
+    # Build the bar content
+    local content="  ${mode_label}   |   ${model}   |   ${status_label}  "
+    local content_len=${#content}
+    local padding=$(( (width - content_len) / 2 ))
+    [[ $padding -lt 0 ]] && padding=0
+    local left_pad=$(printf '%*s' "$padding" '')
+    local right_pad=$(printf '%*s' "$((width - content_len - padding))" '')
+
+    # Print the bar (no newline - we're on line 0)
+    echo -ne "${bg_color}${fg_color}${BOLD}${left_pad}${content}${right_pad}${NC}"
+}
+
+# Simple non-sticky mode bar (fallback for non-interactive)
+atomic_mode_bar_simple() {
+    local provider="${1:-$CLAUDE_PROVIDER}"
+    local model="${2:-$CLAUDE_MODEL}"
+
+    echo ""
+    _atomic_render_mode_bar "$provider" "$model"
+    echo ""
+}
+
+# ============================================================================
 # LEGACY ALIASES (map old functions to new style)
 # ============================================================================
 
@@ -614,7 +736,16 @@ $stdin_content"
     # Create output directory if needed
     mkdir -p "$(dirname "$output_file")"
 
-    atomic_waiting "Invoking Claude via $provider..."
+    # Show sticky mode indicator bar (green=online, red=offline)
+    if [[ -t 1 ]]; then
+        # Interactive terminal - use sticky bar
+        atomic_mode_bar_init "$provider" "$model"
+    else
+        # Non-interactive - use simple bar
+        atomic_mode_bar_simple "$provider" "$model"
+    fi
+
+    atomic_waiting "Invoking Claude..."
     echo ""
 
     # Build the invocation command using claude-local wrapper
@@ -662,6 +793,9 @@ $stdin_content"
     log_file=$(atomic_log_file)
     mkdir -p "$(dirname "$log_file")"
     echo "[$(date -Iseconds)] task=\"$description\" provider=$provider model=$model duration=${duration}s exit=$exit_code output=$output_file" >> "$log_file"
+
+    # Clear sticky mode bar before reporting results
+    atomic_mode_bar_clear
 
     if [[ $exit_code -eq 0 ]]; then
         atomic_success "Claude completed task (${duration}s)"

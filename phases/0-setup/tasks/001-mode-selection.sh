@@ -51,62 +51,25 @@ task_001_mode_selection() {
     done < <(find . -maxdepth 1 -type f -print0 2>/dev/null)
     [[ $file_count -lt 5 ]] && is_greenfield=true
 
-    # Display mode selection
-    echo ""
-    echo -e "${DIM}  ┌─────────────────────────────────────────────────────────┐${NC}"
-    echo -e "${DIM}  │ Choose how to configure this project:                   │${NC}"
-    echo -e "${DIM}  │                                                         │${NC}"
-
-    # DOCUMENT mode
-    if [[ -n "$detected_setup" ]]; then
-        echo -e "${DIM}  │${NC} ${GREEN}DOCUMENT MODE${NC} ${DIM}← setup detected${NC}                         ${DIM}│${NC}"
-        echo -e "${DIM}  │   Found: $detected_setup${NC}                               ${DIM}│${NC}"
-    else
-        echo -e "${DIM}  │ DOCUMENT MODE                                           │${NC}"
-        echo -e "${DIM}  │   Configure initialization/ files with project details. │${NC}"
-    fi
-    echo -e "${DIM}  │   Claude extracts configuration in one pass.            │${NC}"
-    echo -e "${DIM}  │                                                         │${NC}"
-
-    # GUIDED mode
-    echo -e "${DIM}  │ GUIDED MODE (recommended for first-time users)          │${NC}"
-    echo -e "${DIM}  │   Answer questions interactively, learn the pipeline.   │${NC}"
-    echo -e "${DIM}  │                                                         │${NC}"
-
-    # QUICK mode
-    if $is_greenfield; then
-        echo -e "${DIM}  │${NC} ${CYAN}QUICK MODE${NC} ${DIM}← greenfield detected${NC}                        ${DIM}│${NC}"
-    else
-        echo -e "${DIM}  │ QUICK MODE                                              │${NC}"
-    fi
-    echo -e "${DIM}  │   Use sensible defaults, minimal questions.             │${NC}"
-    echo -e "${DIM}  │   Best for new projects or rapid prototyping.           │${NC}"
-    echo -e "${DIM}  │                                                         │${NC}"
-    echo -e "${DIM}  └─────────────────────────────────────────────────────────┘${NC}"
-    echo ""
-
     # Determine smart default
     local default_choice="2"  # Guided by default
-    local default_label="guided"
     if [[ -n "$detected_setup" ]]; then
         default_choice="1"
-        default_label="document"
     elif $is_greenfield; then
         default_choice="3"
-        default_label="quick"
     fi
 
-    echo -e "  ${CYAN}1.${NC} ${BOLD}DOCUMENT${NC}  - Parse initialization files (1 LLM call)"
-    echo -e "  ${CYAN}2.${NC} ${BOLD}GUIDED${NC}    - Interactive Q&A (step by step)"
-    echo -e "  ${CYAN}3.${NC} ${BOLD}QUICK${NC}     - Sensible defaults (minimal input)"
+    # Display consolidated mode selection
     echo ""
-
-    # Setup hint
-    if [[ -z "$detected_setup" ]]; then
-        echo -e "  ${DIM}No setup.md found. Configure initialization/ files first.${NC}"
-        echo -e "  ${DIM}  See: ${ATOMIC_ROOT}/initialization/${NC}"
-        echo ""
+    echo -e "  ${BOLD}How do you want to configure this project?${NC}"
+    echo ""
+    echo -e "  ${CYAN}1.${NC} ${BOLD}DOCUMENT${NC}  - Parse initialization files (1 LLM call)"
+    if [[ -n "$detected_setup" ]]; then
+        echo -e "     ${DIM}Found: $detected_setup${NC}"
     fi
+    echo -e "  ${CYAN}2.${NC} ${BOLD}GUIDED${NC}    - Interactive Q&A, step by step"
+    echo -e "  ${CYAN}3.${NC} ${BOLD}QUICK${NC}     - Sensible defaults, minimal input"
+    echo ""
 
     while true; do
         read -p "  Select mode [$default_choice]: " choice
