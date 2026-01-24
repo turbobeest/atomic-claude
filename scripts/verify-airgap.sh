@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# Verify airgapped model availability
-# Run this before operating in offline/airgapped mode
+# Verify LLM availability for airgapped/offline operation
+# Supports local and LAN Ollama servers
 #
 
 set -euo pipefail
@@ -9,143 +9,173 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 
+# Source availability library
+source "$ROOT_DIR/lib/llm-availability.sh" 2>/dev/null || {
+    echo "ERROR: Could not load llm-availability.sh"
+    exit 1
+}
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 CYAN='\033[0;36m'
 DIM='\033[2m'
+BOLD='\033[1m'
 NC='\033[0m'
 
-# Model tiers
-REQUIRED_MODELS=(
-    "devstral:24b"
-    "llama3.2:3b"
-)
-
-RECOMMENDED_MODELS=(
-    "llama3.1:8b"
-    "codellama:13b"
-    "phi3:mini"
-)
-
-OPTIONAL_MODELS=(
-    "llama3.1:70b"
-    "qwen2:7b"
-    "mixtral:8x7b"
-    "codellama:34b"
+# Required models (at least one must be available somewhere)
+REQUIRED_CAPABILITIES=(
+    "code"      # For implementation
+    "reasoning" # For planning/review
+    "fast"      # For validation
 )
 
 echo ""
 echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
-echo -e "${CYAN}  AIRGAPPED MODEL VERIFICATION${NC}"
+echo -e "${CYAN}  LLM AVAILABILITY CHECK${NC}"
 echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
 echo ""
 
-# Check Ollama connectivity
-OLLAMA_HOST="${OLLAMA_HOST:-http://localhost:11434}"
-echo -e "Checking Ollama at ${DIM}$OLLAMA_HOST${NC}..."
+# ============================================================================
+# CHECK CLAUDE PROVIDERS
+# ============================================================================
 
-if ! curl -s --connect-timeout 5 "$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
-    echo -e "${RED}ERROR: Ollama not running or not reachable${NC}"
-    echo ""
-    echo "Start Ollama with: ollama serve"
-    echo "Or set OLLAMA_HOST environment variable"
-    exit 1
+echo -e "${BOLD}Claude Providers${NC}"
+echo ""
+
+max_status=$(_llm_check_claude_max)
+api_status=$(_llm_check_claude_api)
+
+if [[ "$max_status" == "available" ]]; then
+    echo -e "  ${GREEN}●${NC} Claude Max: ${GREEN}available${NC} (opus, sonnet)"
+    CLAUDE_AVAILABLE=true
+else
+    echo -e "  ${DIM}○${NC} Claude Max: unavailable"
+    CLAUDE_AVAILABLE=false
 fi
 
-echo -e "${GREEN}✓${NC} Ollama connected"
+if [[ "$api_status" == "available" ]]; then
+    echo -e "  ${GREEN}●${NC} Claude API: ${GREEN}available${NC} (opus, sonnet, haiku)"
+    CLAUDE_AVAILABLE=true
+else
+    echo -e "  ${DIM}○${NC} Claude API: unavailable"
+fi
+
 echo ""
 
-# Get available models
-AVAILABLE_MODELS=$(curl -s "$OLLAMA_HOST/api/tags" | jq -r '.models[].name' 2>/dev/null || echo "")
+# ============================================================================
+# CHECK OLLAMA SERVERS
+# ============================================================================
 
-check_model() {
-    local model="$1"
-    local base_model="${model%%:*}"
+echo -e "${BOLD}Ollama Servers${NC}"
+echo ""
 
-    # Check exact match first
-    if echo "$AVAILABLE_MODELS" | grep -q "^$model$"; then
-        return 0
-    fi
+OLLAMA_AVAILABLE=false
+AVAILABLE_MODELS=()
 
-    # Check for any version of this model
-    if echo "$AVAILABLE_MODELS" | grep -q "^$base_model"; then
-        return 0
-    fi
+while IFS= read -r host; do
+    [[ -z "$host" ]] && continue
 
-    return 1
-}
+    host_info=$(_llm_check_ollama_host "$host")
+    status=$(echo "$host_info" | jq -r '.status')
 
-# Check required models
-echo -e "${CYAN}Required Models${NC} (must have for basic operation):"
-required_missing=0
-for model in "${REQUIRED_MODELS[@]}"; do
-    if check_model "$model"; then
-        echo -e "  ${GREEN}✓${NC} $model"
+    if [[ "$status" == "available" ]]; then
+        models=$(echo "$host_info" | jq -r '.models | join(", ")')
+        model_count=$(echo "$host_info" | jq -r '.models | length')
+        echo -e "  ${GREEN}●${NC} $host: ${GREEN}$model_count models${NC}"
+        echo -e "     ${DIM}$models${NC}"
+        OLLAMA_AVAILABLE=true
+
+        # Collect models
+        while IFS= read -r model; do
+            [[ -n "$model" ]] && AVAILABLE_MODELS+=("$model")
+        done < <(echo "$host_info" | jq -r '.models[]')
     else
-        echo -e "  ${RED}✗${NC} $model ${DIM}(MISSING)${NC}"
-        ((required_missing++))
+        echo -e "  ${DIM}○${NC} $host: unreachable"
     fi
-done
+done < <(_llm_get_ollama_hosts)
+
+if [[ ${#AVAILABLE_MODELS[@]} -eq 0 ]] && [[ "$OLLAMA_AVAILABLE" == "false" ]]; then
+    echo -e "  ${DIM}(no servers responding)${NC}"
+fi
+
 echo ""
 
-# Check recommended models
-echo -e "${CYAN}Recommended Models${NC} (for full capability):"
-recommended_missing=0
-for model in "${RECOMMENDED_MODELS[@]}"; do
-    if check_model "$model"; then
-        echo -e "  ${GREEN}✓${NC} $model"
+# ============================================================================
+# CHECK AGENT READINESS
+# ============================================================================
+
+echo -e "${BOLD}Agent Readiness${NC}"
+echo ""
+
+# Refresh availability cache
+llm_refresh_availability >/dev/null 2>&1
+
+agents_config="$ROOT_DIR/config/agents.json"
+if [[ ! -f "$agents_config" ]]; then
+    echo -e "  ${YELLOW}!${NC} agents.json not found - skipping agent check"
+else
+    ready=0
+    blocked=0
+    blocked_agents=()
+
+    while IFS= read -r agent; do
+        if llm_can_agent_run "$agent" 2>/dev/null; then
+            ((ready++))
+        else
+            ((blocked++))
+            blocked_agents+=("$agent")
+        fi
+    done < <(jq -r '.agents | keys[]' "$agents_config")
+
+    if [[ $blocked -eq 0 ]]; then
+        echo -e "  ${GREEN}✓${NC} All $ready agents can run with available models"
     else
-        echo -e "  ${YELLOW}○${NC} $model ${DIM}(optional)${NC}"
-        ((recommended_missing++))
+        echo -e "  ${GREEN}✓${NC} $ready agents ready"
+        echo -e "  ${YELLOW}!${NC} $blocked agents blocked (no suitable model):"
+        for agent in "${blocked_agents[@]:0:5}"; do
+            tier=$(jq -r ".agents[\"$agent\"].model_preference.tier" "$agents_config")
+            echo -e "     ${DIM}- $agent (needs: $tier)${NC}"
+        done
+        if [[ $blocked -gt 5 ]]; then
+            echo -e "     ${DIM}... and $((blocked - 5)) more${NC}"
+        fi
     fi
-done
+fi
+
 echo ""
 
-# Check optional models
-echo -e "${CYAN}Optional Models${NC} (for advanced tasks):"
-optional_available=0
-for model in "${OPTIONAL_MODELS[@]}"; do
-    if check_model "$model"; then
-        echo -e "  ${GREEN}✓${NC} $model"
-        ((optional_available++))
-    else
-        echo -e "  ${DIM}○ $model${NC}"
-    fi
-done
-echo ""
+# ============================================================================
+# SUMMARY
+# ============================================================================
 
-# Summary
 echo -e "${CYAN}═══════════════════════════════════════════════════════════════${NC}"
 echo ""
 
-if [[ $required_missing -gt 0 ]]; then
-    echo -e "${RED}AIRGAPPED MODE: NOT READY${NC}"
+if [[ "$CLAUDE_AVAILABLE" == "true" ]]; then
+    echo -e "${GREEN}STATUS: FULLY OPERATIONAL${NC}"
     echo ""
-    echo "Missing required models. Run:"
-    for model in "${REQUIRED_MODELS[@]}"; do
-        if ! check_model "$model"; then
-            echo "  ollama pull $model"
-        fi
-    done
-    exit 1
-elif [[ $recommended_missing -gt 0 ]]; then
-    echo -e "${YELLOW}AIRGAPPED MODE: PARTIAL${NC}"
+    echo "Claude is available. All features supported."
+    exit 0
+elif [[ "$OLLAMA_AVAILABLE" == "true" ]]; then
+    echo -e "${YELLOW}STATUS: AIRGAPPED MODE${NC}"
     echo ""
-    echo "Basic operation available, but consider pulling:"
-    for model in "${RECOMMENDED_MODELS[@]}"; do
-        if ! check_model "$model"; then
-            echo "  ollama pull $model"
-        fi
-    done
+    echo "Operating with Ollama models only."
+    echo "Some agents may have reduced capability."
+    echo ""
+    echo -e "${DIM}To add more models, run on any Ollama server:${NC}"
+    echo "  ollama pull devstral:24b"
+    echo "  ollama pull llama3.1:8b"
     exit 0
 else
-    echo -e "${GREEN}AIRGAPPED MODE: READY${NC}"
+    echo -e "${RED}STATUS: NO LLM AVAILABLE${NC}"
     echo ""
-    echo "All required and recommended models available."
-    if [[ $optional_available -lt ${#OPTIONAL_MODELS[@]} ]]; then
-        echo -e "${DIM}Optional models can be added for heavy reasoning tasks.${NC}"
-    fi
-    exit 0
+    echo "Neither Claude nor Ollama is accessible."
+    echo ""
+    echo "Options:"
+    echo "  1. Login to Claude: claude login"
+    echo "  2. Start local Ollama: ollama serve"
+    echo "  3. Add LAN Ollama to: config/ollama-hosts.json"
+    exit 1
 fi
