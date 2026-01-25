@@ -793,15 +793,15 @@ digraph $diagram_type {
         style="rounded,filled"
         fillcolor="#F5F5F5"
 
-        component_a [label="Component A"]
-        component_b [label="Component B"]
-        component_c [label="Component C"]
+        component_a [label="Component A\n[Customize]"]
+        component_b [label="Component B\n[Customize]"]
+        component_c [label="Component C\n[Customize]"]
     }
 
     component_a -> component_b [label="relates to"]
     component_b -> component_c [label="uses"]
 
-    // TODO: Replace with actual $diagram_type content
+    // This is a starter template - regenerate with LLM for full detail
 }
 EOF
             ;;
