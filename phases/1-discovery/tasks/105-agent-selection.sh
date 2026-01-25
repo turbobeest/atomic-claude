@@ -43,7 +43,7 @@ _105_load_agent_config() {
     # Fall back to environment variable or default
     AGENT_REPO="${AGENT_REPO:-${AGENT_REPO_PATH:-$default_repo}}"
     AGENT_MANIFEST="$AGENT_REPO/agent-manifest.json"
-    PIPELINE_AGENTS_DIR="$AGENT_REPO/pipeline-agents/-dev-system"
+    PIPELINE_AGENTS_DIR="$AGENT_REPO/pipeline-agents/atomic-claude"
     EXPERT_AGENTS_DIR="$AGENT_REPO/expert-agents"
 }
 
@@ -125,7 +125,7 @@ EOF
                 if [[ -f "$custom_path/agent-manifest.json" ]]; then
                     AGENT_REPO="$custom_path"
                     AGENT_MANIFEST="$AGENT_REPO/agent-manifest.json"
-                    PIPELINE_AGENTS_DIR="$AGENT_REPO/pipeline-agents/-dev-system"
+                    PIPELINE_AGENTS_DIR="$AGENT_REPO/pipeline-agents/atomic-claude"
                     EXPERT_AGENTS_DIR="$AGENT_REPO/expert-agents"
                 else
                     echo -e "  ${YELLOW}!${NC} Manifest not found - using defaults"

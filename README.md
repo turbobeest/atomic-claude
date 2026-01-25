@@ -121,8 +121,4 @@ Options:
 | **Code generation** | write tests | **Yes** |
 | **Review** | security audit | **Yes** |
 
-~85% of dev-sys tasks are deterministic. ATOMIC CLAUDE only invokes the LLM for the ~15% that truly require it.
-
-## See Also
-
-- [REFACTOR-PLAN.md](./REFACTOR-PLAN.md) - Full migration strategy from dev-sys
+~85% of software development tasks are deterministic. ATOMIC CLAUDE only invokes the LLM for the ~15% that truly require it.
