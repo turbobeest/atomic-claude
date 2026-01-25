@@ -218,16 +218,17 @@ EOF
     # Build agent suggestion prompt
     local suggestion_prompt="$prompts_dir/agent-suggestion.md"
 
-    # Extract full agent list from manifest (not just categories)
+    # Extract full agent list from manifest, grouped by category/subcategory
     local agent_list=""
     if [[ -f "$AGENT_MANIFEST" ]]; then
         agent_list=$(jq -r '
-            .categories | to_entries[] |
-            "### \(.value.title)\n\(.value.description)\n" +
-            (.value.subcategories | to_entries | map(
-                "**\(.value.title):**\n" +
-                (.value.agents | map("- " + .) | join("\n"))
-            ) | join("\n\n"))
+            .agents | group_by(.category) | map(
+                "### " + .[0].category + "\n" +
+                (group_by(.subcategory) | map(
+                    (if .[0].subcategory != "" then "**" + .[0].subcategory + ":**\n" else "" end) +
+                    (map("- " + .name + " (" + .tier + "): " + (.description | .[0:70])) | join("\n"))
+                ) | join("\n\n"))
+            ) | join("\n\n---\n\n")
         ' "$AGENT_MANIFEST" 2>/dev/null)
     fi
 
