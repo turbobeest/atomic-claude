@@ -11,6 +11,10 @@ SCRIPT ──prompt.md──► CLAUDE ──output.json──► SCRIPT ──p
 [state.json]                                 [state.json]
 ```
 
+<img width="2816" height="1536" alt="Gemini_Generated_Image_ewch6tewch6tewch" src="https://github.com/user-attachments/assets/deb5bc34-cd3c-42cd-bf0f-ab08f9644215" />
+
+
+
 ## Philosophy
 
 - **Atomic**: Indivisible units of work. One task, one outcome, no side quests.
