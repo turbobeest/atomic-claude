@@ -21,6 +21,47 @@ task_704_testing_execution() {
     echo ""
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # SKILL LOADING: WEBAPP-TESTING (conditional)
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    local webapp_skill_content=""
+    local webapp_skill_path="$ATOMIC_ROOT/skills/webapp-testing/SKILL.md"
+    local is_web_project=false
+
+    # Detect if this is a web project
+    if [[ -f "$ATOMIC_ROOT/package.json" ]]; then
+        # Check for frontend frameworks
+        if grep -qE '"(react|vue|angular|svelte|next|nuxt|vite)"' "$ATOMIC_ROOT/package.json" 2>/dev/null; then
+            is_web_project=true
+        fi
+    fi
+
+    # Also check for common frontend indicators
+    if [[ -d "$ATOMIC_ROOT/src" ]] && find "$ATOMIC_ROOT/src" -name "*.tsx" -o -name "*.jsx" -o -name "*.vue" 2>/dev/null | head -1 | grep -q .; then
+        is_web_project=true
+    fi
+
+    # Load skill if web project detected
+    if [[ "$is_web_project" == "true" && -f "$webapp_skill_path" ]]; then
+        echo -e "  ${CYAN}╭─────────────────────────────────────────────────────────╮${NC}"
+        echo -e "  ${CYAN}│${NC} ${BOLD}SKILL: webapp-testing${NC}                                  ${CYAN}│${NC}"
+        echo -e "  ${CYAN}╰─────────────────────────────────────────────────────────╯${NC}"
+        echo -e "  ${DIM}Web project detected - loading Playwright testing skill${NC}"
+        echo ""
+
+        webapp_skill_content=$(cat "$webapp_skill_path")
+
+        # Ensure with_server.py is executable
+        local server_script="$ATOMIC_ROOT/skills/webapp-testing/scripts/with_server.py"
+        [[ -f "$server_script" ]] && chmod +x "$server_script"
+
+        echo -e "  ${GREEN}✓${NC} Loaded webapp-testing skill"
+        echo -e "  ${DIM}  • Playwright patterns available${NC}"
+        echo -e "  ${DIM}  • Server lifecycle management (with_server.py)${NC}"
+        echo ""
+    fi
+
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # LOAD INTEGRATION AGENTS FROM TASK 703 SELECTION
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -114,6 +155,23 @@ You are an E2E test runner agent analyzing project integration.
 PROMPT
     fi
 
+    # Inject webapp-testing skill if loaded
+    if [[ -n "$webapp_skill_content" ]]; then
+        cat >> "$e2e_prompt_file" << SKILL
+
+---
+
+## Skill: webapp-testing
+
+Use the following Playwright patterns and server management utilities for E2E testing:
+
+$webapp_skill_content
+
+**Available script:** \`$ATOMIC_ROOT/skills/webapp-testing/scripts/with_server.py\`
+
+SKILL
+    fi
+
     cat >> "$e2e_prompt_file" << PROMPT
 
 ## Project Context
@@ -124,6 +182,8 @@ $project_context
 
 Analyze the project and identify E2E test flows. For each flow, determine if it would pass or fail based on the implementation.
 
+$(if [[ -n "$webapp_skill_content" ]]; then echo "If this is a web application, use the webapp-testing skill patterns (Playwright, with_server.py) to design executable tests."; fi)
+
 Return your analysis as JSON:
 \`\`\`json
 {
@@ -132,6 +192,9 @@ Return your analysis as JSON:
   "failed": <number failing>,
   "flows": [
     {"name": "flow name", "status": "PASS|FAIL", "reason": "brief reason"}
+  ],
+  "playwright_tests": [
+    {"name": "test name", "script": "python code using playwright patterns from skill"}
   ]
 }
 \`\`\`
