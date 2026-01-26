@@ -121,7 +121,7 @@ Configure in `config/models.json`:
       "enabled": true,
       "host": "http://localhost:11434",
       "default_model": "devstral:24b",
-      "context_length": 32768
+      "context_length": 65536
     }
   }
 }
