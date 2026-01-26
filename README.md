@@ -45,35 +45,73 @@ SCRIPT ──prompt.md──► CLAUDE ──output.json──► SCRIPT ──p
 # 5. Move to next phase
 ```
 
+## Hybrid LLM Support
+
+Atomic Claude supports multiple LLM providers with automatic fallback:
+
+| Provider | Mode | Use Case |
+|----------|------|----------|
+| **Claude Max** | Subscription-based | Primary workhorse (no per-token cost) |
+| **Claude API** | Pay-per-token | On-demand / CI environments |
+| **Ollama** | Local / Airgapped | Offline operation, fast tasks, cost-free |
+
+Provider routing is configured in `config/models.json`:
+
+```
+┌─────────────────────────────────────────────┐
+│  Role Routing                               │
+│  primary:    max → api → ollama             │
+│  fast:       ollama (llama3.2:3b)           │
+│  gardener:   ollama (phi3:mini)             │
+│  heavyweight: max → api                     │
+└─────────────────────────────────────────────┘
+```
+
+The **mode bar** displays the active provider and model during LLM invocations:
+
+```
+ MAX MODE │ sonnet │ online   ← green bar when connected
+ OLLAMA   │ devstral:24b │ airgapped  ← when running offline
+```
+
+Fallback is automatic: if Claude Max is unavailable, the system tries Claude API, then Ollama with tier-appropriate model selection (opus → llama3.1:70b, sonnet → devstral:24b, haiku → llama3.2:3b).
+
 ## Structure
 
 ```
 ATOMIC-CLAUDE/
-├── main.sh            # CLI entry point
+├── main.sh              # CLI entry point
 ├── lib/
-│   ├── atomic.sh      # Core invocation: atomic_invoke()
-│   ├── phase.sh       # Phase lifecycle management
-│   ├── audit.sh       # Phase auditing system
-│   └── intro.sh       # Terminal UI effects
+│   ├── atomic.sh        # Core invocation: atomic_invoke(), mode bar UI
+│   ├── phase.sh         # Phase lifecycle management
+│   ├── provider.sh      # Multi-provider routing & health checks
+│   ├── llm-availability.sh  # Model discovery & fallback chains
+│   ├── task-state.sh    # Task state machine (pending→running→done)
+│   ├── audit.sh         # Phase auditing system
+│   └── intro.sh         # Terminal UI effects
 │
 ├── config/
-│   └── models.json    # Provider & model configuration
+│   └── models.json      # Provider, model & fallback configuration
+│
+├── skills/
+│   └── webapp-testing/  # Playwright E2E patterns (auto-loaded for web projects)
 │
 ├── phases/
-│   ├── 0-setup/       # Project initialization
-│   ├── 1-discovery/   # Requirements gathering
-│   ├── 2-prd/         # PRD authoring
-│   ├── 3-tasking/     # Task decomposition
+│   ├── 0-setup/         # Project initialization
+│   ├── 1-discovery/     # Requirements gathering & agent selection
+│   ├── 2-prd/           # PRD authoring
+│   ├── 3-tasking/       # Task decomposition
 │   ├── 4-specification/ # OpenSpec generation
 │   ├── 5-implementation/ # TDD cycles
-│   ├── 6-code-review/ # Review & refinement
-│   ├── 7-integration/ # Integration testing
+│   ├── 6-code-review/   # Review & refinement
+│   ├── 7-integration/   # Integration testing & E2E
 │   ├── 8-deployment-prep/ # Release preparation
-│   └── 9-release/     # Deployment
+│   └── 9-release/       # Deployment
 │
-├── .claude/           # Runtime state
-├── .outputs/          # Phase outputs
-└── .logs/             # Invocation logs
+├── docs/                # Architecture & airgapped model docs
+├── .claude/             # Runtime state
+├── .outputs/            # Phase outputs
+└── .logs/               # Invocation logs
 ```
 
 ## Using the Library
@@ -126,3 +164,49 @@ Options:
 | **Review** | security audit | **Yes** |
 
 ~85% of software development tasks are deterministic. ATOMIC CLAUDE only invokes the LLM for the ~15% that truly require it.
+
+## Skills
+
+Skills are domain-specific knowledge modules loaded at the task level. When a task detects a relevant project type, it automatically injects the corresponding skill content into the LLM prompt.
+
+| Skill | Auto-Detected When | Loaded By |
+|-------|-------------------|-----------|
+| `webapp-testing` | package.json contains React/Vue/Angular/Svelte/Next/Nuxt/Vite | Task 704 (Testing Execution) |
+
+Skills live in `skills/<name>/SKILL.md` and provide patterns, conventions, and tooling guidance that the LLM uses during generation. They are injected into prompts by the orchestrating task script -- the LLM never decides which skills to load.
+
+## External Repositories
+
+Atomic Claude integrates with two companion repositories for agent selection and audit coverage:
+
+### Agents (`agents/`)
+
+- **Source of truth:** `agent-inventory.csv` (221 agents with category, subcategory, tier, grade, composite score)
+- **Generated:** `agent-manifest.json` (via `build-manifest.sh`)
+- **Used by:** Task 105 (Agent Selection) during Phase 1 Discovery
+- Agents are matched to project needs based on capabilities and graded by composite score
+
+### Audits (`audits/`)
+
+- **Source of truth:** `AUDIT-INVENTORY.csv` (2,186 audits across 43 categories)
+- **Generated:** `AUDIT-MENU.md` (via `build-menu.sh`)
+- **Used by:** Phase audit system (`lib/audit.sh`) for quality gates
+- Categories span security, performance, reliability, accessibility, compliance, and more
+
+## Airgapped / Offline Mode
+
+For environments without internet access, Atomic Claude falls back to Ollama with tiered model selection. See `docs/AIRGAPPED-MODEL-RANKING.md` for the complete agent-to-model mapping.
+
+```bash
+# Force offline mode
+export ATOMIC_OFFLINE_MODE=true
+export ATOMIC_PREFER_LOCAL=true
+export CLAUDE_PROVIDER=ollama
+```
+
+Minimum pull set for 32GB+ RAM:
+```bash
+ollama pull devstral:24b   # Primary workhorse
+ollama pull llama3.2:3b    # Fast validation tasks
+ollama pull llama3.1:8b    # Fallback workhorse
+```
