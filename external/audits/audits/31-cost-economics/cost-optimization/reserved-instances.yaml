@@ -1,0 +1,364 @@
+audit:
+  id: cost-economics.cost-optimization.reserved-instances
+  name: Reserved Instances Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: cost-economics
+  category_number: 31
+  subcategory: cost-optimization
+  tier: expert
+  estimated_duration: 4-6 hours  # median: 5h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: organizational
+  default_profiles:
+  - full
+  - finops
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the organization's use of Reserved Instances,
+    Savings Plans, and other commitment-based discounts. It evaluates
+    coverage levels, utilization rates, expiration schedules, and
+    identifies opportunities for additional commitments or adjustments.
+  why_it_matters: |
+    Commitment-based discounts (RIs, Savings Plans) offer 30-75% savings
+    compared to on-demand pricing. However, poorly managed commitments
+    can result in wasted spend (unused reservations) or missed savings
+    (low coverage). Optimal commitment management is a core FinOps
+    capability with significant financial impact.
+  when_to_run:
+  - Monthly commitment review
+  - Before major infrastructure changes
+  - 60-90 days before commitment expirations
+  - During annual budget planning
+prerequisites:
+  required_artifacts:
+  - type: commitment-inventory
+    description: List of all active RIs and Savings Plans
+  - type: utilization-data
+    description: RI/SP utilization and coverage reports
+  - type: usage-forecast
+    description: Projected resource usage for commitment period
+  access_requirements:
+  - Access to AWS RI and Savings Plans reports
+  - Access to Azure Reservations
+  - Access to GCP Committed Use Discounts
+  - Access to Cost Explorer or equivalent
+discovery:
+  commitment_types:
+  - provider: AWS
+    types:
+    - EC2 Reserved Instances
+    - RDS Reserved Instances
+    - ElastiCache Reserved Nodes
+    - Compute Savings Plans
+    - EC2 Instance Savings Plans
+  - provider: Azure
+    types:
+    - Azure Reservations
+    - Azure Savings Plans
+  - provider: GCP
+    types:
+    - Committed Use Discounts
+    - Flex Committed Use Discounts
+  api_queries:
+  - provider: AWS
+    service: Cost Explorer
+    operations:
+    - GetReservationUtilization
+    - GetReservationCoverage
+    - GetSavingsPlansCoverage
+    - GetSavingsPlansUtilization
+  file_patterns:
+  - glob: '**/*.tf'
+    purpose: Terraform files
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: CloudFormation templates
+  - glob: '**/*cost*.yaml'
+    purpose: Cost configuration files
+  - glob: '**/*budget*.yaml'
+    purpose: Budget configuration files
+  - glob: '**/*tag*.yaml'
+    purpose: Tagging policy files
+  code_patterns:
+  - pattern: tags\s*[=:]|cost_center|billing|budget
+    type: regex
+    scope: config
+    purpose: Cost/billing references
+  - pattern: reserved_instance|spot_instance|savings_plan
+    type: regex
+    scope: config
+    purpose: Cost optimization patterns
+knowledge_sources:
+  specifications:
+  - id: aws-savings-plans
+    name: AWS Savings Plans Documentation
+    url: https://docs.aws.amazon.com/savingsplans/latest/userguide/what-is-savings-plans.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: finops-commitment-discounts
+    name: FinOps - Commitment Based Discounts
+    url: https://www.finops.org/framework/capabilities/commitment-discounts/
+    offline_cache: true
+  - id: ri-best-practices
+    name: Reserved Instance Best Practices
+    url: https://aws.amazon.com/ec2/pricing/reserved-instances/
+    offline_cache: true
+tooling:
+  cloud_native_tools:
+  - tool: AWS Cost Explorer
+    purpose: RI/SP coverage and utilization reports
+    command: |
+      aws ce get-reservation-utilization \
+        --time-period Start=2025-01-01,End=2025-01-22 \
+        --granularity MONTHLY
+  - tool: AWS Trusted Advisor
+    purpose: RI optimization recommendations
+  - tool: Azure Cost Management
+    purpose: Reservation utilization analysis
+  third_party_tools:
+  - tool: CloudHealth
+    purpose: Multi-cloud RI management
+  - tool: Spot.io
+    purpose: Automated commitment optimization
+signals:
+  critical:
+  - id: RI-CRIT-001
+    signal: RI/SP utilization below 70%
+    evidence_threshold: utilization_rate < 70%
+    explanation: |
+      Low utilization means the organization is paying for commitments
+      that are not being used. At below 70% utilization, the RI may
+      not be cost-effective compared to on-demand.
+    remediation: Modify or exchange underutilized RIs, adjust usage patterns
+  - id: RI-CRIT-002
+    signal: Significant on-demand spend with stable usage patterns
+    evidence_threshold: on_demand_stable_usage > 20% of compute
+    explanation: |
+      Stable, predictable on-demand usage represents missed savings
+      opportunity. These workloads are prime candidates for commitment
+      discounts.
+    remediation: Analyze usage patterns and purchase appropriate commitments
+  high:
+  - id: RI-HIGH-001
+    signal: RIs expiring within 60 days without renewal plan
+    evidence_threshold: expiring_ri_value > $10000
+    explanation: |
+      Expiring RIs without a renewal or replacement plan will revert
+      to on-demand pricing, resulting in significant cost increases.
+    remediation: Evaluate renewal, exchange, or alternative commitments
+  - id: RI-HIGH-002
+    signal: RI coverage below 50% for eligible services
+    evidence_threshold: coverage_rate < 50%
+    explanation: |
+      Low coverage indicates significant savings opportunity. For
+      stable workloads, coverage should typically be 70-80%.
+    remediation: Increase commitment purchases for stable workloads
+  medium:
+  - id: RI-MED-001
+    signal: Mismatched RI types for current architecture
+    evidence_pattern: RIs for deprecated or changed instance families
+    remediation: Exchange RIs to match current architecture
+  - id: RI-MED-002
+    signal: No Savings Plans in use despite eligible spend
+    evidence_pattern: Only RIs used when SPs would provide flexibility
+    remediation: Evaluate Savings Plans for greater flexibility
+  low:
+  - id: RI-LOW-001
+    signal: RI purchases not aligned with organizational process
+    evidence_pattern: Ad-hoc RI purchases without governance
+    remediation: Implement RI procurement governance process
+  positive:
+  - id: RI-POS-001
+    signal: RI/SP utilization consistently above 95%
+  - id: RI-POS-002
+    signal: Coverage aligned with workload stability analysis
+  - id: RI-POS-003
+    signal: Proactive expiration management with 90-day planning
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory current commitments
+    description: |
+      Catalog all active RIs, Savings Plans, and other commitments
+      including terms, expiration dates, and coverage.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List all active Savings Plans
+      command: |
+        aws savingsplans describe-savings-plans \
+          --states active \
+          --output table
+    - purpose: List all RIs
+      command: |
+        aws ec2 describe-reserved-instances \
+          --filters Name=state,Values=active \
+          --output table
+    expected_findings:
+    - Commitment inventory
+    - Expiration schedule
+  - id: '2'
+    name: Analyze utilization rates
+    description: |
+      Review utilization for all commitments to identify underutilized
+      reservations.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Get RI utilization
+      command: |
+        aws ce get-reservation-utilization \
+          --time-period Start=2025-01-01,End=2025-01-22 \
+          --granularity MONTHLY \
+          --output json
+    - purpose: Get SP utilization
+      command: |
+        aws ce get-savings-plans-utilization \
+          --time-period Start=2025-01-01,End=2025-01-22 \
+          --granularity MONTHLY
+    expected_findings:
+    - Utilization rates by commitment
+    - Underutilized commitments
+  - id: '3'
+    name: Assess coverage levels
+    description: |
+      Evaluate what percentage of eligible usage is covered by
+      commitments versus on-demand.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Get RI coverage
+      command: |
+        aws ce get-reservation-coverage \
+          --time-period Start=2025-01-01,End=2025-01-22 \
+          --granularity MONTHLY
+    - purpose: Get SP coverage
+      command: |
+        aws ce get-savings-plans-coverage \
+          --time-period Start=2025-01-01,End=2025-01-22
+    expected_findings:
+    - Coverage by service
+    - On-demand spend eligible for coverage
+  - id: '4'
+    name: Identify purchase opportunities
+    description: |
+      Analyze usage patterns to identify opportunities for new
+      commitments based on stable, predictable usage.
+    duration_estimate: 60 min
+    commands:
+    - purpose: Get RI purchase recommendations
+      command: |
+        aws ce get-reservation-purchase-recommendation \
+          --service "Amazon Elastic Compute Cloud - Compute"
+    - purpose: Get SP recommendations
+      command: |
+        aws ce get-savings-plans-purchase-recommendation \
+          --savings-plans-type COMPUTE_SP \
+          --term-in-years ONE_YEAR \
+          --payment-option NO_UPFRONT \
+          --lookback-period-in-days SIXTY_DAYS
+    expected_findings:
+    - Recommended purchases
+    - Estimated savings
+  - id: '5'
+    name: Review expiration schedule
+    description: |
+      Identify commitments expiring in the next 90 days and develop
+      renewal or replacement plans.
+    duration_estimate: 30 min
+    expected_findings:
+    - Expiring commitments
+    - Renewal recommendations
+  - id: '6'
+    name: Calculate savings impact
+    description: |
+      Quantify current savings from commitments and potential
+      additional savings from recommendations.
+    duration_estimate: 30 min
+    expected_findings:
+    - Current commitment savings
+    - Additional savings potential
+    - Optimal commitment strategy
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Current Commitment Portfolio
+    - Utilization and Coverage Analysis
+    - Purchase Recommendations
+    - Expiration Management Plan
+  - type: metrics_dashboard
+    metrics:
+    - Overall RI/SP utilization rate
+    - Coverage by service
+    - On-demand spend eligible for coverage
+    - Savings from commitments (actual vs potential)
+  confidence_guidance:
+    high: Complete commitment data with 60+ days of utilization
+    medium: Partial data or shorter analysis period
+    low: Limited access to commitment details
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: finops-commitment-discounts
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 1
+      reduced_scope: Utilization review only
+    full:
+      included: true
+      priority: 1
+    finops:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: ri-001
+  item: RI/SP utilization above 80%
+  level: CRITICAL
+  verification: automated
+  expected: utilization >= 80%
+- id: ri-002
+  item: Coverage appropriate for workload stability
+  level: BLOCKING
+  verification: manual
+  expected: Coverage aligned with analysis
+- id: ri-003
+  item: Expiring commitments have renewal plan
+  level: WARNING
+  verification: manual
+  expected: All expirations within 90 days addressed
+governance:
+  applicable_to:
+    archetypes:
+    - cloud-native
+    - hybrid
+    - enterprise
+  compliance_frameworks:
+  - framework: FinOps Foundation
+    controls:
+    - Commitment Based Discounts
+  - framework: AWS Well-Architected
+    controls:
+    - COST-07
+relationships:
+  commonly_combined:
+  - cost-economics.cost-optimization.rightsizing
+  - cost-economics.cost-optimization.savings-plans
+  - cost-economics.financial-governance.forecasting

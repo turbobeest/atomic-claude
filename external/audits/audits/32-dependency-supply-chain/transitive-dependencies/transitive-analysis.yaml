@@ -1,0 +1,227 @@
+audit:
+  id: dependency-supply-chain.transitive-dependencies.transitive-analysis
+  name: Transitive Dependency Analysis Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: dependency-supply-chain
+  category_number: 32
+  subcategory: transitive-dependencies
+  tier: phd
+  estimated_duration: 2-4 hours  # median: 3h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: medium
+  scope: dependencies
+  default_profiles:
+  - full
+  - detailed
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit analyzes the complete transitive dependency graph,
+    identifying indirect dependencies pulled in by direct dependencies.
+    It provides visibility into the full scope of third-party code
+    your project relies upon.
+  why_it_matters: |
+    Transitive dependencies often outnumber direct dependencies 10:1
+    or more. Vulnerabilities, license issues, and maintenance problems
+    in transitive deps affect your project just as much as direct deps.
+    You can't manage what you don't know about.
+  when_to_run:
+  - During initial project assessment
+  - After adding significant new dependencies
+  - During security audits
+  - Quarterly health checks
+prerequisites:
+  required_artifacts:
+  - type: lock_file
+    description: package-lock.json, yarn.lock, etc.
+  access_requirements:
+  - Read access to dependency files
+  - Package manager CLI access
+discovery:
+  file_patterns:
+  - glob: '**/package-lock.json'
+    purpose: Find npm lock file
+  - glob: '**/yarn.lock'
+    purpose: Find yarn lock file
+  - glob: '**/poetry.lock'
+    purpose: Find Poetry lock file
+  - glob: '**/Cargo.lock'
+    purpose: Find Cargo lock file
+  - glob: '**/go.sum'
+    purpose: Find Go sum file
+knowledge_sources:
+  guides:
+  - id: npm-dependency-tree
+    name: npm Dependency Tree
+    url: https://docs.npmjs.com/cli/v9/commands/npm-ls
+  standards:
+  - id: sbom-transitives
+    name: SBOM Transitive Coverage
+    relevance: Complete dependency inventory
+tooling:
+  analysis_tools:
+  - tool: npm ls
+    purpose: List full npm dependency tree
+  - tool: pipdeptree
+    purpose: Python dependency tree
+  - tool: cargo tree
+    purpose: Rust dependency tree
+  - tool: go mod graph
+    purpose: Go module graph
+  - tool: mvn dependency:tree
+    purpose: Maven dependency tree
+signals:
+  critical:
+  - id: DEP-TRANS-CRIT-001
+    signal: Unknown transitive dependency with critical role
+    evidence_indicators:
+    - Transitive dep handling sensitive data
+    - Critical functionality from unknown source
+    explanation: |
+      Transitive dependencies you don't know about may be executing
+      code in sensitive contexts. Complete visibility is essential
+      for security assessment.
+    remediation: Document and assess all transitive dependencies
+  high:
+  - id: DEP-TRANS-HIGH-001
+    signal: Excessive transitive dependency count
+    evidence_indicators:
+    - 1000+ total dependencies
+    - Single direct dep brings 200+ transitives
+    remediation: Evaluate if dependency worth the transitive cost
+  - id: DEP-TRANS-HIGH-002
+    signal: Transitive dependency with known vulnerability
+    evidence_indicators:
+    - CVE in transitive dep
+    - Vulnerability not visible in direct deps
+    remediation: Update direct dep or use resolutions to fix
+  medium:
+  - id: DEP-TRANS-MED-001
+    signal: Deep transitive chains (10+ levels)
+    evidence_indicators:
+    - Dependency tree very deep
+    - Hard to trace dependency origin
+    remediation: Document deep chains; consider simplification
+  - id: DEP-TRANS-MED-002
+    signal: Transitive dependency duplication
+    evidence_indicators:
+    - Same package at multiple versions
+    - Bloated node_modules/vendor
+    remediation: Try to consolidate versions
+  low:
+  - id: DEP-TRANS-LOW-001
+    signal: Minor transitive dependencies not individually assessed
+    evidence_indicators:
+    - Small utility packages not reviewed
+    - Common pattern in npm ecosystem
+    remediation: Acceptable; focus on significant transitives
+  positive:
+  - id: DEP-TRANS-POS-001
+    signal: Complete transitive visibility achieved
+  - id: DEP-TRANS-POS-002
+    signal: Reasonable transitive count and depth
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Count Total Dependencies
+    description: Get count of all dependencies
+    commands:
+    - purpose: Count npm deps
+      command: npm ls --all --json 2>/dev/null | jq '[.. | .version? | select(. != null)] | length' ||
+        echo 'Could not count npm deps'
+  - id: '2'
+    name: Generate Dependency Tree
+    description: Create full dependency tree visualization
+    commands:
+    - purpose: Generate npm tree
+      command: npm ls --all 2>/dev/null | head -200 || echo 'npm tree not available'
+  - id: '3'
+    name: Identify Heaviest Direct Dependencies
+    description: Find which direct deps bring most transitives
+    commands:
+    - purpose: Count per direct dep
+      command: 'for pkg in $(cat package.json 2>/dev/null | jq -r ''.dependencies | keys[]'' | head -10);
+        do echo -n "$pkg: "; npm ls "$pkg" --all 2>/dev/null | wc -l; done | sort -t: -k2 -rn || echo
+        ''Analysis not available'''
+  - id: '4'
+    name: Check Tree Depth
+    description: Measure maximum dependency depth
+    commands:
+    - purpose: Estimate depth
+      command: npm ls --all 2>/dev/null | grep -E '^[│ └├]+' | awk '{print length}' | sort -rn | head
+        -1 || echo 'Depth analysis not available'
+  - id: '5'
+    name: Find Duplicate Versions
+    description: Identify packages with multiple versions
+    commands:
+    - purpose: Find duplicates
+      command: npm ls --all 2>/dev/null | grep -oE '[a-zA-Z0-9@/-]+@[0-9.]+' | sort | uniq -d | head -20
+        || echo 'Duplicate check not available'
+  - id: '6'
+    name: Explain Why Packages Installed
+    description: Trace origin of specific transitives
+    commands:
+    - purpose: Explain a package
+      command: 'npm explain lodash 2>/dev/null | head -30 || echo ''Use: npm explain [package] to trace
+        origin'''
+output:
+  deliverables:
+  - type: transitive_inventory
+    format: structured
+    description: Complete list of transitive dependencies
+  - type: dependency_tree
+    format: text
+    description: Visual dependency tree
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Dependency Counts
+    - Tree Depth Analysis
+    - Heavy Dependencies
+    - Recommendations
+closeout_checklist:
+- id: dep-trans-001
+  item: Total dependency count documented
+  level: REQUIRED
+  verification: Count recorded
+- id: dep-trans-002
+  item: Dependency tree generated
+  level: REQUIRED
+  verification: Tree available
+- id: dep-trans-003
+  item: Heavy deps identified
+  level: REQUIRED
+  verification: Top transitive contributors listed
+- id: dep-trans-004
+  item: Duplicates identified
+  level: RECOMMENDED
+  verification: Duplicate list generated
+governance:
+  applicable_to:
+    archetypes:
+    - all-software-projects
+  compliance_mappings:
+  - framework: SOC 2
+    control: CC6.1
+    description: Asset inventory
+  - framework: NIST CSF
+    control: ID.AM-1
+    description: Asset inventory
+relationships:
+  commonly_combined:
+  - dependency-supply-chain.dependency-inventory.dependency-tree-analysis
+  depends_on:
+  - dependency-supply-chain.dependency-inventory.dependency-enumeration
+  feeds_into:
+  - dependency-supply-chain.supply-chain-security.sbom-generation

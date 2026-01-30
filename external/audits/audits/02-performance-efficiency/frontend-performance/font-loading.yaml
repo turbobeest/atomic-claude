@@ -1,0 +1,346 @@
+# ============================================================
+# FONT LOADING AUDIT
+# ============================================================
+# Evaluates web font loading strategies to prevent Flash of
+# Invisible Text (FOIT) and Flash of Unstyled Text (FOUT).
+# ============================================================
+
+audit:
+  id: "performance-efficiency.frontend-performance.font-loading"
+  name: "Font Loading Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "frontend-performance"
+
+  tier: "expert"
+  estimated_duration: "1.5 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes web font loading including font-display settings, preloading,
+    subsetting, format selection, and number of font variants. Examines
+    strategies to minimize Flash of Invisible Text (FOIT) and layout shifts
+    from font swapping.
+
+  why_it_matters: |
+    Web fonts can block text rendering (FOIT) causing blank text until fonts
+    load. Font swapping causes layout shifts (CLS) when fallback fonts are
+    replaced. Excessive font variants add significant weight. Proper font
+    loading is critical for both LCP and CLS.
+
+  when_to_run:
+    - "After adding or changing fonts"
+    - "When experiencing text rendering issues"
+    - "During Core Web Vitals optimization"
+    - "When reducing page weight"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "CSS files with @font-face declarations"
+
+  access_requirements:
+    - "Read access to source code"
+
+discovery:
+  code_patterns:
+    - pattern: "@font-face"
+      type: "regex"
+      scope: "source"
+      purpose: "Find font declarations"
+
+    - pattern: "font-display:\\s*(auto|block)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find fonts without proper display strategy"
+
+    - pattern: "fonts\\.googleapis\\.com|fonts\\.gstatic\\.com"
+      type: "regex"
+      scope: "source"
+      purpose: "Find Google Fonts usage"
+
+    - pattern: "<link.*preload.*font"
+      type: "regex"
+      scope: "source"
+      purpose: "Find preloaded fonts"
+
+  file_patterns:
+    - glob: "**/*.css"
+      purpose: "CSS with font declarations"
+    - glob: "**/*.woff2"
+      purpose: "WOFF2 font files"
+    - glob: "**/*.woff"
+      purpose: "WOFF font files"
+    - glob: "**/*.ttf"
+      purpose: "TTF font files"
+
+knowledge_sources:
+  guides:
+    - id: "font-best-practices"
+      name: "Best Practices for Fonts"
+      url: "https://web.dev/font-best-practices/"
+      offline_cache: true
+
+    - id: "font-display"
+      name: "Controlling Font Performance with font-display"
+      url: "https://developers.google.com/web/updates/2016/02/font-display"
+      offline_cache: true
+
+    - id: "preload-fonts"
+      name: "Preload Web Fonts"
+      url: "https://web.dev/codelab-preload-web-fonts/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "Lighthouse"
+      purpose: "Font loading audits"
+      offline_capable: false
+
+    - tool: "subfont"
+      purpose: "Font subsetting"
+      offline_capable: true
+
+    - tool: "glyphhanger"
+      purpose: "Subsetting tool"
+      offline_capable: true
+
+  scripts:
+    - id: "audit-fonts"
+      language: "bash"
+      purpose: "Find font declarations and issues"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find @font-face declarations
+        grep -rn '@font-face' --include='*.css' .
+        # Check for font-display
+        grep -rn 'font-display' --include='*.css' .
+        # Find font files
+        find . -type f \( -name '*.woff2' -o -name '*.woff' -o -name '*.ttf' \) -exec ls -lh {} \;
+
+signals:
+  critical:
+    - id: "FONT-CRIT-001"
+      signal: "font-display: block causing FOIT"
+      evidence_pattern: "font-display:\\s*block"
+      explanation: |
+        font-display: block causes text to be invisible until the font loads
+        (FOIT). On slow connections, users see blank text for seconds.
+        This severely impacts user experience and LCP.
+      remediation: "Use font-display: swap or optional to show fallback text immediately"
+
+    - id: "FONT-CRIT-002"
+      signal: "No font-display specified (defaults to block)"
+      evidence_pattern: "@font-face\\s*\\{(?!.*font-display)"
+      explanation: |
+        Without font-display, browsers default to block behavior (FOIT).
+        Text remains invisible during font loading.
+      remediation: "Add font-display: swap to all @font-face rules"
+
+  high:
+    - id: "FONT-HIGH-001"
+      signal: "Loading many font variants"
+      evidence_threshold: "> 4 font files loaded"
+      explanation: |
+        Each font variant (weight, style) requires a separate file. Loading
+        many variants adds significant page weight and HTTP requests.
+      remediation: "Limit to essential variants, use variable fonts if many weights needed"
+
+    - id: "FONT-HIGH-002"
+      signal: "Fonts not preloaded"
+      evidence_pattern: "(?!.*preload.*font)"
+      explanation: |
+        Fonts discovered late in CSS cascade are requested late. Preloading
+        ensures font download starts early, reducing FOIT/FOUT duration.
+      remediation: "Add <link rel='preload' as='font'> for critical fonts"
+
+    - id: "FONT-HIGH-003"
+      signal: "Using non-WOFF2 formats"
+      evidence_pattern: "src:.*url.*\\.(ttf|otf|eot)(?!.*woff2)"
+      explanation: |
+        WOFF2 provides ~30% better compression than WOFF and much better
+        than TTF/OTF. Using older formats wastes bandwidth.
+      remediation: "Convert to WOFF2 and list it first in src"
+
+  medium:
+    - id: "FONT-MED-001"
+      signal: "Google Fonts without display parameter"
+      evidence_pattern: "fonts\\.googleapis\\.com(?!.*display=)"
+      remediation: "Add &display=swap to Google Fonts URL"
+
+    - id: "FONT-MED-002"
+      signal: "Fonts not subsetted"
+      evidence_pattern: "large font file without unicode-range"
+      remediation: "Subset fonts to include only needed characters"
+
+  low:
+    - id: "FONT-LOW-001"
+      signal: "Icon fonts instead of SVG"
+      evidence_pattern: "fontawesome|icomoon|glyphicons"
+      remediation: "Consider inline SVG icons for better performance and accessibility"
+
+  positive:
+    - id: "FONT-POS-001"
+      signal: "font-display: swap used"
+      evidence_pattern: "font-display:\\s*swap"
+
+    - id: "FONT-POS-002"
+      signal: "Critical fonts preloaded"
+      evidence_pattern: "<link.*preload.*as=\"font\""
+
+    - id: "FONT-POS-003"
+      signal: "Variable fonts used"
+      evidence_pattern: "font-variation-settings|wght.*100.*900"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory fonts"
+      description: |
+        Find all font declarations and files.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find font-face declarations"
+          command: "grep -rn '@font-face' --include='*.css' ."
+        - purpose: "Find font files"
+          command: "find . -type f \\( -name '*.woff2' -o -name '*.woff' -o -name '*.ttf' \\) -exec ls -lh {} \\;"
+      expected_findings:
+        - "Font inventory"
+        - "File sizes"
+
+    - id: "2"
+      name: "Check font-display usage"
+      description: |
+        Verify all fonts have appropriate font-display settings.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find font-display settings"
+          command: "grep -rn 'font-display' --include='*.css' ."
+        - purpose: "Find fonts without font-display"
+          command: "grep -rn -A10 '@font-face' --include='*.css' . | grep -B5 '}' | grep -v font-display"
+      expected_findings:
+        - "font-display coverage"
+        - "Missing font-display rules"
+
+    - id: "3"
+      name: "Check preloading"
+      description: |
+        Verify critical fonts are preloaded.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Find font preloads"
+          command: "grep -rn 'preload.*font\\|preload.*as=\"font\"' --include='*.html' ."
+      expected_findings:
+        - "Preloaded fonts"
+        - "Missing preloads for critical fonts"
+
+    - id: "4"
+      name: "Analyze font formats"
+      description: |
+        Check that WOFF2 is used and listed first.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Check font formats in CSS"
+          command: "grep -rn 'src:.*url' --include='*.css' . | head -20"
+      expected_findings:
+        - "Format usage"
+        - "Format ordering"
+
+    - id: "5"
+      name: "Count font variants"
+      description: |
+        Assess the number of font variants being loaded.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Count font files"
+          command: "find . -type f \\( -name '*.woff2' -o -name '*.woff' \\) | wc -l"
+      expected_findings:
+        - "Variant count"
+        - "Reduction opportunities"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Font Inventory"
+        - "Loading Strategy Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "CSS clearly shows font-display settings and format usage"
+    medium: "Patterns suggest issues but runtime testing needed"
+    low: "Potential issue requiring browser testing"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "font-best-practices"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Lower priority than other Core Web Vitals factors"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "font-001"
+    item: "All fonts have font-display: swap (or optional)"
+    level: "CRITICAL"
+    verification: "grep -rn '@font-face' --include='*.css' -A10 . | grep -c 'font-display'"
+    expected: "Matches number of @font-face rules"
+
+  - id: "font-002"
+    item: "Critical fonts preloaded"
+    level: "BLOCKING"
+    verification: "grep -rn 'preload.*font' --include='*.html' . | wc -l"
+    expected: "> 0"
+
+  - id: "font-003"
+    item: "WOFF2 format used"
+    level: "WARNING"
+    verification: "find . -type f -name '*.woff2' | wc -l"
+    expected: "> 0"
+
+governance:
+  applicable_to:
+    archetypes: ["webapp", "marketing-site"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.frontend-performance.core-web-vitals"
+    - "performance-efficiency.frontend-performance.critical-rendering-path"

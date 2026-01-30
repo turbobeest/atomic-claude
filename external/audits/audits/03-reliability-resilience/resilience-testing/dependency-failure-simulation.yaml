@@ -1,0 +1,372 @@
+audit:
+  id: reliability-resilience.resilience-testing.dependency-failure-simulation
+  name: Dependency Failure Simulation Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: resilience-testing
+  tier: phd
+  estimated_duration: 4 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: true
+execution:
+  automatable: partial
+  severity: high
+  scope: testing
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: false
+description:
+  what: |
+    This audit assesses chaos experiments designed to simulate failures in
+    external dependencies including databases, caches, message queues,
+    third-party APIs, and other upstream/downstream services. It evaluates
+    whether systems gracefully handle dependency unavailability, degradation,
+    and unexpected behavior.
+  why_it_matters: |
+    Modern systems depend on numerous external services, and these dependencies
+    fail in unpredictable ways. Without testing dependency failures, systems
+    may cascade into complete outages when a single dependency becomes
+    unavailable. Organizations that test dependency failures can maintain
+    partial functionality and graceful degradation during third-party outages.
+  when_to_run:
+  - When adding new external dependencies
+  - Before major releases with dependency changes
+  - Quarterly resilience testing
+  - After incidents caused by dependency failures
+prerequisites:
+  required_artifacts:
+  - type: dependency-map
+    description: Map of all external dependencies
+  - type: chaos-experiments
+    description: Dependency failure experiment definitions
+  - type: fallback-configurations
+    description: Fallback and circuit breaker configurations
+  access_requirements:
+  - Read access to service dependency configurations
+  - Access to chaos engineering platform
+  - Read access to circuit breaker configurations
+  - Access to Toxiproxy or similar failure injection tools
+discovery:
+  code_patterns:
+  - pattern: circuit.*breaker|fallback|timeout|retry
+    type: regex
+    scope: source
+    purpose: Identify resilience patterns
+  - pattern: toxiproxy|chaos.*dependency|inject.*failure
+    type: regex
+    scope: config
+    purpose: Find dependency failure injection
+  - pattern: mock|stub|fake
+    type: keyword
+    scope: config
+    purpose: Identify test doubles for dependencies
+  file_patterns:
+  - glob: '**/toxiproxy/**/*.yaml'
+    purpose: Toxiproxy configurations
+  - glob: '**/chaos/dependencies/**/*'
+    purpose: Dependency failure experiments
+  - glob: '**/circuit-breaker/**/*'
+    purpose: Circuit breaker configurations
+  - glob: '**/resilience/**/*'
+    purpose: Resilience configuration files
+  documents_to_review:
+  - type: Dependency criticality matrix
+    purpose: Understand dependency priorities
+  - type: Fallback behavior documentation
+    purpose: Expected behavior during dependency failures
+  - type: Third-party SLA documentation
+    purpose: Expected reliability of dependencies
+knowledge_sources:
+  specifications:
+  - id: resilience4j
+    name: Resilience4j Documentation
+    url: https://resilience4j.readme.io/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: toxiproxy-guide
+    name: Toxiproxy Usage Guide
+    url: https://github.com/Shopify/toxiproxy
+    offline_cache: true
+  - id: netflix-hystrix
+    name: Hystrix Wiki (Circuit Breakers)
+    url: https://github.com/Netflix/Hystrix/wiki
+    offline_cache: true
+  - id: chaos-dependency-testing
+    name: Gremlin Dependency Testing
+    url: https://www.gremlin.com/blog/testing-external-dependencies-with-chaos-engineering/
+    offline_cache: true
+  learning_resources:
+  - id: release-it
+    title: 'Release It!: Design and Deploy Production-Ready Software'
+    type: book
+    reference: 'ISBN: 978-1680502398'
+tooling:
+  infrastructure_tools:
+  - tool: Toxiproxy
+    purpose: Inject network-level failures into dependency connections
+    command: toxiproxy-cli toxic add -t latency -a latency=1000 database
+  - tool: Gremlin
+    purpose: Blackhole or latency attacks on dependencies
+    command: gremlin attack network blackhole --target-hosts db.example.com
+  - tool: Chaos Mesh
+    purpose: Network chaos for Kubernetes dependencies
+    command: kubectl get networkchaos -A
+  - tool: WireMock
+    purpose: Simulate third-party API failures
+    command: Check WireMock stub configurations
+  monitoring_queries:
+  - system: Prometheus
+    query: sum(rate(circuit_breaker_state_transitions_total{to_state='open'}[1h])) by (service)
+    purpose: Track circuit breaker activations
+    threshold: Expected during chaos experiments only
+  - system: Prometheus
+    query: histogram_quantile(0.99, rate(external_dependency_request_duration_seconds_bucket[5m]))
+    purpose: Monitor dependency latency
+    threshold: Within timeout thresholds
+  scripts:
+  - id: dependency-coverage-checker
+    language: python
+    purpose: Verify all dependencies have failure tests
+    source: inline
+    code: |
+      #!/usr/bin/env python3
+      """
+      Dependency Failure Coverage Checker
+      Maps dependencies to their chaos experiments
+      """
+      import yaml
+      import json
+
+      def load_dependency_map(filepath):
+          with open(filepath) as f:
+              return yaml.safe_load(f)
+
+      def load_experiments(experiments_dir):
+          # Load all experiment definitions
+          pass
+
+      def check_coverage(dependencies, experiments):
+          covered = set()
+          uncovered = set()
+          for dep in dependencies:
+              if has_experiment(dep, experiments):
+                  covered.add(dep)
+              else:
+                  uncovered.add(dep)
+          return covered, uncovered
+
+      def has_experiment(dependency, experiments):
+          # Check if dependency has failure experiments
+          pass
+signals:
+  critical:
+  - id: DFS-CRIT-001
+    signal: Critical dependencies have no failure experiments
+    evidence_indicators:
+    - Database or cache dependencies not tested
+    - No chaos experiments for core APIs
+    explanation: |
+      Critical dependencies without failure testing will cause unexpected
+      behavior or outages when they fail. These failures often cascade
+      because fallback paths are untested.
+    remediation: Implement failure experiments for all critical dependencies
+  - id: DFS-CRIT-002
+    signal: No fallback behavior defined for dependency failures
+    evidence_indicators:
+    - Missing circuit breaker configurations
+    - No graceful degradation paths
+    explanation: |
+      Without defined fallback behavior, dependency failures cause
+      complete feature outages rather than graceful degradation.
+    remediation: Implement circuit breakers and fallback responses
+  high:
+  - id: DFS-HIGH-001
+    signal: Third-party API failures not simulated
+    explanation: External APIs fail unpredictably and must be tested
+    remediation: Use WireMock or similar to simulate API failures
+  - id: DFS-HIGH-002
+    signal: Dependency timeout behavior not tested
+    explanation: Slow dependencies can cause cascading timeouts
+    remediation: Test with latency injection to verify timeout handling
+  medium:
+  - id: DFS-MED-001
+    signal: Partial dependency failures not tested
+    remediation: Test scenarios where dependencies return errors for some requests
+  - id: DFS-MED-002
+    signal: Dependency failure combinations not tested
+    remediation: Test multiple simultaneous dependency failures
+  low:
+  - id: DFS-LOW-001
+    signal: Dependency failure documentation incomplete
+  positive:
+  - id: DFS-POS-001
+    signal: All critical dependencies have failure experiments
+  - id: DFS-POS-002
+    signal: Circuit breakers configured and tested for all dependencies
+  - id: DFS-POS-003
+    signal: Graceful degradation verified through chaos experiments
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Map External Dependencies
+    description: |
+      Create a comprehensive map of all external dependencies including
+      databases, caches, message queues, and third-party APIs.
+    duration_estimate: 45 min
+    questions:
+    - What external services does the system depend on?
+    - Which dependencies are critical vs optional?
+    - What is the expected behavior when each dependency fails?
+    expected_findings:
+    - Complete dependency inventory
+    - Criticality classification for each dependency
+  - id: '2'
+    name: Inventory Failure Experiments
+    description: |
+      Catalog all existing chaos experiments that target dependency
+      failures, including Toxiproxy configurations and network chaos.
+    duration_estimate: 45 min
+    commands:
+    - purpose: List Toxiproxy proxies and toxics
+      command: toxiproxy-cli list && toxiproxy-cli toxic list
+    - purpose: Find dependency chaos experiments
+      command: find . -name '*.yaml' | xargs grep -l 'dependency\|external\|network'
+    expected_findings:
+    - Inventory of dependency failure experiments
+    - Mapping of experiments to dependencies
+  - id: '3'
+    name: Assess Coverage Gaps
+    description: |
+      Compare the dependency map against existing experiments to
+      identify dependencies without failure testing.
+    duration_estimate: 30 min
+    questions:
+    - Which dependencies lack chaos experiments?
+    - Are all failure modes covered for tested dependencies?
+    - Are third-party APIs adequately tested?
+    expected_findings:
+    - Coverage gap analysis
+    - Priority list of experiments needed
+  - id: '4'
+    name: Verify Resilience Patterns
+    description: |
+      Check that circuit breakers, timeouts, and fallbacks are
+      properly configured for each dependency.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find circuit breaker configurations
+      command: grep -r 'circuitbreaker\|CircuitBreaker\|hystrix' src/ config/
+    - purpose: Find timeout configurations
+      command: grep -r 'timeout\|Timeout' src/ config/ | grep -i 'ms\|second'
+    expected_findings:
+    - Circuit breaker configurations for each dependency
+    - Timeout settings analysis
+  - id: '5'
+    name: Review Experiment Results
+    description: |
+      Analyze recent chaos experiment results to verify that
+      dependency failures are handled gracefully.
+    duration_estimate: 45 min
+    questions:
+    - What was the system behavior during dependency chaos?
+    - Did circuit breakers activate as expected?
+    - Was graceful degradation achieved?
+    expected_findings:
+    - Evidence of successful graceful degradation
+    - Issues discovered during dependency failure tests
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: dependency_coverage_matrix
+    format: table
+    sections:
+    - Dependency
+    - Criticality
+    - Failure Experiments
+    - Resilience Patterns
+    - Coverage Status
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Coverage Analysis
+    - Resilience Pattern Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Experiments executed and results verified
+    medium: Experiments defined but not recently executed
+    low: Based on configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: resilience4j
+      priority: required
+    - source_id: toxiproxy-guide
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive dependency analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: dfs-001
+  item: Dependency map documented and current
+  level: CRITICAL
+  verification: manual
+  verification_notes: Confirm dependency inventory exists and is comprehensive
+  expected: Confirmed by reviewer
+- id: dfs-002
+  item: Critical dependencies have failure experiments
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify chaos experiments exist for critical dependencies
+  expected: Confirmed by reviewer
+- id: dfs-003
+  item: Circuit breakers configured for external dependencies
+  level: BLOCKING
+  verification: manual
+  verification_notes: Check circuit breaker configurations
+  expected: Confirmed by reviewer
+- id: dfs-004
+  item: Fallback behavior tested and verified
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm graceful degradation works during dependency failures
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - distributed-system
+    - microservices
+    - cloud-native
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.1
+    - CC7.2
+  - framework: ISO 27001
+    controls:
+    - A.17.1
+relationships:
+  commonly_combined:
+  - reliability-resilience.resilience-testing.failure-mode-coverage
+  - reliability-resilience.fault-tolerance.circuit-breaker-patterns
+  - reliability-resilience.fault-tolerance.graceful-degradation

@@ -1,0 +1,334 @@
+# ============================================================
+# AUDIT: Integration Test Isolation
+# ============================================================
+# Evaluates whether integration tests are properly isolated
+# from each other and from external factors.
+# ============================================================
+
+audit:
+  id: "testing-quality-assurance.integration-testing.integration-test-isolation"
+  name: "Integration Test Isolation"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "testing-quality-assurance"
+  category_number: 10
+  subcategory: "integration-testing"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "testing"
+
+  default_profiles:
+    - "full"
+    - "quality"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Assesses whether integration tests are properly isolated including
+    database isolation, network isolation, state cleanup, parallel
+    execution safety, and independence from external system state.
+    Evaluates techniques like test containers, transactions, and cleanup.
+
+  why_it_matters: |
+    Non-isolated integration tests are flaky and unreliable. Tests that
+    depend on shared state fail unpredictably, pass/fail depending on
+    execution order, and create debugging nightmares. Proper isolation
+    ensures test results are deterministic and trustworthy.
+
+  when_to_run:
+    - "When tests become flaky"
+    - "Before parallelizing test execution"
+    - "Test infrastructure reviews"
+    - "CI pipeline optimization"
+
+prerequisites:
+  required_artifacts:
+    - type: "integration_tests"
+      description: "Integration test files"
+    - type: "test_infrastructure"
+      description: "Test environment configuration"
+
+  access_requirements:
+    - "Source code repository access"
+    - "Test environment access"
+
+discovery:
+  file_patterns:
+    - glob: "**/integration/**/*.test.{js,ts}"
+      purpose: "Integration test files"
+    - glob: "**/docker-compose.test.yml"
+      purpose: "Test Docker composition"
+    - glob: "**/*.integration.test.{js,ts}"
+      purpose: "Integration test naming"
+
+  code_patterns:
+    - pattern: "beforeAll|afterAll|beforeEach|afterEach"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify setup/teardown patterns"
+    - pattern: "truncate|deleteMany|clear|reset"
+      type: "keyword"
+      scope: "source"
+      purpose: "Identify cleanup operations"
+    - pattern: "testcontainers|TestContainer"
+      type: "keyword"
+      scope: "source"
+      purpose: "Identify container isolation"
+
+knowledge_sources:
+  guides:
+    - id: "test-isolation"
+      name: "Test Isolation Best Practices"
+      url: "https://martinfowler.com/bliki/UnitTest.html"
+      offline_cache: true
+    - id: "testcontainers"
+      name: "Testcontainers for Integration Testing"
+      url: "https://www.testcontainers.org/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "xunit-patterns"
+      title: "xUnit Test Patterns"
+      type: "book"
+      reference: "ISBN 978-0131495050"
+
+tooling:
+  infrastructure_tools:
+    - tool: "testcontainers"
+      purpose: "Isolated database/service containers"
+      command: "npm test -- --testcontainers"
+    - tool: "docker-compose"
+      purpose: "Test environment orchestration"
+      command: "docker-compose -f docker-compose.test.yml up"
+
+  scripts:
+    - id: "isolation-analyzer"
+      language: "bash"
+      purpose: "Analyze test isolation patterns"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Integration Test Isolation Analysis ==="
+        echo "Setup/teardown hooks:"
+        grep -r -c 'beforeAll\|afterAll\|beforeEach\|afterEach' --include='*integration*.test.*' . 2>/dev/null | grep -v ':0' | head -20
+        echo ""
+        echo "Cleanup operations:"
+        grep -r 'truncate\|deleteMany\|clear\|reset\|drop' --include='*.test.*' . 2>/dev/null | grep -v node_modules | head -15
+        echo ""
+        echo "Testcontainers usage:"
+        grep -r 'testcontainers\|TestContainer' --include='*.test.*' --include='*.ts' . 2>/dev/null | grep -v node_modules | head -10
+
+signals:
+  critical:
+    - id: "ISO-CRIT-001"
+      signal: "Tests share database state"
+      evidence_pattern: "No cleanup between tests, shared data"
+      explanation: |
+        Shared database state causes tests to interfere with each other,
+        leading to order-dependent failures and inconsistent results.
+      remediation: "Implement database cleanup or transaction rollback between tests"
+
+    - id: "ISO-CRIT-002"
+      signal: "Tests fail when run in parallel"
+      evidence_pattern: "Tests pass sequentially but fail concurrently"
+      explanation: |
+        Parallel execution failures indicate shared state or race conditions
+        in tests, making the suite unreliable for CI.
+      remediation: "Isolate tests using separate databases or namespaces"
+
+  high:
+    - id: "ISO-HIGH-001"
+      signal: "No cleanup between test runs"
+      evidence_pattern: "Missing afterEach/afterAll cleanup"
+      explanation: |
+        Without cleanup, test data accumulates and causes subsequent
+        test failures or unpredictable behavior.
+      remediation: "Add cleanup hooks to all integration tests"
+
+    - id: "ISO-HIGH-002"
+      signal: "Tests depend on execution order"
+      evidence_pattern: "Tests fail when run individually or shuffled"
+      explanation: |
+        Order-dependent tests indicate hidden dependencies that make
+        the suite fragile and hard to maintain.
+      remediation: "Ensure each test sets up its required state independently"
+
+  medium:
+    - id: "ISO-MED-001"
+      signal: "Shared test fixtures across files"
+      evidence_pattern: "Global fixtures without proper isolation"
+      remediation: "Use per-test or per-file fixture isolation"
+
+    - id: "ISO-MED-002"
+      signal: "Environment variables leak between tests"
+      evidence_pattern: "process.env modifications without restore"
+      remediation: "Save and restore environment state in setup/teardown"
+
+  low:
+    - id: "ISO-LOW-001"
+      signal: "Time-based test dependencies"
+      evidence_pattern: "Tests use real time instead of mocked time"
+
+  positive:
+    - id: "ISO-POS-001"
+      signal: "Each test uses isolated database"
+      evidence_pattern: "Testcontainers or per-test schema"
+    - id: "ISO-POS-002"
+      signal: "Transaction-based isolation"
+      evidence_pattern: "Tests wrapped in rolled-back transactions"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Analyze setup/teardown patterns"
+      description: |
+        Review how integration tests set up and clean up
+        their required state.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find setup/teardown hooks"
+          command: "grep -r -B2 -A10 'beforeAll\\|beforeEach' --include='*integration*.test.*' . 2>/dev/null | head -50"
+        - purpose: "Find cleanup patterns"
+          command: "grep -r -B2 -A10 'afterAll\\|afterEach' --include='*integration*.test.*' . 2>/dev/null | head -50"
+      expected_findings:
+        - "Setup patterns"
+        - "Cleanup patterns"
+
+    - id: "2"
+      name: "Check database isolation"
+      description: |
+        Verify that database state is properly isolated between
+        tests and test runs.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find database cleanup"
+          command: "grep -r 'truncate\\|deleteMany\\|clear\\|destroy' --include='*.test.*' . 2>/dev/null | head -20"
+        - purpose: "Check for testcontainers"
+          command: "grep -r 'testcontainers\\|new.*Container' --include='*.test.*' . 2>/dev/null | head -10"
+      expected_findings:
+        - "Database cleanup mechanism"
+        - "Container-based isolation"
+
+    - id: "3"
+      name: "Test parallel execution"
+      description: |
+        Verify tests can run in parallel without interference.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check for parallel execution support"
+          command: "grep -r 'runInBand\\|maxWorkers\\|parallel' --include='*.json' --include='jest.config.*' . 2>/dev/null | head -10"
+      questions:
+        - "Can tests run in parallel?"
+        - "Are there race conditions between tests?"
+      expected_findings:
+        - "Parallel execution capability"
+        - "Isolation verification"
+
+    - id: "4"
+      name: "Check for shared state"
+      description: |
+        Identify any global or shared state that could cause
+        test interference.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find global state usage"
+          command: "grep -r 'global\\.' --include='*integration*.test.*' . 2>/dev/null | head -10"
+        - purpose: "Find module-level variables"
+          command: "grep -r '^let\\|^var\\|^const.*=' --include='*integration*.test.*' . 2>/dev/null | head -15"
+      expected_findings:
+        - "Shared state instances"
+        - "Potential interference points"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "isolation_report"
+      format: "table"
+      sections:
+        - "Setup/Teardown Analysis"
+        - "Database Isolation"
+        - "Parallel Execution"
+        - "Shared State"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Isolation Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Tests executed in parallel and shuffled order"
+    medium: "Static analysis of isolation patterns"
+    low: "Based on grep patterns only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "test-isolation"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Isolation analysis requires thorough review"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "iso-001"
+    item: "Setup/teardown patterns documented"
+    level: "CRITICAL"
+    verification: "grep -r 'beforeAll\\|afterAll' --include='*.test.*' . | wc -l"
+    expected: "PASS (patterns documented)"
+
+  - id: "iso-002"
+    item: "Database isolation verified"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Document database cleanup mechanism"
+    expected: "Confirmed by reviewer"
+
+  - id: "iso-003"
+    item: "Parallel execution assessed"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Document parallel execution capability"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Testability"]
+
+relationships:
+  commonly_combined:
+    - "testing-quality-assurance.unit-testing.test-isolation"
+    - "testing-quality-assurance.integration-testing.database-integration-testing"
+    - "testing-quality-assurance.test-strategy.testing-environment-strategy"

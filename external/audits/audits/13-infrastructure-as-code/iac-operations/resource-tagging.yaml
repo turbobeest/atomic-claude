@@ -1,0 +1,360 @@
+audit:
+  id: infrastructure-as-code.iac-operations.resource-tagging
+  name: Resource Tagging
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: iac-operations
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the implementation of resource tagging in
+    Infrastructure as Code for cost allocation and governance:
+
+    - Default tags on provider configuration
+    - Required tags on all resources
+    - Tag validation and enforcement
+    - Cost allocation tag activation
+    - Environment and ownership tagging
+    - Automation and IaC identification tags
+    - Tag policy compliance
+
+    The focus is on consistent, comprehensive tagging that enables
+    cost tracking, resource organization, and compliance.
+  why_it_matters: |
+    Tags are the foundation of cloud governance. Without proper tagging:
+
+    - Cost allocation is impossible - no per-project billing
+    - Resource ownership is unclear - orphaned resources accumulate
+    - Compliance is difficult - no way to identify sensitive resources
+    - Automation fails - can't target resources by tag
+    - Security audits are incomplete - can't identify data classification
+
+    A well-implemented tagging strategy enables FinOps, security,
+    and operational excellence.
+  when_to_run:
+  - When establishing cloud governance
+  - During FinOps implementation
+  - After cost allocation audits
+  - When implementing tag policies
+prerequisites:
+  required_artifacts:
+  - type: terraform_configuration
+    description: Terraform configurations with resources
+  - type: tag_policy
+    description: Documented tagging strategy
+  access_requirements:
+  - Read access to Terraform configuration repository
+  - Access to cloud cost management tools
+discovery:
+  code_patterns:
+  - pattern: default_tags\s*\{
+    type: regex
+    scope: source
+    purpose: Find AWS provider default tags
+  - pattern: tags\s*=\s*\{
+    type: regex
+    scope: source
+    purpose: Find resource-level tags
+  - pattern: merge.*tags|tags.*merge
+    type: regex
+    scope: source
+    purpose: Find tag merging patterns
+  - pattern: common_tags|required_tags
+    type: keyword
+    scope: source
+    purpose: Find shared tag variables
+  file_patterns:
+  - glob: '**/provider*.tf'
+    purpose: Provider configurations with default tags
+  - glob: '**/variables.tf'
+    purpose: Tag variables
+  - glob: '**/locals.tf'
+    purpose: Local tag definitions
+  - glob: '**/*.tf'
+    purpose: Resources with tags
+knowledge_sources:
+  specifications:
+  - id: aws-tagging-best-practices
+    name: AWS Tagging Best Practices
+    url: https://docs.aws.amazon.com/whitepapers/latest/tagging-best-practices/tagging-best-practices.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: terraform-default-tags
+    name: Terraform AWS Provider Default Tags
+    url: https://registry.terraform.io/providers/hashicorp/aws/latest/docs#default_tags
+    offline_cache: true
+  - id: finops-tagging
+    name: FinOps Foundation - Cost Allocation
+    url: https://www.finops.org/framework/domains/understanding-cloud-usage/
+    offline_cache: true
+  - id: spacelift-terraform-tags
+    name: Terraform Tags Guide
+    url: https://spacelift.io/blog/terraform-tags
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: tflint
+    purpose: Can enforce tag requirements with custom rules
+    offline_capable: true
+  - tool: checkov
+    purpose: Checks for missing tags on resources
+    offline_capable: true
+  infrastructure_tools:
+  - tool: AWS Tag Editor
+    purpose: View and manage tags across resources
+    command: aws resourcegroupstaggingapi get-resources
+  - tool: AWS Cost Explorer
+    purpose: Analyze costs by tag
+    command: aws ce get-cost-and-usage
+  scripts:
+  - id: tag-coverage-check
+    language: bash
+    purpose: Check tagging coverage across resources
+    source: inline
+    code: |
+      #!/bin/bash
+      # Check tag coverage in Terraform files
+
+      echo "=== Resources with tags ==="
+      TAGGED=$(grep -r 'tags\s*=' --include='*.tf' . | wc -l)
+
+      echo "=== Resources likely missing tags ==="
+      grep -r 'resource "aws_' --include='*.tf' . | while read line; do
+        file=$(echo "$line" | cut -d: -f1)
+        resource=$(echo "$line" | grep -o 'resource "[^"]*"')
+        if ! grep -q 'tags\s*=' "$file" 2>/dev/null; then
+          echo "MISSING TAGS: $file - $resource"
+        fi
+      done | head -20
+
+      echo ""
+      echo "=== Default tags configuration ==="
+      grep -r -A10 'default_tags' --include='*.tf' . | head -20
+signals:
+  critical:
+  - id: IAC-TAG-CRIT-001
+    signal: No tagging strategy implemented
+    evidence_pattern: Resources without tags, no default_tags
+    explanation: |
+      Without tags, resources cannot be associated with projects,
+      teams, or environments. Cost allocation is impossible, and
+      orphaned resources cannot be identified for cleanup.
+    remediation: |
+      Implement comprehensive tagging:
+      1. Define required tags (environment, owner, project, cost-center)
+      2. Configure default_tags in provider
+      3. Add tag validation to modules
+      4. Activate cost allocation tags in AWS
+  high:
+  - id: IAC-TAG-HIGH-001
+    signal: No default_tags on provider (AWS)
+    evidence_pattern: aws provider without default_tags block
+    explanation: |
+      Without default_tags, every resource must be individually
+      tagged, leading to inconsistency and missed resources.
+    remediation: |
+      Add default_tags to AWS provider:
+      provider "aws" {
+        default_tags {
+          tags = {
+            Environment = var.environment
+            ManagedBy   = "terraform"
+            Project     = var.project_name
+            Owner       = var.team_name
+          }
+        }
+      }
+  - id: IAC-TAG-HIGH-002
+    signal: Cost allocation tags not activated
+    evidence_pattern: Tags exist but not activated for cost reporting
+    explanation: |
+      Tags must be explicitly activated in AWS Cost Explorer for
+      cost allocation. Unactivated tags don't appear in billing reports.
+    remediation: |
+      Activate cost allocation tags:
+      1. Go to AWS Billing console
+      2. Navigate to Cost allocation tags
+      3. Activate required tags (environment, project, cost-center)
+      4. Wait 24 hours for tags to appear in reports
+  medium:
+  - id: IAC-TAG-MED-001
+    signal: Inconsistent tag keys across resources
+    evidence_pattern: Mix of Environment, environment, env, ENV
+    remediation: |
+      Standardize tag key naming:
+      - Use consistent case (PascalCase or lowercase)
+      - Document standard tag keys
+      - Enforce via AWS Tag Policies or tflint rules
+  - id: IAC-TAG-MED-002
+    signal: Missing owner/team tags
+    remediation: |
+      Add ownership tags to all resources:
+      - Owner: Team or individual responsible
+      - Team: Business unit
+      - CostCenter: For finance allocation
+  low:
+  - id: IAC-TAG-LOW-001
+    signal: Tags not documented
+    remediation: Document required tags and their purposes in README
+  positive:
+  - id: IAC-TAG-POS-001
+    signal: default_tags configured with all required tags
+  - id: IAC-TAG-POS-002
+    signal: Tag validation in module variables
+  - id: IAC-TAG-POS-003
+    signal: AWS Tag Policies enforce compliance
+  - id: IAC-TAG-POS-004
+    signal: Cost allocation tags activated and used in reporting
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Review provider default_tags
+    description: |
+      Check for default tags configuration on cloud providers.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find default_tags configuration
+      command: grep -r -A10 'default_tags' --include='*.tf' . | head -30
+    - purpose: Find provider blocks
+      command: grep -r -A5 'provider "aws"' --include='*.tf' . | head -30
+    expected_findings:
+    - Default tags configuration
+    - Tags included by default
+  - id: '2'
+    name: Analyze resource tagging coverage
+    description: |
+      Check what percentage of resources have tags.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Count resources
+      command: grep -r 'resource "' --include='*.tf' . | wc -l
+    - purpose: Count resources with tags
+      command: grep -r -B5 'tags\s*=' --include='*.tf' . | grep -c 'resource "'
+    - purpose: Find resources without tags
+      command: |
+        for f in $(find . -name '*.tf'); do
+          grep -l 'resource "aws_' "$f" 2>/dev/null | while read file; do
+            if ! grep -q 'tags\s*=' "$file"; then
+              echo "NO TAGS: $file"
+            fi
+          done
+        done | head -20
+    expected_findings:
+    - Tagging coverage percentage
+    - Resources missing tags
+  - id: '3'
+    name: Review tag standardization
+    description: |
+      Check for consistent tag key usage.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Extract tag keys used
+      command: grep -r -o '[A-Za-z_-]*\s*=' --include='*.tf' . | grep -i 'environment\|owner\|project\|team\|cost'
+        | sort | uniq -c | sort -rn | head -20
+    - purpose: Find common_tags variable
+      command: grep -r -A10 'common_tags\|required_tags' --include='*.tf' . | head -30
+    expected_findings:
+    - Tag key consistency
+    - Standard tags defined
+  - id: '4'
+    name: Check for tag validation
+    description: |
+      Verify tag values are validated.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find tag validation
+      command: grep -r -A10 'variable.*tags' --include='*.tf' . | grep -A10 'validation' | head -30
+    - purpose: Check for tag enforcement
+      command: grep -r 'tag.*policy\|enforce.*tag' --include='*.tf' . | head -10
+    expected_findings:
+    - Tag validation implementation
+    - Policy enforcement
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Default Tags Analysis
+    - Coverage Assessment
+    - Standardization Review
+    - Recommendations
+  confidence_guidance:
+    high: Tag coverage calculated and validated against policy
+    medium: Configuration reviewed but coverage not calculated
+    low: Only presence of tags confirmed
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: aws-tagging-best-practices
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: Quick pattern match for default_tags
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: tag-001
+  item: Default tags configured on provider
+  level: CRITICAL
+  verification: grep -r 'default_tags' --include='*.tf' . | wc -l
+  expected: '>0'
+- id: tag-002
+  item: Required tags defined (environment, owner, project)
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify default_tags includes required tags
+  expected: Confirmed by reviewer
+- id: tag-003
+  item: Tag keys are consistent across resources
+  level: WARNING
+  verification: manual
+  verification_notes: Verify consistent naming convention
+  expected: Confirmed by reviewer
+- id: tag-004
+  item: Cost allocation tags activated in cloud console
+  level: WARNING
+  verification: manual
+  verification_notes: Verify tags activated in AWS Billing
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: FinOps Framework
+    controls:
+    - Cost Allocation
+  - framework: AWS Well-Architected
+    controls:
+    - COST-01
+    - COST-02
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.testing-validation.cost-estimation
+  - infrastructure-as-code.iac-operations.dependency-management

@@ -1,0 +1,394 @@
+# ============================================================
+# AUDIT: Cumulative Layout Shift (CLS) Optimization
+# ============================================================
+# Evaluates CLS performance, a Core Web Vital measuring visual
+# stability during page load and interaction.
+# ============================================================
+
+audit:
+  id: "seo-discoverability.core-web-vitals.cumulative-layout-shift"
+
+  name: "Cumulative Layout Shift (CLS) Optimization Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "seo-discoverability"
+  category_number: 16
+  subcategory: "core-web-vitals"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "runtime"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines Cumulative Layout Shift (CLS) performance,
+    a Core Web Vital that measures visual stability. CLS quantifies
+    how much visible content shifts unexpectedly during the page
+    lifecycle. It evaluates current CLS scores, identifies layout
+    shift sources, analyzes shift causes, and provides stability
+    optimization recommendations.
+
+  why_it_matters: |
+    CLS is a Core Web Vital that directly impacts search rankings.
+    High CLS (over 0.25) creates frustrating experiences where users
+    may accidentally click wrong elements, lose reading position, or
+    find the page disorienting. Good CLS (under 0.1) provides a stable,
+    predictable visual experience.
+
+  when_to_run:
+    - "During visual stability optimization"
+    - "After adding dynamic content or ads"
+    - "When users report accidental clicks"
+    - "During Core Web Vitals audits"
+    - "After design changes"
+
+prerequisites:
+  required_artifacts:
+    - type: "website"
+      description: "Live website accessible for testing"
+    - type: "crux_data"
+      description: "Chrome User Experience Report data (optional)"
+
+  access_requirements:
+    - "PageSpeed Insights API access"
+    - "Google Search Console"
+    - "Chrome DevTools"
+
+discovery:
+  code_patterns:
+    - pattern: "width|height"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find explicit dimension declarations"
+    - pattern: "<img[^>]*(?!width|height)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find images without dimensions"
+    - pattern: "aspect-ratio"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find CSS aspect ratio declarations"
+
+  file_patterns:
+    - glob: "**/*.html"
+      purpose: "Check for image dimensions"
+    - glob: "**/*.css"
+      purpose: "Check for layout stability styles"
+
+knowledge_sources:
+  specifications:
+    - id: "web-vitals-cls"
+      name: "web.dev: Cumulative Layout Shift"
+      url: "https://web.dev/cls/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "google-optimize-cls"
+      name: "Google: Optimize CLS"
+      url: "https://web.dev/optimize-cls/"
+      offline_cache: true
+    - id: "google-cls-debug"
+      name: "Google: Debug Layout Shifts"
+      url: "https://web.dev/debug-layout-shifts/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "Lighthouse"
+      purpose: "CLS measurement and diagnostics"
+      offline_capable: true
+    - tool: "Chrome DevTools"
+      purpose: "Layout shift visualization"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "PageSpeed Insights"
+      purpose: "Field and lab CLS data"
+      command: "https://pagespeed.web.dev/"
+    - tool: "Google Search Console"
+      purpose: "Site-wide Core Web Vitals report"
+      command: "Core Web Vitals report"
+    - tool: "WebPageTest"
+      purpose: "Filmstrip view for visual shifts"
+      command: "https://www.webpagetest.org/"
+
+  scripts:
+    - id: "cls-checker"
+      language: "bash"
+      purpose: "Check CLS via PageSpeed Insights API"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        URL=$1
+        API_KEY=$2
+
+        echo "=== CLS Analysis for: $URL ==="
+
+        RESULT=$(curl -s "https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=$URL&key=$API_KEY&strategy=mobile")
+
+        # Lab CLS
+        echo "Lab CLS:"
+        echo $RESULT | jq '.lighthouseResult.audits["cumulative-layout-shift"].numericValue'
+
+        # Field CLS
+        echo ""
+        echo "Field CLS (75th percentile):"
+        echo $RESULT | jq '.loadingExperience.metrics.CUMULATIVE_LAYOUT_SHIFT_SCORE.percentile'
+
+        # Layout shift elements
+        echo ""
+        echo "Elements causing shifts:"
+        echo $RESULT | jq '.lighthouseResult.audits["layout-shift-elements"]'
+
+signals:
+  critical:
+    - id: "CLS-CRIT-001"
+      signal: "CLS exceeds 0.25 (poor threshold)"
+      evidence_threshold: "CLS > 0.25"
+      explanation: |
+        CLS over 0.25 is classified as "poor" by Google. Pages with
+        high CLS create disorienting experiences and can cause users
+        to click unintended elements.
+      remediation: "Add dimensions to images/embeds, reserve space for dynamic content"
+
+    - id: "CLS-CRIT-002"
+      signal: "Ads or embeds causing major layout shifts"
+      evidence_indicators:
+        - "Ad containers without reserved height"
+        - "Embeds loading after page render"
+      explanation: |
+        Ads and third-party embeds are common CLS culprits when they
+        don't have pre-reserved space, pushing content around when loaded.
+      remediation: "Reserve exact space for ads, use min-height containers"
+
+  high:
+    - id: "CLS-HIGH-001"
+      signal: "CLS between 0.1-0.25 (needs improvement)"
+      evidence_threshold: "CLS > 0.1 && CLS <= 0.25"
+      explanation: |
+        CLS in this range is classified as "needs improvement" and
+        creates noticeable visual instability.
+      remediation: "Identify and fix layout shift sources"
+
+    - id: "CLS-HIGH-002"
+      signal: "Images without width and height attributes"
+      explanation: |
+        Images without explicit dimensions cause layout shifts as
+        the browser determines their size during loading.
+      remediation: "Add width and height attributes to all images"
+
+    - id: "CLS-HIGH-003"
+      signal: "Web fonts causing layout shifts (FOIT/FOUT)"
+      explanation: |
+        Web fonts that load after text is rendered can cause text
+        to resize, creating layout shifts.
+      remediation: "Use font-display: optional/swap, preload fonts"
+
+  medium:
+    - id: "CLS-MED-001"
+      signal: "Dynamic content injected above existing content"
+      remediation: "Insert content below the fold or reserve space"
+
+    - id: "CLS-MED-002"
+      signal: "CSS animations causing layout shifts"
+      remediation: "Use transform animations instead of layout-triggering properties"
+
+    - id: "CLS-MED-003"
+      signal: "Cookie banners causing layout shifts"
+      remediation: "Use fixed/sticky positioning for banners"
+
+  low:
+    - id: "CLS-LOW-001"
+      signal: "Minor shifts from user-initiated interactions"
+
+  positive:
+    - id: "CLS-POS-001"
+      signal: "CLS under 0.1 (good threshold)"
+    - id: "CLS-POS-002"
+      signal: "All images have explicit dimensions"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Gather CLS Field Data"
+      description: |
+        Collect real-user CLS data from Chrome User Experience
+        Report via PageSpeed Insights and Search Console.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Get field CLS data"
+          command: "PageSpeed Insights for key pages"
+      expected_findings:
+        - "Field CLS by page type"
+        - "CLS distribution"
+        - "Mobile vs desktop CLS"
+
+    - id: "2"
+      name: "Run Lab Tests"
+      description: |
+        Use Lighthouse to measure lab CLS and identify elements
+        causing layout shifts.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Run Lighthouse audit"
+          command: "Chrome DevTools > Lighthouse > Performance"
+      expected_findings:
+        - "Lab CLS scores"
+        - "Shift element identification"
+        - "Shift scores by element"
+
+    - id: "3"
+      name: "Visualize Layout Shifts"
+      description: |
+        Use Chrome DevTools Layout Shift Regions or WebPageTest
+        filmstrip to visualize when and where shifts occur.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Enable layout shift visualization"
+          command: "Chrome DevTools > Rendering > Layout Shift Regions"
+      expected_findings:
+        - "Visual shift patterns"
+        - "Timing of shifts"
+        - "Shift magnitudes"
+
+    - id: "4"
+      name: "Audit Image Dimensions"
+      description: |
+        Check that all images have explicit width and height
+        attributes or CSS aspect-ratio set.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find images without dimensions"
+          command: "grep -r '<img' --include='*.html' | grep -v 'width'"
+      expected_findings:
+        - "Images missing dimensions"
+        - "Responsive image issues"
+        - "Aspect ratio usage"
+
+    - id: "5"
+      name: "Analyze Dynamic Content"
+      description: |
+        Identify dynamic content that loads after initial render
+        and causes layout shifts (ads, embeds, lazy content).
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Dynamic content sources"
+        - "Shift contribution"
+        - "Space reservation status"
+
+    - id: "6"
+      name: "Check Font Loading"
+      description: |
+        Review web font loading strategy for potential FOIT/FOUT
+        causing text-related layout shifts.
+      duration_estimate: "20 min"
+      expected_findings:
+        - "Font loading strategy"
+        - "font-display values"
+        - "Preload usage"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "CLS Performance Summary"
+        - "Layout Shift Sources"
+        - "Optimization Opportunities"
+        - "Implementation Recommendations"
+
+  confidence_guidance:
+    high: "Field data from CrUX with large sample size"
+    medium: "Lab data verified with visual inspection"
+    low: "Single lab test without field validation"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "web-vitals-cls"
+        priority: "required"
+      - source_id: "google-optimize-cls"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed visual stability analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "cls-001"
+    item: "CLS under 0.1 on key pages"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Check PageSpeed Insights field data"
+    expected: "Confirmed by reviewer"
+
+  - id: "cls-002"
+    item: "All images have width and height attributes"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Audit img tags for dimension attributes"
+    expected: "Confirmed by reviewer"
+
+  - id: "cls-003"
+    item: "Ad slots have reserved space"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Check ad container min-height"
+    expected: "Confirmed by reviewer"
+
+  - id: "cls-004"
+    item: "Font loading doesn't cause FOUT"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Test font loading behavior"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["web-application", "marketing-site", "ecommerce", "content-site"]
+
+  compliance_frameworks:
+    - framework: "Google Core Web Vitals"
+      controls: ["CLS", "Visual Stability"]
+
+relationships:
+  commonly_combined:
+    - "seo-discoverability.core-web-vitals.largest-contentful-paint"
+    - "seo-discoverability.core-web-vitals.interaction-to-next-paint"
+    - "seo-discoverability.core-web-vitals.first-contentful-paint"

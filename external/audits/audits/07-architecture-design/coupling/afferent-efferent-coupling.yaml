@@ -1,0 +1,359 @@
+audit:
+  id: architecture-design.coupling.afferent-efferent-coupling
+  name: Afferent and Efferent Coupling Analysis
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: architecture-design
+  category_number: 7
+  subcategory: coupling
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - architecture
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit measures and analyzes afferent coupling (Ca) - the number of
+    external modules that depend on a module, and efferent coupling (Ce) -
+    the number of external modules a module depends on. It calculates
+    derived metrics including Instability (I = Ce/(Ca+Ce)) and uses these
+    to assess the Stable Dependencies Principle (SDP) and Stable
+    Abstractions Principle (SAP).
+  why_it_matters: |
+    Understanding afferent and efferent coupling reveals:
+    - Which modules are stable foundations vs. volatile components
+    - Whether the codebase follows proper dependency direction
+    - Risk assessment for changes - high Ca modules are dangerous to modify
+    - Architectural debt when unstable modules are depended upon
+    Violations of SDP lead to cascading changes and fragile architectures.
+  when_to_run:
+  - During architecture evolution planning
+  - When evaluating module extraction for microservices
+  - Before deprecating or significantly changing core modules
+  - During technical debt assessment
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Complete source code with clear module boundaries
+  - type: build_configuration
+    description: Build files showing module/package structure
+  access_requirements:
+  - Read access to entire codebase
+  - Documentation of intended module boundaries
+discovery:
+  code_patterns:
+  - pattern: ^import\s+|^from\s+.*\s+import
+    type: regex
+    scope: source
+    purpose: Track import statements for dependency counting
+  - pattern: ^package\s+|^namespace\s+
+    type: regex
+    scope: source
+    purpose: Identify module/package declarations
+  - pattern: require\(['"]|import\s+.*\s+from
+    type: regex
+    scope: source
+    purpose: JavaScript/TypeScript module imports
+  file_patterns:
+  - glob: '**/package.json'
+    purpose: Node.js module definitions
+  - glob: '**/pom.xml'
+    purpose: Maven module definitions
+  - glob: '**/build.gradle'
+    purpose: Gradle module definitions
+  - glob: '**/__init__.py'
+    purpose: Python package definitions
+knowledge_sources:
+  specifications:
+  - id: clean-architecture
+    name: Clean Architecture - Robert C. Martin
+    url: https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: sdp-sap
+    name: Stable Dependencies Principle
+    url: https://wiki.c2.com/?StableDependenciesPrinciple
+    offline_cache: true
+  - id: ddd-evans
+    name: Domain-Driven Design Reference
+    url: https://www.domainlanguage.com/ddd/reference/
+    offline_cache: true
+  - id: pragmatic-programmer
+    name: Pragmatic Programmer Tips
+    url: https://pragprog.com/tips/
+    offline_cache: true
+  learning_resources:
+  - id: agile-ppp
+    title: Agile Software Development, Principles, Patterns, and Practices
+    type: book
+    reference: Robert C. Martin - Chapter on Package Coupling
+  - id: software-metrics
+    title: Object-Oriented Software Metrics
+    type: book
+    reference: Lorenz & Kidd - ISBN 978-0131792920
+tooling:
+  static_analysis:
+  - tool: JDepend
+    purpose: Calculate Ca, Ce, I, A, D metrics for Java
+    offline_capable: true
+  - tool: NDepend
+    purpose: Comprehensive coupling analysis for .NET
+    offline_capable: true
+  - tool: Structure101
+    purpose: Visualize dependencies and calculate coupling
+    offline_capable: true
+  - tool: SonarQube
+    purpose: Track coupling metrics over time
+    offline_capable: false
+  - tool: dependency-cruiser
+    purpose: Analyze and enforce JavaScript/TypeScript dependencies
+    offline_capable: true
+  scripts:
+  - id: coupling-calculator
+    language: python
+    purpose: Calculate Ca/Ce from import analysis
+    source: inline
+    code: |
+      #!/usr/bin/env python3
+      import os
+      import re
+      from collections import defaultdict
+
+      def analyze_coupling(src_dir):
+          # Track dependencies: module -> set of modules it imports from
+          efferent = defaultdict(set)  # Ce: what this module depends on
+          afferent = defaultdict(set)  # Ca: what depends on this module
+
+          for root, _, files in os.walk(src_dir):
+              for f in files:
+                  if f.endswith(('.java', '.py', '.ts', '.js')):
+                      module = os.path.dirname(root).replace('/', '.')
+                      with open(os.path.join(root, f)) as fp:
+                          for line in fp:
+                              if 'import' in line:
+                                  # Extract imported module
+                                  match = re.search(r'from\s+(\S+)|import\s+(\S+)', line)
+                                  if match:
+                                      dep = match.group(1) or match.group(2)
+                                      efferent[module].add(dep)
+                                      afferent[dep].add(module)
+
+          print("Module,Ca,Ce,Instability")
+          for module in efferent:
+              ca = len(afferent.get(module, set()))
+              ce = len(efferent[module])
+              i = ce / (ca + ce) if (ca + ce) > 0 else 0
+              print(f"{module},{ca},{ce},{i:.2f}")
+signals:
+  critical:
+  - id: COUPLING-CRIT-001
+    signal: Highly unstable module (I > 0.8) with high afferent coupling (Ca > 10)
+    evidence_pattern: Module with many dependents but also many dependencies
+    explanation: |
+      This violates the Stable Dependencies Principle. Many modules depend
+      on something that itself is highly volatile. Any change to this module
+      will cascade through the system.
+    remediation: Reduce Ce by abstracting dependencies or split module into stable/unstable parts
+  - id: COUPLING-CRIT-002
+    signal: Concrete module in dependency center (high Ca, low abstraction)
+    evidence_pattern: Non-abstract module with Ca > 15
+    explanation: |
+      Violates Stable Abstractions Principle - stable modules should be
+      abstract. A concrete class that many depend on cannot change safely.
+    remediation: Extract interface from concrete implementation; depend on abstraction
+  high:
+  - id: COUPLING-HIGH-001
+    signal: Dependency direction violation - stable depends on unstable
+    evidence_pattern: Module with I < 0.3 imports from module with I > 0.7
+    explanation: |
+      Stable modules should not depend on unstable ones. This creates
+      unexpected change propagation when the unstable module evolves.
+    remediation: Invert dependency using interface in stable module
+  - id: COUPLING-HIGH-002
+    signal: Module with excessive efferent coupling (Ce > 20)
+    evidence_pattern: Module imports from more than 20 external modules
+    explanation: |
+      High Ce indicates a module knows too much about the system,
+      making it fragile and difficult to test in isolation.
+    remediation: Apply facade pattern or split responsibilities
+  medium:
+  - id: COUPLING-MED-001
+    signal: Main sequence deviation (D > 0.3)
+    evidence_pattern: Distance from main sequence exceeds threshold
+    remediation: Adjust abstraction level to match stability requirements
+  - id: COUPLING-MED-002
+    signal: Zone of uselessness - high abstraction, low stability
+    evidence_pattern: A > 0.8 and I > 0.7
+    remediation: Review if abstractions are actually used
+  low:
+  - id: COUPLING-LOW-001
+    signal: Module instability near 0.5 - neither stable nor flexible
+    remediation: Consider clarifying module's role in architecture
+  positive:
+  - id: COUPLING-POS-001
+    signal: Clean separation of stable core and volatile periphery
+  - id: COUPLING-POS-002
+    signal: Dependencies flow from unstable to stable modules
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify module boundaries
+    description: |
+      Define what constitutes a "module" for analysis - packages,
+      directories, or explicit module definitions.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List top-level packages/modules
+      command: find . -type d -maxdepth 3 | grep -E 'src/(main|lib)' | head -30
+    - purpose: Identify module configuration files
+      command: find . -name 'package.json' -o -name 'pom.xml' -o -name 'build.gradle' | head -20
+    expected_findings:
+    - Clear module boundary definitions
+    - Module naming conventions
+  - id: '2'
+    name: Calculate afferent coupling (Ca)
+    description: |
+      For each module, count how many other modules depend on it.
+      High Ca = many dependents = need stability.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find most imported modules (Java)
+      command: grep -rh '^import' --include='*.java' | sed 's/import //;s/\..*//' | sort | uniq -c | sort
+        -rn | head -20
+    - purpose: Find most imported modules (TypeScript)
+      command: grep -rh 'from.*import' --include='*.ts' | grep -oP "from '\K[^']+" | sort | uniq -c |
+        sort -rn | head -20
+    expected_findings:
+    - Modules with highest afferent coupling
+    - Core dependencies of the system
+  - id: '3'
+    name: Calculate efferent coupling (Ce)
+    description: |
+      For each module, count how many other modules it depends on.
+      High Ce = many dependencies = potentially fragile.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Count imports per module (Java)
+      command: 'for d in $(find . -type d -name ''java'' -path ''*/main/*''); do echo "$d: $(grep -r ''^import''
+        $d 2>/dev/null | wc -l)"; done | sort -t: -k2 -rn | head -10'
+    - purpose: Count dependencies per file
+      command: find . -name '*.ts' -exec sh -c 'echo "$(grep -c import "$1") $1"' _ {} \; 2>/dev/null
+        | sort -rn | head -20
+    expected_findings:
+    - Modules with highest efferent coupling
+    - Potential god modules
+  - id: '4'
+    name: Calculate instability metric
+    description: |
+      Compute I = Ce / (Ca + Ce) for each module.
+      I=0 is maximally stable, I=1 is maximally unstable.
+    duration_estimate: 20 min
+    expected_findings:
+    - Instability ranking of all modules
+    - Identification of stable core vs volatile periphery
+  - id: '5'
+    name: Verify dependency direction
+    description: |
+      Check that dependencies flow from unstable to stable modules,
+      not the reverse.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Visualize dependency direction
+      command: npx dependency-cruiser --output-type dot src 2>/dev/null | grep -E '->'
+    expected_findings:
+    - Dependency direction violations
+    - Cycles involving stable modules
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: metrics_report
+    format: tabular
+    sections:
+    - Module Coupling Matrix
+    - Ca/Ce/I per Module
+    - Main Sequence Analysis
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Coupling Metrics Analysis
+    - SDP/SAP Violations
+    - Recommendations
+  confidence_guidance:
+    high: Metrics calculated directly from dependency analysis
+    medium: Some module boundaries inferred
+    low: Manual estimation due to dynamic dependencies
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: clean-architecture
+      priority: required
+    - source_id: sdp-sap
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive dependency analysis
+    full:
+      included: true
+      priority: 1
+    architecture:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: afferent-efferent-001
+  item: Ca and Ce calculated for all major modules
+  level: CRITICAL
+  verification: manual
+  verification_notes: Coupling matrix populated for top 20 modules
+  expected: Confirmed by reviewer
+- id: afferent-efferent-002
+  item: No SDP violations in core modules
+  level: CRITICAL
+  verification: manual
+  verification_notes: Stable modules (I < 0.3) do not depend on unstable modules (I > 0.7)
+  expected: Confirmed by reviewer
+- id: afferent-efferent-003
+  item: Instability metric calculated for all modules
+  level: BLOCKING
+  verification: manual
+  verification_notes: I = Ce/(Ca+Ce) computed and documented
+  expected: Confirmed by reviewer
+- id: afferent-efferent-004
+  item: High-Ca modules are appropriately abstract
+  level: WARNING
+  verification: manual
+  verification_notes: Modules with Ca > 10 have interfaces, not just implementations
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Maintainability
+    - Modularity
+    - Reusability
+relationships:
+  commonly_combined:
+  - architecture-design.coupling.tight-coupling-detection
+  - architecture-design.design-principles.dependency-inversion
+  - architecture-design.cohesion.module-cohesion

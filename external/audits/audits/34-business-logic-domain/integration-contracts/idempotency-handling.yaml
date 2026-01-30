@@ -1,0 +1,266 @@
+# ============================================================
+# AUDIT: Idempotency Handling
+# Category: 34 - Business Logic & Domain
+# Subcategory: integration-contracts
+# ============================================================
+
+audit:
+  id: "business-logic-domain.integration-contracts.idempotency-handling"
+  name: "Idempotency Handling Audit"
+  version: "1.0.0"
+  last_updated: "2025-01-22"
+  status: "active"
+
+  category: "business-logic-domain"
+  category_number: 34
+  subcategory: "integration-contracts"
+
+  tier: "expert"
+  estimated_duration: "3-5 hours"  # median: 4h
+
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "business-logic"
+
+  default_profiles:
+    - "full"
+    - "quick"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates idempotency handling in API integrations. This audit examines
+    idempotency key usage, duplicate request handling, retry safety, and
+    exactly-once semantics. It ensures operations can be safely retried without
+    causing duplicate effects.
+
+  why_it_matters: |
+    Network failures and timeouts are inevitable. Without proper idempotency,
+    retries cause duplicate transactions, double charges, and data corruption.
+    Idempotent operations are essential for reliable integrations and financial
+    correctness.
+
+  when_to_run:
+    - "When designing payment or financial APIs"
+    - "After duplicate transaction incidents"
+    - "When implementing retry logic"
+    - "During integration reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "API implementation code"
+    - type: "api_specs"
+      description: "API specifications"
+    - type: "integration_logs"
+      description: "Request/response logs"
+
+  access_requirements:
+    - "Read access to API code"
+    - "Access to API specifications"
+    - "Test environment access"
+
+discovery:
+  file_patterns:
+    - glob: "**/api/**/*.{ts,java,cs,py}"
+      purpose: "Find API implementations"
+    - glob: "**/*Idempoten*.{ts,java,cs,py}"
+      purpose: "Find idempotency handling code"
+    - glob: "**/controllers/**/*.{ts,java,cs,py}"
+      purpose: "Find controller code"
+    - glob: "**/middleware/**/*.{ts,java,cs,py}"
+      purpose: "Find middleware for idempotency"
+
+  interview_questions:
+    - role: "Lead Developer"
+      questions:
+        - "How do you handle duplicate requests?"
+        - "Are APIs designed to be idempotent?"
+        - "What is your idempotency key strategy?"
+    - role: "Operations"
+      questions:
+        - "Have there been duplicate transaction issues?"
+        - "How do you handle retry storms?"
+        - "How long are idempotency keys stored?"
+
+knowledge_sources:
+  guides:
+    - id: "stripe-idempotency"
+      name: "Stripe Idempotency Guide"
+      url: "https://stripe.com/docs/api/idempotent_requests"
+    - id: "idempotency-patterns"
+      name: "Idempotency Patterns"
+      url: "https://microservices.io/patterns/communication-style/idempotent-consumer.html"
+
+  standards:
+    - id: "http-idempotency"
+      name: "HTTP Idempotency"
+      relevance: "HTTP method idempotency semantics"
+
+tooling:
+  analysis_tools:
+    - tool: "Load testing tools"
+      purpose: "Test concurrent duplicate requests"
+    - tool: "API testing frameworks"
+      purpose: "Test idempotency behavior"
+
+signals:
+  critical:
+    - id: "IDH-CRIT-001"
+      signal: "POST operations not idempotent causing duplicates"
+      evidence_indicators:
+        - "Duplicate records from retries"
+        - "Double charges to customers"
+        - "No idempotency key handling"
+      explanation: |
+        Non-idempotent POST operations cause duplicate transactions when
+        retried. This is especially critical for financial operations.
+      remediation: "Implement idempotency key handling for all non-idempotent operations"
+
+    - id: "IDH-CRIT-002"
+      signal: "Idempotency keys not unique per operation"
+      evidence_indicators:
+        - "Keys reused across different operations"
+        - "Collision in idempotency keys"
+        - "Wrong operation returned"
+      explanation: |
+        Idempotency key collisions cause incorrect responses, potentially
+        returning results from unrelated operations.
+      remediation: "Use UUIDs or client-generated unique keys per operation"
+
+  high:
+    - id: "IDH-HIGH-001"
+      signal: "Idempotency window too short"
+      evidence_indicators:
+        - "Keys expire before retry possible"
+        - "Duplicates after key expiration"
+        - "Retry after timeout creates duplicate"
+      remediation: "Extend idempotency window; consider business operation duration"
+
+    - id: "IDH-HIGH-002"
+      signal: "Partial operations not handled idempotently"
+      evidence_indicators:
+        - "Retry of failed operation re-executes successful steps"
+        - "No checkpointing in multi-step operations"
+        - "Inconsistent state on retry"
+      remediation: "Implement checkpointing; make partial operations resumable"
+
+  medium:
+    - id: "IDH-MED-001"
+      signal: "Idempotency responses not consistent"
+      evidence_indicators:
+        - "Different response on retry"
+        - "Status changes between checks"
+        - "Cached response not returned"
+      remediation: "Cache and return exact original response"
+
+    - id: "IDH-MED-002"
+      signal: "No idempotency for webhooks"
+      evidence_indicators:
+        - "Duplicate webhook processing"
+        - "No webhook deduplication"
+        - "Events processed multiple times"
+      remediation: "Implement webhook deduplication; track processed event IDs"
+
+  low:
+    - id: "IDH-LOW-001"
+      signal: "Idempotency behavior not documented"
+      evidence_indicators:
+        - "API docs don't mention idempotency"
+        - "Clients unaware of idempotency support"
+      remediation: "Document idempotency behavior in API documentation"
+
+  positive:
+    - id: "IDH-POS-001"
+      signal: "All mutation operations support idempotency keys"
+    - id: "IDH-POS-002"
+      signal: "Idempotency tested for concurrent duplicates"
+
+procedure:
+  context:
+    cognitive_mode: "analytical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Mutation Operations"
+      description: "Map all non-idempotent operations"
+      duration_estimate: "30 minutes"
+
+    - id: "2"
+      name: "Review Idempotency Implementation"
+      description: "Analyze idempotency handling code"
+      duration_estimate: "1-2 hours"
+
+    - id: "3"
+      name: "Test Duplicate Handling"
+      description: "Submit duplicate requests"
+      duration_estimate: "1 hour"
+
+    - id: "4"
+      name: "Test Concurrent Duplicates"
+      description: "Test race conditions with concurrent requests"
+      duration_estimate: "30 minutes"
+
+    - id: "5"
+      name: "Document Findings"
+      description: "Compile idempotency findings"
+      duration_estimate: "30 minutes"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      description: "List of idempotency issues"
+
+    - type: "operation_matrix"
+      format: "structured"
+      description: "Matrix of operations and idempotency support"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Operation Inventory"
+        - "Idempotency Analysis"
+        - "Test Results"
+        - "Recommendations"
+
+closeout_checklist:
+  - id: "idh-001"
+    item: "Mutation operations inventoried"
+    level: "REQUIRED"
+    verification: "manual"
+  - id: "idh-002"
+    item: "Idempotency handling verified"
+    level: "REQUIRED"
+    verification: "automated"
+  - id: "idh-003"
+    item: "Concurrent duplicate tests run"
+    level: "WARNING"
+    verification: "manual"
+
+governance:
+  applicable_to:
+    archetypes: ["payment-systems", "api-providers", "fintech"]
+
+  compliance_mappings:
+    - framework: "PCI-DSS"
+      control: "Transaction Processing"
+      description: "Duplicate transaction prevention"
+
+relationships:
+  commonly_combined:
+    - "business-logic-domain.integration-contracts.partner-api-compliance"
+    - "api-design.api-reliability"
+  depends_on:
+    - "api-design.api-specifications"
+  feeds_into:
+    - "reliability.api-reliability"

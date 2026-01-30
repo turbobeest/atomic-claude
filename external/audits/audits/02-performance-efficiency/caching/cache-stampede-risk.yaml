@@ -1,0 +1,331 @@
+# ============================================================
+# CACHE STAMPEDE RISK AUDIT
+# ============================================================
+# Evaluates protection mechanisms against cache stampedes (thundering herd)
+# when cache entries expire or are invalidated under load.
+
+audit:
+  id: "performance-efficiency.caching.cache-stampede-risk"
+  name: "Cache Stampede Risk Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "caching"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Identifies vulnerabilities to cache stampedes (thundering herd problem)
+    where simultaneous cache misses cause massive backend load spikes.
+    Reviews protection mechanisms like locking, probabilistic early expiration,
+    and request coalescing.
+
+  why_it_matters: |
+    Cache stampedes can take down entire systems. When a popular cache entry
+    expires, hundreds of concurrent requests hit the backend simultaneously,
+    overwhelming databases and services. This is a primary cause of cascading
+    failures and outages in high-traffic systems.
+
+  when_to_run:
+    - "High-traffic system design review"
+    - "After cache-related outages"
+    - "Load testing preparation"
+    - "Scaling capacity planning"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application code with caching logic"
+    - type: "architecture_docs"
+      description: "System architecture and traffic patterns"
+
+  access_requirements:
+    - "Source code repository access"
+    - "Traffic analytics access"
+
+discovery:
+  code_patterns:
+    - pattern: "cache\\.get.*or.*cache\\.set|get_or_set|cache\\.fetch"
+      type: "regex"
+      scope: "source"
+      purpose: "Find cache-aside patterns vulnerable to stampede"
+
+    - pattern: "lock|mutex|semaphore|single_flight"
+      type: "regex"
+      scope: "source"
+      purpose: "Find stampede protection mechanisms"
+
+    - pattern: "probabilistic.*expire|early.*refresh|stale.*while.*revalidate"
+      type: "regex"
+      scope: "source"
+      purpose: "Find probabilistic early expiration"
+
+    - pattern: "@cache|@cached|memoize|@lru_cache"
+      type: "regex"
+      scope: "source"
+      purpose: "Find decorator-based caching without protection"
+
+  file_patterns:
+    - glob: "**/cache*.{py,rb,js,ts,java,go}"
+      purpose: "Cache implementation files"
+    - glob: "**/decorators*.{py,rb}"
+      purpose: "Cache decorators"
+
+knowledge_sources:
+  papers:
+    - id: "thundering-herd"
+      title: "Solving the Thundering Herd Problem"
+      url: "https://instagram-engineering.com/thundering-herds-promises-82191c8af57d"
+
+  guides:
+    - id: "cache-stampede-prevention"
+      name: "Cache Stampede Prevention Patterns"
+      url: "https://redis.io/docs/manual/client-side-caching/"
+      offline_cache: true
+
+    - id: "singleflight-go"
+      name: "Go singleflight package"
+      url: "https://pkg.go.dev/golang.org/x/sync/singleflight"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "grep/ripgrep"
+      purpose: "Find cache access patterns"
+      offline_capable: true
+
+  scripts:
+    - id: "stampede-detector"
+      language: "bash"
+      purpose: "Find unprotected cache-aside patterns"
+      source: "inline"
+      code: |
+        # Find cache get/set without surrounding lock
+        rg -n 'cache\.(get|fetch)' --type py --type js -A 5 | \
+        grep -v 'lock\|mutex\|single'
+
+signals:
+  critical:
+    - id: "STAMPEDE-CRIT-001"
+      signal: "Popular cache entries with no stampede protection"
+      evidence_pattern: "High-traffic endpoint using cache.get().or_set() without locking"
+      explanation: |
+        When a popular cache entry expires, all concurrent requests will
+        simultaneously attempt to regenerate it. With 1000 QPS, a 1-second
+        generation time means 1000 redundant backend calls.
+      remediation: "Implement locking, request coalescing, or probabilistic early refresh"
+
+    - id: "STAMPEDE-CRIT-002"
+      signal: "Synchronized TTL expiration across hot keys"
+      evidence_pattern: "Multiple hot keys with identical TTL values"
+      explanation: |
+        If many popular cache entries were set at the same time with the
+        same TTL, they will all expire simultaneously, creating a massive
+        synchronized stampede.
+      remediation: "Add TTL jitter: ttl + random(0, ttl * 0.1)"
+
+  high:
+    - id: "STAMPEDE-HIGH-001"
+      signal: "Cache warming not implemented for cold starts"
+      evidence_pattern: "No cache priming/warming on startup or deployment"
+      explanation: |
+        Cold caches after deployment or restart cause all requests to miss,
+        creating an immediate stampede condition until cache is populated.
+      remediation: "Implement cache warming on startup for critical data"
+
+    - id: "STAMPEDE-HIGH-002"
+      signal: "No request coalescing for expensive computations"
+      evidence_pattern: "Expensive cache.get_or_set without singleflight"
+      explanation: |
+        Multiple in-flight requests for the same missing key redundantly
+        compute the same result instead of sharing a single computation.
+      remediation: "Use singleflight/promise coalescing patterns"
+
+  medium:
+    - id: "STAMPEDE-MED-001"
+      signal: "Lock implementation without timeout"
+      evidence_pattern: "acquire_lock(?!.*timeout)"
+      remediation: "Add timeout to prevent indefinite waiting"
+
+    - id: "STAMPEDE-MED-002"
+      signal: "No early refresh before expiration"
+      evidence_pattern: "Standard TTL without stale-while-revalidate"
+      remediation: "Implement probabilistic early refresh or background refresh"
+
+  low:
+    - id: "STAMPEDE-LOW-001"
+      signal: "No load testing for cache failure scenarios"
+      remediation: "Add chaos testing for cache unavailability"
+
+  positive:
+    - id: "STAMPEDE-POS-001"
+      signal: "Proper lock-based cache population"
+
+    - id: "STAMPEDE-POS-002"
+      signal: "Request coalescing implemented (singleflight)"
+
+    - id: "STAMPEDE-POS-003"
+      signal: "Probabilistic early expiration configured"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify high-traffic cache access patterns"
+      description: |
+        Find cache access points in high-traffic code paths and assess
+        their vulnerability to stampede conditions.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find cache-aside patterns"
+          command: "rg -n 'cache\\.(get|fetch).*or|get_or_set|cache_get_or_set' --type py --type js --type go"
+        - purpose: "Find cache decorators"
+          command: "rg -n '@cache|@cached|@memoize' --type py"
+
+      expected_findings:
+        - "Cache access patterns identified"
+        - "High-traffic endpoints mapped"
+
+    - id: "2"
+      name: "Check for stampede protection"
+      description: |
+        Verify that identified cache access patterns have appropriate
+        protection mechanisms in place.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find lock patterns"
+          command: "rg -n 'lock|mutex|singleflight|single_flight' --type py --type go --type java"
+        - purpose: "Find early refresh patterns"
+          command: "rg -n 'early.*refresh|stale.*while|probabilistic' --type py --type js"
+
+      expected_findings:
+        - "Protection mechanisms catalog"
+        - "Unprotected patterns identified"
+
+    - id: "3"
+      name: "Analyze TTL distribution"
+      description: |
+        Check for synchronized TTL values that could cause mass expiration
+        and recommend jitter implementation.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find TTL settings"
+          command: "rg -n 'ttl|expire|EXPIRE' --type py --type js -C 2"
+
+      expected_findings:
+        - "TTL synchronization risks"
+        - "Jitter implementation status"
+
+    - id: "4"
+      name: "Review cache warming strategy"
+      description: |
+        Assess startup and deployment cache warming to prevent cold-start
+        stampedes.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find warming/priming code"
+          command: "rg -n 'warm|prime|preload|prefetch' --type py --type js --type go"
+
+      expected_findings:
+        - "Cache warming implementation"
+        - "Cold start vulnerability assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Stampede Risk Assessment"
+        - "Protection Mechanisms Review"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct code analysis with traffic pattern verification"
+    medium: "Code analysis without traffic data"
+    low: "Pattern matching without full context"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "cache-stampede-prevention"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "stampede-001"
+    item: "High-traffic cache paths have stampede protection"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Reviewer confirms lock/coalescing for popular entries"
+    expected: "Confirmed by reviewer"
+
+  - id: "stampede-002"
+    item: "TTL jitter implemented to prevent synchronized expiration"
+    level: "BLOCKING"
+    verification: "rg -l 'random.*ttl|ttl.*random|jitter' && echo PASS || echo NEEDS_REVIEW"
+    expected: "PASS"
+
+  - id: "stampede-003"
+    item: "Cache warming implemented for critical data"
+    level: "WARNING"
+    verification: "rg -l 'warm|prime|preload' && echo PASS || echo NEEDS_REVIEW"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Reliability Engineering"
+      controls: ["Fault Tolerance"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.caching.cache-hit-rate"
+    - "performance-efficiency.caching.ttl-configuration"
+    - "reliability-resilience.fault-tolerance.circuit-breaker"

@@ -1,0 +1,344 @@
+# ============================================================
+# AUDIT: Exhaustiveness Checking
+# ============================================================
+
+audit:
+  id: "code-quality.type-safety.exhaustiveness-checking"
+  name: "Exhaustiveness Checking Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "code-quality"
+  category_number: 6
+  subcategory: "type-safety"
+
+  tier: "expert"
+  estimated_duration: "35 minutes"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "quality"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Verifies that switch/match statements, union type handlers, and
+    enum processing cover all possible cases. Identifies incomplete
+    case handling that could lead to unhandled states, missing default
+    handlers, and code that would break silently when new enum values
+    or union members are added.
+
+  why_it_matters: |
+    Non-exhaustive case handling is a leading cause of runtime errors
+    and logic bugs. When new enum values or union types are added,
+    non-exhaustive handlers silently skip the new cases. Exhaustiveness
+    checking catches these issues at compile time, preventing bugs from
+    reaching production.
+
+  when_to_run:
+    - "Code reviews"
+    - "Before releases"
+    - "After enum/type modifications"
+    - "Type system upgrades"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code"
+
+  access_requirements:
+    - "Read access to source code"
+
+discovery:
+  code_patterns:
+    - pattern: "match\\s+\\w+\\s*:|switch\\s*\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Match/switch statements"
+    - pattern: "class\\s+\\w+\\(Enum\\)|enum\\s+\\w+"
+      type: "regex"
+      scope: "source"
+      purpose: "Enum definitions"
+    - pattern: "if.*isinstance|if.*typeof"
+      type: "regex"
+      scope: "source"
+      purpose: "Type-based branching"
+    - pattern: "Union\\[|\\|"
+      type: "regex"
+      scope: "source"
+      purpose: "Union types"
+
+  file_patterns:
+    - glob: "**/*.{py,ts,java,kt,rs,go}"
+      purpose: "Source code with pattern matching"
+
+knowledge_sources:
+  guides:
+    - id: "typescript-exhaustive"
+      name: "TypeScript Exhaustive Checks"
+      url: "https://www.typescriptlang.org/docs/handbook/2/narrowing.html#exhaustiveness-checking"
+      offline_cache: true
+
+    - id: "python-match"
+      name: "Python Pattern Matching (PEP 636)"
+      url: "https://peps.python.org/pep-0636/"
+      offline_cache: true
+
+    - id: "rust-exhaustive"
+      name: "Rust Pattern Matching"
+      url: "https://doc.rust-lang.org/book/ch18-03-pattern-syntax.html"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "mypy"
+      purpose: "Python exhaustiveness with Literal types"
+      offline_capable: true
+    - tool: "typescript"
+      purpose: "TypeScript never type exhaustiveness"
+      offline_capable: true
+    - tool: "rust-analyzer"
+      purpose: "Rust match exhaustiveness"
+      offline_capable: true
+
+  scripts:
+    - id: "exhaustiveness-scan"
+      language: "bash"
+      purpose: "Find non-exhaustive patterns"
+      source: "inline"
+      code: |
+        # Find match statements
+        grep -rn --include="*.py" "match\s\+\w\+\s*:" . 2>/dev/null | head -20
+        # Find enum definitions
+        grep -rn --include="*.py" "class.*Enum\|from enum import" . 2>/dev/null | head -20
+        # Find switch with no default
+        grep -rn --include="*.{js,ts}" "switch\s*(" . 2>/dev/null | head -20
+
+signals:
+  critical:
+    - id: "EC-CRIT-001"
+      signal: "Security-critical enum handling without exhaustiveness"
+      evidence_pattern: "Permission/role enum without complete handling"
+      cwe: "CWE-478"
+      explanation: |
+        When security-related enums (permissions, roles, states) are not
+        handled exhaustively, new security states may be silently ignored,
+        potentially granting unintended access or bypassing security checks.
+      remediation: "Ensure all security enums have exhaustive handling"
+
+    - id: "EC-CRIT-002"
+      signal: "State machine transitions missing cases"
+      evidence_pattern: "State enum with partial transition handling"
+      explanation: |
+        State machines with non-exhaustive transition handling can enter
+        undefined states or silently fail transitions, leading to data
+        corruption or stuck processes.
+      remediation: "Implement exhaustive state transition handling"
+
+  high:
+    - id: "EC-HIGH-001"
+      signal: "Switch/match without default and incomplete cases"
+      evidence_pattern: "switch without default or match without wildcard"
+      cwe: "CWE-478"
+      explanation: |
+        Switch statements without default cases and without covering all
+        enum values will silently skip new values added later. This is
+        a common source of bugs after enum expansion.
+      remediation: "Add exhaustive cases or failing default"
+
+    - id: "EC-HIGH-002"
+      signal: "Union type narrowing with missing branches"
+      evidence_pattern: "Union type without all member handling"
+      explanation: |
+        When handling union types, missing branches mean some valid types
+        are not processed. This leads to runtime errors or incorrect
+        behavior for the unhandled types.
+      remediation: "Add handlers for all union members"
+
+  medium:
+    - id: "EC-MED-001"
+      signal: "isinstance chains without else clause"
+      evidence_pattern: "if isinstance... elif isinstance... (no else)"
+      remediation: "Add else clause with error or assertion"
+
+    - id: "EC-MED-002"
+      signal: "Default case silently returns None"
+      evidence_pattern: "default: return or case _: return None"
+      remediation: "Make default case explicit about unhandled values"
+
+  low:
+    - id: "EC-LOW-001"
+      signal: "Enum iteration without version tracking"
+      evidence_pattern: "for value in Enum without exhaustiveness"
+      remediation: "Consider explicit exhaustiveness check"
+
+  positive:
+    - id: "EC-POS-001"
+      signal: "assert_never pattern used for exhaustiveness"
+    - id: "EC-POS-002"
+      signal: "TypeScript never type forces exhaustiveness"
+    - id: "EC-POS-003"
+      signal: "Match statements cover all cases"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Enums and Union Types"
+      description: |
+        Find all enum definitions and union types that require
+        exhaustive handling.
+      duration_estimate: "8 min"
+      commands:
+        - purpose: "Find Python enums"
+          command: |
+            grep -rn --include="*.py" "class.*Enum\|from enum import" . 2>/dev/null | head -20
+        - purpose: "Find TypeScript enums and unions"
+          command: |
+            grep -rn --include="*.ts" "enum \|type.*=.*\|" . 2>/dev/null | head -20
+        - purpose: "List enum values"
+          command: |
+            grep -rn --include="*.py" -A10 "class.*Enum" . 2>/dev/null | grep "=" | head -30
+      expected_findings:
+        - "Enum definitions"
+        - "Union type definitions"
+
+    - id: "2"
+      name: "Analyze Match/Switch Statements"
+      description: |
+        Find all pattern matching constructs and verify they
+        handle all cases.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Find Python match statements"
+          command: |
+            grep -rn --include="*.py" "match\s\+\w\+\s*:" . 2>/dev/null | head -15
+        - purpose: "Find switch statements"
+          command: |
+            grep -rn --include="*.{js,ts,java}" "switch\s*(" . 2>/dev/null | head -15
+        - purpose: "Find default/wildcard cases"
+          command: |
+            grep -rn --include="*.py" "case _:" . 2>/dev/null | head -10
+      expected_findings:
+        - "Match/switch locations"
+        - "Default case presence"
+
+    - id: "3"
+      name: "Check Type Narrowing Patterns"
+      description: |
+        Identify isinstance/typeof chains that may miss types.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Find isinstance chains"
+          command: |
+            grep -rn --include="*.py" -A5 "if isinstance" . 2>/dev/null | head -40
+        - purpose: "Find typeof checks"
+          command: |
+            grep -rn --include="*.{js,ts}" "typeof\s\+\w\+\s*===" . 2>/dev/null | head -20
+        - purpose: "Find missing else clauses"
+          command: |
+            grep -rn --include="*.py" -A8 "if isinstance" . 2>/dev/null | grep -B8 "return\|raise" | grep -v "else" | head -20
+      expected_findings:
+        - "Type narrowing patterns"
+        - "Missing else clauses"
+
+    - id: "4"
+      name: "Verify Exhaustiveness Patterns"
+      description: |
+        Check for proper exhaustiveness enforcement patterns.
+      duration_estimate: "7 min"
+      commands:
+        - purpose: "Find assert_never usage"
+          command: |
+            grep -rn --include="*.py" "assert_never\|NoReturn\|typing.Never" . 2>/dev/null | head -10
+        - purpose: "Find unreachable assertions"
+          command: |
+            grep -rn --include="*.{ts,js}" "assertNever\|: never" . 2>/dev/null | head -10
+      expected_findings:
+        - "Exhaustiveness patterns used"
+        - "Enforcement gaps"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "non_exhaustive_matches"
+        - "missing_default_cases"
+        - "incomplete_type_narrowing"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Exhaustiveness Analysis"
+        - "Risk Areas"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full type checker analysis with exhaustiveness enabled"
+    medium: "Pattern matching analysis"
+    low: "Grep-based detection only"
+
+offline:
+  capability: "full"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires deep analysis"
+    full:
+      included: true
+      priority: 2
+    quality:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "ec-001"
+    item: "Match statements have wildcard or complete coverage"
+    level: "WARNING"
+    verification: |
+      match_count=$(grep -rn --include="*.py" "match\s\+\w\+\s*:" . 2>/dev/null | wc -l)
+      wildcard_count=$(grep -rn --include="*.py" "case _:" . 2>/dev/null | wc -l)
+      [ "$match_count" -eq 0 ] && echo "PASS" || ([ "$wildcard_count" -ge "$match_count" ] && echo "PASS" || echo "FAIL")
+    expected: "PASS"
+
+  - id: "ec-002"
+    item: "No silent default handlers"
+    level: "WARNING"
+    verification: |
+      grep -rn --include="*.py" "case _:\s*$" . 2>/dev/null -A1 | grep "pass" | wc -l | awk '{print ($1 == 0) ? "PASS" : "FAIL"}'
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "CWE"
+      controls: ["CWE-478"]
+    - framework: "ISO 25010"
+      controls: ["Reliability"]
+
+relationships:
+  commonly_combined:
+    - "code-quality.type-safety.type-coverage"
+    - "code-quality.type-safety.null-safety"
+    - "code-quality.readability.control-flow-clarity"

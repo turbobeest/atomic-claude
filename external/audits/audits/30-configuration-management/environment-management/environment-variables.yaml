@@ -1,0 +1,163 @@
+# ============================================================
+# AUDIT: Environment Variable Management
+# Category: 30 - Configuration Management
+# Subcategory: environment-management
+# ============================================================
+# Management of environment variables for application configuration
+# per 12-factor app principles.
+# ============================================================
+
+audit:
+  id: "configuration-management.environment-management.environment-variables"
+  name: "Environment Variable Management Audit"
+  version: "1.0.0"
+  last_updated: "2025-01-22"
+  status: "active"
+
+  category: "configuration-management"
+  category_number: 30
+  subcategory: "environment-management"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "full"
+  severity: "high"
+  scope: "codebase"
+  default_profiles: ["full", "production"]
+
+description:
+  what: |
+    This audit examines environment variable management practices per
+    12-factor app principles. It evaluates env var usage, documentation,
+    validation, default handling, and security of sensitive variables.
+
+  why_it_matters: |
+    12-factor app Factor III mandates storing config in environment variables.
+    Poor env var management causes deployment failures and security issues.
+    Undocumented env vars create operational knowledge gaps.
+
+  when_to_run:
+    - "When implementing 12-factor practices"
+    - "After deployment configuration issues"
+    - "During onboarding reviews"
+
+discovery:
+  code_patterns:
+    - pattern: "process\\.env\\.|os\\.environ|getenv|ENV\\["
+      type: "regex"
+      scope: "source"
+      purpose: "Detect environment variable access"
+
+    - pattern: "\\$\\{[A-Z_]+\\}|\\$[A-Z_]+"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect env var interpolation"
+
+  file_patterns:
+    - glob: "**/.env*"
+      purpose: "Environment variable files"
+    - glob: "**/*.env.example"
+      purpose: "Example env files"
+
+signals:
+  critical:
+    - id: "EVAR-CRIT-001"
+      signal: "Secrets stored in .env files committed to repo"
+      evidence_indicators:
+        - ".env file in git"
+        - "Secrets in version control"
+        - "API keys in .env not gitignored"
+      explanation: "Committed secrets are exposed in version history."
+      remediation: "Remove secrets from git, add .env to .gitignore, rotate secrets."
+      cwe: "CWE-540"
+
+  high:
+    - id: "EVAR-HIGH-001"
+      signal: "No .env.example for documentation"
+      evidence_indicators:
+        - "Missing .env.example file"
+        - "No documentation of required env vars"
+        - "Undocumented environment variables"
+      explanation: "Undocumented env vars create onboarding difficulties."
+      remediation: "Create .env.example with all required variables documented."
+
+    - id: "EVAR-HIGH-002"
+      signal: "Missing env vars cause runtime failures"
+      evidence_indicators:
+        - "No validation of required env vars"
+        - "Fails silently on missing config"
+        - "No startup validation"
+      explanation: "Missing env vars cause runtime errors rather than startup failures."
+      remediation: "Validate required env vars at startup with clear error messages."
+
+    - id: "EVAR-HIGH-003"
+      signal: "Hardcoded configuration in code"
+      evidence_indicators:
+        - "URLs hardcoded"
+        - "API endpoints in code"
+        - "Config not externalized"
+      explanation: "Hardcoded config violates 12-factor and requires code changes."
+      remediation: "Externalize configuration to environment variables."
+
+  medium:
+    - id: "EVAR-MED-001"
+      signal: "Inconsistent env var naming"
+      evidence_indicators:
+        - "Mixed casing conventions"
+        - "No prefix for grouping"
+        - "Ambiguous variable names"
+      explanation: "Inconsistent naming creates confusion and errors."
+      remediation: "Standardize to SCREAMING_SNAKE_CASE with consistent prefixes."
+
+    - id: "EVAR-MED-002"
+      signal: "No default values for optional vars"
+      evidence_indicators:
+        - "Optional vars without defaults"
+        - "Behavior unclear when unset"
+      explanation: "Undocumented defaults create unpredictable behavior."
+      remediation: "Document and implement sensible defaults for optional vars."
+
+procedure:
+  steps:
+    - id: "1"
+      name: "Environment Variable Usage Analysis"
+      description: "Analyze environment variable usage in code."
+      commands:
+        - purpose: "Find env var access patterns"
+          command: |
+            grep -rhoE "process\.env\.[A-Z_]+" --include="*.js" --include="*.ts" . 2>/dev/null | \
+              sort | uniq -c | sort -rn | head -50
+        - purpose: "Check for .env.example"
+          command: |
+            find . -name ".env.example" -o -name "*.env.example" 2>/dev/null | head -10
+        - purpose: "Verify .env is gitignored"
+          command: |
+            grep "\.env" .gitignore 2>/dev/null || echo ".env not in .gitignore"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+    - type: "env_var_inventory"
+      format: "table"
+      description: "Inventory of environment variables used"
+
+profiles:
+  membership:
+    quick: {included: true, priority: 2}
+    full: {included: true, priority: 1}
+    production: {included: true, priority: 1}
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+  compliance_frameworks:
+    - framework: "12-Factor App"
+      controls: ["Factor III"]

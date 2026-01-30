@@ -1,0 +1,335 @@
+# ============================================================
+# AUDIT: Data Modeling Quality
+# ============================================================
+# Evaluates the overall quality of data models including entity
+# identification, attribute definitions, and domain modeling.
+# ============================================================
+
+audit:
+  id: "data-state-management.schema-design.data-modeling-quality"
+
+  name: "Data Modeling Quality"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "schema-design"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates the quality of data models by examining entity
+    identification, attribute definitions, domain constraints, and alignment
+    between the data model and business domain. It assesses whether entities
+    properly capture business concepts and whether the model supports
+    current and anticipated use cases.
+
+  why_it_matters: |
+    Poor data modeling creates technical debt that compounds over time.
+    Misidentified entities lead to awkward workarounds, missing attributes
+    require schema migrations under pressure, and domain misalignment causes
+    impedance mismatch between code and data. Quality data models reduce
+    bugs, improve developer productivity, and enable cleaner application code.
+
+  when_to_run:
+    - "During initial database design"
+    - "Before major feature additions"
+    - "When domain model complexity increases"
+    - "During technical debt assessment"
+
+prerequisites:
+  required_artifacts:
+    - type: "database-schema"
+      description: "Complete database schema definitions"
+    - type: "domain-model"
+      description: "Domain model documentation or entity diagrams"
+
+  access_requirements:
+    - "Read access to database schemas"
+    - "Access to domain documentation or domain experts"
+    - "Business requirements documentation"
+
+discovery:
+  code_patterns:
+    - pattern: "CREATE TABLE|@Entity|@Table|model\\s+\\w+"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify entity definitions"
+    - pattern: "VARCHAR\\(255\\)|TEXT|BLOB"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify potentially unrefined attribute types"
+    - pattern: "@Embedded|@ValueObject|value.*class"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify value objects and embedded types"
+
+  file_patterns:
+    - glob: "**/models/**/*"
+      purpose: "ORM model definitions"
+    - glob: "**/entities/**/*"
+      purpose: "Entity class definitions"
+    - glob: "**/domain/**/*"
+      purpose: "Domain model classes"
+    - glob: "**/schema/**/*"
+      purpose: "Schema definitions"
+
+knowledge_sources:
+  guides:
+    - id: "ddd-reference"
+      name: "Domain-Driven Design Reference"
+      url: "https://www.domainlanguage.com/ddd/reference/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "ddd-blue-book"
+      title: "Domain-Driven Design: Tackling Complexity in the Heart of Software"
+      type: "book"
+      reference: "ISBN: 978-0321125217"
+    - id: "data-modeling-essentials"
+      title: "Data Modeling Essentials"
+      type: "book"
+      reference: "ISBN: 978-0126445510"
+
+tooling:
+  static_analysis:
+    - tool: "er-diagram-generator"
+      purpose: "Generate entity relationship diagrams for review"
+      offline_capable: true
+
+  scripts:
+    - id: "analyze-entity-quality"
+      language: "bash"
+      purpose: "Analyze entity naming and structure patterns"
+      source: "inline"
+      code: |
+        # Find entities with generic names
+        grep -riE 'CREATE TABLE.*(data|info|item|thing|record)' \
+          --include='*.sql' . 2>/dev/null
+
+signals:
+  critical:
+    - id: "MODEL-CRIT-001"
+      signal: "Entities that don't map to business domain concepts"
+      evidence_pattern: "Tables named 'data', 'info', 'item', 'record', 'stuff'"
+      explanation: |
+        Generic entity names indicate failure to properly identify business
+        domain concepts. This leads to unclear responsibilities, mixed concerns
+        within entities, and code that's hard to understand and maintain.
+      remediation: "Rename entities to reflect actual business domain concepts they represent"
+
+    - id: "MODEL-CRIT-002"
+      signal: "God entities with excessive attributes (30+ columns)"
+      evidence_pattern: "Tables with more than 30 columns"
+      explanation: |
+        Entities with too many attributes typically represent multiple
+        concepts merged together. This violates single responsibility
+        principle and makes the entity difficult to understand and modify.
+      remediation: "Decompose large entities into cohesive smaller entities or value objects"
+
+  high:
+    - id: "MODEL-HIGH-001"
+      signal: "Missing domain concepts represented as primitive types"
+      evidence_pattern: "Repeated VARCHAR fields for email, phone, currency, etc."
+      explanation: |
+        Using primitive types for domain concepts (primitive obsession)
+        loses domain semantics and validation. Email stored as VARCHAR
+        can't enforce format rules at the schema level.
+      remediation: "Create proper domain types or value objects for repeated concepts"
+
+    - id: "MODEL-HIGH-002"
+      signal: "Inconsistent naming conventions across entities"
+      evidence_pattern: "Mixed snake_case, camelCase, or inconsistent abbreviations"
+      explanation: |
+        Inconsistent naming makes the schema harder to learn and work with.
+        Developers waste time looking up correct column names and make
+        errors due to naming confusion.
+      remediation: "Standardize on consistent naming convention and apply across all entities"
+
+  medium:
+    - id: "MODEL-MED-001"
+      signal: "Missing audit columns on mutable entities"
+      evidence_pattern: "Tables without created_at, updated_at, or similar"
+      remediation: "Add standard audit columns (created_at, updated_at, created_by) to mutable entities"
+
+    - id: "MODEL-MED-002"
+      signal: "Overuse of nullable columns"
+      evidence_pattern: "More than 50% nullable columns in an entity"
+      remediation: "Review nullability requirements; consider splitting entity or using default values"
+
+  low:
+    - id: "MODEL-LOW-001"
+      signal: "Entity names that don't follow ubiquitous language"
+
+  positive:
+    - id: "MODEL-POS-001"
+      signal: "Clean entity design with clear domain alignment"
+    - id: "MODEL-POS-002"
+      signal: "Proper use of value objects and embedded types"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Entity Inventory"
+      description: |
+        Catalog all entities in the data model, including their
+        names, purposes, and key attributes.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "List all table/entity definitions"
+          command: "grep -riE 'CREATE TABLE|@Entity|@Table|class.*Model|model\\s+\\w+' --include='*.sql' --include='*.ts' --include='*.py' --include='*.java' --include='*.prisma' . 2>/dev/null | head -50"
+        - purpose: "Find entities with generic names"
+          command: "grep -riE 'CREATE TABLE.*(data|info|item|thing|record|stuff|temp|misc)' --include='*.sql' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Complete entity inventory"
+        - "Entities with problematic naming"
+
+    - id: "2"
+      name: "Attribute Quality Analysis"
+      description: |
+        Analyze attribute definitions for type appropriateness,
+        domain alignment, and consistent conventions.
+      duration_estimate: "40 min"
+
+      commands:
+        - purpose: "Find generic VARCHAR(255) columns"
+          command: "grep -riE 'VARCHAR\\(255\\)|TEXT|String' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -40"
+        - purpose: "Find nullable column patterns"
+          command: "grep -riE 'NULL|\\?:|Optional<|nullable.*true' --include='*.sql' --include='*.ts' --include='*.java' --include='*.prisma' . 2>/dev/null | head -40"
+        - purpose: "Find audit columns"
+          command: "grep -riE 'created_at|updated_at|created_by|modified_by|@CreatedDate|@LastModified' --include='*.sql' --include='*.ts' --include='*.java' --include='*.prisma' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Attribute type patterns"
+        - "Nullability assessment"
+        - "Audit column coverage"
+
+    - id: "3"
+      name: "Entity Size Analysis"
+      description: |
+        Identify overly large entities that may represent
+        multiple domain concepts merged together.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Count columns per table (SQL migrations)"
+          command: "for f in $(find . -name '*.sql' -path '*/migrations/*' 2>/dev/null); do echo \"=== $f ===\"; grep -E '^\\s+\\w+' \"$f\" 2>/dev/null | wc -l; done | head -60"
+        - purpose: "Count fields per model (Prisma)"
+          command: "grep -A100 'model ' --include='*.prisma' . 2>/dev/null | grep -E '^\\s+\\w+' | head -50"
+
+      expected_findings:
+        - "Entity size distribution"
+        - "Potentially oversized entities"
+
+    - id: "4"
+      name: "Domain Alignment Review"
+      description: |
+        Compare entity names and structures against business
+        domain vocabulary and concepts.
+      duration_estimate: "35 min"
+
+      commands:
+        - purpose: "Extract entity names for review"
+          command: "grep -riE 'CREATE TABLE\\s+(\\w+)|model\\s+(\\w+)|@Entity.*class\\s+(\\w+)' --include='*.sql' --include='*.prisma' --include='*.java' . 2>/dev/null | sed 's/.*\\(CREATE TABLE\\|model\\|class\\)\\s*//' | cut -d' ' -f1 | sort -u | head -50"
+        - purpose: "Find value objects"
+          command: "grep -riE '@Embeddable|@ValueObject|value.*object|embedded' --include='*.ts' --include='*.java' --include='*.py' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Entity naming alignment with domain"
+        - "Value object usage patterns"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Entity Inventory"
+        - "Quality Assessment"
+        - "Domain Alignment Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct schema evidence with clear quality issues"
+    medium: "Patterns suggest issues, needs domain expert confirmation"
+    low: "Potential issues based on naming or structure heuristics"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "ddd-reference"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive schema and domain analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "model-001"
+    item: "All entities inventoried and reviewed"
+    level: "CRITICAL"
+    verification: "grep -riE 'CREATE TABLE|model\\s+\\w+' --include='*.sql' --include='*.prisma' . 2>/dev/null | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "model-002"
+    item: "Entity naming conventions evaluated"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer should confirm entity names follow consistent conventions"
+    expected: "Confirmed by reviewer"
+
+  - id: "model-003"
+    item: "Domain alignment assessed"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer should confirm entities map to domain concepts"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Data Quality Standards"
+      controls: ["DQ-005"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.schema-design.normalization-appropriateness"
+    - "data-state-management.schema-design.relationship-design"

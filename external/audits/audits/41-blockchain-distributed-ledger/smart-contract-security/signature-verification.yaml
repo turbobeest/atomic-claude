@@ -1,0 +1,276 @@
+audit:
+  id: blockchain-distributed-ledger.smart-contract-security.signature-verification
+  name: Signature Verification Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: blockchain-distributed-ledger
+  category_number: 41
+  subcategory: smart-contract-security
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: software
+  default_profiles:
+  - full
+  - blockchain
+  - security
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates smart contract signature verification
+    for cryptographic correctness and security. It examines:
+    - ECDSA signature validation
+    - EIP-712 typed data signing
+    - Replay attack protection
+    - Nonce management
+    - Signature malleability handling
+    - Multi-signature verification
+  why_it_matters: |
+    Signature verification flaws enable authorization bypass:
+    - Invalid signatures accepted grants unauthorized access
+    - Missing replay protection allows signature reuse
+    - Signature malleability enables duplicate transactions
+    - Improper nonce handling breaks authorization flow
+    - ecrecover returns zero on invalid signatures
+
+    Correct signature verification is essential for meta-transactions,
+    permits, and off-chain authorization.
+  when_to_run:
+  - Signature-based authorization
+  - Meta-transaction implementation
+  - EIP-712 integration
+  - Permit functionality
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Smart contract source code
+  - type: documentation
+    description: Signature scheme documentation
+  access_requirements:
+  - Access to contract source
+  - Understanding of signature flow
+discovery:
+  code_patterns:
+  - pattern: (ecrecover|ECDSA|signature)
+    type: regex
+    scope: source
+    purpose: Detect signature verification
+  - pattern: (EIP712|_TYPEHASH|DOMAIN)
+    type: regex
+    scope: source
+    purpose: Detect EIP-712 implementation
+  - pattern: (nonce|replay|permit)
+    type: regex
+    scope: source
+    purpose: Detect replay protection
+  file_patterns:
+  - glob: '**/*.sol'
+    purpose: Solidity contracts
+  - glob: '**/signature/**/*.sol'
+    purpose: Signature contracts
+knowledge_sources:
+  specifications:
+  - id: eip-712
+    name: 'EIP-712: Typed Structured Data Hashing'
+    url: https://eips.ethereum.org/EIPS/eip-712
+    offline_cache: true
+    priority: required
+  - id: eip-2612
+    name: 'EIP-2612: Permit Extension'
+    url: https://eips.ethereum.org/EIPS/eip-2612
+    offline_cache: true
+signals:
+  critical:
+  - id: SIG-CRIT-001
+    signal: ecrecover return value not validated
+    evidence_indicators:
+    - ecrecover result used without check
+    - Zero address not rejected
+    - Invalid signature returns address(0)
+    explanation: |
+      ecrecover returns address(0) for invalid signatures.
+      Without validation, this can match zero-address checks
+      or uninitialized addresses.
+    remediation: |
+      - Check recovered address != address(0)
+      - Use OpenZeppelin ECDSA library
+      - Validate against expected signer
+      - Handle all error cases
+    cwe: CWE-347
+  - id: SIG-CRIT-002
+    signal: No replay attack protection
+    evidence_indicators:
+    - Signature reusable across transactions
+    - No nonce tracking
+    - Missing chain ID or contract address
+    explanation: |
+      Without replay protection, valid signatures can be reused
+      multiple times or across chains/contracts.
+    remediation: |
+      - Implement nonce tracking
+      - Include chain ID in signed message
+      - Include contract address in domain
+      - Mark signatures as used
+    cwe: CWE-294
+  high:
+  - id: SIG-HIGH-001
+    signal: Signature malleability not handled
+    evidence_indicators:
+    - Raw ecrecover used
+    - s-value not constrained
+    - Duplicate signatures possible
+    explanation: |
+      ECDSA signatures have malleable s-values. The same signature
+      can be modified to create a valid but different signature,
+      enabling replay if used as unique identifiers.
+    remediation: |
+      - Use OpenZeppelin ECDSA library
+      - Constrain s to lower half
+      - Use signature hash as identifier
+      - Follow EIP-2 recommendations
+  - id: SIG-HIGH-002
+    signal: EIP-712 domain not complete
+    evidence_indicators:
+    - Missing chainId in domain
+    - Missing verifyingContract
+    - Incomplete domain separator
+    explanation: |
+      Incomplete EIP-712 domains allow signature reuse across
+      chains or contracts.
+    remediation: |
+      - Include all domain fields
+      - Verify chainId matches current chain
+      - Include verifyingContract address
+      - Follow EIP-712 specification
+  medium:
+  - id: SIG-MED-001
+    signal: Nonce management not atomic
+    evidence_indicators:
+    - Nonce check and increment separate
+    - Race condition possible
+    - Out-of-order nonces not handled
+    explanation: |
+      Non-atomic nonce operations can enable race conditions
+      or require sequential signature use.
+    remediation: |
+      - Atomically check and increment nonce
+      - Consider bitmap for non-sequential nonces
+      - Handle concurrent transactions
+      - Test race conditions
+  - id: SIG-MED-002
+    signal: Deadline not enforced
+    evidence_indicators:
+    - Signature valid indefinitely
+    - No expiry check
+    - Old signatures usable
+    explanation: |
+      Signatures without deadlines remain valid indefinitely,
+      increasing risk if keys are compromised later.
+    remediation: |
+      - Add deadline to signed message
+      - Validate deadline on-chain
+      - Use reasonable validity periods
+      - Reject expired signatures
+  low:
+  - id: SIG-LOW-001
+    signal: Signature scheme not documented
+    evidence_indicators:
+    - Signed message format unclear
+    - Verification process undocumented
+    - Off-chain signing requirements missing
+    explanation: |
+      Undocumented signature schemes are difficult to implement
+      correctly off-chain and to audit.
+    remediation: |
+      - Document message format
+      - Provide signing examples
+      - Specify all required fields
+      - Include in API documentation
+  positive:
+  - id: SIG-POS-001
+    signal: Robust signature verification
+    evidence_indicators:
+    - OpenZeppelin ECDSA used
+    - Complete EIP-712 domain
+    - Comprehensive replay protection
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: security-auditor
+  steps:
+  - id: '1'
+    name: Signature Verification Analysis
+    description: |
+      Analyze signature verification implementation.
+    duration_estimate: 60 min
+    commands:
+    - purpose: Find signature verification
+      command: |
+        grep -rniE "(ecrecover|ECDSA\.|recover\()" \
+          --include="*.sol" . 2>/dev/null | head -30
+    - purpose: Find EIP-712 implementation
+      command: |
+        grep -rniE "(EIP712|DOMAIN|_TYPEHASH)" \
+          --include="*.sol" . 2>/dev/null | head -20
+    - purpose: Find nonce handling
+      command: |
+        grep -rniE "(nonce|_useNonce)" \
+          --include="*.sol" . 2>/dev/null | head -20
+    expected_findings:
+    - Signature verification
+    - EIP-712 usage
+    - Replay protection
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Signature Analysis
+    - Security Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 1
+    blockchain:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: sig-001
+  item: ecrecover return value validated
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify zero address rejected
+  expected: Confirmed by reviewer
+- id: sig-002
+  item: Replay protection implemented
+  level: BLOCKING
+  verification: |
+    grep -rniE "(nonce|chainId)" \
+      --include="*.sol" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - blockchain
+    - defi
+    - meta-transactions
+    - permits
+relationships:
+  commonly_combined:
+  - blockchain.smart-contract-security.access-control
+  - blockchain.key-management.private-key-security
+  - blockchain.smart-contract-quality.error-handling

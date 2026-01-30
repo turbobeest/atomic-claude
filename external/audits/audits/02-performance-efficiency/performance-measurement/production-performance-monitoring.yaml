@@ -1,0 +1,396 @@
+# ============================================================
+# AUDIT: Production Performance Monitoring Audit
+# ============================================================
+
+audit:
+  id: "performance-efficiency.performance-measurement.production-performance-monitoring"
+  name: "Production Performance Monitoring Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "performance-measurement"
+
+  tier: "expert"
+  estimated_duration: "2.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates production performance monitoring infrastructure including APM
+    instrumentation, distributed tracing, metrics collection, dashboards, and
+    alerting. Verifies observability coverage for latency, throughput, errors,
+    and saturation (USE/RED methodology). Reviews data retention and query
+    capabilities.
+
+  why_it_matters: |
+    You cannot improve what you cannot measure. Production monitoring provides
+    the ground truth for performance. Google's "Four Golden Signals" (latency,
+    traffic, errors, saturation) form the foundation of observability. Teams
+    with comprehensive monitoring have 60% faster MTTR and 50% fewer repeat
+    incidents compared to those flying blind.
+
+  when_to_run:
+    - "Initial production setup"
+    - "After major infrastructure changes"
+    - "Incident post-mortems"
+    - "Quarterly observability reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure_config"
+      description: "Monitoring configuration files"
+    - type: "runtime_access"
+      description: "APM and metrics system access"
+
+  access_requirements:
+    - "APM dashboard access (Datadog, New Relic, etc.)"
+    - "Prometheus/Grafana access"
+    - "Distributed tracing system access"
+    - "Alerting configuration access"
+
+discovery:
+  file_patterns:
+    - glob: "**/prometheus*.yaml"
+      purpose: "Prometheus configuration"
+    - glob: "**/grafana/**"
+      purpose: "Grafana dashboards"
+    - glob: "**/datadog*.yaml"
+      purpose: "Datadog configuration"
+    - glob: "**/alerts/*.yaml"
+      purpose: "Alert definitions"
+
+  code_patterns:
+    - pattern: "prometheus|datadog|newrelic|opentelemetry"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find monitoring tool configuration"
+    - pattern: "trace|span|metric"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find instrumentation code"
+
+knowledge_sources:
+  guides:
+    - id: "sre-monitoring"
+      name: "Google SRE Book - Monitoring Distributed Systems"
+      url: "https://sre.google/sre-book/monitoring-distributed-systems/"
+      offline_cache: true
+    - id: "use-method"
+      name: "USE Method (Brendan Gregg)"
+      url: "http://www.brendangregg.com/usemethod.html"
+      offline_cache: true
+    - id: "red-method"
+      name: "RED Method"
+      url: "https://grafana.com/blog/2018/08/02/the-red-method-how-to-instrument-your-services/"
+      offline_cache: true
+    - id: "opentelemetry"
+      name: "OpenTelemetry Documentation"
+      url: "https://opentelemetry.io/docs/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "observability-eng"
+      title: "Observability Engineering"
+      type: "book"
+      reference: "Charity Majors, Liz Fong-Jones, George Miranda"
+
+tooling:
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        # Request rate (traffic)
+        sum(rate(http_requests_total[5m]))
+      purpose: "Traffic golden signal"
+    - system: "Prometheus"
+      query: |
+        # Error rate
+        sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))
+      purpose: "Error golden signal"
+    - system: "Prometheus"
+      query: |
+        # Latency p99
+        histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))
+      purpose: "Latency golden signal"
+    - system: "Prometheus"
+      query: |
+        # Saturation (CPU)
+        avg(1 - rate(node_cpu_seconds_total{mode="idle"}[5m]))
+      purpose: "Saturation golden signal"
+
+  infrastructure_tools:
+    - tool: "promtool"
+      purpose: "Validate Prometheus configuration"
+      command: "promtool check rules /etc/prometheus/rules/*.yaml"
+
+  scripts:
+    - id: "monitoring-check"
+      language: "bash"
+      purpose: "Verify monitoring endpoints are working"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Monitoring Health Check ==="
+
+        # Check Prometheus
+        echo -e "\n--- Prometheus ---"
+        curl -s http://localhost:9090/-/healthy && echo "OK" || echo "FAIL"
+
+        # Check Grafana
+        echo -e "\n--- Grafana ---"
+        curl -s http://localhost:3000/api/health | jq '.database'
+
+        # Check metrics endpoint
+        echo -e "\n--- App Metrics ---"
+        curl -s http://localhost:8080/metrics | head -5
+
+signals:
+  critical:
+    - id: "MONITOR-CRIT-001"
+      signal: "No APM or metrics collection in production"
+      evidence_pattern: "No Prometheus, Datadog, or similar configured"
+      explanation: |
+        Without production metrics, teams are completely blind to performance
+        issues until users complain. Problems cannot be diagnosed efficiently,
+        capacity cannot be planned, and regressions go undetected. This is
+        the most fundamental observability gap.
+      remediation: "Implement APM/metrics collection using Prometheus, Datadog, or similar"
+
+    - id: "MONITOR-CRIT-002"
+      signal: "Four Golden Signals not monitored"
+      evidence_pattern: "Missing latency, traffic, errors, or saturation metrics"
+      explanation: |
+        The Four Golden Signals (latency, traffic, errors, saturation) provide
+        comprehensive service health visibility. Missing any signal creates
+        blind spots. Latency without errors misses availability issues. Traffic
+        without saturation misses capacity problems.
+      remediation: "Ensure all four golden signals are collected and dashboarded"
+
+  high:
+    - id: "MONITOR-HIGH-001"
+      signal: "No distributed tracing"
+      evidence_pattern: "Missing Jaeger, Zipkin, or equivalent"
+      explanation: |
+        In microservices architectures, request latency comes from multiple
+        services. Without distributed tracing, isolating the slow service
+        requires guesswork. Tracing shows exactly where time is spent across
+        the request lifecycle.
+      remediation: "Implement distributed tracing with OpenTelemetry, Jaeger, or Zipkin"
+
+    - id: "MONITOR-HIGH-002"
+      signal: "Metrics not available at required granularity"
+      evidence_pattern: "Only 1-minute resolution, no per-endpoint breakdown"
+      explanation: |
+        Coarse-grained metrics hide important patterns. 1-minute resolution
+        misses brief spikes. Global latency hides per-endpoint issues. Per-user
+        or per-tenant breakdowns are essential for debugging experience issues.
+      remediation: "Collect metrics at 15-second intervals with endpoint and tenant labels"
+
+  medium:
+    - id: "MONITOR-MED-001"
+      signal: "No performance dashboards for key services"
+      evidence_pattern: "Metrics collected but no visualization"
+      remediation: "Create service dashboards showing golden signals with drill-down"
+
+    - id: "MONITOR-MED-002"
+      signal: "Metrics retention too short for trend analysis"
+      evidence_pattern: "Retention < 30 days"
+      remediation: "Configure 90-day high-resolution, 1-year downsampled retention"
+
+  low:
+    - id: "MONITOR-LOW-001"
+      signal: "No custom business metrics"
+
+  positive:
+    - id: "MONITOR-POS-001"
+      signal: "Four Golden Signals monitored and dashboarded"
+    - id: "MONITOR-POS-002"
+      signal: "Distributed tracing with full request lifecycle"
+    - id: "MONITOR-POS-003"
+      signal: "Per-endpoint and per-tenant metrics breakdown"
+    - id: "MONITOR-POS-004"
+      signal: "Long-term metrics retention with downsampling"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Verify Metrics Collection"
+      description: |
+        Confirm metrics are being collected in production and
+        verify the Four Golden Signals are covered.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Check for Prometheus config"
+          command: "find . -name 'prometheus*.yaml' -o -name '*prometheus*.yml' | head -5"
+        - purpose: "Verify metrics endpoint"
+          command: "curl -s http://localhost:8080/metrics 2>/dev/null | head -20"
+        - purpose: "Check for latency metrics"
+          command: "curl -s http://localhost:8080/metrics 2>/dev/null | grep -E 'duration|latency'"
+        - purpose: "Check for error metrics"
+          command: "curl -s http://localhost:8080/metrics 2>/dev/null | grep -E 'error|status.*5'"
+
+      expected_findings:
+        - "Metrics endpoint returning data"
+        - "Latency, error, request rate metrics present"
+
+    - id: "2"
+      name: "Review Distributed Tracing"
+      description: |
+        Verify distributed tracing is configured and traces
+        span the full request lifecycle.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find tracing configuration"
+          command: "grep -rn 'jaeger\\|zipkin\\|opentelemetry\\|tracing' --include='*.yaml' --include='*.ts' --include='*.go' ."
+        - purpose: "Check for trace context propagation"
+          command: "grep -rn 'trace.*id\\|span.*id\\|W3C.*trace' --include='*.ts' --include='*.go' src/"
+
+      expected_findings:
+        - "Tracing SDK configured"
+        - "Context propagation in HTTP clients"
+
+    - id: "3"
+      name: "Examine Dashboards"
+      description: |
+        Review existing dashboards to verify they cover
+        performance signals effectively.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find Grafana dashboards"
+          command: "find . -name '*.json' -path '*grafana*' | head -10"
+        - purpose: "Check dashboard content"
+          command: "grep -l 'latency\\|p99\\|error_rate' $(find . -name '*.json' -path '*grafana*' 2>/dev/null) | head -5"
+
+      questions:
+        - "Do dashboards show latency percentiles (p50, p95, p99)?"
+        - "Is traffic rate visible?"
+        - "Are errors prominently displayed?"
+        - "Can you drill down to specific endpoints?"
+
+      expected_findings:
+        - "Service-level dashboards exist"
+        - "Four Golden Signals visualized"
+
+    - id: "4"
+      name: "Review Alerting Configuration"
+      description: |
+        Verify performance-related alerts are configured
+        for proactive incident detection.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find alert definitions"
+          command: "find . -name '*alert*.yaml' -o -name '*.rules' | head -10"
+        - purpose: "Check for latency alerts"
+          command: "grep -rn 'latency\\|duration' --include='*.yaml' --include='*.rules' . | grep -i alert"
+        - purpose: "Check alert thresholds"
+          command: "grep -A5 'alert:' --include='*.yaml' . | grep -E 'for:|expr:'"
+
+      expected_findings:
+        - "Latency threshold alerts"
+        - "Error rate alerts"
+        - "Appropriate severities"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Metrics Collection Analysis"
+        - "Distributed Tracing Review"
+        - "Dashboard Assessment"
+        - "Alerting Configuration"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct system access and configuration review"
+    medium: "Configuration file analysis"
+    low: "Interview-based assessment"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "sre-monitoring"
+        priority: "required"
+      - source_id: "use-method"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive monitoring review"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "monitoring-001"
+    item: "Metrics collection configured"
+    level: "CRITICAL"
+    verification: |
+      PROM=$(find . -name 'prometheus*.yaml' -o -name '*prometheus*.yml' 2>/dev/null | wc -l)
+      if [ "$PROM" -gt 0 ]; then echo "PASS"; else echo "FAIL: No Prometheus config"; fi
+    expected: "PASS"
+
+  - id: "monitoring-002"
+    item: "Four Golden Signals monitored"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify latency, traffic, errors, saturation metrics exist"
+    expected: "Confirmed by reviewer"
+
+  - id: "monitoring-003"
+    item: "Distributed tracing configured"
+    level: "BLOCKING"
+    verification: |
+      TRACE=$(grep -rn 'jaeger\|zipkin\|opentelemetry' --include='*.yaml' . 2>/dev/null | wc -l)
+      if [ "$TRACE" -gt 0 ]; then echo "PASS"; else echo "FAIL: No tracing config"; fi
+    expected: "PASS"
+
+  - id: "monitoring-004"
+    item: "Performance dashboards exist"
+    level: "BLOCKING"
+    verification: |
+      DASH=$(find . -name '*.json' -path '*grafana*' 2>/dev/null | wc -l)
+      if [ "$DASH" -gt 0 ]; then echo "PASS"; else echo "FAIL: No dashboards"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.performance-measurement.slo-sli-alignment"
+    - "performance-efficiency.performance-measurement.synthetic-monitoring"

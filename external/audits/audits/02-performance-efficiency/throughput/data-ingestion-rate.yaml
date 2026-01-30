@@ -1,0 +1,281 @@
+audit:
+  id: performance-efficiency.throughput.data-ingestion-rate
+  name: Data Ingestion Rate Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: throughput
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit measures the rate at which data flows into the system
+    from various sources: APIs, file uploads, streaming pipelines,
+    database replication, and ETL processes. It evaluates ingestion
+    capacity, identifies bottlenecks, and assesses whether the system
+    can keep up with data growth.
+  why_it_matters: |
+    Data ingestion bottlenecks cause data loss, delays in availability,
+    and can cascade into downstream processing failures. As data volumes
+    grow exponentially, ingestion capacity must scale accordingly.
+    Understanding ingestion limits is critical for data-intensive
+    applications.
+  when_to_run:
+  - When adding new data sources
+  - During data pipeline capacity planning
+  - When data delays are reported
+  - Before major data migration projects
+prerequisites:
+  required_artifacts:
+  - type: ingestion_metrics
+    description: Metrics for data ingestion rates and volumes
+  - type: pipeline_access
+    description: Access to data pipeline monitoring
+  access_requirements:
+  - Access to ingestion pipeline metrics
+  - Access to data lake/warehouse monitoring
+  - Access to API upload metrics
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: sum(rate(data_ingested_bytes_total[5m]))
+    purpose: Overall data ingestion rate in bytes/second
+    threshold: Within pipeline capacity
+  - system: Prometheus
+    query: |
+      sum(rate(data_ingested_records_total[5m])) by (source)
+    purpose: Record ingestion rate by source
+    threshold: Stable or growing as expected
+  - system: CloudWatch
+    query: SELECT SUM(IncomingBytes) FROM Kinesis WHERE StreamName='data-stream'
+    purpose: Kinesis stream ingestion rate
+    threshold: < 80% of shard capacity
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: aws-kinesis-scaling
+    name: AWS Kinesis Scaling Guide
+    url: https://docs.aws.amazon.com/streams/latest/dev/kinesis-record-processor-scaling.html
+    offline_cache: true
+  - id: snowflake-ingestion
+    name: Snowflake Data Loading Best Practices
+    url: https://docs.snowflake.com/en/user-guide/data-load-considerations
+    offline_cache: true
+  - id: bigquery-streaming
+    name: BigQuery Streaming Inserts
+    url: https://cloud.google.com/bigquery/docs/streaming-data-into-bigquery
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: aws-cli
+    purpose: Check Kinesis shard metrics
+    command: |
+      aws cloudwatch get-metric-statistics --namespace AWS/Kinesis \
+        --metric-name IncomingBytes --dimensions Name=StreamName,Value=my-stream \
+        --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ) \
+        --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) --period 60 --statistics Sum
+  - tool: bq
+    purpose: Check BigQuery streaming buffer
+    command: bq show --format=prettyjson dataset.table | jq '.streamingBuffer'
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      sum(increase(data_ingested_bytes_total[1h])) by (source)
+    purpose: Data volume ingested per hour by source
+  - system: Prometheus
+    query: |
+      sum(rate(ingestion_errors_total[5m])) / sum(rate(data_ingested_records_total[5m]))
+    purpose: Ingestion error rate
+signals:
+  critical:
+  - id: ING-CRIT-001
+    signal: Data ingestion falling behind by more than 1 hour
+    evidence_threshold: ingestion_lag > 1h
+    explanation: |
+      Ingestion lag of more than an hour means data is not available
+      for downstream processing in a timely manner. This affects
+      reporting, analytics, and any real-time features.
+    remediation: Scale ingestion workers; increase shard/partition count; optimize batch sizes
+  - id: ING-CRIT-002
+    signal: Ingestion error rate exceeds 5%
+    evidence_threshold: error_rate > 0.05
+    explanation: |
+      High error rates mean data is being lost or corrupted during
+      ingestion. This creates data quality issues and gaps in
+      downstream systems.
+    remediation: Investigate error causes; implement retry logic; add dead letter queues
+  high:
+  - id: ING-HIGH-001
+    signal: Ingestion rate approaching capacity limit
+    evidence_threshold: ingestion_rate > 80% of capacity
+    explanation: |
+      Operating near ingestion capacity limits leaves no headroom
+      for traffic spikes or data bursts. Capacity must be increased
+      before it becomes a bottleneck.
+    remediation: Scale ingestion infrastructure; add shards/partitions
+  - id: ING-HIGH-002
+    signal: No ingestion rate monitoring
+    evidence_indicators:
+    - No data_ingested_* metrics
+    - No pipeline throughput dashboards
+    explanation: |
+      Without ingestion monitoring, you cannot detect capacity
+      issues until downstream systems report missing data.
+    remediation: Implement comprehensive ingestion metrics
+  medium:
+  - id: ING-MED-001
+    signal: Ingestion metrics not broken down by source
+    remediation: Add source labels to ingestion metrics
+  - id: ING-MED-002
+    signal: No dead letter queue for failed ingestion
+    remediation: Implement DLQ to capture and replay failed records
+  low:
+  - id: ING-LOW-001
+    signal: Ingestion SLO not defined
+  positive:
+  - id: ING-POS-001
+    signal: Ingestion rate stable with headroom for growth
+  - id: ING-POS-002
+    signal: Zero ingestion errors over monitoring period
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Data Sources
+    description: |
+      Identify all data ingestion points and their expected volumes.
+    duration_estimate: 15 min
+    commands:
+    - purpose: List Kinesis streams
+      command: aws kinesis list-streams
+    - purpose: Check ingestion metric labels
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/label/source/values' | jq
+    expected_findings:
+    - List of data sources
+    - Expected ingestion volumes
+  - id: '2'
+    name: Measure Ingestion Rates
+    description: |
+      Measure current ingestion rates across all sources.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Query ingestion rate
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(data_ingested_bytes_total[5m]))by(source)'
+    - purpose: Query records per second
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(data_ingested_records_total[5m]))by(source)'
+    expected_findings:
+    - Bytes and records ingested per second
+    - Breakdown by source
+  - id: '3'
+    name: Check Ingestion Lag
+    description: |
+      Measure the delay between data creation and availability.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Query ingestion lag
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=ingestion_lag_seconds'
+    expected_findings:
+    - End-to-end ingestion latency
+    - Sources with lag
+  - id: '4'
+    name: Evaluate Capacity
+    description: |
+      Compare current ingestion rates to system capacity limits.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check Kinesis shard utilization
+      command: |
+        aws cloudwatch get-metric-statistics --namespace AWS/Kinesis \
+          --metric-name WriteProvisionedThroughputExceeded --dimensions Name=StreamName,Value=my-stream \
+          --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ) \
+          --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) --period 300 --statistics Sum
+    expected_findings:
+    - Capacity utilization percentage
+    - Throttling events
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Data Source Inventory
+    - Ingestion Rate Analysis
+    - Capacity Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Production metrics with >24h of data
+    medium: Snapshot metrics during peak hours
+    low: Configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-kinesis-scaling
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires pipeline access and runtime analysis
+    full:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: ingestion-001
+  item: Ingestion lag under 15 minutes
+  level: CRITICAL
+  verification: |
+    curl -s 'http://prometheus:9090/api/v1/query?query=max(ingestion_lag_seconds)' | \
+      jq '.data.result[0].value[1] | tonumber < 900'
+  expected: 'true'
+- id: ingestion-002
+  item: Ingestion error rate under 1%
+  level: BLOCKING
+  verification: |
+    curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(ingestion_errors_total[5m]))/sum(rate(data_ingested_records_total[5m]))' | \
+      jq '.data.result[0].value[1] | tonumber < 0.01'
+  expected: 'true'
+- id: ingestion-003
+  item: Ingestion capacity monitoring in place
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm ingestion metrics and alerts are configured
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - data-platform
+    - analytics
+    - etl
+relationships:
+  commonly_combined:
+  - performance-efficiency.throughput.stream-processing-throughput
+  - performance-efficiency.throughput.batch-processing-throughput

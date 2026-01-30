@@ -1,0 +1,274 @@
+audit:
+  id: blockchain-distributed-ledger.smart-contract-security.front-running
+  name: Front-Running Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: blockchain-distributed-ledger
+  category_number: 41
+  subcategory: smart-contract-security
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: software
+  default_profiles:
+  - full
+  - blockchain
+  - defi
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates smart contracts for front-running vulnerabilities
+    where transaction ordering can be exploited. It examines:
+    - Mempool-visible profitable transactions
+    - Price-sensitive operations
+    - Commit-reveal pattern implementation
+    - Slippage protection mechanisms
+    - MEV (Miner Extractable Value) exposure
+    - Sandwich attack vectors
+  why_it_matters: |
+    Front-running enables value extraction from users:
+    - Mempool transactions are publicly visible
+    - Miners/validators can reorder transactions
+    - DEX trades can be sandwiched for profit
+    - NFT mints can be sniped
+    - Liquidations can be front-run
+
+    Front-running protection is essential for fair user experience.
+  when_to_run:
+  - DeFi contract development
+  - DEX implementation
+  - Auction/bidding systems
+  - Price-sensitive operations
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Smart contract source code
+  - type: documentation
+    description: Transaction flow documentation
+  access_requirements:
+  - Access to contract source
+  - Understanding of transaction flows
+discovery:
+  code_patterns:
+  - pattern: (swap|trade|exchange|buy|sell)
+    type: regex
+    scope: source
+    purpose: Detect trading operations
+  - pattern: (slippage|minAmount|deadline)
+    type: regex
+    scope: source
+    purpose: Detect front-running protection
+  - pattern: (commit|reveal|secret)
+    type: regex
+    scope: source
+    purpose: Detect commit-reveal patterns
+  file_patterns:
+  - glob: '**/*.sol'
+    purpose: Solidity contracts
+  - glob: '**/dex/**/*.sol'
+    purpose: DEX contracts
+knowledge_sources:
+  specifications:
+  - id: swc-114
+    name: 'SWC-114: Transaction Order Dependence'
+    url: https://swcregistry.io/docs/SWC-114
+    offline_cache: true
+    priority: required
+signals:
+  critical:
+  - id: FRONT-CRIT-001
+    signal: No slippage protection on swaps
+    evidence_indicators:
+    - Swap without minimum output check
+    - No slippage parameter
+    - Direct pool interaction without protection
+    explanation: |
+      Swaps without slippage protection are vulnerable to sandwich
+      attacks. Attacker front-runs with large trade, victim gets
+      worse price, attacker back-runs to profit.
+    remediation: |
+      - Add minAmountOut parameter
+      - Implement slippage tolerance
+      - Add deadline for transaction validity
+      - Use private mempool services
+    cwe: CWE-362
+  - id: FRONT-CRIT-002
+    signal: Auction/bid visible in mempool
+    evidence_indicators:
+    - Bid amount visible in transaction
+    - No commit-reveal for bidding
+    - Auction winner can be front-run
+    explanation: |
+      Visible bids allow front-running to outbid or snipe auctions.
+      Commit-reveal patterns hide bids until reveal phase.
+    remediation: |
+      - Implement commit-reveal bidding
+      - Use sealed-bid auction pattern
+      - Consider on-chain encryption
+      - Add bid validity timeframes
+  high:
+  - id: FRONT-HIGH-001
+    signal: Price oracle vulnerable to manipulation
+    evidence_indicators:
+    - Spot price used for calculations
+    - Single-block price reference
+    - No TWAP or oracle protection
+    explanation: |
+      Spot prices can be manipulated in the same block as the
+      transaction. This enables flash loan attacks and price
+      manipulation front-running.
+    remediation: |
+      - Use TWAP (Time-Weighted Average Price)
+      - Use decentralized oracle networks
+      - Add price deviation checks
+      - Consider multiple oracle sources
+  - id: FRONT-HIGH-002
+    signal: Liquidation front-running possible
+    evidence_indicators:
+    - Liquidation threshold publicly visible
+    - No liquidation delay or batching
+    - Profitable liquidation targets exposed
+    explanation: |
+      Liquidation opportunities visible in mempool attract
+      front-runners who compete to extract value, potentially
+      giving worse outcomes to liquidated users.
+    remediation: |
+      - Implement liquidation queuing
+      - Consider Dutch auction liquidations
+      - Add keeper incentive alignment
+      - Use private transaction services
+  medium:
+  - id: FRONT-MED-001
+    signal: No transaction deadline
+    evidence_indicators:
+    - Transaction valid indefinitely
+    - No expiry mechanism
+    - Stale transactions can execute
+    explanation: |
+      Without deadlines, transactions can be held and executed
+      when market conditions are unfavorable, enabling delayed
+      front-running attacks.
+    remediation: |
+      - Add deadline parameter
+      - Reject stale transactions
+      - Include timestamp validation
+      - Document validity period
+  - id: FRONT-MED-002
+    signal: Commit-reveal timing vulnerable
+    evidence_indicators:
+    - Short commit period
+    - Reveal can be front-run
+    - Timing attacks possible
+    explanation: |
+      Poorly designed commit-reveal can still be vulnerable if
+      timing allows observation and front-running during reveal.
+    remediation: |
+      - Use adequate commit period
+      - Require reveals within strict window
+      - Consider block-based timing
+      - Add front-running penalties
+  low:
+  - id: FRONT-LOW-001
+    signal: MEV exposure not documented
+    evidence_indicators:
+    - No MEV analysis performed
+    - Extraction opportunities not identified
+    - User impact not assessed
+    explanation: |
+      Undocumented MEV exposure leaves users unaware of risks
+      and prevents mitigation planning.
+    remediation: |
+      - Document MEV exposure points
+      - Quantify potential value extraction
+      - Recommend protection measures
+      - Consider Flashbots/MEV protection
+  positive:
+  - id: FRONT-POS-001
+    signal: Robust front-running protection
+    evidence_indicators:
+    - Slippage protection implemented
+    - Commit-reveal where appropriate
+    - MEV mitigation considered
+procedure:
+  context:
+    cognitive_mode: adversarial
+    ensemble_role: security-auditor
+  steps:
+  - id: '1'
+    name: Front-Running Analysis
+    description: |
+      Identify front-running vectors and protections.
+    duration_estimate: 60 min
+    commands:
+    - purpose: Find trading operations
+      command: |
+        grep -rniE "(swap|trade|exchange|buy|sell)" \
+          --include="*.sol" . 2>/dev/null | head -30
+    - purpose: Find slippage protection
+      command: |
+        grep -rniE "(slippage|minAmount|deadline|maxAmount)" \
+          --include="*.sol" . 2>/dev/null | head -20
+    expected_findings:
+    - Trading operations
+    - Protection mechanisms
+    - Vulnerable patterns
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Front-Running Analysis
+    - MEV Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 2
+    blockchain:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: front-001
+  item: Slippage protection on value-sensitive operations
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify all swaps/trades have slippage protection
+  expected: Confirmed by reviewer
+- id: front-002
+  item: Transaction deadlines implemented
+  level: WARNING
+  verification: |
+    grep -rniE "deadline|expir" \
+      --include="*.sol" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "CHECK"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - defi
+    - dex
+    - auction
+    - trading
+relationships:
+  commonly_combined:
+  - blockchain.smart-contract-security.flash-loan-attack
+  - blockchain.smart-contract-security.oracle-manipulation
+  - blockchain.integration.off-chain-data
+
+# Glossary of domain-specific terms:
+glossary:
+  "timelock": "Governance mechanism requiring delay between proposal and execution"
+  "reentrancy": "Vulnerability where external call allows re-entering function before completion"
+  "oracle": "External data feed providing off-chain information to smart contracts"

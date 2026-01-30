@@ -1,0 +1,354 @@
+# ============================================================
+# AUDIT: Anonymization Effectiveness
+# ============================================================
+# Evaluates whether anonymization techniques effectively prevent
+# re-identification of individuals in datasets.
+
+audit:
+  id: "ethical-societal.privacy-data-ethics.anonymization-effectiveness"
+
+  name: "Anonymization Effectiveness"
+
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "ethical-societal"
+  category_number: 18
+  subcategory: "privacy-data-ethics"
+
+  tier: "expert"
+  estimated_duration: "4-8 hours"  # median: 6h
+
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Assesses effectiveness of anonymization and pseudonymization techniques
+    in preventing re-identification of individuals. Evaluates techniques
+    including k-anonymity, l-diversity, t-closeness, differential privacy,
+    and data masking against re-identification attacks including linkage
+    attacks, inference attacks, and auxiliary data correlation.
+
+  why_it_matters: |
+    Ineffective anonymization can expose personal data despite intended
+    protections. GDPR only exempts truly anonymous data - pseudonymized data
+    remains personal data. Re-identification can occur through linkage with
+    publicly available data. Organizations believing they hold anonymous data
+    may face unexpected compliance obligations when anonymization fails.
+
+  when_to_run:
+    - "Before sharing or publishing datasets"
+    - "When implementing anonymization for analytics"
+    - "During data sharing agreement negotiations"
+    - "After anonymization technique changes"
+
+prerequisites:
+  required_artifacts:
+    - type: "anonymized_datasets"
+      description: "Datasets that have undergone anonymization"
+    - type: "anonymization_methodology"
+      description: "Documentation of anonymization techniques applied"
+
+  access_requirements:
+    - "Access to anonymized data samples"
+    - "Knowledge of original data schema"
+    - "Auxiliary datasets for linkage testing"
+
+discovery:
+  code_patterns:
+    - pattern: "(anonymize|de.?identify|k.?anonymity|differential.?privacy)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find anonymization implementations"
+    - pattern: "(mask|redact|generalize|suppress|noise)"
+      type: "regex"
+      scope: "source"
+      purpose: "Locate specific anonymization techniques"
+    - pattern: "(pseudonymize|tokenize|hash.*identifier)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find pseudonymization code"
+
+  file_patterns:
+    - glob: "**/anonymization/**"
+      purpose: "Find anonymization modules"
+    - glob: "**/privacy/**"
+      purpose: "Locate privacy implementations"
+
+knowledge_sources:
+  specifications:
+    - id: "gdpr-recital26"
+      name: "GDPR Recital 26 - Anonymous Data"
+      url: "https://gdpr-info.eu/recitals/no-26/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "wp216"
+      name: "WP29 Opinion on Anonymisation Techniques"
+      url: "https://ec.europa.eu/justice/article-29/documentation/opinion-recommendation/files/2014/wp216_en.pdf"
+      offline_cache: true
+    - id: "nist-de-id"
+      name: "NIST De-Identification Guidelines"
+      url: "https://nvlpubs.nist.gov/nistpubs/ir/2015/NIST.IR.8053.pdf"
+      offline_cache: true
+
+  papers:
+    - id: "k-anonymity"
+      title: "Protecting Respondents' Identities in Microdata Release"
+      url: "https://ieeexplore.ieee.org/document/1000000"
+    - id: "l-diversity"
+      title: "l-Diversity: Privacy Beyond k-Anonymity"
+      url: "https://dl.acm.org/doi/10.1145/1217299.1217302"
+    - id: "netflix-attack"
+      title: "Robust De-anonymization of Large Sparse Datasets"
+      url: "https://arxiv.org/abs/cs/0610105"
+
+tooling:
+  static_analysis:
+    - tool: "ARX Data Anonymization Tool"
+      purpose: "Test k-anonymity and other properties"
+      offline_capable: true
+    - tool: "sdcMicro"
+      purpose: "Statistical disclosure control"
+      offline_capable: true
+
+  scripts:
+    - id: "k-anonymity-check"
+      language: "python"
+      purpose: "Verify k-anonymity property of dataset"
+      source: "inline"
+      code: |
+        import pandas as pd
+        from collections import Counter
+
+        def check_k_anonymity(df, quasi_identifiers, k):
+            """Check if dataset satisfies k-anonymity."""
+            # Group by quasi-identifiers
+            groups = df.groupby(quasi_identifiers).size()
+
+            # Find minimum group size
+            min_group_size = groups.min()
+
+            # Check if all groups have at least k records
+            violating_groups = groups[groups < k]
+
+            return {
+                'k_satisfied': min_group_size >= k,
+                'min_group_size': min_group_size,
+                'violating_groups': len(violating_groups),
+                'total_groups': len(groups)
+            }
+
+signals:
+  critical:
+    - id: "ANON-CRIT-001"
+      signal: "Direct identifiers present in 'anonymized' data"
+      evidence_indicators:
+        - "Names, SSNs, or other direct identifiers not removed"
+        - "Email addresses or phone numbers present"
+      explanation: |
+        Direct identifiers make re-identification trivial. Data containing
+        direct identifiers cannot be considered anonymized and remains
+        personal data under GDPR.
+      remediation: "Remove all direct identifiers before any anonymization"
+
+    - id: "ANON-CRIT-002"
+      signal: "K-anonymity below acceptable threshold"
+      evidence_threshold: "k < 5"
+      explanation: |
+        Low k values mean individuals can be easily singled out from small
+        groups. K-anonymity of at least 5-10 typically required for meaningful
+        protection.
+      remediation: "Apply additional generalization or suppression to increase k"
+
+  high:
+    - id: "ANON-HIGH-001"
+      signal: "Linkage attack feasible with public data"
+      explanation: "Quasi-identifiers can be linked with external datasets for re-identification"
+      remediation: "Reduce quasi-identifier precision or apply additional techniques"
+
+    - id: "ANON-HIGH-002"
+      signal: "Homogeneity attack possible (l-diversity violation)"
+      explanation: "Sensitive attributes not diverse within equivalence classes"
+      remediation: "Apply l-diversity or t-closeness constraints"
+
+  medium:
+    - id: "ANON-MED-001"
+      signal: "Temporal correlation enables tracking"
+      remediation: "Apply temporal masking or aggregation"
+
+    - id: "ANON-MED-002"
+      signal: "Unique combinations remain identifiable"
+      remediation: "Apply additional generalization to high-cardinality attributes"
+
+  low:
+    - id: "ANON-LOW-001"
+      signal: "Anonymization technique not documented"
+      remediation: "Document anonymization methodology and parameters"
+
+  positive:
+    - id: "ANON-POS-001"
+      signal: "Differential privacy with appropriate epsilon"
+    - id: "ANON-POS-002"
+      signal: "Regular re-identification risk testing conducted"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Review anonymization methodology"
+      description: |
+        Examine documentation of anonymization techniques applied.
+        Identify quasi-identifiers, sensitive attributes, and parameters.
+      duration_estimate: "45 min"
+      questions:
+        - "What anonymization technique was applied?"
+        - "What are the quasi-identifiers in this dataset?"
+        - "What parameters were used (k value, epsilon, etc.)?"
+      expected_findings:
+        - "Technique documentation assessment"
+        - "Parameter appropriateness"
+
+    - id: "2"
+      name: "Check for direct identifiers"
+      description: |
+        Verify that all direct identifiers have been removed or
+        properly anonymized.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Scan for identifier patterns"
+          command: "grep -r -E '(name|email|ssn|phone|address)' --include='*.csv' --include='*.json' . | head -20"
+      expected_findings:
+        - "Direct identifier presence check"
+        - "Completeness of removal"
+
+    - id: "3"
+      name: "Verify k-anonymity"
+      description: |
+        Test dataset for k-anonymity by grouping on quasi-identifiers
+        and checking minimum group sizes.
+      duration_estimate: "60 min"
+      expected_findings:
+        - "K-anonymity verification"
+        - "Equivalence class analysis"
+
+    - id: "4"
+      name: "Test for linkage attacks"
+      description: |
+        Attempt to link anonymized records with publicly available
+        or auxiliary datasets to assess re-identification risk.
+      duration_estimate: "90 min"
+      expected_findings:
+        - "Linkage vulnerability assessment"
+        - "Re-identification risk quantification"
+
+    - id: "5"
+      name: "Assess inference risks"
+      description: |
+        Evaluate whether sensitive attributes can be inferred from
+        anonymized data through statistical analysis.
+      duration_estimate: "60 min"
+      expected_findings:
+        - "Inference attack assessment"
+        - "Attribute disclosure risk"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "anonymization_report"
+      format: "structured"
+      sections:
+        - "Methodology Review"
+        - "K-Anonymity Analysis"
+        - "Linkage Attack Assessment"
+        - "Inference Risk Analysis"
+        - "Re-identification Risk Score"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Risk Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Comprehensive testing with auxiliary data"
+    medium: "Technical analysis without external linkage testing"
+    low: "Documentation review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "gdpr-recital26"
+        priority: "required"
+      - source_id: "wp216"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed technical analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "anon-001"
+    item: "No direct identifiers in anonymized data"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "All direct identifiers removed or masked"
+    expected: "Confirmed by reviewer"
+
+  - id: "anon-002"
+    item: "K-anonymity threshold met"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Minimum k >= 5 for all quasi-identifier combinations"
+    expected: "Confirmed by reviewer"
+
+  - id: "anon-003"
+    item: "Linkage attack risk assessed"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Tested against relevant auxiliary datasets"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["data-analytics", "research", "data-sharing"]
+
+  compliance_frameworks:
+    - framework: "GDPR"
+      controls: ["Recital 26", "Article 4(5)"]
+    - framework: "HIPAA"
+      controls: ["Safe Harbor", "Expert Determination"]
+
+relationships:
+  commonly_combined:
+    - "ethical-societal.privacy-data-ethics.data-minimization"
+    - "ethical-societal.privacy-data-ethics.third-party-data-sharing"

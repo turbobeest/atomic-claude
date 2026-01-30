@@ -1,0 +1,377 @@
+audit:
+  id: cloud-infrastructure.compute.reserved-capacity
+  name: Reserved Capacity
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: compute
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates reserved instance (RI), savings plans, and committed use
+    discount utilization across cloud infrastructure. Examines coverage
+    rates, utilization efficiency, expiration schedules, and alignment
+    between commitments and actual usage patterns.
+  why_it_matters: |
+    Reserved capacity offers 30-72% savings over on-demand pricing but
+    requires careful planning. Unused reservations represent wasted prepaid
+    capacity, while insufficient coverage means paying premium on-demand
+    rates for predictable workloads. Organizations often have 10-30% of
+    reservations underutilized while simultaneously paying on-demand for
+    eligible workloads.
+  when_to_run:
+  - Quarterly cost optimization reviews
+  - Before RI/savings plan purchases
+  - 30-60 days before reservation expiration
+  - After significant infrastructure changes
+prerequisites:
+  required_artifacts:
+  - type: billing_access
+    description: Access to reserved instance and savings plan data
+  - type: cloud_access
+    description: Read access to compute instance inventory
+  access_requirements:
+  - Cost Explorer or billing console access
+  - Reserved instance management access
+  - Compute instance inventory access
+discovery:
+  metrics_queries:
+  - system: Cost Explorer
+    query: |
+      aws ce get-reservation-utilization
+      --time-period Start=YYYY-MM-01,End=YYYY-MM-DD
+      --granularity MONTHLY
+    purpose: Check RI utilization rates
+    threshold: Utilization < 80% indicates waste
+  - system: Cost Explorer
+    query: |
+      aws ce get-reservation-coverage
+      --time-period Start=YYYY-MM-01,End=YYYY-MM-DD
+      --granularity MONTHLY
+    purpose: Check RI coverage rates
+    threshold: Coverage < 70% for steady-state workloads indicates opportunity
+  file_patterns:
+  - glob: '**/terraform/**/*reserved*.tf'
+    purpose: Find Terraform reserved instance configurations
+  - glob: '**/docs/**/*capacity*.md'
+    purpose: Find capacity planning documentation
+knowledge_sources:
+  specifications:
+  - id: aws-ri-docs
+    name: AWS Reserved Instances Documentation
+    url: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-reserved-instances.html
+    offline_cache: true
+    priority: required
+  - id: aws-savings-plans
+    name: AWS Savings Plans Documentation
+    url: https://docs.aws.amazon.com/savingsplans/latest/userguide/
+    offline_cache: true
+    priority: required
+  - id: gcp-cuds
+    name: GCP Committed Use Discounts
+    url: https://cloud.google.com/compute/docs/instances/signing-up-committed-use-discounts
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-ri-best-practices
+    name: AWS Reserved Instance Best Practices
+    url: https://docs.aws.amazon.com/whitepapers/latest/cost-optimization-reservation-models/cost-optimization-reservation-models.html
+    offline_cache: true
+  - id: finops-commitment
+    name: FinOps Commitment Management
+    url: https://www.finops.org/framework/capabilities/commitment-based-discounts/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS CLI
+    purpose: List reserved instances
+    command: aws ec2 describe-reserved-instances --query 'ReservedInstances[?State==`active`]'
+  - tool: AWS CLI
+    purpose: Check savings plans
+    command: aws savingsplans describe-savings-plans --query 'savingsPlans[?state==`active`]'
+  - tool: AWS Cost Explorer
+    purpose: Get RI utilization report
+    command: aws ce get-reservation-utilization --time-period Start=$(date -d '30 days ago' +%Y-%m-%d),End=$(date
+      +%Y-%m-%d)
+  monitoring_queries:
+  - system: AWS Budgets
+    query: |
+      aws budgets describe-budget --account-id {account_id}
+      --budget-name ReservationUtilization
+    purpose: Check RI utilization budget alerts
+  scripts:
+  - id: reservation-analyzer
+    language: bash
+    purpose: Analyze reserved capacity utilization
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Reserved Instance Analysis ==="
+
+      # Active Reserved Instances
+      echo "Active Reserved Instances:"
+      aws ec2 describe-reserved-instances \
+        --filters "Name=state,Values=active" \
+        --query 'ReservedInstances[].{Type:InstanceType,Count:InstanceCount,End:End,Offering:OfferingType}' \
+        --output table
+
+      # Savings Plans
+      echo "Active Savings Plans:"
+      aws savingsplans describe-savings-plans \
+        --query 'savingsPlans[?state==`active`].{Type:savingsPlanType,Commitment:commitment,End:end}' \
+        --output table
+
+      # Utilization
+      echo "RI Utilization (last 30 days):"
+      aws ce get-reservation-utilization \
+        --time-period Start=$(date -d '30 days ago' +%Y-%m-%d),End=$(date +%Y-%m-%d) \
+        --granularity MONTHLY \
+        --query 'Total.{Utilization:UtilizationPercentage}' \
+        --output table
+
+      # Coverage
+      echo "RI Coverage (last 30 days):"
+      aws ce get-reservation-coverage \
+        --time-period Start=$(date -d '30 days ago' +%Y-%m-%d),End=$(date +%Y-%m-%d) \
+        --granularity MONTHLY \
+        --query 'Total.{Coverage:CoverageHours.CoverageHoursPercentage}' \
+        --output table
+signals:
+  critical:
+  - id: RESERVED-CRIT-001
+    signal: Reserved instances expiring within 30 days with no renewal plan
+    evidence_threshold: Active RIs with End date < NOW + 30 days
+    explanation: |
+      Expiring reservations without renewal plans will result in workloads
+      shifting to on-demand pricing, causing significant cost increases.
+      RI purchases require lead time for approval and processing.
+    remediation: Immediately evaluate and execute renewal or replacement strategy
+  - id: RESERVED-CRIT-002
+    signal: Reserved instance utilization below 50%
+    evidence_threshold: RI utilization < 50% for 30+ days
+    explanation: |
+      Severely underutilized reservations represent significant wasted
+      prepaid capacity. At 50% utilization, savings are largely negated.
+    remediation: Modify, exchange, or sell unused reservations; adjust future purchases
+  high:
+  - id: RESERVED-HIGH-001
+    signal: On-demand spend for RI-eligible workloads exceeds 30%
+    evidence_threshold: Coverage < 70% for steady-state workloads
+    explanation: |
+      Significant on-demand spending for predictable workloads indicates
+      missed savings opportunities of 30-60%.
+    remediation: Purchase additional RIs or Savings Plans for steady-state workloads
+  - id: RESERVED-HIGH-002
+    signal: Reserved capacity misaligned with instance types in use
+    evidence_indicators:
+    - RIs for instance types not currently deployed
+    - High on-demand for types with unused RI capacity in other families
+    explanation: |
+      Instance type changes without RI adjustments result in unused
+      reservations and continued on-demand spending.
+    remediation: Modify or exchange RIs to match current instance types
+  - id: RESERVED-HIGH-003
+    signal: No automated RI utilization monitoring
+    evidence_indicators:
+    - No AWS Budgets for RI utilization
+    - No alerting on underutilization
+    explanation: |
+      Without monitoring, utilization issues go undetected until
+      quarterly reviews, extending waste periods.
+    remediation: Implement AWS Budgets alerts for RI utilization thresholds
+  medium:
+  - id: RESERVED-MED-001
+    signal: Savings Plans may be more beneficial than RIs
+    remediation: Analyze Savings Plans recommendations for flexibility benefits
+  - id: RESERVED-MED-002
+    signal: Regional vs zonal RI optimization possible
+    remediation: Evaluate regional RIs for AZ flexibility
+  - id: RESERVED-MED-003
+    signal: Convertible RIs not being used for flexibility
+    remediation: Consider convertible RIs for changing workloads
+  low:
+  - id: RESERVED-LOW-001
+    signal: RI purchase documentation incomplete
+    remediation: Document purchase rationale and expected utilization
+  positive:
+  - id: RESERVED-POS-001
+    signal: RI utilization consistently above 90%
+  - id: RESERVED-POS-002
+    signal: Automated utilization monitoring with alerting
+  - id: RESERVED-POS-003
+    signal: Regular RI portfolio reviews and optimization
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Reserved Capacity Inventory
+    description: |
+      Collect complete inventory of all reserved instances and
+      savings plans across accounts and regions.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List all active reserved instances
+      command: aws ec2 describe-reserved-instances --filters 'Name=state,Values=active' --query 'ReservedInstances[].{ID:ReservedInstancesId,Type:InstanceType,Count:InstanceCount,End:End,AZ:AvailabilityZone}'
+        --output table
+    - purpose: List all savings plans
+      command: aws savingsplans describe-savings-plans --query 'savingsPlans[].{ID:savingsPlanId,Type:savingsPlanType,Commitment:commitment,End:end,State:state}'
+        --output table
+    expected_findings:
+    - Complete RI and savings plan inventory
+    - Expiration dates and commitment amounts
+  - id: '2'
+    name: Utilization Analysis
+    description: |
+      Analyze utilization rates for all reserved capacity to
+      identify underutilized commitments.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get RI utilization report
+      command: aws ce get-reservation-utilization --time-period Start=$(date -d '90 days ago' +%Y-%m-%d),End=$(date
+        +%Y-%m-%d) --granularity MONTHLY --output table
+    - purpose: Get savings plan utilization
+      command: aws ce get-savings-plans-utilization --time-period Start=$(date -d '90 days ago' +%Y-%m-%d),End=$(date
+        +%Y-%m-%d) --granularity MONTHLY --output table
+    expected_findings:
+    - Monthly utilization percentages
+    - Underutilized reservations identification
+  - id: '3'
+    name: Coverage Analysis
+    description: |
+      Analyze coverage rates to identify on-demand workloads
+      that would benefit from reserved capacity.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get RI coverage report
+      command: aws ce get-reservation-coverage --time-period Start=$(date -d '90 days ago' +%Y-%m-%d),End=$(date
+        +%Y-%m-%d) --granularity MONTHLY --group-by Type=DIMENSION,Key=INSTANCE_TYPE --output table
+    expected_findings:
+    - Coverage percentage by instance type
+    - On-demand spend for covered vs uncovered
+  - id: '4'
+    name: Expiration Schedule Review
+    description: |
+      Review upcoming reservation expirations and develop
+      renewal or replacement strategies.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List RIs expiring in next 90 days
+      command: aws ec2 describe-reserved-instances --filters 'Name=state,Values=active' --query 'ReservedInstances[?End<=`'$(date
+        -d '90 days' +%Y-%m-%dT%H:%M:%S)'`].{Type:InstanceType,Count:InstanceCount,End:End}' --output
+        table
+    expected_findings:
+    - Reservations requiring renewal decisions
+    - Timeline for purchase decisions
+  - id: '5'
+    name: Optimization Recommendations
+    description: |
+      Generate specific recommendations for improving
+      reserved capacity utilization and coverage.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get RI purchase recommendations
+      command: aws ce get-reservation-purchase-recommendation --service EC2 --lookback-period-in-days
+        THIRTY_DAYS
+    - purpose: Get Savings Plans recommendations
+      command: aws ce get-savings-plans-purchase-recommendation --savings-plans-type COMPUTE_SP --lookback-period-in-days
+        THIRTY_DAYS --term-in-years ONE_YEAR --payment-option NO_UPFRONT
+    expected_findings:
+    - Recommended purchases with ROI analysis
+    - Exchange or modification opportunities
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Utilization Analysis
+    - Coverage Analysis
+    - Expiration Schedule
+    - Purchase Recommendations
+  - type: spreadsheet
+    format: csv
+    contents: RI inventory with utilization and recommendations
+  confidence_guidance:
+    high: 90+ days of utilization data, complete inventory access
+    medium: 30-90 days of data, partial inventory
+    low: Less than 30 days of data
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-ri-docs
+      priority: required
+    - source_id: aws-savings-plans
+      priority: required
+  limitations:
+  - Cannot access live reservation data offline
+  - Utilization metrics require API access
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed financial analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: reserved-001
+  item: All reserved capacity inventoried
+  level: CRITICAL
+  verification: aws ec2 describe-reserved-instances --query 'length(ReservedInstances)' 2>/dev/null |
+    grep -qE '[0-9]+' && echo PASS || echo FAIL
+  expected: PASS
+- id: reserved-002
+  item: Utilization rates calculated
+  level: CRITICAL
+  verification: manual
+  verification_notes: Confirm utilization percentages documented for all reservations
+  expected: Confirmed by reviewer
+- id: reserved-003
+  item: Expiring reservations identified with renewal plan
+  level: BLOCKING
+  verification: manual
+  verification_notes: All RIs expiring in 90 days have documented renewal decision
+  expected: Confirmed by reviewer
+- id: reserved-004
+  item: Coverage gaps analyzed
+  level: WARNING
+  verification: manual
+  verification_notes: On-demand workloads assessed for RI/SP coverage
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: FinOps
+    controls:
+    - Commitment Management
+    - Rate Optimization
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.compute.instance-right-sizing
+  - cloud-infrastructure.compute.spot-instance-usage
+  - cloud-infrastructure.storage.storage-cost-optimization

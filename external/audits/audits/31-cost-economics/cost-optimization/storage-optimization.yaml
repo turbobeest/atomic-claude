@@ -1,0 +1,343 @@
+audit:
+  id: cost-economics.cost-optimization.storage-optimization
+  name: Storage Optimization Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: cost-economics
+  category_number: 31
+  subcategory: cost-optimization
+  tier: expert
+  estimated_duration: 4-6 hours  # median: 5h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - finops
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines storage costs across object storage, block
+    storage, file systems, and databases. It evaluates storage tier
+    selection, lifecycle policies, data retention practices, and
+    identifies opportunities to reduce costs through tiering,
+    compression, and cleanup.
+  why_it_matters: |
+    Storage costs often grow unchecked as data accumulates. The cost
+    difference between storage tiers can be 10-20x (e.g., S3 Standard
+    vs Glacier). Proper lifecycle management and tier selection can
+    significantly reduce storage costs while maintaining data accessibility.
+  when_to_run:
+  - Quarterly storage review
+  - When storage costs exceed thresholds
+  - Before data migration projects
+  - During data governance reviews
+prerequisites:
+  required_artifacts:
+  - type: storage-inventory
+    description: Inventory of all storage resources
+  - type: access-patterns
+    description: Data access frequency metrics
+  - type: retention-policies
+    description: Data retention requirements
+  access_requirements:
+  - Read access to S3 Storage Lens or equivalent
+  - Access to storage metrics and access logs
+  - Access to lifecycle policy configurations
+  - Read access to storage cost reports
+discovery:
+  storage_types:
+  - type: Object Storage
+    services:
+    - S3
+    - Azure Blob
+    - GCS
+    optimization_potential: High
+  - type: Block Storage
+    services:
+    - EBS
+    - Azure Disk
+    - Persistent Disk
+    optimization_potential: High
+  - type: File Storage
+    services:
+    - EFS
+    - Azure Files
+    - Filestore
+    optimization_potential: Medium
+  - type: Database Storage
+    services:
+    - RDS
+    - DynamoDB
+    - Cloud SQL
+    optimization_potential: Medium
+  api_queries:
+  - provider: AWS
+    service: S3 Storage Lens
+    purpose: Storage analytics and optimization insights
+  - provider: AWS
+    service: S3 Intelligent-Tiering
+    purpose: Automatic tier optimization
+  file_patterns:
+  - glob: '**/*.tf'
+    purpose: Terraform files
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: CloudFormation templates
+  - glob: '**/*cost*.yaml'
+    purpose: Cost configuration files
+  - glob: '**/*budget*.yaml'
+    purpose: Budget configuration files
+  - glob: '**/*tag*.yaml'
+    purpose: Tagging policy files
+  code_patterns:
+  - pattern: tags\s*[=:]|cost_center|billing|budget
+    type: regex
+    scope: config
+    purpose: Cost/billing references
+  - pattern: reserved_instance|spot_instance|savings_plan
+    type: regex
+    scope: config
+    purpose: Cost optimization patterns
+knowledge_sources:
+  specifications:
+  - id: aws-s3-storage-classes
+    name: AWS S3 Storage Classes
+    url: https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-class-intro.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: storage-lifecycle
+    name: S3 Lifecycle Configuration
+    url: https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lifecycle-mgmt.html
+    offline_cache: true
+  - id: finops-storage
+    name: FinOps Storage Optimization
+    url: https://www.finops.org/framework/capabilities/
+    offline_cache: true
+tooling:
+  analysis_tools:
+  - tool: S3 Storage Lens
+    purpose: Storage analytics dashboard
+  - tool: S3 Inventory
+    purpose: Object listing for analysis
+  - tool: EBS Snapshots Analysis
+    command: |
+      aws ec2 describe-snapshots --owner-ids self \
+        --query 'Snapshots[*].[SnapshotId,VolumeSize,StartTime]'
+signals:
+  critical:
+  - id: STOR-CRIT-001
+    signal: Infrequently accessed data in expensive storage tiers
+    evidence_threshold: hot_tier_data_access < 1% in 90 days
+    explanation: |
+      Data that is rarely accessed should not reside in expensive
+      hot storage tiers. Moving to Glacier or similar can save
+      80-95% on storage costs.
+    remediation: Implement lifecycle policies to tier data automatically
+  - id: STOR-CRIT-002
+    signal: No lifecycle policies configured for growing buckets
+    evidence_pattern: Large S3 buckets without lifecycle rules
+    explanation: |
+      Without lifecycle policies, data accumulates indefinitely in
+      the default storage tier. This is a common source of runaway
+      storage costs.
+    remediation: Configure lifecycle policies for all buckets
+  high:
+  - id: STOR-HIGH-001
+    signal: Orphaned EBS snapshots consuming significant storage
+    evidence_threshold: orphaned_snapshot_cost > $1000/month
+    explanation: |
+      EBS snapshots from deleted volumes often persist indefinitely.
+      These orphaned snapshots accumulate costs without providing
+      value.
+    remediation: Identify and delete orphaned snapshots
+  - id: STOR-HIGH-002
+    signal: Over-provisioned EBS volumes with low utilization
+    evidence_threshold: ebs_utilization < 30%
+    explanation: |
+      EBS volumes are charged for provisioned capacity, not used
+      capacity. Over-provisioned volumes waste money.
+    remediation: Resize volumes or implement elastic volumes
+  medium:
+  - id: STOR-MED-001
+    signal: Uncompressed data in object storage
+    evidence_pattern: Large uncompressed files in S3
+    remediation: Implement compression before storage
+  - id: STOR-MED-002
+    signal: Multi-part upload failures not cleaned up
+    evidence_pattern: Incomplete multi-part uploads accumulating
+    remediation: Configure abort incomplete multi-part upload rule
+  low:
+  - id: STOR-LOW-001
+    signal: S3 Intelligent-Tiering not utilized
+    evidence_pattern: Standard tier used for varying access patterns
+    remediation: Evaluate Intelligent-Tiering for variable workloads
+  positive:
+  - id: STOR-POS-001
+    signal: Comprehensive lifecycle policies across all buckets
+  - id: STOR-POS-002
+    signal: Active use of storage tiers aligned with access patterns
+  - id: STOR-POS-003
+    signal: Regular storage cleanup and optimization process
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory storage resources
+    description: |
+      Catalog all storage resources including S3 buckets, EBS
+      volumes, EFS filesystems, and database storage.
+    duration_estimate: 45 min
+    commands:
+    - purpose: List S3 buckets with size
+      command: |
+        aws s3api list-buckets --query 'Buckets[].Name' --output text | \
+          xargs -I {} aws cloudwatch get-metric-statistics \
+            --namespace AWS/S3 --metric-name BucketSizeBytes \
+            --dimensions Name=BucketName,Value={} Name=StorageType,Value=StandardStorage \
+            --start-time $(date -u -d '1 day ago' +%Y-%m-%dT%H:%M:%S) \
+            --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+            --period 86400 --statistics Average
+    - purpose: List EBS volumes
+      command: |
+        aws ec2 describe-volumes --query 'Volumes[*].[VolumeId,Size,State,VolumeType]'
+    expected_findings:
+    - Storage inventory by type
+    - Size distribution
+  - id: '2'
+    name: Analyze access patterns
+    description: |
+      Review access patterns to identify infrequently accessed data
+      suitable for cheaper storage tiers.
+    duration_estimate: 60 min
+    expected_findings:
+    - Access frequency analysis
+    - Cold data identification
+    - Tiering candidates
+  - id: '3'
+    name: Review lifecycle policies
+    description: |
+      Examine existing lifecycle policies for completeness and
+      appropriateness.
+    duration_estimate: 45 min
+    commands:
+    - purpose: List bucket lifecycle configurations
+      command: |
+        aws s3api get-bucket-lifecycle-configuration \
+          --bucket BUCKET_NAME 2>/dev/null || echo "No lifecycle policy"
+    expected_findings:
+    - Policy coverage
+    - Policy effectiveness
+    - Gaps identified
+  - id: '4'
+    name: Identify orphaned resources
+    description: |
+      Find orphaned snapshots, unused volumes, and incomplete
+      uploads consuming storage.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find orphaned snapshots
+      command: |
+        aws ec2 describe-snapshots --owner-ids self \
+          --query 'Snapshots[?State==`completed`].[SnapshotId,VolumeId,StartTime]'
+    - purpose: Find unattached volumes
+      command: |
+        aws ec2 describe-volumes \
+          --filters Name=status,Values=available \
+          --query 'Volumes[*].[VolumeId,Size,CreateTime]'
+    expected_findings:
+    - Orphaned resources
+    - Cleanup candidates
+  - id: '5'
+    name: Calculate optimization potential
+    description: |
+      Quantify savings from implementing tiering, lifecycle policies,
+      and resource cleanup.
+    duration_estimate: 30 min
+    expected_findings:
+    - Tiering savings potential
+    - Cleanup savings
+    - Total optimization opportunity
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Storage Inventory
+    - Tiering Opportunities
+    - Cleanup Recommendations
+    - Lifecycle Policy Recommendations
+  - type: metrics_dashboard
+    metrics:
+    - Storage by tier
+    - Lifecycle policy coverage
+    - Orphaned resource cost
+    - Optimization savings potential
+  confidence_guidance:
+    high: Complete storage analytics with access pattern data
+    medium: Storage inventory without detailed access patterns
+    low: Partial storage visibility
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-s3-storage-classes
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+      reduced_scope: Top buckets by size only
+    full:
+      included: true
+      priority: 1
+    finops:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: stor-001
+  item: Lifecycle policies configured for all buckets
+  level: CRITICAL
+  verification: automated
+  expected: 100% coverage
+- id: stor-002
+  item: Orphaned resources cleaned up
+  level: BLOCKING
+  verification: manual
+  expected: Cleanup completed or scheduled
+- id: stor-003
+  item: Tiering strategy documented
+  level: WARNING
+  verification: manual
+  expected: Strategy documented
+governance:
+  applicable_to:
+    archetypes:
+    - cloud-native
+    - data-intensive
+    - archive-heavy
+  compliance_frameworks:
+  - framework: FinOps Foundation
+    controls:
+    - Workload Optimization
+    - Data Lifecycle Management
+  - framework: AWS Well-Architected
+    controls:
+    - COST-09
+relationships:
+  commonly_combined:
+  - cost-economics.resource-efficiency.waste-identification
+  - cost-economics.cost-visibility.cost-attribution
+  - cost-economics.cost-optimization.rightsizing

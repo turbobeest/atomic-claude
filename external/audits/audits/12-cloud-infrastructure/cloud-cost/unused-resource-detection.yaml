@@ -1,0 +1,306 @@
+audit:
+  id: cloud-infrastructure.cloud-cost.unused-resource-detection
+  name: Unused Resource Detection
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: cloud-cost
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: infrastructure
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Identifies unused or underutilized cloud resources including idle EC2
+    instances, unattached EBS volumes, unused Elastic IPs, orphaned snapshots,
+    idle load balancers, unused NAT gateways, and other resources that
+    incur costs without providing value. Estimates potential savings from
+    cleanup.
+  why_it_matters: |
+    Unused resources represent pure waste - money spent on resources providing
+    no value. Studies show 30-35% of cloud spend is wasted on unused or
+    underutilized resources. Identifying and eliminating waste is the
+    lowest-friction way to reduce cloud costs without impacting applications.
+  when_to_run:
+  - Regular cost optimization reviews (monthly)
+  - After major migrations or decomissions
+  - Before budget renewals
+  - When seeking quick cost wins
+prerequisites:
+  required_artifacts:
+  - type: cloud-account
+    description: Access to cloud resource inventory
+  - type: metrics-access
+    description: Access to resource utilization metrics
+  access_requirements:
+  - EC2, EBS, ELB, and related service read access
+  - CloudWatch metrics access
+  - Trusted Advisor or equivalent access
+discovery:
+  metrics_queries:
+  - system: CloudWatch
+    query: AWS/EC2 CPUUtilization Average < 5%
+    purpose: Identify idle EC2 instances
+    threshold: <5% average CPU over 7 days
+  - system: CloudWatch
+    query: AWS/ELB RequestCount Sum = 0
+    purpose: Identify unused load balancers
+    threshold: Zero requests over 7 days
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  specifications:
+  - id: aws-trusted-advisor
+    name: AWS Trusted Advisor Cost Optimization
+    url: https://docs.aws.amazon.com/awssupport/latest/user/cost-optimization-checks.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: finops-waste
+    name: FinOps Waste Reduction
+    url: https://www.finops.org/framework/capabilities/avoiding-unnecessary-cost/
+    offline_cache: true
+  - id: aws-cost-optimization
+    name: AWS Cost Optimization Pillar
+    url: https://docs.aws.amazon.com/wellarchitected/latest/cost-optimization-pillar/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: aws-cli
+    purpose: Query resource state
+    command: aws ec2 describe-volumes --filters Name=status,Values=available
+  - tool: trusted-advisor
+    purpose: Cost optimization recommendations
+    command: aws support describe-trusted-advisor-checks --language en
+  - tool: cost-explorer
+    purpose: Resource cost analysis
+    command: aws ce get-cost-and-usage-with-resources
+  scripts:
+  - id: unused-resource-scan
+    language: bash
+    purpose: Scan for unused resources
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Unattached EBS Volumes ==="
+      aws ec2 describe-volumes --filters Name=status,Values=available --query 'Volumes[*].[VolumeId,Size,CreateTime]' --output table
+      echo "=== Unused Elastic IPs ==="
+      aws ec2 describe-addresses --query 'Addresses[?AssociationId==`null`].[PublicIp,AllocationId]' --output table
+      echo "=== Stopped EC2 Instances ==="
+      aws ec2 describe-instances --filters Name=instance-state-name,Values=stopped --query 'Reservations[*].Instances[*].[InstanceId,InstanceType,LaunchTime]' --output table
+      echo "=== Old Snapshots (>90 days) ==="
+      aws ec2 describe-snapshots --owner-ids self --query "Snapshots[?StartTime<='$(date -d '90 days ago' +%Y-%m-%d)'].[SnapshotId,VolumeId,StartTime,VolumeSize]" --output table | head -20
+signals:
+  critical:
+  - id: UNUSED-RES-CRIT-001
+    signal: Large volumes of unattached storage
+    evidence_pattern: '>100 GB unattached EBS volumes'
+    explanation: |
+      Unattached volumes incur costs but provide no value. Large
+      amounts suggest systematic process failure to clean up.
+    remediation: Delete or snapshot and delete unneeded volumes
+  high:
+  - id: UNUSED-RES-HIGH-001
+    signal: Long-stopped EC2 instances
+    evidence_pattern: EC2 instances stopped >30 days
+    explanation: |
+      Stopped instances still incur EBS storage costs. Long-stopped
+      instances likely are not needed and should be terminated.
+    remediation: Terminate unused instances, snapshot if data needed
+  - id: UNUSED-RES-HIGH-002
+    signal: Idle load balancers
+    evidence_pattern: Load balancer with zero requests for 7+ days
+    explanation: |
+      Load balancers have hourly costs. Unused balancers waste money
+      and should be removed.
+    remediation: Delete unused load balancers
+  - id: UNUSED-RES-HIGH-003
+    signal: Unused Elastic IPs
+    evidence_pattern: Elastic IPs not associated with running instance
+    explanation: |
+      Unassociated Elastic IPs incur charges. They should be released
+      if not needed.
+    remediation: Release unused Elastic IPs
+  medium:
+  - id: UNUSED-RES-MED-001
+    signal: Old snapshots without lifecycle policy
+    evidence_pattern: Snapshots older than 90 days
+    remediation: Implement snapshot lifecycle policy, delete old snapshots
+  - id: UNUSED-RES-MED-002
+    signal: Idle NAT Gateways
+    evidence_pattern: NAT Gateway with minimal traffic
+    remediation: Remove unused NAT Gateways or consolidate
+  - id: UNUSED-RES-MED-003
+    signal: Unused reserved capacity
+    evidence_pattern: Reserved instances without matching usage
+    remediation: Modify or sell unused reservations
+  low:
+  - id: UNUSED-RES-LOW-001
+    signal: Empty S3 buckets
+    remediation: Delete or document purpose of empty buckets
+  - id: UNUSED-RES-LOW-002
+    signal: Unused security groups
+    remediation: Clean up orphaned security groups
+  positive:
+  - id: UNUSED-RES-POS-001
+    signal: Regular unused resource cleanup in place
+  - id: UNUSED-RES-POS-002
+    signal: Automation deletes unused resources
+  - id: UNUSED-RES-POS-003
+    signal: Minimal idle resources found
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Scan for unattached storage
+    description: |
+      Identify unattached EBS volumes and orphaned snapshots.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find unattached volumes
+      command: aws ec2 describe-volumes --filters Name=status,Values=available --query 'Volumes[*].[VolumeId,Size,CreateTime]'
+    - purpose: Calculate unattached volume cost
+      command: aws ec2 describe-volumes --filters Name=status,Values=available --query 'sum(Volumes[*].Size)'
+    expected_findings:
+    - Unattached volume inventory
+    - Storage waste estimate
+  - id: '2'
+    name: Identify idle compute
+    description: |
+      Find stopped instances and instances with very low utilization.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find stopped instances
+      command: aws ec2 describe-instances --filters Name=instance-state-name,Values=stopped --query 'Reservations[*].Instances[*].[InstanceId,InstanceType,LaunchTime]'
+    - purpose: Check CPU utilization
+      command: aws cloudwatch get-metric-statistics --namespace AWS/EC2 --metric-name CPUUtilization --dimensions
+        Name=InstanceId,Value=<id> --start-time <start> --end-time <end> --period 86400 --statistics Average
+    expected_findings:
+    - Stopped instance inventory
+    - Low-utilization instances
+  - id: '3'
+    name: Check network resources
+    description: |
+      Identify unused Elastic IPs, load balancers, and NAT Gateways.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find unused EIPs
+      command: aws ec2 describe-addresses --query 'Addresses[?AssociationId==`null`]'
+    - purpose: Find unused load balancers
+      command: aws elbv2 describe-load-balancers --query 'LoadBalancers[*].[LoadBalancerArn,LoadBalancerName]'
+    expected_findings:
+    - Unused network resources
+    - Network resource waste estimate
+  - id: '4'
+    name: Review Trusted Advisor recommendations
+    description: |
+      Check Trusted Advisor for additional waste identification.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Get cost optimization checks
+      command: aws support describe-trusted-advisor-check-result --check-id <check-id> --language en
+    expected_findings:
+    - Trusted Advisor findings
+    - Additional optimization opportunities
+  - id: '5'
+    name: Calculate potential savings
+    description: |
+      Estimate cost savings from cleaning up identified resources.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Price unused resources
+      command: aws pricing get-products --service-code AmazonEC2 --filters Type=TERM_MATCH,Field=productFamily,Value=Storage
+    expected_findings:
+    - Savings estimate
+    - Priority cleanup targets
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Unused Resource Inventory
+    - Savings Opportunity
+    - Cleanup Recommendations
+  confidence_guidance:
+    high: Direct resource state queries
+    medium: Utilization-based assessment
+    low: Estimated based on patterns
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-trusted-advisor
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: Quick cost wins available
+    full:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: unused-resource-detection-001
+  item: No unattached EBS volumes older than 7 days
+  level: BLOCKING
+  verification: aws ec2 describe-volumes --filters Name=status,Values=available --query 'length(Volumes)'
+    | awk '{print ($1==0)?"PASS":"FAIL"}'
+  expected: PASS
+- id: unused-resource-detection-002
+  item: No stopped instances older than 30 days
+  level: WARNING
+  verification: manual
+  verification_notes: Check stopped instance ages
+  expected: Confirmed by reviewer
+- id: unused-resource-detection-003
+  item: No unused Elastic IPs
+  level: WARNING
+  verification: aws ec2 describe-addresses --query 'Addresses[?AssociationId==`null`]' | jq 'length' |
+    awk '{print ($1==0)?"PASS":"FAIL"}'
+  expected: PASS
+- id: unused-resource-detection-004
+  item: Snapshot lifecycle policy in place
+  level: WARNING
+  verification: aws dlm get-lifecycle-policies --query 'Policies' | jq 'length' | awk '{print ($1>0)?"PASS":"FAIL"}'
+  expected: PASS
+- id: unused-resource-detection-005
+  item: Regular cleanup process documented
+  level: WARNING
+  verification: manual
+  verification_notes: Verify cleanup process exists and is followed
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: FinOps
+    controls:
+    - Avoiding Unnecessary Cost
+    - Workload Management
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.cloud-cost.cost-allocation
+  - cloud-infrastructure.cloud-cost.cost-anomaly-detection
+  - cloud-infrastructure.containers.container-resource-limits

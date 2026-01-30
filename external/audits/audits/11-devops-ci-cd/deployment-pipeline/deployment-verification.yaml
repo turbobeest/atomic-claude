@@ -1,0 +1,360 @@
+# ============================================================
+# AUDIT: Deployment Verification
+# ============================================================
+# Evaluates post-deployment testing and validation
+
+audit:
+  id: "devops-ci-cd.deployment-pipeline.deployment-verification"
+  name: "Deployment Verification"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "deployment-pipeline"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "deployment"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Examines how deployments are verified after release including
+    smoke tests, health checks, integration tests, synthetic monitoring,
+    and manual verification procedures. Evaluates whether deployments
+    are considered successful only after validation passes.
+
+  why_it_matters: |
+    Without deployment verification, issues are discovered by users
+    rather than by automated checks. This increases MTTR, damages
+    user trust, and creates incident fatigue. Proper verification
+    catches problems within minutes rather than hours, enabling
+    quick rollback before user impact spreads.
+
+  when_to_run:
+    - "Initial deployment audit"
+    - "After deployment incidents"
+    - "When implementing new services"
+    - "Quarterly reliability reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "ci_configuration"
+      description: "CI/CD pipeline with deployment stages"
+    - type: "test_configuration"
+      description: "Post-deployment test definitions"
+
+  access_requirements:
+    - "CI/CD system access"
+    - "Test execution logs"
+    - "Monitoring system access"
+
+discovery:
+  code_patterns:
+    - pattern: "smoke.*test|health.*check|verification|post.*deploy"
+      type: "regex"
+      scope: "config"
+      purpose: "Identify post-deployment verification steps"
+
+    - pattern: "readinessProbe|livenessProbe|startupProbe"
+      type: "regex"
+      scope: "config"
+      purpose: "Kubernetes health probes"
+
+  file_patterns:
+    - glob: "**/tests/smoke/**"
+      purpose: "Smoke test definitions"
+
+    - glob: "**/tests/e2e/**"
+      purpose: "End-to-end tests that may run post-deploy"
+
+    - glob: "**/*health*"
+      purpose: "Health check implementations"
+
+knowledge_sources:
+  guides:
+    - id: "k8s-probes"
+      name: "Kubernetes Liveness and Readiness Probes"
+      url: "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"
+      offline_cache: true
+
+    - id: "synthetic-monitoring"
+      name: "Synthetic Monitoring Best Practices"
+      url: "https://www.datadoghq.com/knowledge-center/synthetic-monitoring/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Check pod health status"
+      command: "kubectl get pods -l app=NAME -o wide"
+
+    - tool: "curl"
+      purpose: "Health endpoint verification"
+      command: "curl -sf http://service/health"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "probe_success{job='blackbox'}"
+      purpose: "Synthetic monitoring results"
+
+  scripts:
+    - id: "check-health-endpoints"
+      language: "bash"
+      purpose: "Verify health endpoint configuration"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        if grep -r 'healthz\|ready\|live' k8s/ src/ 2>/dev/null | head -1; then
+          echo "PASS: Health endpoints found"
+        else
+          echo "WARN: No health endpoints found"
+        fi
+
+signals:
+  critical:
+    - id: "CICD-VERIFY-CRIT-001"
+      signal: "No post-deployment verification exists"
+      evidence_pattern: "No smoke tests, health checks, or verification steps"
+      explanation: |
+        Without verification, deployments are considered successful even
+        when the application is broken. Users become the canary, discovering
+        issues before the team.
+      remediation: "Implement automated post-deployment verification"
+
+    - id: "CICD-VERIFY-CRIT-002"
+      signal: "Health checks not configured for deployment orchestration"
+      evidence_pattern: "No readinessProbe or livenessProbe in Kubernetes"
+      explanation: |
+        Without health probes, Kubernetes cannot determine if a pod is
+        ready for traffic or if it needs to be restarted. This leads to
+        traffic being sent to unhealthy pods.
+      remediation: "Configure readiness and liveness probes for all services"
+
+  high:
+    - id: "CICD-VERIFY-HIGH-001"
+      signal: "Deployment considered complete before verification passes"
+      evidence_pattern: "Verification runs async without gating deployment"
+      explanation: |
+        If verification runs but doesn't gate the deployment, issues
+        may not be caught in time for automatic rollback.
+      remediation: "Make verification a blocking step in deployment"
+
+    - id: "CICD-VERIFY-HIGH-002"
+      signal: "Health checks only verify application startup, not functionality"
+      evidence_pattern: "Health endpoint just returns 200 without checking dependencies"
+      explanation: |
+        Superficial health checks pass even when the application cannot
+        serve real requests due to dependency failures.
+      remediation: "Implement deep health checks that verify critical dependencies"
+
+  medium:
+    - id: "CICD-VERIFY-MED-001"
+      signal: "No synthetic monitoring for critical user journeys"
+      evidence_pattern: "Missing continuous synthetic tests post-deployment"
+      remediation: "Implement synthetic monitoring for critical paths"
+
+    - id: "CICD-VERIFY-MED-002"
+      signal: "Verification tests are flaky"
+      evidence_pattern: "High failure rate in verification tests not due to real issues"
+      remediation: "Fix flaky tests or implement retry with analysis"
+
+  low:
+    - id: "CICD-VERIFY-LOW-001"
+      signal: "No metrics collected during verification window"
+
+    - id: "CICD-VERIFY-LOW-002"
+      signal: "Verification results not visible in deployment UI"
+
+  positive:
+    - id: "CICD-VERIFY-POS-001"
+      signal: "Comprehensive smoke tests run on every deployment"
+
+    - id: "CICD-VERIFY-POS-002"
+      signal: "Automatic rollback triggered on verification failure"
+
+    - id: "CICD-VERIFY-POS-003"
+      signal: "Synthetic monitoring validates critical paths continuously"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory verification mechanisms"
+      description: |
+        Identify all post-deployment verification steps including
+        health checks, smoke tests, and manual procedures.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find smoke test configurations"
+          command: |
+            find . -name '*smoke*' -o -name '*verify*' 2>/dev/null | head -20
+
+        - purpose: "Check for verification in CI pipeline"
+          command: |
+            grep -rE 'smoke|verify|health.*check' .github/workflows/ .gitlab-ci.yml 2>/dev/null
+
+      expected_findings:
+        - "Complete list of verification mechanisms"
+
+    - id: "2"
+      name: "Analyze health probe configuration"
+      description: |
+        Review Kubernetes health probe configuration for all services.
+        Verify probes are meaningful, not just superficial.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Extract health probe configs"
+          command: |
+            grep -rA 10 'readinessProbe:\|livenessProbe:' k8s/ helm/ --include='*.yaml' 2>/dev/null
+
+      expected_findings:
+        - "Health probe configuration assessment"
+
+    - id: "3"
+      name: "Review health check implementation"
+      description: |
+        Examine health check endpoint implementation to verify
+        it checks meaningful functionality.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find health endpoint code"
+          command: |
+            grep -rn 'health\|ready\|live' src/ app/ --include='*.ts' --include='*.py' --include='*.go' 2>/dev/null | head -30
+
+      expected_findings:
+        - "Health check depth assessment"
+
+    - id: "4"
+      name: "Check deployment blocking"
+      description: |
+        Verify that failed verification blocks deployment completion
+        and triggers rollback.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Check for blocking verification"
+          command: |
+            grep -rE 'needs:|depends_on:|wait.*healthy' .github/workflows/ .gitlab-ci.yml k8s/ 2>/dev/null
+
+      expected_findings:
+        - "Verification blocking status"
+
+    - id: "5"
+      name: "Assess synthetic monitoring"
+      description: |
+        Determine if synthetic monitoring validates critical
+        user journeys continuously.
+      duration_estimate: "15 min"
+
+      questions:
+        - "What critical paths are monitored synthetically?"
+        - "How quickly are synthetic failures alerted?"
+        - "Are synthetic tests integrated with deployment verification?"
+
+      expected_findings:
+        - "Synthetic monitoring coverage"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Verification Mechanisms"
+        - "Health Check Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Verification tested end-to-end including failure scenarios"
+    medium: "Configuration reviewed, not tested in production"
+    low: "Based on configuration review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "k8s-probes"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed verification analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "deployment-verification-001"
+    item: "Post-deployment verification exists and runs"
+    level: "CRITICAL"
+    verification: |
+      grep -rE 'smoke|verify|test' .github/workflows/*deploy* 2>/dev/null && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "deployment-verification-002"
+    item: "Kubernetes health probes configured"
+    level: "CRITICAL"
+    verification: |
+      grep -r 'readinessProbe:' k8s/ helm/ --include='*.yaml' 2>/dev/null && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "deployment-verification-003"
+    item: "Verification failure triggers rollback"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify failed verification prevents deployment completion"
+    expected: "Confirmed by reviewer"
+
+  - id: "deployment-verification-004"
+    item: "Health checks validate dependencies"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Review health check implementation for dependency validation"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "DORA"
+      controls: ["Change Failure Rate"]
+    - framework: "SOC2"
+      controls: ["CC7.1"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.deployment-pipeline.rollback-capability"
+    - "devops-ci-cd.deployment-pipeline.canary-deployment"

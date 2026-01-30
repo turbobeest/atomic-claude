@@ -1,0 +1,305 @@
+audit:
+  id: observability-instrumentation.logging.sensitive-data-in-logs
+  name: Sensitive Data in Logs Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: logging
+  tier: phd
+  estimated_duration: 1.5 hours
+  completeness: requires_discovery
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Examines logging code and log output to identify instances where sensitive
+    data (PII, credentials, financial data, health information) may be written
+    to logs. Reviews log sanitization mechanisms, masking implementations,
+    and patterns that commonly lead to data exposure.
+  why_it_matters: |
+    Sensitive data in logs creates serious security and compliance risks. Logs
+    are often stored with less security than production databases, shared widely
+    for debugging, and retained longer than intended. Exposed credentials enable
+    account takeover, while PII exposure violates GDPR, CCPA, and HIPAA requirements,
+    potentially resulting in fines and reputational damage.
+  when_to_run:
+  - Security audit and compliance review
+  - Before production deployment
+  - After adding new data processing features
+  - Following a data exposure incident
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code with logging statements
+  - type: data_classification
+    description: List of sensitive data types handled by the application
+  access_requirements:
+  - Read access to application codebase
+  - Access to sample log output (optional but recommended)
+  - Knowledge of data types processed by the application
+discovery:
+  code_patterns:
+  - pattern: log.*password|log.*secret|log.*token|log.*key
+    type: regex
+    scope: source
+    purpose: Find potential credential logging
+  - pattern: log.*email|log.*phone|log.*ssn|log.*address
+    type: regex
+    scope: source
+    purpose: Find potential PII logging
+  - pattern: log.*(request|response).*body
+    type: regex
+    scope: source
+    purpose: Find full request/response logging
+  - pattern: JSON\.stringify.*log|to_json.*log
+    type: regex
+    scope: source
+    purpose: Find object serialization to logs
+  - pattern: mask|redact|sanitize|scrub
+    type: keyword
+    scope: source
+    purpose: Find data masking implementations
+  file_patterns:
+  - glob: '**/middleware/logging*.{js,ts,py}'
+    purpose: Logging middleware that may log requests
+  - glob: '**/interceptor*.{js,ts,java}'
+    purpose: HTTP interceptors that may log payloads
+knowledge_sources:
+  specifications:
+  - id: owasp-logging
+    name: OWASP Logging Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html
+    offline_cache: true
+    priority: required
+  - id: gdpr-pii
+    name: GDPR Personal Data Definition
+    url: https://gdpr.eu/eu-gdpr-personal-data/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: sensitive-data-handling
+    name: Secure Logging Practices
+    url: https://owasp.org/www-project-proactive-controls/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect sensitive data logging patterns
+    offline_capable: true
+  - tool: grep/ripgrep
+    purpose: Search for dangerous logging patterns
+    offline_capable: true
+  scripts:
+  - id: find-sensitive-logging
+    language: bash
+    purpose: Identify potential sensitive data in logs
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Searching for credential logging ==="
+      rg -i 'log.*(password|secret|token|api.?key|auth)' --type-add 'code:*.{js,ts,py,go,java,rb}' -t code
+      echo "=== Searching for PII logging ==="
+      rg -i 'log.*(email|phone|ssn|credit.?card|address)' --type-add 'code:*.{js,ts,py,go,java,rb}' -t code
+      echo "=== Searching for request body logging ==="
+      rg -i 'log.*(request|req).*(body|payload)' --type-add 'code:*.{js,ts,py,go,java,rb}' -t code
+signals:
+  critical:
+  - id: SENS-LOG-CRIT-001
+    signal: Credentials logged in plaintext
+    evidence_pattern: log.*(password|secret|api.?key|token).*[=:]
+    explanation: |
+      Plaintext credentials in logs enable account takeover by anyone with
+      log access. This is a severe security vulnerability.
+    remediation: Never log credentials. Implement filtering at the logger level.
+  - id: SENS-LOG-CRIT-002
+    signal: Full request/response bodies logged including auth headers
+    evidence_pattern: log.*headers|log.*authorization
+    explanation: Auth headers contain tokens that enable session hijacking
+    remediation: Filter sensitive headers before logging requests
+  - id: SENS-LOG-CRIT-003
+    signal: Credit card numbers or financial data logged
+    evidence_pattern: log.*(card|pan|account.?number|cvv)
+    explanation: PCI-DSS violation; enables financial fraud
+    remediation: Mask or exclude financial data from all logging
+  high:
+  - id: SENS-LOG-HIGH-001
+    signal: PII logged without masking (email, phone, SSN)
+    explanation: GDPR/CCPA violation; enables identity theft
+    remediation: Implement PII masking (e.g., j***@example.com)
+  - id: SENS-LOG-HIGH-002
+    signal: User objects serialized to logs with all fields
+    explanation: Uncontrolled serialization may expose unexpected sensitive fields
+    remediation: Use DTOs or explicit field selection for logging
+  medium:
+  - id: SENS-LOG-MED-001
+    signal: No centralized log sanitization mechanism
+    remediation: Implement a log filter/interceptor that scrubs sensitive patterns
+  - id: SENS-LOG-MED-002
+    signal: Exception stack traces may contain sensitive data
+    remediation: Review exception handling for potential data exposure
+  low:
+  - id: SENS-LOG-LOW-001
+    signal: IP addresses logged without consideration of privacy
+  positive:
+  - id: SENS-LOG-POS-001
+    signal: Centralized log sanitizer with sensitive pattern filtering
+  - id: SENS-LOG-POS-002
+    signal: Structured logging with explicit field allowlists
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify sensitive data types
+    description: |
+      Catalog the types of sensitive data the application handles
+      to understand what might appear in logs.
+    duration_estimate: 15 min
+    questions:
+    - What PII does the application process?
+    - What credentials or secrets does the application handle?
+    - What financial or health data is involved?
+    expected_findings:
+    - Sensitive data inventory
+    - High-risk data flows
+  - id: '2'
+    name: Search for dangerous logging patterns
+    description: |
+      Use static analysis to find code patterns that may log
+      sensitive data.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find credential logging
+      command: rg -i 'log.*(password|secret|token|api.?key)' --type-add 'code:*.{js,ts,py,go,java}' -t
+        code
+    - purpose: Find PII logging
+      command: rg -i 'log.*(email|phone|ssn|credit.?card)' --type-add 'code:*.{js,ts,py,go,java}' -t code
+    - purpose: Find object serialization in logs
+      command: rg 'log.*(JSON\.stringify|to_json|%s|%v)' --type-add 'code:*.{js,ts,py,go}' -t code
+    expected_findings:
+    - Potential sensitive data logging locations
+    - Object serialization risks
+  - id: '3'
+    name: Review log sanitization mechanisms
+    description: |
+      Examine existing log filtering, masking, or sanitization
+      implementations.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find sanitization code
+      command: rg -i '(mask|redact|sanitize|scrub|filter).*(log|password|secret|pii)' .
+    - purpose: Find logger configuration
+      command: rg -i '(formatter|filter|interceptor)' --type-add 'config:*.{yml,yaml,json}' -t config
+    expected_findings:
+    - Existing sanitization implementations
+    - Coverage gaps
+  - id: '4'
+    name: Sample log output analysis
+    description: |
+      If available, analyze actual log output for sensitive data patterns
+      using regex matching.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Search logs for email patterns
+      command: rg '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}' /var/log/app/ 2>/dev/null | head -20
+    - purpose: Search logs for potential credit cards
+      command: rg '\b[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{4}\b' /var/log/app/ 2>/dev/null | head
+        -20
+    expected_findings:
+    - Actual sensitive data in logs
+    - Pattern frequency
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Sensitive Data Inventory
+    - Vulnerable Code Locations
+    - Sanitization Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Sensitive data directly observed in log output or confirmed in code
+    medium: Logging patterns suggest potential exposure without confirmation
+    low: Theoretical risk based on code patterns
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-logging
+      priority: required
+    - source_id: gdpr-pii
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires thorough code analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: sens-log-001
+  item: No credentials logged in plaintext
+  level: CRITICAL
+  verification: rg -i 'log.*(password|secret|api.?key).*[=:]' --type-add 'code:*.{js,ts,py,go,java}' -t
+    code && echo 'FAIL' || echo 'PASS'
+  expected: PASS
+- id: sens-log-002
+  item: PII is masked or excluded from logs
+  level: CRITICAL
+  verification: manual
+  verification_notes: Review logging of user data for proper masking
+  expected: Confirmed by reviewer
+- id: sens-log-003
+  item: Request/response logging filters sensitive headers
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify Authorization and Cookie headers are not logged
+  expected: Confirmed by reviewer
+- id: sens-log-004
+  item: Centralized log sanitization mechanism exists
+  level: WARNING
+  verification: rg -l '(mask|redact|sanitize).*(log|formatter)' . && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: GDPR
+    controls:
+    - Article 5(1)(f)
+    - Article 32
+  - framework: PCI-DSS
+    controls:
+    - '3.4'
+    - '10.5'
+  - framework: HIPAA
+    controls:
+    - 164.312(a)(1)
+    - 164.312(e)(1)
+  - framework: SOC2
+    controls:
+    - CC6.1
+relationships:
+  commonly_combined:
+  - observability-instrumentation.logging.log-retention
+  - observability-instrumentation.logging.structured-logging

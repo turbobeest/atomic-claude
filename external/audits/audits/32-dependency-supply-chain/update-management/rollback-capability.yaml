@@ -1,0 +1,235 @@
+audit:
+  id: dependency-supply-chain.update-management.rollback-capability
+  name: Rollback Capability Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: dependency-supply-chain
+  category_number: 32
+  subcategory: update-management
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: dependencies
+  default_profiles:
+  - full
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates the ability to quickly roll back dependency updates
+    if issues are discovered post-deployment. It assesses lock file management,
+    deployment procedures, and recovery mechanisms for dependency-related
+    problems.
+  why_it_matters: |
+    Even with thorough testing, some issues only appear in production.
+    The ability to quickly rollback to known-good dependency versions
+    minimizes impact from problematic updates. Without rollback capability,
+    teams may face extended outages while debugging.
+  when_to_run:
+  - When establishing deployment procedures
+  - Before major dependency updates
+  - After experiencing rollback difficulties
+  - During disaster recovery planning
+prerequisites:
+  required_artifacts:
+  - type: deployment_config
+    description: Deployment configuration and procedures
+  - type: lock_file
+    description: Dependency lock files
+  - type: version_control
+    description: Git history with lock file versions
+  access_requirements:
+  - Access to deployment systems
+  - Access to version control history
+discovery:
+  file_patterns:
+  - glob: '**/package-lock.json'
+    purpose: Find npm lock files
+  - glob: '**/yarn.lock'
+    purpose: Find yarn lock files
+  - glob: '**/poetry.lock'
+    purpose: Find Poetry lock files
+  - glob: '**/Cargo.lock'
+    purpose: Find Cargo lock files
+  - glob: '**/go.sum'
+    purpose: Find Go sum files
+knowledge_sources:
+  guides:
+  - id: deployment-rollback
+    name: Deployment Rollback Strategies
+    url: https://docs.github.com/en/actions/deployment/managing-your-deployments/viewing-deployment-history
+  standards:
+  - id: change-management
+    name: IT Change Management
+    relevance: Rollback procedures
+tooling:
+  analysis_tools:
+  - tool: git
+    purpose: Version control for lock files
+  - tool: npm ci
+    purpose: Clean install from lock file
+  - tool: docker
+    purpose: Container-based rollback
+signals:
+  critical:
+  - id: DEP-ROLL-CRIT-001
+    signal: No ability to rollback dependency changes
+    evidence_indicators:
+    - Lock files not in version control
+    - No previous deployment artifacts
+    explanation: |
+      Without rollback capability, dependency issues can cause extended
+      outages. The only recovery option becomes forward-fixing, which
+      may take hours or days under pressure.
+    remediation: Implement lock file versioning and deployment artifact retention
+  high:
+  - id: DEP-ROLL-HIGH-001
+    signal: Lock file changes not tracked separately
+    evidence_indicators:
+    - Lock file updates bundled with code changes
+    - Cannot isolate dependency changes
+    remediation: Track dependency updates in dedicated commits/PRs
+  - id: DEP-ROLL-HIGH-002
+    signal: No tested rollback procedure
+    evidence_indicators:
+    - Rollback never practiced
+    - No documented rollback steps
+    remediation: Document and test rollback procedures
+  medium:
+  - id: DEP-ROLL-MED-001
+    signal: Rollback requires significant manual steps
+    evidence_indicators:
+    - Manual dependency restoration
+    - Complex rollback process
+    remediation: Automate rollback process
+  - id: DEP-ROLL-MED-002
+    signal: Deployment artifacts not retained long enough
+    evidence_indicators:
+    - Only latest deployment available
+    - Short artifact retention period
+    remediation: Extend deployment artifact retention
+  low:
+  - id: DEP-ROLL-LOW-001
+    signal: Rollback time not measured
+    evidence_indicators:
+    - No RTO for dependency issues
+    - Rollback duration unknown
+    remediation: Measure and document rollback time
+  positive:
+  - id: DEP-ROLL-POS-001
+    signal: Quick and reliable dependency rollback capability
+  - id: DEP-ROLL-POS-002
+    signal: Rollback procedure tested regularly
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Verify Lock Files in Version Control
+    description: Confirm lock files are tracked
+    commands:
+    - purpose: Check if lock files are tracked
+      command: git ls-files | grep -E '(package-lock|yarn\.lock|poetry\.lock|Cargo\.lock|go\.sum)' ||
+        echo 'No lock files tracked'
+  - id: '2'
+    name: Check Lock File Not Ignored
+    description: Verify lock files aren't in gitignore
+    commands:
+    - purpose: Check gitignore for lock files
+      command: 'git check-ignore package-lock.json yarn.lock poetry.lock Cargo.lock go.sum 2>/dev/null
+        && echo ''WARNING: Lock files ignored!'' || echo ''Lock files not ignored'''
+  - id: '3'
+    name: Verify Ability to Checkout Previous Versions
+    description: Test accessing historical lock files
+    commands:
+    - purpose: Find recent lock file changes
+      command: git log --oneline -10 -- '*lock*' '*-lock.json' 'go.sum' 2>/dev/null || echo 'Could not
+        find lock file history'
+  - id: '4'
+    name: Check Clean Install Capability
+    description: Verify npm ci or equivalent works
+    commands:
+    - purpose: Test clean install
+      command: npm ci --dry-run 2>/dev/null || echo 'npm ci dry-run not applicable'
+  - id: '5'
+    name: Review Deployment Artifact Retention
+    description: Check how long deployments are kept
+    commands:
+    - purpose: Check deployment history
+      command: gh release list --limit 10 2>/dev/null || echo 'Could not check releases'
+  - id: '6'
+    name: Document Rollback Procedure
+    description: Create or verify rollback documentation
+    commands:
+    - purpose: Generate rollback template
+      command: |-
+        echo 'Dependency Rollback Procedure:
+
+        1. Identify problematic deployment commit
+        2. Find previous known-good lock file version
+           git log --oneline -10 -- package-lock.json
+        3. Checkout previous lock file
+           git checkout <commit>^ -- package-lock.json
+        4. Run clean install
+           npm ci
+        5. Deploy rollback
+        6. Verify functionality'
+output:
+  deliverables:
+  - type: rollback_assessment
+    format: structured
+    description: Evaluation of rollback capabilities
+  - type: rollback_procedure
+    format: document
+    description: Documented rollback steps
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Current Rollback Capability
+    - Lock File Management
+    - Artifact Retention
+    - Recommendations
+closeout_checklist:
+- id: dep-roll-001
+  item: Lock files in version control
+  level: CRITICAL
+  verification: git ls-files shows lock files
+- id: dep-roll-002
+  item: Lock files not ignored
+  level: CRITICAL
+  verification: git check-ignore returns empty
+- id: dep-roll-003
+  item: Rollback procedure documented
+  level: REQUIRED
+  verification: Documentation exists
+- id: dep-roll-004
+  item: Rollback tested
+  level: RECOMMENDED
+  verification: Successful rollback drill completed
+governance:
+  applicable_to:
+    archetypes:
+    - all-software-projects
+  compliance_mappings:
+  - framework: SOC 2
+    control: CC8.1
+    description: Change reversal capabilities
+  - framework: ISO 27001
+    control: A.12.1.2
+    description: Change management
+relationships:
+  commonly_combined:
+  - deployment-release.rollback-strategy
+  depends_on:
+  - dependency-supply-chain.dependency-inventory.version-pinning
+  feeds_into:
+  - operations.incident-response

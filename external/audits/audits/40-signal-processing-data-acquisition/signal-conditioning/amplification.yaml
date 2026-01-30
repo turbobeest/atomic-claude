@@ -1,0 +1,246 @@
+audit:
+  id: signal-processing-data-acquisition.signal-conditioning.amplification
+  name: Amplification Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: signal-conditioning
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: hardware-software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates signal amplification in the acquisition path
+    to ensure proper gain matching, noise performance, and dynamic range.
+    It examines:
+    - Gain selection and configuration
+    - Noise contribution and signal-to-noise ratio
+    - Input and output dynamic range
+    - Gain accuracy and stability
+    - Clipping and headroom management
+    - Programmable gain amplifier configuration
+  why_it_matters: |
+    Amplification determines signal quality at the ADC:
+    - Too little gain: Signal lost in ADC quantization noise
+    - Too much gain: Signal clips, losing information
+    - Amplifier noise adds to system noise floor
+    - Gain accuracy affects measurement accuracy
+    - Temperature stability affects repeatability
+
+    Proper amplification matches signal to ADC input range while
+    maintaining adequate SNR and headroom.
+  when_to_run:
+  - Signal conditioning design
+  - Gain optimization
+  - Noise performance characterization
+  - Dynamic range verification
+prerequisites:
+  required_artifacts:
+  - type: schematic
+    description: Amplifier circuit design
+  - type: source_code
+    description: Gain control code if programmable
+  - type: signal_specification
+    description: Expected signal levels
+  access_requirements:
+  - Access to amplifier specifications
+  - Signal level documentation
+  - Gain configuration code
+discovery:
+  code_patterns:
+  - pattern: (gain|amplif|pga|vga)_(set|config|select)
+    type: regex
+    scope: source
+    purpose: Detect gain configuration
+  - pattern: (GAIN|AMP|PGA).*=.*\d+
+    type: regex
+    scope: source
+    purpose: Detect gain values
+  file_patterns:
+  - glob: '**/gain*.{c,h,cpp,py}'
+    purpose: Gain control files
+  - glob: '**/amplifier*.{c,h,cpp}'
+    purpose: Amplifier configuration
+  - glob: '**/pga*.{c,h,cpp}'
+    purpose: PGA driver files
+knowledge_sources:
+  guides:
+  - id: ti-pga-selection
+    name: Texas Instruments PGA Selection Guide
+    url: https://www.ti.com/lit/an/sboa092/sboa092.pdf
+    offline_cache: true
+  - id: analog-amp-noise
+    name: Analog Devices Amplifier Noise Guide
+    url: https://www.analog.com/media/en/training-seminars/tutorials/MT-047.pdf
+    offline_cache: true
+signals:
+  critical:
+  - id: AMP-CRIT-001
+    signal: Signal clipping due to insufficient headroom
+    evidence_indicators:
+    - Output saturates at supply rails
+    - Waveform peaks clipped
+    - Harmonic distortion from clipping
+    explanation: |
+      Clipping irreversibly distorts the signal. Once clipped,
+      the original signal cannot be recovered. Headroom must
+      accommodate signal peaks plus margin.
+    remediation: |
+      - Reduce gain to provide headroom
+      - Increase supply voltage if possible
+      - Implement automatic gain control
+      - Add peak detection and gain reduction
+    cwe: CWE-682
+  - id: AMP-CRIT-002
+    signal: Signal lost in noise floor
+    evidence_indicators:
+    - SNR < required specification
+    - Amplifier noise dominates signal
+    - Gain too low for signal level
+    explanation: |
+      Insufficient amplification leaves signal near noise floor,
+      degrading SNR. The first amplifier stage often dominates
+      system noise, making its selection critical.
+    remediation: |
+      - Increase gain if headroom allows
+      - Use lower-noise amplifier
+      - Optimize first stage gain for noise
+      - Consider preamplification
+    cwe: CWE-682
+  high:
+  - id: AMP-HIGH-001
+    signal: Gain accuracy insufficient for measurement
+    evidence_indicators:
+    - Gain error exceeds accuracy budget
+    - No gain calibration implemented
+    - Temperature drift affects gain
+    explanation: |
+      Gain error directly affects measurement accuracy. A 1%
+      gain error causes 1% measurement error. Temperature drift
+      can add significant error over operating range.
+    remediation: |
+      - Implement gain calibration
+      - Use precision resistors for gain setting
+      - Add temperature compensation
+      - Document gain in error budget
+  medium:
+  - id: AMP-MED-001
+    signal: Gain switching causes transients
+    evidence_indicators:
+    - Glitches during gain changes
+    - No settling time after gain change
+    - Data corruption during transitions
+    explanation: |
+      Programmable gain amplifiers may produce transients during
+      switching. Without settling time, measurements during
+      transitions are invalid.
+    remediation: |
+      - Allow settling time after gain changes
+      - Blank data during transitions
+      - Use break-before-make switching
+      - Document settling time requirements
+  low:
+  - id: AMP-LOW-001
+    signal: Gain selection not documented
+    evidence_indicators:
+    - Gain values not justified
+    - Signal levels not linked to gain
+    - Noise analysis not recorded
+    explanation: |
+      Undocumented gain selection makes verification difficult.
+      The relationship between signal levels, noise, and gain
+      should be clear.
+    remediation: |
+      - Document gain selection rationale
+      - Record signal level expectations
+      - Include noise analysis
+      - Specify gain in system documentation
+  positive:
+  - id: AMP-POS-001
+    signal: Well-designed amplification with margin
+    evidence_indicators:
+    - Gain matches signal to ADC range
+    - Adequate headroom for peaks
+    - Noise contribution acceptable
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: analog-engineer
+  steps:
+  - id: '1'
+    name: Gain Configuration Review
+    description: |
+      Review gain settings and configuration.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find gain configuration
+      command: |
+        grep -rniE "(gain|amplif|pga)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -30
+    expected_findings:
+    - Gain values
+    - Configuration method
+    - Signal level context
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Gain Analysis
+    - Noise Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 3
+    signal-processing:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: amp-001
+  item: Gain provides adequate headroom
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify no clipping with maximum expected signal
+  expected: Confirmed by reviewer
+- id: amp-002
+  item: SNR meets requirements
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify SNR with minimum expected signal
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - embedded-systems
+    - scientific-instruments
+    - audio-systems
+relationships:
+  commonly_combined:
+  - signal-processing.signal-conditioning.noise-reduction
+  - signal-processing.signal-conditioning.dynamic-range
+  - signal-processing.adc-dac.adc-resolution-adequacy
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

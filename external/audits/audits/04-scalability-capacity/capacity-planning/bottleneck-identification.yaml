@@ -1,0 +1,295 @@
+# ============================================================
+# AUDIT FILE: Bottleneck Identification Audit
+# ============================================================
+
+audit:
+  id: "scalability-capacity.capacity-planning.bottleneck-identification"
+  name: "Bottleneck Identification Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "capacity-planning"
+
+  tier: "expert"
+  estimated_duration: "5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "metrics"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Systematically identifies current and potential bottlenecks across
+    the system that limit scalability and performance. Analyzes resource
+    utilization, queue depths, contention points, and throughput limits
+    to find components that would fail first under increased load.
+
+  why_it_matters: |
+    Bottlenecks determine system-wide capacity - the system can only
+    scale as far as its weakest link. Identifying bottlenecks before
+    they become critical enables proactive remediation and informed
+    architecture decisions. Unidentified bottlenecks cause unexpected
+    failures during growth or traffic spikes.
+
+  when_to_run:
+    - "During performance troubleshooting"
+    - "Before scaling initiatives"
+    - "When experiencing diminishing returns from scaling"
+    - "As part of capacity planning reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "architecture"
+      description: "System architecture documentation"
+    - type: "metrics"
+      description: "Resource utilization and performance metrics"
+    - type: "traces"
+      description: "Distributed traces showing request flows"
+
+  access_requirements:
+    - "Monitoring system access"
+    - "Distributed tracing access"
+    - "Database performance metrics"
+    - "Queue metrics access"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus"
+      query: "topk(5, avg(rate(http_request_duration_seconds_sum[5m])) by (service) / avg(rate(http_request_duration_seconds_count[5m])) by (service))"
+      purpose: "Identify slowest services"
+    - system: "Prometheus"
+      query: "topk(5, avg(rate(queue_depth[5m])))"
+      purpose: "Find backed-up queues"
+    - system: "Database"
+      query: "Lock contention metrics"
+      purpose: "Identify database bottlenecks"
+
+  file_patterns:
+    - glob: "**/connection-pool*.yaml"
+      purpose: "Connection pool configurations"
+    - glob: "**/rate-limit*.yaml"
+      purpose: "Rate limiting configurations"
+
+knowledge_sources:
+  guides:
+    - id: "performance-bottlenecks"
+      name: "Identifying Performance Bottlenecks"
+      url: "https://docs.microsoft.com/en-us/azure/architecture/performance/bottleneck-analysis"
+      offline_cache: true
+    - id: "database-bottlenecks"
+      name: "Database Performance Bottlenecks"
+      url: "https://use-the-index-luke.com/"
+      offline_cache: true
+
+  papers:
+    - id: "universal-scalability"
+      title: "Universal Scalability Law"
+      url: "http://www.perfdynamics.com/Manifesto/USLscalability.html"
+
+tooling:
+  infrastructure_tools:
+    - tool: "jaeger"
+      purpose: "Trace analysis for bottleneck identification"
+      command: "jaeger-query service-graph"
+    - tool: "kubectl"
+      purpose: "Pod resource utilization"
+      command: "kubectl top pods --sort-by=cpu"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])) by (service)"
+      purpose: "P99 latency by service"
+    - system: "Database"
+      query: "SELECT * FROM pg_stat_activity WHERE wait_event IS NOT NULL"
+      purpose: "Database wait events"
+
+signals:
+  critical:
+    - id: "SCALE-BI-CRIT-001"
+      signal: "Single bottleneck limiting entire system capacity"
+      evidence_threshold: "One component at >95% utilization while others <50%"
+      explanation: |
+        A single component is constraining the entire system's throughput.
+        No amount of scaling other components will improve performance
+        until this bottleneck is addressed.
+      remediation: "Prioritize bottleneck remediation; consider architectural changes"
+
+  high:
+    - id: "SCALE-BI-HIGH-001"
+      signal: "Database contention limiting throughput"
+      explanation: "Lock contention or connection pool exhaustion"
+      remediation: "Implement read replicas; optimize queries; increase pool size"
+    - id: "SCALE-BI-HIGH-002"
+      signal: "Network bandwidth bottleneck"
+      explanation: "Network throughput limiting data transfer"
+      remediation: "Upgrade network capacity; implement compression; optimize protocols"
+
+  medium:
+    - id: "SCALE-BI-MED-001"
+      signal: "Queue depth growing under load"
+      remediation: "Increase consumer capacity; optimize processing"
+    - id: "SCALE-BI-MED-002"
+      signal: "Connection pool saturation at peak"
+      remediation: "Increase pool size; implement connection reuse"
+
+  low:
+    - id: "SCALE-BI-LOW-001"
+      signal: "Minor resource contention during peaks"
+
+  positive:
+    - id: "SCALE-BI-POS-001"
+      signal: "Even resource utilization across components"
+    - id: "SCALE-BI-POS-002"
+      signal: "Known bottlenecks with documented mitigation plans"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map System Components"
+      description: |
+        Create or verify a complete map of system components that
+        could become bottlenecks, including compute, storage, network,
+        and external dependencies.
+      duration_estimate: "45 min"
+      expected_findings:
+        - "Complete component inventory"
+        - "Dependency mapping"
+
+    - id: "2"
+      name: "Collect Utilization Metrics"
+      description: |
+        Gather resource utilization metrics for all components
+        under various load conditions.
+      duration_estimate: "60 min"
+      commands:
+        - purpose: "Get resource utilization"
+          command: "kubectl top nodes && kubectl top pods -A"
+      expected_findings:
+        - "Utilization by component"
+        - "Utilization patterns under load"
+
+    - id: "3"
+      name: "Analyze Request Flow"
+      description: |
+        Trace request flows through the system to identify where
+        time is spent and where delays occur.
+      duration_estimate: "60 min"
+      expected_findings:
+        - "Time distribution across components"
+        - "Delay hotspots"
+        - "Serialization points"
+
+    - id: "4"
+      name: "Identify Contention Points"
+      description: |
+        Find resources with contention: locks, connection pools,
+        shared queues, and other serialization points.
+      duration_estimate: "60 min"
+      expected_findings:
+        - "Contention point inventory"
+        - "Contention severity assessment"
+
+    - id: "5"
+      name: "Prioritize Bottlenecks"
+      description: |
+        Rank identified bottlenecks by impact and urgency to
+        guide remediation priorities.
+      duration_estimate: "45 min"
+      expected_findings:
+        - "Prioritized bottleneck list"
+        - "Remediation recommendations"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Bottleneck Inventory"
+        - "Impact Assessment"
+        - "Prioritized Remediation Plan"
+
+    - type: "visualization"
+      format: "diagram"
+      sections:
+        - "System Bottleneck Map"
+        - "Utilization Heatmap"
+
+  confidence_guidance:
+    high: "Load testing validation of bottleneck identification"
+    medium: "Metrics analysis without load testing"
+    low: "Architecture review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "performance-bottlenecks"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "bottleneck-identification-001"
+    item: "System components mapped"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Confirm complete component inventory"
+    expected: "Confirmed by reviewer"
+
+  - id: "bottleneck-identification-002"
+    item: "Bottlenecks identified"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify bottleneck analysis completed"
+    expected: "Confirmed by reviewer"
+
+  - id: "bottleneck-identification-003"
+    item: "Remediation priorities established"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Confirm prioritized remediation plan created"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.1", "CC7.2"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.load-distribution.hot-spot-detection"
+    - "scalability-capacity.capacity-planning.headroom-analysis"

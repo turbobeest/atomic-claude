@@ -1,0 +1,320 @@
+# ============================================================
+# AUDIT: Data Aging
+# ============================================================
+# Evaluates how data ages through different lifecycle stages
+# including tiering, aggregation, and summarization strategies.
+# ============================================================
+
+audit:
+  id: "data-state-management.data-lifecycle.data-aging"
+
+  name: "Data Aging"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "data-lifecycle"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates data aging strategies including how data transitions
+    through different lifecycle stages, aggregation of detailed data into
+    summaries, tiered storage approaches, and data quality degradation
+    management. It examines the balance between data accessibility,
+    storage costs, and performance.
+
+  why_it_matters: |
+    Data aging strategies directly impact storage costs, query performance,
+    and data utility. Without proper aging, detailed data accumulates
+    indefinitely, increasing costs and slowing queries. Premature aging
+    loses valuable detail. Well-designed aging strategies preserve data
+    value while managing costs and performance.
+
+  when_to_run:
+    - "When storage costs are increasing"
+    - "When query performance degrades on historical data"
+    - "During capacity planning"
+    - "When designing data warehouse strategies"
+
+prerequisites:
+  required_artifacts:
+    - type: "data-lifecycle-policy"
+      description: "Documentation of data aging policies"
+    - type: "storage-config"
+      description: "Storage tier and aggregation configuration"
+
+  access_requirements:
+    - "Access to data lifecycle configuration"
+    - "Access to aggregation job definitions"
+    - "Storage metrics and costs"
+
+discovery:
+  code_patterns:
+    - pattern: "aggregate|rollup|summarize|compact"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify aggregation patterns"
+    - pattern: "tier|hot|warm|cold|archive"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify tiering patterns"
+    - pattern: "partition|PARTITION BY|partition_by"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify partitioning for aging"
+
+  file_patterns:
+    - glob: "**/aggregation/**/*"
+      purpose: "Aggregation job definitions"
+    - glob: "**/rollup/**/*"
+      purpose: "Rollup job definitions"
+    - glob: "**/lifecycle/**/*"
+      purpose: "Lifecycle configuration"
+
+knowledge_sources:
+  guides:
+    - id: "timescaledb-data-lifecycle"
+      name: "TimescaleDB Data Lifecycle"
+      url: "https://docs.timescale.com/use-timescale/latest/data-retention/"
+      offline_cache: true
+
+    - id: "data-warehouse-aging"
+      name: "Data Warehouse Aging Strategies"
+      url: "https://cloud.google.com/architecture/data-lifecycle-management"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "partition-manager"
+      purpose: "Manage table partitions for aging"
+      command: "psql -c \"SELECT * FROM pg_partitions WHERE tablename = 'events'\""
+
+signals:
+  critical:
+    - id: "AGING-CRIT-001"
+      signal: "No data aging strategy for high-volume time-series data"
+      evidence_pattern: "Growing tables without partitioning, aggregation, or tiering"
+      explanation: |
+        High-volume data without aging strategy grows without bound.
+        Query performance degrades, storage costs escalate, and
+        eventually the system fails under data weight.
+      remediation: "Implement partitioning, aggregation, and tiering for time-series data"
+
+    - id: "AGING-CRIT-002"
+      signal: "Data detail lost before aggregation"
+      evidence_pattern: "Raw data deleted before summary creation completes"
+      explanation: |
+        If raw data is deleted before aggregation completes successfully,
+        the summarized data may be incomplete or corrupted. The original
+        detail is lost and cannot be reconstructed.
+      remediation: "Ensure aggregation completes and is verified before raw data deletion"
+
+  high:
+    - id: "AGING-HIGH-001"
+      signal: "Aggregation granularity too coarse for business needs"
+      evidence_pattern: "Hourly aggregates when minute-level needed for recent data"
+      explanation: |
+        Over-aggressive aggregation loses detail needed for analysis.
+        Users cannot drill down into recent data for troubleshooting
+        or detailed reporting.
+      remediation: "Implement tiered aggregation with finer granularity for recent data"
+
+    - id: "AGING-HIGH-002"
+      signal: "No partitioning on large time-series tables"
+      evidence_pattern: "Single partition tables with millions of rows by date"
+      explanation: |
+        Without partitioning, queries scan entire tables even when only
+        recent data is needed. Maintenance operations (vacuum, analyze)
+        become prohibitively slow.
+      remediation: "Implement table partitioning by time period (day, week, month)"
+
+  medium:
+    - id: "AGING-MED-001"
+      signal: "Inconsistent aggregation across similar data types"
+      evidence_pattern: "Different aging strategies for similar metrics"
+      remediation: "Standardize aggregation strategies by data category"
+
+    - id: "AGING-MED-002"
+      signal: "Manual partition management"
+      evidence_pattern: "Partitions created manually without automation"
+      remediation: "Automate partition creation and maintenance"
+
+  low:
+    - id: "AGING-LOW-001"
+      signal: "Aggregation jobs not monitored"
+
+  positive:
+    - id: "AGING-POS-001"
+      signal: "Comprehensive tiered aging with appropriate granularity"
+    - id: "AGING-POS-002"
+      signal: "Automated partition management with monitoring"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Aging Strategy Discovery"
+      description: |
+        Identify existing data aging strategies including
+        partitioning, aggregation, and tiering.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find partitioning configuration"
+          command: "grep -riE 'PARTITION BY|partition_by|partitionBy|partitioned' --include='*.sql' --include='*.prisma' --include='*.ts' --include='*.py' . 2>/dev/null | head -40"
+        - purpose: "Find aggregation jobs"
+          command: "grep -riE 'aggregate|rollup|summarize|compact' --include='*.ts' --include='*.py' --include='*.sql' --include='*.yml' . 2>/dev/null | head -40"
+        - purpose: "Find tiering configuration"
+          command: "grep -riE 'tier|hot|warm|cold|archive' --include='*.yml' --include='*.yaml' --include='*.tf' --include='*.json' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Aging strategies in use"
+        - "Partitioning approach"
+
+    - id: "2"
+      name: "Aggregation Analysis"
+      description: |
+        Evaluate aggregation granularity and timing for
+        different data types.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find aggregation schedules"
+          command: "grep -riE '@Scheduled|cron|schedule.*aggregate|aggregate.*schedule' --include='*.ts' --include='*.py' --include='*.java' --include='*.yml' . 2>/dev/null | head -30"
+        - purpose: "Find aggregation granularity"
+          command: "grep -riE 'hourly|daily|weekly|monthly|minute|hour|day' --include='*.ts' --include='*.py' -path '*aggregate*' . 2>/dev/null | head -30"
+        - purpose: "Find summary tables"
+          command: "grep -riE '_summary|_hourly|_daily|_aggregated|Summary' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Aggregation granularity"
+        - "Aggregation timing"
+
+    - id: "3"
+      name: "Partition Management Analysis"
+      description: |
+        Evaluate how partitions are created, maintained,
+        and dropped.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find partition creation"
+          command: "grep -riE 'CREATE.*PARTITION|add.*partition|createPartition' --include='*.sql' --include='*.ts' --include='*.py' . 2>/dev/null | head -30"
+        - purpose: "Find partition dropping"
+          command: "grep -riE 'DROP.*PARTITION|remove.*partition|dropPartition' --include='*.sql' --include='*.ts' --include='*.py' . 2>/dev/null | head -20"
+        - purpose: "Find partition automation"
+          command: "grep -riE 'partition.*auto|auto.*partition|pg_partman|partition.*manager' --include='*.sql' --include='*.ts' --include='*.py' --include='*.yml' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Partition lifecycle management"
+        - "Automation status"
+
+    - id: "4"
+      name: "Data Volume Analysis"
+      description: |
+        Identify high-volume tables that need aging strategies.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find event/log tables"
+          command: "grep -riE 'CREATE TABLE.*(event|log|metric|audit|activity)' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -30"
+        - purpose: "Find time-series indicators"
+          command: "grep -riE 'timestamp|created_at|occurred_at|event_time' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -40"
+
+      expected_findings:
+        - "High-volume tables"
+        - "Aging strategy coverage"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Aging Strategy Assessment"
+        - "Aggregation Analysis"
+        - "Partition Management"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear evidence of missing aging strategy for high-volume data"
+    medium: "Aging exists but granularity or automation uncertain"
+    low: "Strategy appears adequate but volume analysis needed"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "timescaledb-data-lifecycle"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive lifecycle analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "aging-001"
+    item: "High-volume tables have aging strategy"
+    level: "CRITICAL"
+    verification: "grep -riE 'PARTITION|aggregate|rollup' --include='*.sql' --include='*.ts' . 2>/dev/null | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "aging-002"
+    item: "Aggregation granularity appropriate for business needs"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify aggregation granularity meets business requirements"
+    expected: "Confirmed by reviewer"
+
+  - id: "aging-003"
+    item: "Partition management automated"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify partition creation/dropping is automated"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Data Governance"
+      controls: ["DG-005", "DG-006"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.data-lifecycle.archival-strategy"
+    - "data-state-management.data-lifecycle.data-retention-policy"

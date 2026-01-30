@@ -1,0 +1,375 @@
+# ============================================================
+# AUDIT FILE: Supply Chain Security
+# ============================================================
+# Evaluates software supply chain security practices including
+# dependency management and build integrity.
+# ============================================================
+
+audit:
+  id: "devops-ci-cd.pipeline-security.supply-chain-security"
+  name: "Supply Chain Security Assessment"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "pipeline-security"
+
+  tier: "expert"
+  estimated_duration: "4 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "security"
+
+  default_profiles:
+    - "full"
+    - "security"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines software supply chain security including dependency
+    management, build provenance, third-party action security, and SBOM
+    generation. It evaluates protection against supply chain attacks
+    like dependency confusion and compromised build tools.
+
+  why_it_matters: |
+    Supply chain attacks compromise trusted dependencies or build tools
+    to inject malicious code. These attacks are increasing in frequency
+    and sophistication, requiring comprehensive defense across the
+    entire build and deployment pipeline.
+
+  when_to_run:
+    - "When establishing security baselines"
+    - "After supply chain security incidents"
+    - "During SLSA compliance reviews"
+    - "Quarterly security assessments"
+
+prerequisites:
+  required_artifacts:
+    - type: "dependency_manifests"
+      description: "Package lock files and dependency specifications"
+    - type: "ci_cd_config"
+      description: "CI/CD pipeline configurations"
+
+  access_requirements:
+    - "Read access to dependency configurations"
+    - "Access to build pipeline configurations"
+    - "Permission to review build provenance"
+
+discovery:
+  file_patterns:
+    - glob: "**/package-lock.json"
+      purpose: "NPM dependency locks"
+    - glob: "**/yarn.lock"
+      purpose: "Yarn dependency locks"
+    - glob: "**/Pipfile.lock"
+      purpose: "Python dependency locks"
+    - glob: "**/go.sum"
+      purpose: "Go dependency checksums"
+    - glob: "**/Cargo.lock"
+      purpose: "Rust dependency locks"
+    - glob: "**/.github/workflows/*.yaml"
+      purpose: "GitHub Actions workflows"
+
+  code_patterns:
+    - pattern: "uses:\\s*[a-z]+/[a-z]+@"
+      type: "regex"
+      scope: "config"
+      purpose: "GitHub Actions references"
+    - pattern: "npm install|pip install|go get"
+      type: "regex"
+      scope: "config"
+      purpose: "Package installation commands"
+    - pattern: "@v[0-9]|@master|@main|@latest"
+      type: "regex"
+      scope: "config"
+      purpose: "Unpinned dependency versions"
+
+knowledge_sources:
+  specifications:
+    - id: "slsa"
+      name: "SLSA Framework"
+      url: "https://slsa.dev/"
+      offline_cache: true
+      priority: "required"
+    - id: "in-toto"
+      name: "in-toto Supply Chain Security"
+      url: "https://in-toto.io/"
+      offline_cache: true
+      priority: "recommended"
+    - id: "nsa-cicd-security"
+      name: "NSA/CISA: Defending CI/CD Environments"
+      url: "https://media.defense.gov/2023/Jun/28/2003249466/-1/-1/0/CSI_DEFENDING_CI_CD_ENVIRONMENTS.PDF"
+      offline_cache: true
+      priority: "required"
+    - id: "nsa-supply-chain"
+      name: "NSA: Securing the Software Supply Chain"
+      url: "https://media.defense.gov/2022/Sep/01/2003068942/-1/-1/0/ESF_SECURING_THE_SOFTWARE_SUPPLY_CHAIN_DEVELOPERS.PDF"
+      offline_cache: true
+      priority: "required"
+    - id: "nist-800-218"
+      name: "NIST SP 800-218: SSDF"
+      url: "https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-218.pdf"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "sigstore"
+      name: "Sigstore Supply Chain Security"
+      url: "https://www.sigstore.dev/"
+      offline_cache: true
+    - id: "scorecard"
+      name: "OpenSSF Scorecard"
+      url: "https://securityscorecards.dev/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "scorecard"
+      purpose: "Assess repository security posture"
+      offline_capable: false
+    - tool: "syft"
+      purpose: "Generate SBOM"
+      offline_capable: true
+    - tool: "grype"
+      purpose: "Scan dependencies for vulnerabilities"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "npm"
+      purpose: "Audit Node.js dependencies"
+      command: "npm audit --json"
+    - tool: "pip"
+      purpose: "Check Python dependencies"
+      command: "pip-audit"
+
+  scripts:
+    - id: "supply-chain-check"
+      language: "bash"
+      purpose: "Check for supply chain risks"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Check for unpinned actions
+        echo "=== Unpinned GitHub Actions ==="
+        grep -rE 'uses:.*@(master|main|v[0-9]+)$' \
+          --include='*.yaml' .github/workflows/ 2>/dev/null | head -20
+
+signals:
+  critical:
+    - id: "SUPCHN-CRIT-001"
+      signal: "GitHub Actions use unpinned versions (master/main/v1)"
+      evidence_pattern: "@master|@main|@v[0-9]$"
+      explanation: |
+        Unpinned actions can be silently updated by maintainers or
+        attackers who compromise the repository, injecting malicious
+        code into your build.
+      remediation: "Pin all actions to full SHA commit hashes; use Dependabot for updates"
+
+    - id: "SUPCHN-CRIT-002"
+      signal: "No dependency lock files"
+      evidence_indicators:
+        - "package.json without package-lock.json"
+        - "requirements.txt without hash pinning"
+      explanation: |
+        Without lock files, builds are not reproducible and dependency
+        versions can change between builds, enabling attacks.
+      remediation: "Generate and commit lock files for all package managers"
+
+  high:
+    - id: "SUPCHN-HIGH-001"
+      signal: "Dependencies from untrusted or typosquat sources"
+      evidence_pattern: "registry|install.*http"
+      explanation: |
+        Untrusted registries may serve malicious packages; typosquat
+        attacks target common misspellings.
+      remediation: "Use trusted registries only; enable dependency confusion protection"
+
+    - id: "SUPCHN-HIGH-002"
+      signal: "No SBOM generation"
+      evidence_indicators:
+        - "No syft, cyclonedx, or SBOM tool in pipeline"
+        - "No software bill of materials produced"
+      explanation: |
+        Without SBOM, vulnerability tracking and incident response
+        for supply chain issues is severely hampered.
+      remediation: "Generate and retain SBOM for all releases"
+
+  medium:
+    - id: "SUPCHN-MED-001"
+      signal: "No dependency vulnerability scanning"
+      evidence_pattern: "audit|vulnerability|snyk|dependabot"
+      remediation: "Implement automated dependency vulnerability scanning"
+
+    - id: "SUPCHN-MED-002"
+      signal: "Build provenance not generated or verified"
+      evidence_pattern: "provenance|attestation|slsa"
+      remediation: "Generate SLSA provenance attestations for builds"
+
+  low:
+    - id: "SUPCHN-LOW-001"
+      signal: "Dependency update policy not defined"
+
+  positive:
+    - id: "SUPCHN-POS-001"
+      signal: "All actions pinned to SHA with automated updates"
+    - id: "SUPCHN-POS-002"
+      signal: "SLSA Level 3 provenance with verified build"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Assess action pinning"
+      description: |
+        Review GitHub Actions and other third-party tool references
+        for proper version pinning.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find action references"
+          command: "grep -rE 'uses:' --include='*.yaml' .github/workflows/ 2>/dev/null | head -30"
+        - purpose: "Check for unpinned actions"
+          command: "grep -rE 'uses:.*@(master|main|v[0-9]+)$' --include='*.yaml' .github/workflows/ 2>/dev/null | head -15"
+      expected_findings:
+        - "Action pinning assessment"
+        - "Unpinned action identification"
+
+    - id: "2"
+      name: "Review dependency management"
+      description: |
+        Examine dependency specifications and lock files for
+        all package managers in use.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find lock files"
+          command: "find . -name 'package-lock.json' -o -name 'yarn.lock' -o -name '*.lock' -o -name 'go.sum' 2>/dev/null | head -15"
+        - purpose: "Check for dependency manifests without locks"
+          command: "find . -name 'package.json' -exec dirname {} \\; 2>/dev/null | while read d; do [ -f \"$d/package-lock.json\" ] || echo \"Missing lock: $d\"; done | head -10"
+      expected_findings:
+        - "Lock file coverage"
+        - "Missing lock identification"
+
+    - id: "3"
+      name: "Evaluate registry security"
+      description: |
+        Review registry configurations and verify trusted sources
+        are used exclusively.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find registry configurations"
+          command: "find . -name '.npmrc' -o -name '.pypirc' -o -name 'pip.conf' 2>/dev/null | head -10"
+      expected_findings:
+        - "Registry configuration assessment"
+        - "Untrusted source identification"
+
+    - id: "4"
+      name: "Review SBOM generation"
+      description: |
+        Check if Software Bill of Materials is generated and
+        retained for releases.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check for SBOM tooling"
+          command: "grep -ri 'sbom\\|syft\\|cyclonedx' --include='*.yaml' . 2>/dev/null | head -10"
+      expected_findings:
+        - "SBOM generation status"
+        - "Retention practices"
+
+    - id: "5"
+      name: "Assess build provenance"
+      description: |
+        Evaluate SLSA compliance and build provenance generation.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check for provenance generation"
+          command: "grep -ri 'provenance\\|slsa\\|attestation' --include='*.yaml' . 2>/dev/null | head -15"
+      expected_findings:
+        - "SLSA compliance level"
+        - "Provenance generation status"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Supply Chain Analysis"
+        - "SLSA Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Comprehensive tool analysis with SLSA verification"
+    medium: "Configuration analysis with sample verification"
+    low: "Documentation review only"
+
+offline:
+  capability: "partial"
+  cache_manifest:
+    knowledge:
+      - source_id: "slsa"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive security review"
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "supchn-001"
+    item: "All GitHub Actions pinned to SHA"
+    level: "CRITICAL"
+    verification: "grep -rE 'uses:.*@[a-f0-9]{40}' --include='*.yaml' .github/workflows/ 2>/dev/null | head -1 && echo 'PASS' || echo 'FAIL'"
+    expected: "PASS"
+
+  - id: "supchn-002"
+    item: "Lock files present for all package managers"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify lock files exist for all dependency specifications"
+    expected: "Confirmed by reviewer"
+
+  - id: "supchn-003"
+    item: "SBOM generated for releases"
+    level: "BLOCKING"
+    verification: "grep -ri 'sbom\\|syft' --include='*.yaml' . 2>/dev/null && echo 'PASS' || echo 'FAIL'"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SLSA"
+      controls: ["Source L1", "Build L1", "Build L2", "Build L3"]
+    - framework: "SOC2"
+      controls: ["CC6.1", "CC8.1"]
+    - framework: "NIST-CSF"
+      controls: ["PR.DS-6", "PR.IP-2"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.artifact-management.artifact-signing"
+    - "devops-ci-cd.artifact-management.artifact-vulnerability-scanning"

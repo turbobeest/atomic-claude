@@ -1,0 +1,326 @@
+# ============================================================
+# AUDIT: Backward Compatible Schema Change
+# ============================================================
+# Evaluates whether schema changes maintain backward compatibility
+# with existing applications during rolling deployments.
+# ============================================================
+
+audit:
+  id: "data-state-management.schema-evolution.backward-compatible-schema-change"
+
+  name: "Backward Compatible Schema Change"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "schema-evolution"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates whether database schema changes maintain backward
+    compatibility with existing application versions. It examines changes
+    for compatibility with rolling deployments where old and new application
+    versions coexist during deployment. The audit identifies breaking changes
+    that require coordinated deployment strategies.
+
+  why_it_matters: |
+    In modern deployment practices, application instances running different
+    versions coexist during rolling updates. Schema changes that break
+    backward compatibility can cause errors for old application versions,
+    leading to failed requests, data corruption, or deployment rollback
+    failures. Backward compatible changes enable safe, gradual rollouts.
+
+  when_to_run:
+    - "Before deploying schema changes"
+    - "During migration planning"
+    - "When designing new features"
+    - "After compatibility-related incidents"
+
+prerequisites:
+  required_artifacts:
+    - type: "migration-files"
+      description: "Proposed schema changes"
+    - type: "application-code"
+      description: "Application code accessing the database"
+
+  access_requirements:
+    - "Read access to migration files"
+    - "Access to application database queries"
+    - "Deployment process documentation"
+
+discovery:
+  code_patterns:
+    - pattern: "DROP COLUMN|RENAME COLUMN|ALTER.*TYPE"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify potentially breaking changes"
+    - pattern: "ADD COLUMN.*NOT NULL(?!.*DEFAULT)"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify non-nullable columns without defaults"
+    - pattern: "RENAME TABLE|ALTER TABLE.*RENAME"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify table/column renames"
+
+  file_patterns:
+    - glob: "**/migrations/**/*.sql"
+      purpose: "SQL migration files"
+    - glob: "**/migrations/**/*.ts"
+      purpose: "TypeScript migration files"
+    - glob: "**/schema/**/*.prisma"
+      purpose: "Prisma schema changes"
+
+knowledge_sources:
+  guides:
+    - id: "expand-contract-pattern"
+      name: "Expand and Contract Database Refactoring Pattern"
+      url: "https://martinfowler.com/bliki/ParallelChange.html"
+      offline_cache: true
+
+    - id: "zero-downtime-deployments"
+      name: "Zero Downtime Database Deployments"
+      url: "https://spring.io/blog/2016/05/31/zero-downtime-deployment-with-a-database"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "schema-diff"
+      purpose: "Compare schema versions for breaking changes"
+      offline_capable: true
+
+  scripts:
+    - id: "detect-breaking-changes"
+      language: "bash"
+      purpose: "Find schema changes that break backward compatibility"
+      source: "inline"
+      code: |
+        grep -riE '(DROP COLUMN|RENAME|ALTER.*TYPE|NOT NULL(?!.*DEFAULT))' \
+          --include='*.sql' migrations/ 2>/dev/null
+
+signals:
+  critical:
+    - id: "BKCOMPAT-CRIT-001"
+      signal: "DROP COLUMN while old application version still running"
+      evidence_pattern: "ALTER TABLE DROP COLUMN in migration without expand-contract"
+      explanation: |
+        Dropping a column while old application versions still reference
+        it causes immediate query failures. The old version will try to
+        SELECT or INSERT the dropped column and fail.
+      remediation: "Use expand-contract pattern: stop writing, deploy new code, then drop column"
+
+    - id: "BKCOMPAT-CRIT-002"
+      signal: "Column rename without alias or backward compatibility layer"
+      evidence_pattern: "ALTER TABLE RENAME COLUMN without view or trigger"
+      explanation: |
+        Renaming a column immediately breaks all queries using the old
+        name. Old application versions will fail until fully deployed.
+      remediation: "Create view with old name, or add new column and migrate data gradually"
+
+  high:
+    - id: "BKCOMPAT-HIGH-001"
+      signal: "Adding NOT NULL column without default value"
+      evidence_pattern: "ADD COLUMN.*NOT NULL without DEFAULT clause"
+      explanation: |
+        Adding a NOT NULL column without a default breaks INSERT statements
+        from old application versions that don't know about the new column.
+        Inserts will fail with NOT NULL constraint violations.
+      remediation: "Add column as nullable first, or include DEFAULT value"
+
+    - id: "BKCOMPAT-HIGH-002"
+      signal: "Changing column type to incompatible type"
+      evidence_pattern: "ALTER COLUMN TYPE from wider to narrower type"
+      explanation: |
+        Changing column types can break applications that depend on the
+        original type. Narrowing types (VARCHAR(255) to VARCHAR(50)) can
+        cause data truncation or insert failures.
+      remediation: "Add new column with new type, migrate data, update application, then drop old column"
+
+  medium:
+    - id: "BKCOMPAT-MED-001"
+      signal: "Adding unique constraint on existing data"
+      evidence_pattern: "ADD CONSTRAINT UNIQUE on populated table"
+      remediation: "Verify data uniqueness before adding constraint; handle duplicates first"
+
+    - id: "BKCOMPAT-MED-002"
+      signal: "Changing foreign key behavior"
+      evidence_pattern: "ALTER CONSTRAINT or changing ON DELETE behavior"
+      remediation: "Document behavior change; ensure application handles new cascade behavior"
+
+  low:
+    - id: "BKCOMPAT-LOW-001"
+      signal: "Adding optional columns in large batches"
+
+  positive:
+    - id: "BKCOMPAT-POS-001"
+      signal: "Expand-contract pattern properly implemented"
+    - id: "BKCOMPAT-POS-002"
+      signal: "New columns added with appropriate defaults"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Schema Change Classification"
+      description: |
+        Classify each schema change as backward compatible,
+        potentially breaking, or definitely breaking.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find column drops"
+          command: "grep -riE 'DROP COLUMN|dropColumn' --include='*.sql' --include='*.ts' --include='*.py' -path '*/migrations/*' . 2>/dev/null | head -30"
+        - purpose: "Find column renames"
+          command: "grep -riE 'RENAME COLUMN|renameColumn|RENAME TO' --include='*.sql' --include='*.ts' --include='*.py' . 2>/dev/null | head -30"
+        - purpose: "Find type changes"
+          command: "grep -riE 'ALTER.*TYPE|MODIFY COLUMN|changeColumn' --include='*.sql' --include='*.ts' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Classification of schema changes"
+        - "Potentially breaking operations"
+
+    - id: "2"
+      name: "NOT NULL Analysis"
+      description: |
+        Identify new NOT NULL constraints that could break
+        existing application inserts.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find NOT NULL additions"
+          command: "grep -riE 'ADD COLUMN.*NOT NULL|NOT NULL(?!.*DEFAULT)' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -30"
+        - purpose: "Check for defaults on NOT NULL columns"
+          command: "grep -riE 'NOT NULL.*DEFAULT|DEFAULT.*NOT NULL' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "NOT NULL columns with/without defaults"
+        - "Potential insert failures"
+
+    - id: "3"
+      name: "Application Query Analysis"
+      description: |
+        Identify application queries that could be affected
+        by schema changes.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find SELECT statements with specific columns"
+          command: "grep -riE 'SELECT.*FROM|findMany|findOne' --include='*.ts' --include='*.py' --include='*.java' . 2>/dev/null | head -40"
+        - purpose: "Find INSERT statements"
+          command: "grep -riE 'INSERT INTO|create\\(|insert\\(' --include='*.ts' --include='*.py' --include='*.java' . 2>/dev/null | head -40"
+
+      expected_findings:
+        - "Queries affected by schema changes"
+        - "Application compatibility assessment"
+
+    - id: "4"
+      name: "Migration Strategy Review"
+      description: |
+        Evaluate whether expand-contract or other safe migration
+        patterns are being used.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find phased migration patterns"
+          command: "find . -name '*.sql' -path '*/migrations/*' -exec grep -l -E 'phase|step|part' {} \\; 2>/dev/null | head -20"
+        - purpose: "Find view-based compatibility layers"
+          command: "grep -riE 'CREATE VIEW|CREATE OR REPLACE VIEW' --include='*.sql' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Migration strategy patterns"
+        - "Compatibility layer usage"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Change Classification"
+        - "Breaking Changes"
+        - "Compatibility Analysis"
+        - "Recommended Migration Strategy"
+
+  confidence_guidance:
+    high: "Clear breaking change without compatibility mechanism"
+    medium: "Potentially breaking depending on application usage"
+    low: "Unlikely to break but should be verified"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "expand-contract-pattern"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed compatibility analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "bkcompat-001"
+    item: "All schema changes classified for backward compatibility"
+    level: "CRITICAL"
+    verification: "grep -riE 'DROP|RENAME|ALTER.*TYPE' --include='*.sql' -path '*/migrations/*' . 2>/dev/null | wc -l | xargs -I{} echo PASS"
+    expected: "PASS"
+
+  - id: "bkcompat-002"
+    item: "NOT NULL columns have appropriate defaults"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify new NOT NULL columns have defaults"
+    expected: "Confirmed by reviewer"
+
+  - id: "bkcompat-003"
+    item: "Migration strategy documented for breaking changes"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify breaking changes have migration plans"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Change Management"
+      controls: ["CM-003", "CM-004"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.schema-evolution.zero-downtime-migration"
+    - "data-state-management.schema-evolution.migration-safety"

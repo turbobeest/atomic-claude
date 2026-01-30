@@ -1,0 +1,303 @@
+audit:
+  id: observability-instrumentation.observability-operations.observability-cost
+  name: Observability Cost Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: observability-operations
+  tier: phd
+  estimated_duration: 4-6 hours  # median: 5h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Examines the cost structure and efficiency of observability infrastructure
+    including metrics storage, log ingestion, trace sampling, and data retention
+    policies. Analyzes spend across vendors, evaluates cardinality explosion risks,
+    and identifies opportunities for cost optimization without sacrificing visibility.
+  why_it_matters: |
+    Observability costs can grow exponentially with system scale, often becoming
+    one of the largest infrastructure line items. Uncontrolled cardinality, excessive
+    log verbosity, and poor retention policies lead to runaway costs. Organizations
+    frequently spend 10x more than necessary due to lack of cost governance.
+  when_to_run:
+  - During quarterly infrastructure cost reviews
+  - After significant traffic or service growth
+  - When observability bills increase by more than 20%
+  - Before contract renewals with observability vendors
+  - When adding new services or metrics sources
+prerequisites:
+  required_artifacts:
+  - type: billing_data
+    description: Access to observability vendor invoices and usage reports
+  - type: metrics_inventory
+    description: Catalog of metrics being collected across services
+  - type: retention_policies
+    description: Current data retention configuration for metrics, logs, traces
+  access_requirements:
+  - Read access to observability platform admin dashboards
+  - Billing/cost management portal access
+  - Metrics cardinality analysis tools
+  - Log volume and ingestion rate metrics
+discovery:
+  code_patterns:
+  - pattern: histogram_quantiles|summary_objectives
+    type: regex
+    scope: config
+    purpose: Identify expensive histogram configurations
+  - pattern: high_cardinality_labels|dynamic_labels
+    type: keyword
+    scope: source
+    purpose: Find sources of cardinality explosion
+  file_patterns:
+  - glob: '**/prometheus*.yml'
+    purpose: Prometheus scrape configurations and retention settings
+  - glob: '**/logging*.yaml'
+    purpose: Log shipping and retention configurations
+  - glob: '**/otel*.yaml'
+    purpose: OpenTelemetry collector configurations
+  metrics_queries:
+  - system: Prometheus
+    query: topk(10, count by (__name__)({__name__=~".+"}))
+    purpose: Identify highest cardinality metrics
+    threshold: Series count per metric should be < 10000
+  - system: Prometheus
+    query: rate(prometheus_tsdb_head_series_created_total[1h])
+    purpose: Track series churn rate
+    threshold: Churn rate indicates cardinality issues if > 1000/min
+  - system: Vendor API
+    query: GET /api/v1/usage/metrics
+    purpose: Retrieve billable metrics volume
+    threshold: Compare against baseline and budget
+knowledge_sources:
+  guides:
+  - id: grafana-cardinality
+    name: Grafana Cardinality Management Guide
+    url: https://grafana.com/docs/grafana-cloud/cost-management-and-billing/reduce-costs/cardinality-management/
+    offline_cache: true
+  - id: prometheus-storage
+    name: Prometheus Storage Sizing
+    url: https://prometheus.io/docs/prometheus/latest/storage/
+    offline_cache: true
+  learning_resources:
+  - id: observability-cost-control
+    title: Managing Observability Costs at Scale
+    type: article
+    reference: Various SRE blogs and conference talks on cost optimization
+tooling:
+  infrastructure_tools:
+  - tool: promtool
+    purpose: Analyze Prometheus configurations for expensive patterns
+    command: promtool check config prometheus.yml
+  - tool: mimirtool
+    purpose: Analyze cardinality and usage in Mimir/Cortex
+    command: mimirtool analyze prometheus --address=<mimir-url>
+  monitoring_queries:
+  - system: Prometheus
+    query: prometheus_tsdb_head_series
+    purpose: Current active series count
+  - system: Prometheus
+    query: sum(increase(prometheus_tsdb_compaction_duration_seconds_sum[1d]))
+    purpose: Compaction overhead indicating storage pressure
+  scripts:
+  - id: cardinality-analyzer
+    language: bash
+    purpose: Identify top cardinality contributors
+    source: inline
+    code: |
+      #!/bin/bash
+      # Query Prometheus for cardinality analysis
+      curl -s "${PROM_URL}/api/v1/label/__name__/values" | \
+        jq -r '.data[]' | while read metric; do
+        count=$(curl -s "${PROM_URL}/api/v1/series?match[]=${metric}" | jq '.data | length')
+        echo "${count} ${metric}"
+      done | sort -rn | head -20
+signals:
+  critical:
+  - id: OBS-COST-CRIT-001
+    signal: Uncontrolled cardinality explosion detected
+    evidence_threshold: Single metric with > 100,000 series
+    explanation: |
+      Metrics with extremely high cardinality consume disproportionate storage
+      and query resources. This often indicates unbounded label values like
+      user IDs, request IDs, or timestamps in labels.
+    remediation: Identify and remove unbounded labels; use recording rules for aggregation
+  - id: OBS-COST-CRIT-002
+    signal: Observability spend exceeding budget by > 50%
+    evidence_threshold: Monthly cost > 1.5x budgeted amount
+    explanation: |
+      Significant budget overruns indicate loss of cost control and may
+      impact other infrastructure investments or cause service cuts.
+    remediation: Implement immediate cost controls; audit high-volume sources
+  high:
+  - id: OBS-COST-HIGH-001
+    signal: No cost monitoring or alerting for observability spend
+    explanation: Without visibility into spend, costs grow unchecked
+    remediation: Implement budget alerts and usage dashboards
+  - id: OBS-COST-HIGH-002
+    signal: Retention periods not aligned with business requirements
+    explanation: Storing data longer than needed wastes resources
+    remediation: Define tiered retention policies based on data value
+  medium:
+  - id: OBS-COST-MED-001
+    signal: Log verbosity levels not optimized per environment
+    remediation: Implement environment-specific log levels; reduce debug logs in production
+  - id: OBS-COST-MED-002
+    signal: Duplicate metrics collection across tools
+    remediation: Consolidate collection; eliminate redundant instrumentation
+  low:
+  - id: OBS-COST-LOW-001
+    signal: No regular cost review cadence established
+  positive:
+  - id: OBS-COST-POS-001
+    signal: Effective cardinality governance with automated limits
+  - id: OBS-COST-POS-002
+    signal: Cost-per-service attribution enables accountability
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Gather cost and usage data
+    description: |
+      Collect billing data from all observability vendors. Compile usage
+      metrics including ingestion rates, storage consumption, and query costs.
+    duration_estimate: 45 min
+    questions:
+    - What is the total monthly observability spend?
+    - How is cost distributed across metrics, logs, and traces?
+    - What is the cost trend over the past 6 months?
+    expected_findings:
+    - Total cost breakdown by observability pillar
+    - Cost growth trajectory and drivers
+  - id: '2'
+    name: Analyze cardinality and volume
+    description: |
+      Examine metrics cardinality, log volume, and trace sampling rates.
+      Identify the top contributors to cost in each category.
+    duration_estimate: 60 min
+    commands:
+    - purpose: Get top cardinality metrics
+      command: curl -s $PROM_URL/api/v1/status/tsdb | jq '.data.seriesCountByMetricName[:20]'
+    - purpose: Check log ingestion rate
+      command: curl -s $LOKI_URL/metrics | grep loki_distributor_bytes_received_total
+    expected_findings:
+    - List of highest cardinality metrics
+    - Services with highest log volume
+  - id: '3'
+    name: Review retention and sampling policies
+    description: |
+      Audit current retention settings for all data types. Evaluate trace
+      sampling rates and their impact on cost and visibility.
+    duration_estimate: 30 min
+    questions:
+    - What are current retention periods for metrics, logs, and traces?
+    - Are retention periods aligned with compliance requirements?
+    - What is the current trace sampling rate?
+    expected_findings:
+    - Retention policy documentation and compliance gaps
+    - Sampling rate optimization opportunities
+  - id: '4'
+    name: Identify optimization opportunities
+    description: |
+      Based on analysis, identify specific cost reduction opportunities
+      without impacting observability capabilities.
+    duration_estimate: 45 min
+    expected_findings:
+    - Prioritized list of cost optimization actions
+    - Estimated savings for each optimization
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: cost_analysis_report
+    format: structured
+    sections:
+    - Current Cost Breakdown
+    - Cardinality Analysis
+    - Volume Analysis
+    - Optimization Recommendations
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Key Findings
+    - Cost Reduction Roadmap
+    - Recommendations
+  confidence_guidance:
+    high: Based on actual billing data and measurable metrics
+    medium: Estimates based on sampling or partial data
+    low: Projections based on industry benchmarks
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: grafana-cardinality
+      priority: recommended
+    - source_id: prometheus-storage
+      priority: recommended
+  offline_notes: |
+    Configuration review can be done offline. Cost data and cardinality
+    analysis require access to running systems and billing portals.
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Cost analysis requires comprehensive data gathering
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: observability-cost-001
+  item: Total observability cost documented
+  level: CRITICAL
+  verification: manual
+  verification_notes: Confirm total monthly cost and breakdown by pillar are documented
+  expected: Confirmed by reviewer
+- id: observability-cost-002
+  item: Cardinality analysis completed
+  level: BLOCKING
+  verification: manual
+  verification_notes: Top 20 cardinality contributors identified with series counts
+  expected: Confirmed by reviewer
+- id: observability-cost-003
+  item: Cost optimization recommendations provided
+  level: BLOCKING
+  verification: manual
+  verification_notes: At least 3 actionable recommendations with estimated savings
+  expected: Confirmed by reviewer
+- id: observability-cost-004
+  item: Retention policies reviewed
+  level: WARNING
+  verification: manual
+  verification_notes: Current retention periods documented for metrics, logs, and traces
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: FinOps
+    controls:
+    - Cost Allocation
+    - Budget Management
+relationships:
+  commonly_combined:
+  - observability-instrumentation.observability-operations.observability-tool-sprawl
+  - observability-instrumentation.observability-operations.data-pipeline-reliability

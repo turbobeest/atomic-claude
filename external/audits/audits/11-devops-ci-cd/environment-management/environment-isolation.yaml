@@ -1,0 +1,348 @@
+# ============================================================
+# AUDIT FILE: Environment Isolation
+# ============================================================
+# Evaluates the security and operational boundaries between
+# different environments to prevent cross-environment impacts.
+# ============================================================
+
+audit:
+  id: "devops-ci-cd.environment-management.environment-isolation"
+  name: "Environment Isolation Assessment"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "environment-management"
+
+  tier: "expert"
+  estimated_duration: "4 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "security"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines the isolation boundaries between development,
+    staging, and production environments. It evaluates network segregation,
+    access controls, data isolation, shared resource risks, and blast
+    radius containment to ensure that issues in one environment cannot
+    impact others.
+
+  why_it_matters: |
+    Inadequate environment isolation leads to production incidents caused
+    by development activities, data leakage between environments, and
+    security breaches that propagate across boundaries. Strong isolation
+    is essential for compliance, security, and operational stability.
+
+  when_to_run:
+    - "During security audits"
+    - "After cross-environment incidents"
+    - "When onboarding new team members with broad access"
+    - "Quarterly security reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "network_diagrams"
+      description: "Network topology and segmentation documentation"
+    - type: "iam_policies"
+      description: "Identity and access management configurations"
+
+  access_requirements:
+    - "Read access to network configurations"
+    - "Access to IAM policies and role definitions"
+    - "Permission to review security group rules"
+
+discovery:
+  file_patterns:
+    - glob: "**/terraform/**/*.tf"
+      purpose: "Infrastructure definitions with network configs"
+    - glob: "**/iam/**/*.yaml"
+      purpose: "IAM policy definitions"
+    - glob: "**/k8s/**/networkpolicy*.yaml"
+      purpose: "Kubernetes network policies"
+    - glob: "**/security-groups/**"
+      purpose: "Cloud security group definitions"
+
+  code_patterns:
+    - pattern: "vpc|subnet|security_group|network_policy"
+      type: "keyword"
+      scope: "config"
+      purpose: "Network isolation configurations"
+    - pattern: "assume_role|cross.*account|sts"
+      type: "keyword"
+      scope: "config"
+      purpose: "Cross-account access patterns"
+    - pattern: "shared.*database|shared.*redis|shared.*queue"
+      type: "regex"
+      scope: "config"
+      purpose: "Shared resources across environments"
+
+knowledge_sources:
+  guides:
+    - id: "aws-multi-account"
+      name: "AWS Multi-Account Strategy"
+      url: "https://docs.aws.amazon.com/whitepapers/latest/organizing-your-aws-environment/"
+      offline_cache: true
+    - id: "zero-trust"
+      name: "Zero Trust Architecture"
+      url: "https://www.nist.gov/publications/zero-trust-architecture"
+      offline_cache: true
+
+  specifications:
+    - id: "nist-800-53"
+      name: "NIST SP 800-53 Security Controls"
+      url: "https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final"
+      offline_cache: true
+      priority: "required"
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws"
+      purpose: "Audit VPC and security group configurations"
+      command: "aws ec2 describe-security-groups --output json"
+    - tool: "kubectl"
+      purpose: "Review Kubernetes network policies"
+      command: "kubectl get networkpolicies -A -o yaml"
+    - tool: "gcloud"
+      purpose: "Audit GCP firewall rules"
+      command: "gcloud compute firewall-rules list --format=json"
+
+  scripts:
+    - id: "isolation-check"
+      language: "bash"
+      purpose: "Check for cross-environment connectivity"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Check for security groups allowing cross-env traffic
+        aws ec2 describe-security-groups \
+          --query 'SecurityGroups[*].[GroupId,GroupName,IpPermissions]' \
+          --output table
+
+signals:
+  critical:
+    - id: "ENVISO-CRIT-001"
+      signal: "Production database accessible from development environment"
+      evidence_pattern: "prod.*db|production.*database"
+      evidence_indicators:
+        - "Security groups allow dev subnet to prod database port"
+        - "Database credentials shared across environments"
+      explanation: |
+        Development access to production databases creates severe data
+        breach risk, accidental data modification, and compliance violations.
+        A single developer mistake could corrupt production data.
+      remediation: "Implement strict network isolation; use separate credentials per environment"
+
+    - id: "ENVISO-CRIT-002"
+      signal: "Shared IAM roles with production access used in development"
+      evidence_pattern: "role.*production|admin.*role"
+      explanation: |
+        Shared privileged roles allow lateral movement from compromised
+        development environments to production systems.
+      remediation: "Implement separate IAM roles per environment with least-privilege access"
+
+  high:
+    - id: "ENVISO-HIGH-001"
+      signal: "No network segmentation between environments"
+      evidence_pattern: "vpc.*shared|single.*vpc"
+      explanation: |
+        Shared network space increases blast radius and allows network-level
+        attacks to propagate between environments.
+      remediation: "Deploy separate VPCs/VNets per environment with explicit peering controls"
+
+    - id: "ENVISO-HIGH-002"
+      signal: "Shared secrets or credentials across environments"
+      evidence_pattern: "secret.*shared|common.*key"
+      explanation: |
+        Shared secrets mean a credential leak in one environment
+        compromises all environments.
+      remediation: "Implement unique secrets per environment with separate rotation"
+
+  medium:
+    - id: "ENVISO-MED-001"
+      signal: "Shared logging/monitoring infrastructure without tenant isolation"
+      remediation: "Implement log segregation with access controls per environment"
+
+    - id: "ENVISO-MED-002"
+      signal: "CI/CD pipelines can deploy to any environment without gates"
+      remediation: "Implement environment-specific deployment gates and approvals"
+
+  low:
+    - id: "ENVISO-LOW-001"
+      signal: "Inconsistent tagging prevents clear environment identification"
+
+  positive:
+    - id: "ENVISO-POS-001"
+      signal: "Separate cloud accounts per environment with strict boundary controls"
+    - id: "ENVISO-POS-002"
+      signal: "Zero-trust network architecture with explicit allow policies"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map environment boundaries"
+      description: |
+        Identify all environments and document their infrastructure
+        boundaries including accounts, VPCs, and namespaces.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "List VPC configurations"
+          command: "grep -r 'vpc\\|cidr' --include='*.tf' . 2>/dev/null | head -20"
+        - purpose: "Check for multi-account setup"
+          command: "grep -r 'provider.*alias\\|assume_role' --include='*.tf' . 2>/dev/null | head -20"
+      expected_findings:
+        - "Environment boundary documentation"
+        - "Account/VPC structure"
+
+    - id: "2"
+      name: "Audit network isolation"
+      description: |
+        Review security groups, NACLs, and network policies for
+        cross-environment traffic allowances.
+      duration_estimate: "60 min"
+      commands:
+        - purpose: "Find security group definitions"
+          command: "grep -rA10 'security_group\\|network_policy' --include='*.tf' --include='*.yaml' . 2>/dev/null | head -40"
+        - purpose: "Check for permissive rules"
+          command: "grep -r '0\\.0\\.0\\.0/0\\|-1' --include='*.tf' . 2>/dev/null | head -20"
+      expected_findings:
+        - "Network isolation assessment"
+        - "Overly permissive rule identification"
+
+    - id: "3"
+      name: "Review IAM and access controls"
+      description: |
+        Examine IAM policies and roles for cross-environment
+        access permissions.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find IAM role definitions"
+          command: "find . -name '*.tf' -exec grep -l 'iam_role\\|assume_role' {} \\; 2>/dev/null | head -10"
+        - purpose: "Check for cross-account access"
+          command: "grep -r 'arn:aws.*:iam::' --include='*.tf' . 2>/dev/null | head -20"
+      expected_findings:
+        - "IAM role inventory per environment"
+        - "Cross-account access patterns"
+
+    - id: "4"
+      name: "Identify shared resources"
+      description: |
+        Locate resources shared across environments that could
+        create isolation violations.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find shared resource references"
+          command: "grep -ri 'shared\\|common\\|global' --include='*.tf' --include='*.yaml' . 2>/dev/null | head -30"
+      expected_findings:
+        - "Shared resource inventory"
+        - "Risk assessment for each shared resource"
+
+    - id: "5"
+      name: "Test isolation controls"
+      description: |
+        Verify that isolation controls actually prevent cross-environment
+        access as intended.
+      duration_estimate: "60 min"
+      questions:
+        - "Can a development workload reach production databases?"
+        - "Can development credentials access production resources?"
+        - "Are audit logs separated by environment?"
+      expected_findings:
+        - "Isolation verification results"
+        - "Gap identification"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Environment Boundary Map"
+        - "Isolation Gaps"
+        - "Risk Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct testing of isolation controls with verified results"
+    medium: "Configuration analysis without runtime verification"
+    low: "Documentation review only"
+
+offline:
+  capability: "partial"
+  cache_manifest:
+    knowledge:
+      - source_id: "nist-800-53"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive security review"
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "enviso-001"
+    item: "No direct network path from development to production databases"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify security groups and network policies block dev-to-prod database access"
+    expected: "Confirmed by reviewer"
+
+  - id: "enviso-002"
+    item: "Separate IAM roles per environment"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify no shared privileged roles across environments"
+    expected: "Confirmed by reviewer"
+
+  - id: "enviso-003"
+    item: "No shared credentials between environments"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify secrets are unique per environment"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC6.1", "CC6.6", "CC6.7"]
+    - framework: "ISO27001"
+      controls: ["A.13.1.1", "A.13.1.3"]
+    - framework: "PCI-DSS"
+      controls: ["1.3", "7.1"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.environment-management.environment-parity"
+    - "devops-ci-cd.pipeline-security.pipeline-access-control"

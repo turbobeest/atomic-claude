@@ -1,0 +1,326 @@
+# ============================================================
+# NETWORK LATENCY AUDIT
+# ============================================================
+# Measures network-induced delays between system components.
+
+audit:
+  id: "performance-efficiency.latency.network-latency"
+  name: "Network Latency Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "latency"
+
+  tier: "expert"
+  estimated_duration: "1.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit measures network latency between system components including
+    services, databases, caches, and external dependencies. It examines
+    DNS resolution times, TCP connection establishment, TLS handshake
+    overhead, and data transfer times. The audit identifies network
+    bottlenecks, misconfigured network policies, and suboptimal
+    service placement.
+
+  why_it_matters: |
+    Network latency compounds with each hop in a distributed system.
+    A microservices architecture with 10 service calls each adding 5ms
+    of network latency adds 50ms to every request. In cloud environments,
+    cross-AZ or cross-region calls can add 1-100ms per call. Understanding
+    and minimizing network latency is critical for system performance.
+
+  when_to_run:
+    - "After infrastructure changes or migrations"
+    - "When deploying to new regions or availability zones"
+    - "During network-related incident investigations"
+    - "As part of architecture reviews for latency-sensitive systems"
+
+prerequisites:
+  required_artifacts:
+    - type: "network_access"
+      description: "Access to run network diagnostic tools"
+    - type: "service_topology"
+      description: "Understanding of service communication patterns"
+
+  access_requirements:
+    - "Permission to run ping, traceroute, and similar tools"
+    - "Access to network metrics dashboards"
+    - "Access to service mesh telemetry if applicable"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus"
+      query: "histogram_quantile(0.99, rate(http_client_request_duration_seconds_bucket[5m]))"
+      purpose: "Measure client-side request latency including network"
+      threshold: "< 50ms for same-region calls"
+
+    - system: "Istio/Envoy"
+      query: "istio_request_duration_milliseconds_bucket"
+      purpose: "Service mesh request latency"
+      threshold: "< 10ms for mesh overhead"
+
+  file_patterns:
+    - glob: "**/network-policy*.yaml"
+      purpose: "Review Kubernetes network policies"
+    - glob: "**/istio*.yaml"
+      purpose: "Service mesh configuration"
+
+knowledge_sources:
+  guides:
+    - id: "aws-networking-best-practices"
+      name: "AWS Networking Best Practices"
+      url: "https://docs.aws.amazon.com/whitepapers/latest/aws-vpc-connectivity-options/welcome.html"
+      offline_cache: true
+
+    - id: "gcp-network-latency"
+      name: "GCP Network Latency Guide"
+      url: "https://cloud.google.com/compute/docs/regions-zones"
+      offline_cache: true
+
+  papers:
+    - id: "datacenter-tcp"
+      title: "Data Center TCP (DCTCP)"
+      url: "https://dl.acm.org/doi/10.1145/1851182.1851192"
+
+tooling:
+  infrastructure_tools:
+    - tool: "ping"
+      purpose: "Basic ICMP latency measurement"
+      command: "ping -c 10 target-service.internal"
+
+    - tool: "traceroute"
+      purpose: "Identify network path and hop latency"
+      command: "traceroute -n target-service.internal"
+
+    - tool: "curl"
+      purpose: "Measure DNS, connect, and TLS times"
+      command: |
+        curl -w "DNS: %{time_namelookup}s, Connect: %{time_connect}s, TLS: %{time_appconnect}s, Total: %{time_total}s\n" \
+          -o /dev/null -s https://target-service.internal
+
+    - tool: "mtr"
+      purpose: "Combined traceroute and ping"
+      command: "mtr --report --report-cycles 10 target-service.internal"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        histogram_quantile(0.99,
+          sum(rate(http_client_request_duration_seconds_bucket[5m]))
+          by (le, target_service)
+        ) - histogram_quantile(0.99,
+          sum(rate(http_server_request_duration_seconds_bucket[5m]))
+          by (le, handler)
+        )
+      purpose: "Estimate network latency (client time - server time)"
+
+signals:
+  critical:
+    - id: "NET-CRIT-001"
+      signal: "Cross-service network latency exceeds 100ms within same region"
+      evidence_threshold: "P99 intra-region latency > 100ms"
+      explanation: |
+        Network latency this high within a single region indicates
+        severe network misconfiguration, overloaded network links, or
+        packet loss requiring retransmission.
+      remediation: "Investigate network path with traceroute; check for packet loss; review network policies"
+
+    - id: "NET-CRIT-002"
+      signal: "DNS resolution taking longer than 100ms"
+      evidence_threshold: "time_namelookup > 100ms"
+      explanation: |
+        Slow DNS resolution affects every connection and compounds
+        across service calls. This often indicates DNS server issues
+        or missing local caching.
+      remediation: "Implement DNS caching; use local DNS resolvers; consider connection pooling"
+
+  high:
+    - id: "NET-HIGH-001"
+      signal: "TLS handshake adding more than 50ms per connection"
+      evidence_threshold: "time_appconnect - time_connect > 50ms"
+      explanation: |
+        Excessive TLS overhead suggests certificate chain issues,
+        missing TLS session resumption, or suboptimal cipher selection.
+      remediation: "Enable TLS session tickets; optimize certificate chain; use HTTP/2 connection reuse"
+
+    - id: "NET-HIGH-002"
+      signal: "Services making cross-AZ calls for latency-sensitive operations"
+      evidence_indicators:
+        - "Trace data shows cross-AZ hops"
+        - "Network metrics show 2-5ms added per cross-AZ call"
+      explanation: |
+        Cross-AZ calls add 1-5ms each, which compounds in chatty
+        microservices architectures.
+      remediation: "Co-locate latency-sensitive services; implement AZ-aware routing"
+
+  medium:
+    - id: "NET-MED-001"
+      signal: "No connection pooling for frequently-called services"
+      remediation: "Implement HTTP keep-alive and connection pooling"
+
+    - id: "NET-MED-002"
+      signal: "Network latency metrics not collected between services"
+      remediation: "Implement service mesh or sidecar proxies for network telemetry"
+
+  low:
+    - id: "NET-LOW-001"
+      signal: "No network latency baseline documented"
+
+  positive:
+    - id: "NET-POS-001"
+      signal: "Service mesh providing detailed network telemetry"
+    - id: "NET-POS-002"
+      signal: "Connection pooling implemented for all inter-service calls"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map Service Topology"
+      description: |
+        Identify all service-to-service communication paths and
+        their expected latency characteristics.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "List Kubernetes services"
+          command: "kubectl get services -A -o wide"
+        - purpose: "Check service mesh topology"
+          command: "istioctl proxy-status 2>/dev/null || echo 'No Istio installed'"
+      expected_findings:
+        - "List of services and their locations"
+        - "Communication patterns between services"
+
+    - id: "2"
+      name: "Measure Network Latency"
+      description: |
+        Run network diagnostic tools to measure latency between
+        key service pairs.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Measure latency to database"
+          command: "ping -c 20 database.internal | tail -1"
+        - purpose: "Detailed connection timing"
+          command: |
+            curl -w "DNS: %{time_namelookup}s\nConnect: %{time_connect}s\nTLS: %{time_appconnect}s\nTTFB: %{time_starttransfer}s\nTotal: %{time_total}s\n" \
+              -o /dev/null -s https://api.internal/health
+      expected_findings:
+        - "Baseline latency measurements"
+        - "DNS and TLS overhead"
+
+    - id: "3"
+      name: "Analyze Network Path"
+      description: |
+        Use traceroute to understand network paths and identify
+        problematic hops.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Trace route to critical service"
+          command: "traceroute -n api.internal"
+        - purpose: "MTR report for detailed analysis"
+          command: "mtr --report -c 20 api.internal"
+      expected_findings:
+        - "Number of network hops"
+        - "Latency per hop"
+        - "Any packet loss"
+
+    - id: "4"
+      name: "Review Network Configuration"
+      description: |
+        Check network policies and configuration for potential
+        latency-inducing settings.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check Kubernetes network policies"
+          command: "kubectl get networkpolicies -A"
+        - purpose: "Review DNS configuration"
+          command: "kubectl get configmap -n kube-system coredns -o yaml 2>/dev/null || cat /etc/resolv.conf"
+      expected_findings:
+        - "Network policy complexity"
+        - "DNS configuration status"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Network Latency Measurements"
+        - "Topology Analysis"
+        - "Optimization Recommendations"
+
+  confidence_guidance:
+    high: "Measurements from production environment with multiple samples"
+    medium: "Single-point measurements or staging environment"
+    low: "Estimates based on configuration review only"
+
+offline:
+  capability: "partial"
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-networking-best-practices"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires network access and diagnostic tools"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "network-001"
+    item: "Intra-service network latency under 10ms"
+    level: "CRITICAL"
+    verification: "ping -c 10 target-service.internal | tail -1 | awk -F'/' '{print $5 < 10}'"
+    expected: "1"
+
+  - id: "network-002"
+    item: "DNS resolution under 10ms"
+    level: "BLOCKING"
+    verification: |
+      curl -w '%{time_namelookup}' -o /dev/null -s https://api.internal/health | awk '{print $1 < 0.01}'
+    threshold: "< 0.01s"
+
+  - id: "network-003"
+    item: "Connection pooling enabled"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Review HTTP client configuration for keep-alive settings"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["distributed", "microservices", "cloud-native"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.latency.end-to-end-latency"
+    - "performance-efficiency.latency.geographic-latency"

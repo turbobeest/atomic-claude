@@ -1,0 +1,308 @@
+audit:
+  id: reliability-resilience.error-handling.error-rate-monitoring
+  name: Error Rate Monitoring Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: error-handling
+  tier: phd
+  estimated_duration: 2-4 hours  # median: 3h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Examines error rate monitoring implementation including metrics
+    collection, dashboard visibility, alerting thresholds, and incident
+    response integration. Reviews how errors are tracked across services,
+    APIs, and infrastructure layers, ensuring issues are detected before
+    they impact users significantly.
+  why_it_matters: |
+    Without error rate monitoring, teams discover problems from user
+    complaints rather than proactive detection. Delayed awareness leads
+    to extended outages, degraded user experience, and reputational damage.
+    Effective error monitoring enables rapid detection and response,
+    minimizing impact and supporting SLO compliance.
+  when_to_run:
+  - Before production deployment
+  - During observability reviews
+  - After incidents related to delayed detection
+  - When establishing SLOs
+prerequisites:
+  required_artifacts:
+  - type: monitoring_config
+    description: Monitoring and alerting configurations
+  - type: source_code
+    description: Application code for metrics emission
+  access_requirements:
+  - Access to monitoring system (Prometheus, Datadog, CloudWatch, etc.)
+  - Access to alerting configuration
+  - Read access to source code
+discovery:
+  code_patterns:
+  - pattern: error.*count|errorCount|error_count
+    type: regex
+    scope: source
+    purpose: Find error counter metrics
+  - pattern: metrics.*error|prometheus.*error|counter.*error
+    type: regex
+    scope: source
+    purpose: Find error metric instrumentation
+  - pattern: rate\(.*error|error.*rate
+    type: regex
+    scope: config
+    purpose: Find error rate calculations
+  file_patterns:
+  - glob: '**/prometheus/**/*.{yaml,yml}'
+    purpose: Prometheus alerting rules
+  - glob: '**/alerts/**/*.{yaml,yml}'
+    purpose: Alert definitions
+  - glob: '**/monitoring/**/*.{yaml,yml,json}'
+    purpose: Monitoring configuration
+  - glob: '**/dashboards/**/*.json'
+    purpose: Grafana dashboard definitions
+  metrics_queries:
+  - system: Prometheus
+    query: sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))
+    purpose: Calculate HTTP 5xx error rate
+    threshold: < 0.1% for healthy systems
+  - system: Prometheus
+    query: sum(rate(grpc_server_handled_total{grpc_code!="OK"}[5m]))
+    purpose: Calculate gRPC error rate
+    threshold: Should have alerting threshold defined
+knowledge_sources:
+  guides:
+  - id: google-sre-monitoring
+    name: Google SRE Book - Monitoring
+    url: https://sre.google/sre-book/monitoring-distributed-systems/
+    offline_cache: true
+  - id: prometheus-alerting
+    name: Prometheus Alerting Best Practices
+    url: https://prometheus.io/docs/practices/alerting/
+    offline_cache: true
+  - id: release-it
+    name: Michael Nygard - Release It!
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+    offline_cache: true
+  learning_resources:
+  - id: observability-eng
+    title: Observability Engineering
+    type: book
+    reference: 'ISBN: 978-1492076445'
+tooling:
+  monitoring_queries:
+  - system: Prometheus
+    query: ALERTS{alertname=~".*[Ee]rror.*"}
+    purpose: Check if error-related alerts are defined
+  - system: CloudWatch
+    query: SELECT COUNT(*) FROM SCHEMA("AWS/Lambda", FunctionName) WHERE Errors > 0
+    purpose: Count Lambda errors
+  infrastructure_tools:
+  - tool: promtool
+    purpose: Validate Prometheus alerting rules
+    command: promtool check rules rules.yaml
+  scripts:
+  - id: audit-error-monitoring
+    language: bash
+    purpose: Find error monitoring configurations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Error-Related Alert Rules ==="
+      grep -rn "alert.*[Ee]rror\|[Ee]rror.*alert" --include="*.yaml" --include="*.yml" . 2>/dev/null | head -20
+      echo ""
+      echo "=== Error Rate Metrics ==="
+      grep -rn "error.*rate\|rate.*error\|5xx\|4xx" --include="*.yaml" --include="*.yml" --include="*.json" . 2>/dev/null | head -20
+      echo ""
+      echo "=== Error Counter Definitions ==="
+      grep -rn "Counter.*error\|error.*Counter\|errorCount" --include="*.java" --include="*.ts" --include="*.go" --include="*.py" . 2>/dev/null | head -20
+signals:
+  critical:
+  - id: ERRMON-CRIT-001
+    signal: No error rate monitoring for production services
+    evidence_indicators:
+    - No error-related metrics in monitoring system
+    - No error rate dashboards
+    - No error alerting rules
+    explanation: |
+      Without error rate monitoring, teams have no visibility into
+      system health and cannot detect problems proactively.
+    remediation: Implement error rate metrics, dashboards, and alerting for all services
+  - id: ERRMON-CRIT-002
+    signal: No alerting on error rate spikes
+    evidence_indicators:
+    - Error metrics exist but no alerts defined
+    - Alert thresholds set too high to be useful
+    explanation: |
+      Metrics without alerting require constant dashboard watching.
+      Teams need to be paged when error rates exceed thresholds.
+    remediation: Configure alerting on error rate exceeding baseline + threshold
+  high:
+  - id: ERRMON-HIGH-001
+    signal: Error rate thresholds not aligned with SLOs
+    explanation: |
+      Alert thresholds should relate to SLO targets to ensure
+      issues are caught before SLO violations occur.
+    remediation: Align error alerting thresholds with error budget consumption rate
+  - id: ERRMON-HIGH-002
+    signal: No breakdown of errors by type or endpoint
+    explanation: |
+      Aggregate error rates hide which specific operations are failing,
+      making triage and remediation slower.
+    remediation: Add labels/dimensions for error type, endpoint, and service
+  medium:
+  - id: ERRMON-MED-001
+    signal: No error rate trending or comparison to baseline
+    remediation: Implement week-over-week error rate comparisons
+  - id: ERRMON-MED-002
+    signal: Alert fatigue from noisy error alerts
+    remediation: Tune thresholds and add suppression for known issues
+  low:
+  - id: ERRMON-LOW-001
+    signal: Inconsistent error metric naming across services
+  positive:
+  - id: ERRMON-POS-001
+    signal: Comprehensive error monitoring with SLO-aligned alerting
+  - id: ERRMON-POS-002
+    signal: Error dashboards with drill-down capability
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory error metrics
+    description: |
+      Identify all error-related metrics being collected across
+      services and infrastructure.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find error metric definitions
+      command: grep -rn 'error.*counter\|error.*metric\|Counter.*error' --include='*.java' --include='*.ts'
+        --include='*.go' --include='*.py' . 2>/dev/null | head -30
+    expected_findings:
+    - Error metrics inventory
+    - Coverage gaps
+  - id: '2'
+    name: Review alerting configuration
+    description: |
+      Examine error-related alerting rules, thresholds, and
+      escalation paths.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find error alert definitions
+      command: grep -rn -B2 -A5 'alert.*[Ee]rror\|[Ee]rror.*alert' --include='*.yaml' --include='*.yml'
+        . 2>/dev/null | head -60
+    expected_findings:
+    - Alert rule inventory
+    - Threshold appropriateness
+  - id: '3'
+    name: Verify dashboard coverage
+    description: |
+      Check that error rates are visible on operational dashboards
+      with appropriate visualizations.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find dashboard error panels
+      command: grep -rn 'error\|Error' --include='*.json' . 2>/dev/null | grep -i 'dashboard\|panel\|title'
+        | head -30
+    expected_findings:
+    - Dashboard coverage
+    - Visualization gaps
+  - id: '4'
+    name: Assess SLO alignment
+    description: |
+      Verify that error monitoring supports SLO compliance tracking
+      and error budget visibility.
+    duration_estimate: 30 min
+    questions:
+    - Are error thresholds aligned with SLO targets?
+    - Is error budget consumption visible?
+    - Do alerts fire before SLO breach?
+    expected_findings:
+    - SLO integration status
+    - Error budget visibility
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Monitoring Coverage Analysis
+    - Alerting Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Direct evidence from monitoring configuration
+    medium: Configuration exists but effectiveness unclear
+    low: Requires runtime verification of alert behavior
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: google-sre-monitoring
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires monitoring system access
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: error-rate-monitoring-001
+  item: Error rate metrics defined for all services
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify each service emits error rate metrics
+  expected: Confirmed by reviewer
+- id: error-rate-monitoring-002
+  item: Error rate alerting configured
+  level: CRITICAL
+  verification: grep -rni 'alert' --include='*.yaml' --include='*.yml' . 2>/dev/null | grep -i 'error'
+    | wc -l | xargs -I{} sh -c 'if [ {} -gt 0 ]; then echo PASS; else echo FAIL; fi'
+  expected: PASS
+- id: error-rate-monitoring-003
+  item: Error rate dashboard exists
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify operational dashboard shows error rates
+  expected: Confirmed by reviewer
+- id: error-rate-monitoring-004
+  item: Alert thresholds aligned with SLOs
+  level: WARNING
+  verification: manual
+  verification_notes: Verify error alert thresholds support SLO compliance
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SRE Best Practices
+    controls:
+    - Monitoring
+    - Alerting
+  - framework: SOC2
+    controls:
+    - CC7.2
+relationships:
+  commonly_combined:
+  - reliability-resilience.error-handling.error-budget
+  - reliability-resilience.error-handling.error-logging

@@ -1,0 +1,484 @@
+audit:
+  id: configuration-management.configuration-control.change-control
+  name: Configuration Change Control Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: configuration-management
+  category_number: 30
+  subcategory: configuration-control
+  tier: phd
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the formal change control processes applied to
+    configuration modifications. It evaluates:
+    - Change request and approval workflows
+    - Change authorization and audit trails
+    - Pre-change impact assessment
+    - Change implementation procedures
+    - Post-change verification
+    - Emergency change procedures
+    - Change rollback capabilities
+  why_it_matters: |
+    Configuration change control is fundamental to operational stability:
+    - CMMI CM SP 2.1 requires tracking and controlling changes to CIs
+    - ITIL Change Management ensures changes are authorized and controlled
+    - 85% of production incidents are attributed to changes (Gartner)
+    - Uncontrolled changes lead to configuration drift and incidents
+    - Compliance frameworks require demonstrable change control
+    - Audit trails are essential for forensics and compliance
+    - Proper change control reduces mean time to recovery (MTTR)
+  when_to_run:
+  - When establishing change management processes
+  - After change-related incidents
+  - During compliance audits (SOC 2, ISO 27001)
+  - Quarterly process reviews
+  - Before major configuration changes
+prerequisites:
+  required_artifacts:
+  - type: change_records
+    description: Change request and approval records
+  - type: version_control
+    description: Git history and pull requests
+  - type: documentation
+    description: Change management policies and procedures
+  access_requirements:
+  - Access to change management system
+  - Read access to configuration repositories
+  - Access to approval workflows
+  - Access to deployment logs
+discovery:
+  code_patterns:
+  - pattern: (change[-_]request|change[-_]ticket|cr[-_]\d+)
+    type: regex
+    scope: commits
+    purpose: Detect change request references
+  - pattern: (approved[-_]by|reviewed[-_]by|authorized[-_]by)
+    type: regex
+    scope: config
+    purpose: Detect approval metadata
+  - pattern: (require[-_]approval|protected[-_]branch|merge[-_]request)
+    type: regex
+    scope: config
+    purpose: Detect CI/CD change controls
+  - pattern: (CODEOWNERS|required[-_]reviewers)
+    type: regex
+    scope: config
+    purpose: Detect review requirements
+  file_patterns:
+  - glob: '**/.github/CODEOWNERS'
+    purpose: GitHub CODEOWNERS
+  - glob: '**/branch-protection*'
+    purpose: Branch protection configuration
+  - glob: '**/approval*.yaml'
+    purpose: Approval workflow definitions
+  - glob: '**/CHANGELOG*'
+    purpose: Change logs
+knowledge_sources:
+  specifications:
+  - id: cmmi-cm-sp21
+    name: CMMI CM SP 2.1 - Track and Control Changes
+    url: https://cmmiinstitute.com/cmmi
+    offline_cache: true
+    priority: required
+  - id: itil-change
+    name: ITIL Change Management
+    url: https://www.axelos.com/best-practice-solutions/itil
+    offline_cache: true
+    priority: required
+  - id: soc2-cc81
+    name: SOC 2 CC8.1 - Changes to Infrastructure
+    url: https://www.aicpa.org/soc
+    offline_cache: true
+    priority: required
+  guides:
+  - id: github-branch-protection
+    name: GitHub Branch Protection
+    url: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/defining-the-mergeability-of-pull-requests/about-protected-branches
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: git
+    purpose: Change history and approval tracking
+    offline_capable: true
+  infrastructure_tools:
+  - tool: github-api
+    purpose: Review and approval data
+    command: gh pr list --state merged --json reviews
+  scripts:
+  - id: change-control-audit
+    language: bash
+    purpose: Audit change control practices
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Change Control Audit ==="
+      echo ""
+      echo "=== Recent Config Changes ==="
+      git log --oneline -30 -- "*.yaml" "*.json" "*.tf" "*.env*" 2>/dev/null
+      echo ""
+      echo "=== Changes Without PR Reference ==="
+      git log --oneline -50 2>/dev/null | grep -v -E "(#[0-9]+|PR|MR|CR)" | head -20
+      echo ""
+      echo "=== Branch Protection Status ==="
+      cat .github/settings.yml 2>/dev/null | grep -A 10 "branches:" || echo "No branch protection config found"
+signals:
+  critical:
+  - id: CCTL-CRIT-001
+    signal: Configuration changes bypass approval process
+    evidence_indicators:
+    - Direct commits to production configs without PR
+    - No required reviewers for config changes
+    - Changes without change request reference
+    explanation: |
+      CMMI and ITIL require authorization for configuration changes.
+      Bypassing approval enables unauthorized changes that may
+      introduce security vulnerabilities or operational issues.
+    remediation: |
+      - Implement required approvals for config changes
+      - Enable branch protection for config repositories
+      - Configure CODEOWNERS for config files
+      - Require change request references in commits
+    cwe: CWE-284
+  - id: CCTL-CRIT-002
+    signal: No audit trail for configuration changes
+    evidence_indicators:
+    - Changes not logged or tracked
+    - No history of who changed what
+    - Approval records not retained
+    explanation: |
+      SOC 2 CC8.1 requires logging of changes to infrastructure.
+      Without audit trails, incidents cannot be investigated,
+      and compliance cannot be demonstrated.
+    remediation: |
+      - Enable comprehensive change logging
+      - Store all configuration in version control
+      - Retain approval records
+      - Implement change auditing
+  - id: CCTL-CRIT-003
+    signal: Production changes lack separation of duties
+    evidence_indicators:
+    - Same person requests and approves changes
+    - Self-approval of production config changes
+    - No independent review requirement
+    explanation: |
+      Separation of duties prevents unauthorized or erroneous changes.
+      Self-approval creates fraud risk and reduces error detection.
+      Compliance frameworks require independent approval for changes.
+    remediation: |
+      - Require different person for approval
+      - Implement approval workflows
+      - Audit for self-approval violations
+      - Train on separation of duties
+  high:
+  - id: CCTL-HIGH-001
+    signal: No pre-change impact assessment
+    evidence_indicators:
+    - Changes implemented without impact analysis
+    - No risk assessment for config changes
+    - Dependent systems not considered
+    explanation: |
+      ITIL Change Management requires impact assessment before changes.
+      Without assessment, changes may have unexpected effects on
+      dependent services, causing widespread incidents.
+    remediation: |
+      - Implement impact assessment in change workflow
+      - Require dependency analysis for changes
+      - Document expected impact before approval
+      - Review historical impact of similar changes
+  - id: CCTL-HIGH-002
+    signal: Emergency changes not controlled
+    evidence_indicators:
+    - No defined emergency change process
+    - Emergency changes bypass all controls
+    - Emergency changes not documented retroactively
+    explanation: |
+      Emergency changes need expedited but still controlled processes.
+      Completely uncontrolled emergency changes create risk and
+      compliance violations. Post-facto documentation is essential.
+    remediation: |
+      - Define emergency change procedure
+      - Require post-implementation review
+      - Document emergency changes retroactively
+      - Limit emergency change authorization
+  - id: CCTL-HIGH-003
+    signal: Configuration changes not tested before deployment
+    evidence_indicators:
+    - No validation of config changes
+    - Changes deployed without testing
+    - No staging environment for config validation
+    explanation: |
+      Untested configuration changes frequently cause incidents.
+      Validation should include syntax checking, policy validation,
+      and functional testing in non-production environments.
+    remediation: |
+      - Implement config validation in CI/CD
+      - Require staging deployment before production
+      - Add automated config testing
+      - Document testing requirements
+  medium:
+  - id: CCTL-MED-001
+    signal: Change approval workflow inconsistent
+    evidence_indicators:
+    - Different approval processes for similar changes
+    - Approval requirements unclear
+    - Ad-hoc approval decisions
+    explanation: |
+      Inconsistent approval creates confusion and potential gaps.
+      Standardized workflows ensure appropriate scrutiny for all
+      changes based on their risk and impact.
+    remediation: |
+      - Document standard approval workflows
+      - Classify changes by risk level
+      - Match approval requirements to risk
+      - Enforce consistent workflows in tooling
+  - id: CCTL-MED-002
+    signal: Change notification incomplete
+    evidence_indicators:
+    - Stakeholders not notified of changes
+    - No change announcements
+    - Dependent teams unaware of changes
+    explanation: |
+      Change notification enables stakeholders to prepare and respond.
+      Without notification, dependent teams may be caught off-guard
+      by changes affecting their systems.
+    remediation: |
+      - Implement change notification process
+      - Identify stakeholders for each change
+      - Send pre and post-change notifications
+      - Include rollback information
+  - id: CCTL-MED-003
+    signal: Change schedule not maintained
+    evidence_indicators:
+    - No planned change windows
+    - Changes occur at any time
+    - No coordination of concurrent changes
+    explanation: |
+      Change scheduling reduces risk by ensuring appropriate
+      attention and avoiding conflicts. Unscheduled changes during
+      peak hours or alongside other changes increase incident risk.
+    remediation: |
+      - Define change windows
+      - Maintain change calendar
+      - Coordinate concurrent changes
+      - Restrict high-risk change timing
+  low:
+  - id: CCTL-LOW-001
+    signal: Change request templates not used
+    evidence_indicators:
+    - Inconsistent change request format
+    - Missing information in requests
+    - No standard template
+    explanation: |
+      Templates ensure complete change requests with all necessary
+      information. Inconsistent requests may lack critical details
+      for proper assessment and approval.
+    remediation: |
+      - Create change request templates
+      - Require template use in tooling
+      - Include all necessary fields
+      - Provide guidance for completion
+  positive:
+  - id: CCTL-POS-001
+    signal: Comprehensive change control implemented
+    evidence_indicators:
+    - All changes require approval
+    - Complete audit trail maintained
+    - Impact assessment performed
+  - id: CCTL-POS-002
+    signal: Automated change validation
+    evidence_indicators:
+    - CI/CD validates changes automatically
+    - Policy-as-code enforced
+    - Automated rollback capability
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Change Process Documentation Review
+    description: |
+      Review documented change management processes and policies.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find change management documentation
+      command: |
+        find . -type f \( -name "*change*" -o -name "*approval*" \) \
+          \( -name "*.md" -o -name "*.yaml" \) \
+          -not -path "*/node_modules/*" 2>/dev/null | head -20
+    - purpose: Check for CODEOWNERS
+      command: |
+        find . -name "CODEOWNERS" 2>/dev/null
+    - purpose: Review branch protection configuration
+      command: |
+        cat .github/settings.yml 2>/dev/null | head -50
+    expected_findings:
+    - Change management documentation
+    - Approval workflow definitions
+    - Branch protection settings
+  - id: '2'
+    name: Change History Analysis
+    description: |
+      Analyze recent configuration changes for compliance with process.
+    duration_estimate: 45 min
+    commands:
+    - purpose: List recent config changes
+      command: |
+        git log --oneline -50 -- "*.yaml" "*.json" "*.tf" "*.env*" 2>/dev/null
+    - purpose: Check for PR references in commits
+      command: |
+        git log --oneline -50 2>/dev/null | \
+          grep -v -E "(#[0-9]+|PR|MR|pull|merge)" | head -20
+    - purpose: Find direct commits to main/master
+      command: |
+        git log --oneline --first-parent main 2>/dev/null | head -30
+    expected_findings:
+    - Change frequency patterns
+    - PR compliance rate
+    - Direct commit violations
+  - id: '3'
+    name: Approval Process Verification
+    description: |
+      Verify approval requirements are enforced for changes.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check for required reviewers config
+      command: |
+        grep -rn "required_approving_review_count\|required-reviewers\|minApprovals" \
+          --include="*.yaml" --include="*.yml" --include="*.json" . 2>/dev/null | head -20
+    - purpose: List recent merged PRs
+      command: |
+        gh pr list --state merged --limit 20 --json number,title,reviews 2>/dev/null || \
+          echo "GitHub CLI not available or not authenticated"
+    expected_findings:
+    - Approval requirements
+    - Review compliance
+    - Self-approval detection
+  - id: '4'
+    name: Change Rollback Assessment
+    description: |
+      Evaluate rollback capabilities for configuration changes.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find rollback documentation
+      command: |
+        find . -type f \( -name "*rollback*" -o -name "*revert*" \) \
+          -not -path "*/node_modules/*" 2>/dev/null | head -20
+    - purpose: Check for rollback scripts
+      command: |
+        grep -rn "rollback\|revert\|undo" --include="*.sh" --include="*.yaml" \
+          . 2>/dev/null | head -20
+    expected_findings:
+    - Rollback procedures
+    - Rollback automation
+    - Recovery capabilities
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Change Process Assessment
+    - Compliance Analysis
+    - Recommendations
+  - type: compliance_matrix
+    format: table
+    description: Change control compliance by requirement
+  confidence_guidance:
+    high: Process documentation and evidence verified
+    medium: Process exists but compliance partially verified
+    low: Process status requires manual investigation
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cmmi-cm-sp21
+      priority: required
+    - source_id: itil-change
+      priority: required
+    - source_id: soc2-cc81
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Change control audit requires comprehensive review
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: cctl-001
+  item: All configuration changes require approval
+  level: CRITICAL
+  verification: |
+    test -f CODEOWNERS -o -f .github/CODEOWNERS && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: cctl-002
+  item: Change audit trail maintained
+  level: CRITICAL
+  verification: |
+    git log --oneline -1 2>/dev/null && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: cctl-003
+  item: Separation of duties enforced
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify different person required for approval
+  expected: Confirmed by reviewer
+- id: cctl-004
+  item: Rollback capability documented
+  level: WARNING
+  verification: manual
+  verification_notes: Verify rollback procedures exist
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CMMI
+    controls:
+    - CM SP 2.1
+    - CM SP 2.2
+  - framework: ITIL
+    controls:
+    - Change Management
+    - Release Management
+  - framework: SOC 2
+    controls:
+    - CC8.1
+  - framework: ISO 27001
+    controls:
+    - A.8.32
+    - A.12.1.2
+  - framework: PCI-DSS
+    controls:
+    - 6.4.5
+relationships:
+  commonly_combined:
+  - configuration-management.configuration-control.approval-workflow
+  - configuration-management.configuration-control.version-control
+  - configuration-management.configuration-status.change-tracking

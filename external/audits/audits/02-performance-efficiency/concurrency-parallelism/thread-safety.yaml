@@ -1,0 +1,372 @@
+# ============================================================
+# THREAD SAFETY AUDIT
+# ============================================================
+# Detects thread-unsafe code patterns that can lead to data
+# corruption, undefined behavior, and intermittent failures.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.concurrency-parallelism.thread-safety"
+  name: "Thread Safety Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "concurrency-parallelism"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Examines code for thread-unsafe patterns including unprotected shared
+    state, non-atomic operations on shared variables, unsafe lazy initialization,
+    and improper use of thread-local storage. Reviews synchronization primitives
+    for correct usage and identifies potential data races.
+
+  why_it_matters: |
+    Thread safety bugs are among the most difficult to debug because they
+    manifest intermittently under specific timing conditions. A single thread
+    safety violation can cause data corruption, security vulnerabilities,
+    crashes, and undefined behavior that only appears under production load.
+
+  when_to_run:
+    - "Before deploying multi-threaded code to production"
+    - "After adding shared state or removing synchronization"
+    - "When experiencing intermittent failures or data corruption"
+    - "During code review of concurrent code sections"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code with concurrent/parallel sections"
+
+  access_requirements:
+    - "Read access to source code repository"
+    - "Understanding of application's threading model"
+
+discovery:
+  code_patterns:
+    - pattern: "static\\s+(?!final|const)\\w+\\s+\\w+\\s*="
+      type: "regex"
+      scope: "source"
+      purpose: "Detect mutable static variables (potential shared state)"
+
+    - pattern: "\\bvolatile\\b"
+      type: "keyword"
+      scope: "source"
+      purpose: "Identify volatile usage which may mask deeper issues"
+
+    - pattern: "getInstance\\(\\)|getSingleton\\(\\)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find singleton patterns that may have unsafe initialization"
+
+    - pattern: "\\+\\+|--|\\+=|-="
+      type: "regex"
+      scope: "source"
+      purpose: "Identify compound operations that are non-atomic"
+
+    - pattern: "ThreadLocal|thread_local|__thread"
+      type: "regex"
+      scope: "source"
+      purpose: "Locate thread-local storage usage"
+
+  file_patterns:
+    - glob: "**/*.java"
+      purpose: "Java source files"
+    - glob: "**/*.go"
+      purpose: "Go source files"
+    - glob: "**/*.py"
+      purpose: "Python source files"
+    - glob: "**/*.rs"
+      purpose: "Rust source files"
+    - glob: "**/*.cpp"
+      purpose: "C++ source files"
+
+knowledge_sources:
+  specifications:
+    - id: "cwe-362"
+      name: "CWE-362: Concurrent Execution Using Shared Resource with Improper Synchronization"
+      url: "https://cwe.mitre.org/data/definitions/362.html"
+      offline_cache: true
+      priority: "required"
+
+    - id: "cwe-567"
+      name: "CWE-567: Unsynchronized Access to Shared Data in a Multithreaded Context"
+      url: "https://cwe.mitre.org/data/definitions/567.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "java-concurrency"
+      name: "Java Concurrency in Practice"
+      url: "https://jcip.net/"
+      offline_cache: true
+
+    - id: "go-memory-model"
+      name: "The Go Memory Model"
+      url: "https://go.dev/ref/mem"
+      offline_cache: true
+
+  learning_resources:
+    - id: "jcip-book"
+      title: "Java Concurrency in Practice"
+      type: "book"
+      reference: "ISBN 978-0321349606"
+
+tooling:
+  static_analysis:
+    - tool: "ThreadSanitizer (TSan)"
+      purpose: "Detects data races at runtime"
+      offline_capable: true
+
+    - tool: "SpotBugs"
+      purpose: "Java static analysis for concurrency bugs"
+      offline_capable: true
+
+    - tool: "golangci-lint"
+      purpose: "Go static analysis including race detection hints"
+      offline_capable: true
+
+    - tool: "Clippy"
+      purpose: "Rust linter with thread safety checks"
+      offline_capable: true
+
+  scripts:
+    - id: "find-shared-state"
+      language: "bash"
+      purpose: "Find potential shared mutable state"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find static non-final fields in Java
+        grep -rn "static [^f][^i][^n][^a][^l].*=" --include="*.java" .
+        # Find global variables in Go
+        grep -rn "^var " --include="*.go" .
+
+signals:
+  critical:
+    - id: "THREAD-CRIT-001"
+      signal: "Unprotected mutable shared state accessed by multiple threads"
+      evidence_pattern: "static\\s+(?!final|const|readonly)\\w+\\s+\\w+\\s*=(?!.*immutable)"
+      explanation: |
+        Mutable static/global variables accessed by multiple threads without
+        synchronization cause data races. This leads to corrupted data,
+        inconsistent state, and undefined behavior that is difficult to reproduce.
+      remediation: "Add synchronization (mutex, lock), use atomic operations, or make immutable"
+      cwe: "CWE-362"
+
+    - id: "THREAD-CRIT-002"
+      signal: "Double-checked locking without proper memory barriers"
+      evidence_pattern: "if.*null.*synchronized.*if.*null"
+      explanation: |
+        Double-checked locking pattern without volatile or memory barriers allows
+        partially constructed objects to be visible to other threads due to
+        instruction reordering. This is a classic concurrency bug.
+      remediation: "Use volatile keyword (Java), sync.Once (Go), or established singleton patterns"
+      cwe: "CWE-609"
+
+  high:
+    - id: "THREAD-HIGH-001"
+      signal: "Non-atomic compound operations on shared variables"
+      evidence_pattern: "\\+\\+|--|\\+=|-=.*shared|global|static"
+      explanation: |
+        Operations like i++ or count += 1 are not atomic. In concurrent contexts,
+        this causes lost updates where increments are silently dropped.
+      remediation: "Use atomic operations (AtomicInteger, atomic.AddInt64, etc.)"
+      cwe: "CWE-362"
+
+    - id: "THREAD-HIGH-002"
+      signal: "Lazy initialization without synchronization"
+      evidence_pattern: "if.*==.*null.*=.*new"
+      explanation: |
+        Lazy initialization without synchronization can result in multiple
+        initializations, resource leaks, or partially initialized objects being returned.
+      remediation: "Use synchronized lazy initialization or eager initialization"
+      cwe: "CWE-609"
+
+    - id: "THREAD-HIGH-003"
+      signal: "Check-then-act race condition"
+      evidence_pattern: "if.*contains|exists|has.*then.*add|put|set"
+      explanation: |
+        Checking a condition and then acting on it without holding a lock allows
+        another thread to invalidate the condition between check and act.
+      remediation: "Use atomic operations like putIfAbsent() or hold lock during check-act"
+      cwe: "CWE-367"
+
+  medium:
+    - id: "THREAD-MED-001"
+      signal: "Volatile used without understanding memory semantics"
+      evidence_pattern: "volatile.*(?!AtomicReference|AtomicInteger)"
+      remediation: "Review if volatile provides sufficient guarantees; consider atomic classes"
+
+    - id: "THREAD-MED-002"
+      signal: "Thread-local storage without cleanup"
+      evidence_pattern: "ThreadLocal|thread_local"
+      remediation: "Ensure ThreadLocal.remove() is called to prevent memory leaks"
+
+  low:
+    - id: "THREAD-LOW-001"
+      signal: "Synchronized on non-final field"
+      evidence_pattern: "synchronized.*(?!final)"
+      remediation: "Synchronize on final fields to prevent lock object from changing"
+
+  positive:
+    - id: "THREAD-POS-001"
+      signal: "Proper use of concurrent collections"
+      evidence_pattern: "ConcurrentHashMap|sync\\.Map|concurrent\\.futures"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify shared state"
+      description: |
+        Locate all static/global mutable variables and instance variables
+        that may be accessed by multiple threads.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find static mutable fields in Java"
+          command: "grep -rn 'static [^f].*=' --include='*.java' . | grep -v 'static final'"
+        - purpose: "Find global variables in Go"
+          command: "grep -rn '^var ' --include='*.go' ."
+      expected_findings:
+        - "List of all shared mutable state"
+        - "Classification by access pattern"
+
+    - id: "2"
+      name: "Analyze synchronization"
+      description: |
+        For each shared state, verify that proper synchronization exists.
+        Check lock ordering, scope of critical sections, and memory barriers.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find synchronized blocks in Java"
+          command: "grep -rn 'synchronized' --include='*.java' ."
+        - purpose: "Find mutex usage in Go"
+          command: "grep -rn 'sync\\.Mutex|sync\\.RWMutex' --include='*.go' ."
+      expected_findings:
+        - "Mapping of shared state to protection mechanisms"
+        - "Unprotected shared state"
+
+    - id: "3"
+      name: "Check for common patterns"
+      description: |
+        Look for known anti-patterns: double-checked locking, check-then-act,
+        non-atomic compound operations.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find potential double-checked locking"
+          command: "grep -rn -A5 'if.*null' --include='*.java' . | grep -B2 'synchronized'"
+      expected_findings:
+        - "Instances of dangerous patterns"
+        - "Singleton implementations"
+
+    - id: "4"
+      name: "Run ThreadSanitizer"
+      description: |
+        Execute test suite with ThreadSanitizer enabled to detect races dynamically.
+      duration_estimate: "60 min"
+      commands:
+        - purpose: "Run Go tests with race detector"
+          command: "go test -race ./..."
+        - purpose: "Run C++ with TSan"
+          command: "clang++ -fsanitize=thread -g test.cpp && ./a.out"
+      expected_findings:
+        - "Data race reports from TSan"
+        - "Stack traces of racing accesses"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Critical Thread Safety Issues"
+        - "Shared State Inventory"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "ThreadSanitizer detected race, or clear pattern match with shared state"
+    medium: "Pattern matches but threading context unclear"
+    low: "Potential issue requiring manual verification"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "cwe-362"
+        priority: "required"
+      - source_id: "java-concurrency"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Deep analysis required"
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "thread-safety-001"
+    item: "All shared mutable state identified and catalogued"
+    level: "CRITICAL"
+    verification: "grep -rn 'static\\|^var ' --include='*.java' --include='*.go' . | wc -l"
+    expected: "Count documented in findings"
+
+  - id: "thread-safety-002"
+    item: "ThreadSanitizer or race detector executed on test suite"
+    level: "BLOCKING"
+    verification: "go test -race ./... 2>&1 | tail -1"
+    expected: "PASS (no races detected)"
+
+  - id: "thread-safety-003"
+    item: "Double-checked locking patterns reviewed"
+    level: "CRITICAL"
+    verification: "grep -rn 'getInstance\\|Singleton' --include='*.java' . | wc -l"
+    expected: "All instances using safe patterns"
+
+governance:
+  applicable_to:
+    archetypes: ["api", "service", "library"]
+
+  compliance_frameworks:
+    - framework: "CWE"
+      controls: ["CWE-362", "CWE-567", "CWE-609"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.concurrency-parallelism.race-condition"
+    - "performance-efficiency.concurrency-parallelism.deadlock-risk"
+    - "performance-efficiency.concurrency-parallelism.lock-contention"

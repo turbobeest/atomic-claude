@@ -1,0 +1,387 @@
+# ============================================================
+# AUDIT: Interaction to Next Paint (INP) Optimization
+# ============================================================
+# Evaluates INP performance, the Core Web Vital measuring
+# overall page responsiveness to user interactions.
+# ============================================================
+
+audit:
+  id: "seo-discoverability.core-web-vitals.interaction-to-next-paint"
+
+  name: "Interaction to Next Paint (INP) Optimization Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "seo-discoverability"
+  category_number: 16
+  subcategory: "core-web-vitals"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "runtime"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines Interaction to Next Paint (INP) performance,
+    the Core Web Vital that replaced FID in March 2024 for measuring
+    responsiveness. INP measures the latency of all user interactions
+    throughout the page lifecycle, not just the first one. It evaluates
+    current INP scores, identifies slow interactions, analyzes causes
+    of input delay, and provides optimization recommendations.
+
+  why_it_matters: |
+    INP is a Core Web Vital that directly impacts search rankings.
+    Unlike FID which only measures the first interaction, INP captures
+    responsiveness throughout the user session. Good INP (under 200ms)
+    means interactions feel instant. Poor INP (over 500ms) creates
+    a sluggish, frustrating experience where the page feels broken.
+
+  when_to_run:
+    - "During JavaScript optimization"
+    - "After adding interactive features"
+    - "When users report sluggishness"
+    - "During Core Web Vitals audits"
+    - "Before major releases"
+
+prerequisites:
+  required_artifacts:
+    - type: "website"
+      description: "Live website with interactive elements"
+    - type: "crux_data"
+      description: "Chrome User Experience Report data"
+
+  access_requirements:
+    - "PageSpeed Insights API access"
+    - "Google Search Console"
+    - "Chrome DevTools"
+    - "Real device testing capability"
+
+discovery:
+  code_patterns:
+    - pattern: "addEventListener|onclick|onchange"
+      type: "regex"
+      scope: "source"
+      purpose: "Find event handlers"
+    - pattern: "requestAnimationFrame|requestIdleCallback"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find optimized scheduling"
+    - pattern: "isInputPending"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find input-aware scheduling"
+
+  file_patterns:
+    - glob: "**/*.{js,jsx,ts,tsx}"
+      purpose: "Find JavaScript with event handlers"
+    - glob: "**/components/**"
+      purpose: "Find interactive components"
+
+knowledge_sources:
+  specifications:
+    - id: "web-vitals-inp"
+      name: "web.dev: Interaction to Next Paint"
+      url: "https://web.dev/inp/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "google-optimize-inp"
+      name: "Google: Optimize INP"
+      url: "https://web.dev/optimize-inp/"
+      offline_cache: true
+    - id: "google-inp-debug"
+      name: "Google: Find Slow Interactions"
+      url: "https://web.dev/find-slow-interactions-in-the-field/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "Chrome DevTools Performance Panel"
+      purpose: "Interaction timing analysis"
+      offline_capable: true
+    - tool: "web-vitals JavaScript Library"
+      purpose: "Real user INP measurement"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "PageSpeed Insights"
+      purpose: "Field INP data from CrUX"
+      command: "https://pagespeed.web.dev/"
+    - tool: "Google Search Console"
+      purpose: "Site-wide Core Web Vitals"
+      command: "Core Web Vitals report"
+    - tool: "Chrome DevTools"
+      purpose: "Performance profiling"
+      command: "Performance panel"
+
+  scripts:
+    - id: "inp-checker"
+      language: "bash"
+      purpose: "Check INP via PageSpeed Insights API"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        URL=$1
+        API_KEY=$2
+
+        echo "=== INP Analysis for: $URL ==="
+
+        RESULT=$(curl -s "https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=$URL&key=$API_KEY&strategy=mobile")
+
+        # Field INP
+        echo "Field INP (75th percentile):"
+        echo $RESULT | jq '.loadingExperience.metrics.INTERACTION_TO_NEXT_PAINT.percentile'
+
+        # Category
+        echo ""
+        echo "INP Category:"
+        echo $RESULT | jq '.loadingExperience.metrics.INTERACTION_TO_NEXT_PAINT.category'
+
+signals:
+  critical:
+    - id: "INP-CRIT-001"
+      signal: "INP exceeds 500ms (poor threshold)"
+      evidence_threshold: "INP > 500ms"
+      explanation: |
+        INP over 500ms is classified as "poor" by Google. Users
+        experience significant delay between interactions and visual
+        feedback, making the page feel unresponsive or broken.
+      remediation: "Optimize event handlers, reduce main thread blocking, use web workers"
+
+    - id: "INP-CRIT-002"
+      signal: "Multiple interactions consistently slow"
+      evidence_indicators:
+        - "Slow clicks, taps, and keyboard events"
+        - "Pattern of high interaction latency"
+      explanation: |
+        Unlike FID, INP measures all interactions. Consistently slow
+        interactions indicate systemic performance issues.
+      remediation: "Profile and optimize slow interaction handlers"
+
+  high:
+    - id: "INP-HIGH-001"
+      signal: "INP between 200-500ms (needs improvement)"
+      evidence_threshold: "INP > 200ms && INP <= 500ms"
+      explanation: |
+        INP in this range is classified as "needs improvement" and
+        creates noticeable interaction delay.
+      remediation: "Optimize interaction handlers and reduce blocking time"
+
+    - id: "INP-HIGH-002"
+      signal: "Long event handlers blocking main thread"
+      explanation: |
+        Event handlers that run for >50ms block subsequent input
+        processing and delay visual updates.
+      remediation: "Break up long handlers, use requestAnimationFrame for UI updates"
+
+    - id: "INP-HIGH-003"
+      signal: "Heavy JavaScript frameworks causing interaction delay"
+      explanation: |
+        Framework reconciliation or re-rendering during interactions
+        can cause significant delays.
+      remediation: "Optimize component updates, use virtualization, consider lighter alternatives"
+
+  medium:
+    - id: "INP-MED-001"
+      signal: "No interaction feedback during processing"
+      remediation: "Add immediate visual feedback for user actions"
+
+    - id: "INP-MED-002"
+      signal: "Synchronous operations in event handlers"
+      remediation: "Move synchronous work to requestIdleCallback or workers"
+
+    - id: "INP-MED-003"
+      signal: "Large DOM updates on interaction"
+      remediation: "Minimize DOM changes, use document fragments"
+
+  low:
+    - id: "INP-LOW-001"
+      signal: "INP varies significantly by interaction type"
+
+  positive:
+    - id: "INP-POS-001"
+      signal: "INP under 200ms (good threshold)"
+    - id: "INP-POS-002"
+      signal: "All interactions respond within one frame"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Gather INP Field Data"
+      description: |
+        Collect real-user INP data from Chrome User Experience
+        Report via PageSpeed Insights and Search Console.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Get field INP data"
+          command: "PageSpeed Insights for key pages"
+      expected_findings:
+        - "Field INP by page type"
+        - "INP distribution"
+        - "Good/Needs Improvement/Poor breakdown"
+
+    - id: "2"
+      name: "Identify Slow Interactions"
+      description: |
+        Use field data or manual testing to identify which
+        specific interactions are slow.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Measure interactions"
+          command: "web-vitals library or DevTools Performance"
+      expected_findings:
+        - "Slowest interactions"
+        - "Interaction types affected"
+        - "Pages with worst INP"
+
+    - id: "3"
+      name: "Profile Interaction Handlers"
+      description: |
+        Use Chrome DevTools Performance panel to profile slow
+        interactions and identify bottlenecks.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Profile interaction"
+          command: "DevTools > Performance > Click interaction while recording"
+      expected_findings:
+        - "Handler execution time"
+        - "Main thread blocking"
+        - "Call stack analysis"
+
+    - id: "4"
+      name: "Analyze Event Handler Code"
+      description: |
+        Review code for interaction handlers causing slow INP,
+        looking for optimization opportunities.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Long synchronous operations"
+        - "Heavy DOM manipulation"
+        - "Framework-specific issues"
+
+    - id: "5"
+      name: "Test on Real Devices"
+      description: |
+        Test interactions on real mobile devices to understand
+        actual user experience.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Real device performance"
+        - "Touch vs click differences"
+        - "Low-end device impact"
+
+    - id: "6"
+      name: "Implement and Verify Fixes"
+      description: |
+        Apply optimizations and verify INP improvements through
+        lab testing before field validation.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Optimization impact"
+        - "Regression detection"
+        - "Before/after comparison"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "INP Performance Summary"
+        - "Slow Interaction Analysis"
+        - "Handler Optimization"
+        - "Implementation Recommendations"
+
+  confidence_guidance:
+    high: "Field data from CrUX with large sample size"
+    medium: "Lab profiling verified on real devices"
+    low: "Single device lab testing"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "web-vitals-inp"
+        priority: "required"
+      - source_id: "google-optimize-inp"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed interaction analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "inp-001"
+    item: "INP under 200ms on key pages"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Check PageSpeed Insights field data"
+    expected: "Confirmed by reviewer"
+
+  - id: "inp-002"
+    item: "No event handlers blocking >100ms"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Profile key interactions in DevTools"
+    expected: "Confirmed by reviewer"
+
+  - id: "inp-003"
+    item: "Immediate visual feedback on all interactions"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Test common interactions for feedback"
+    expected: "Confirmed by reviewer"
+
+  - id: "inp-004"
+    item: "Tested on real mobile devices"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify performance on mid-tier mobile"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["web-application", "marketing-site", "ecommerce", "content-site"]
+
+  compliance_frameworks:
+    - framework: "Google Core Web Vitals"
+      controls: ["INP", "Responsiveness"]
+
+relationships:
+  commonly_combined:
+    - "seo-discoverability.core-web-vitals.first-input-delay"
+    - "seo-discoverability.core-web-vitals.largest-contentful-paint"
+    - "seo-discoverability.core-web-vitals.cumulative-layout-shift"

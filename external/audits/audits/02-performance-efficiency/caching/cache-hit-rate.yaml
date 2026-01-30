@@ -1,0 +1,308 @@
+# ============================================================
+# CACHE HIT RATE AUDIT
+# ============================================================
+# Evaluates cache effectiveness by measuring hit/miss ratios
+# and identifying opportunities to improve cache utilization.
+
+audit:
+  id: "performance-efficiency.caching.cache-hit-rate"
+  name: "Cache Hit Rate Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "caching"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Examines cache hit rates across all caching layers (Redis, Memcached,
+    application-level caches, CDN, browser) to identify inefficient caching
+    patterns, missed opportunities, and poorly performing cache configurations.
+
+  why_it_matters: |
+    Low cache hit rates indicate wasted infrastructure costs and degraded
+    application performance. Each cache miss translates to backend load,
+    increased latency, and potentially cascading failures under load.
+    A 90% hit rate vs 99% hit rate means 10x more backend requests.
+
+  when_to_run:
+    - "Performance regression detected"
+    - "Infrastructure cost review"
+    - "Scaling capacity planning"
+    - "After major feature deployment"
+
+prerequisites:
+  required_artifacts:
+    - type: "cache_infrastructure"
+      description: "Access to Redis/Memcached instances"
+    - type: "monitoring_system"
+      description: "Metrics collection for cache statistics"
+
+  access_requirements:
+    - "Redis CLI access or equivalent"
+    - "Monitoring dashboard access (Prometheus, Datadog, CloudWatch)"
+    - "Application configuration files"
+
+discovery:
+  metrics_queries:
+    - system: "Redis"
+      query: "INFO stats"
+      purpose: "Retrieve keyspace_hits and keyspace_misses"
+      threshold: "Hit rate > 95%"
+
+    - system: "Prometheus"
+      query: "rate(redis_keyspace_hits_total[5m]) / (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m]))"
+      purpose: "Calculate real-time hit rate"
+      threshold: "> 0.95"
+
+    - system: "Memcached"
+      query: "stats"
+      purpose: "Retrieve get_hits and get_misses"
+      threshold: "Hit rate > 95%"
+
+  code_patterns:
+    - pattern: "cache\\.get|cache\\.fetch|@cached|@cache"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify cache access patterns"
+
+  file_patterns:
+    - glob: "**/redis*.conf"
+      purpose: "Redis configuration files"
+    - glob: "**/memcached*.conf"
+      purpose: "Memcached configuration files"
+    - glob: "**/cache*.{py,rb,js,ts,java}"
+      purpose: "Cache implementation files"
+
+knowledge_sources:
+  specifications:
+    - id: "redis-info"
+      name: "Redis INFO Command Documentation"
+      url: "https://redis.io/commands/info/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "cache-best-practices"
+      name: "Redis Best Practices"
+      url: "https://redis.io/docs/management/optimization/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "redis-cli"
+      purpose: "Query Redis statistics"
+      command: "redis-cli INFO stats | grep keyspace"
+
+    - tool: "memcached-tool"
+      purpose: "Query Memcached statistics"
+      command: "echo 'stats' | nc localhost 11211 | grep -E 'get_hits|get_misses'"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "redis_keyspace_hits_total / (redis_keyspace_hits_total + redis_keyspace_misses_total)"
+      purpose: "Calculate overall cache hit rate"
+
+signals:
+  critical:
+    - id: "CACHE-HIT-CRIT-001"
+      signal: "Cache hit rate below 70%"
+      evidence_threshold: "hit_rate < 0.70"
+      explanation: |
+        A hit rate below 70% indicates fundamental caching problems. The cache
+        is not providing meaningful value and may be actively harming performance
+        by adding latency to cache lookups that consistently miss.
+      remediation: "Review cache key design, TTLs, and warming strategies"
+
+    - id: "CACHE-HIT-CRIT-002"
+      signal: "Cache returning stale data errors"
+      evidence_pattern: "Cache.*stale|WRONGTYPE|serialization.*error"
+      explanation: |
+        Cache corruption or version mismatches cause data integrity issues
+        that can propagate through the entire application.
+      remediation: "Implement cache versioning, flush affected keys, review serialization"
+
+  high:
+    - id: "CACHE-HIT-HIGH-001"
+      signal: "Cache hit rate between 70-85%"
+      evidence_threshold: "0.70 <= hit_rate < 0.85"
+      explanation: |
+        Suboptimal hit rate indicates opportunities for significant improvement.
+        Every percentage point improvement reduces backend load proportionally.
+      remediation: "Analyze miss patterns, extend TTLs where safe, pre-warm critical data"
+
+    - id: "CACHE-HIT-HIGH-002"
+      signal: "High cache eviction rate"
+      evidence_pattern: "evicted_keys > 1000/min"
+      explanation: |
+        Frequent evictions indicate cache size insufficient for workload,
+        causing premature expiration of useful cached data.
+      remediation: "Increase cache memory or optimize key storage efficiency"
+
+  medium:
+    - id: "CACHE-HIT-MED-001"
+      signal: "Cache hit rate between 85-95%"
+      evidence_threshold: "0.85 <= hit_rate < 0.95"
+      remediation: "Fine-tune TTLs and consider additional caching opportunities"
+
+    - id: "CACHE-HIT-MED-002"
+      signal: "Uneven hit rate distribution across keys"
+      evidence_pattern: "High variance in per-key hit rates"
+      remediation: "Segment caching strategy by access pattern"
+
+  low:
+    - id: "CACHE-HIT-LOW-001"
+      signal: "No cache hit rate monitoring configured"
+      remediation: "Implement cache statistics collection and alerting"
+
+  positive:
+    - id: "CACHE-HIT-POS-001"
+      signal: "Cache hit rate above 95%"
+      evidence_threshold: "hit_rate >= 0.95"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Collect cache statistics"
+      description: |
+        Gather hit/miss statistics from all caching layers including Redis,
+        Memcached, application caches, and CDN edge caches.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Get Redis cache statistics"
+          command: "redis-cli INFO stats | grep -E 'keyspace_hits|keyspace_misses'"
+        - purpose: "Calculate Redis hit rate"
+          command: "redis-cli INFO stats | awk '/keyspace_hits/{h=$2}/keyspace_misses/{m=$2}END{print h/(h+m)*100}'"
+
+      expected_findings:
+        - "Overall hit rate percentage"
+        - "Total hits and misses counts"
+
+    - id: "2"
+      name: "Analyze miss patterns"
+      description: |
+        Identify which keys are most frequently missed and whether misses
+        cluster around specific time periods or request types.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Monitor cache misses in real-time"
+          command: "redis-cli MONITOR | grep -v 'GET.*hit' | head -100"
+
+      expected_findings:
+        - "Common miss patterns"
+        - "Time-based miss clustering"
+
+    - id: "3"
+      name: "Review cache configuration"
+      description: |
+        Examine cache size limits, eviction policies, and TTL configurations
+        to identify misconfiguration.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Check Redis memory configuration"
+          command: "redis-cli CONFIG GET maxmemory*"
+        - purpose: "Check eviction policy"
+          command: "redis-cli CONFIG GET maxmemory-policy"
+
+      expected_findings:
+        - "Memory limits and usage"
+        - "Eviction policy appropriateness"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Hit Rate Analysis"
+        - "Miss Pattern Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct metrics from cache infrastructure, verified over 24h+ period"
+    medium: "Point-in-time metrics, limited sample period"
+    low: "Estimated from application logs or indirect indicators"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "redis-info"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime metrics collection"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "cache-hit-rate-001"
+    item: "Redis cache hit rate measured"
+    level: "CRITICAL"
+    verification: "redis-cli INFO stats | awk '/keyspace_hits/{h=$2}/keyspace_misses/{m=$2}END{if(h+m>0){rate=h/(h+m)*100; if(rate>=70)print \"PASS\"; else print \"FAIL\"}else print \"NO_DATA\"}'"
+    expected: "PASS"
+
+  - id: "cache-hit-rate-002"
+    item: "Eviction rate within acceptable limits"
+    level: "BLOCKING"
+    verification: "redis-cli INFO stats | awk '/evicted_keys/{if($2<10000)print \"PASS\"; else print \"FAIL\"}'"
+    expected: "PASS"
+
+  - id: "cache-hit-rate-003"
+    item: "Cache memory utilization reviewed"
+    level: "WARNING"
+    verification: "redis-cli INFO memory | grep -q used_memory && echo PASS || echo FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SRE Best Practices"
+      controls: ["Performance Monitoring"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.caching.cache-invalidation"
+    - "performance-efficiency.caching.cache-size"
+    - "performance-efficiency.caching.ttl-configuration"

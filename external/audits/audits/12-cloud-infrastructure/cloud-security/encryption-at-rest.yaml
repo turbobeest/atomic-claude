@@ -1,0 +1,393 @@
+# ============================================================
+# AUDIT FILE: Encryption at Rest
+# ============================================================
+
+audit:
+  id: "cloud-infrastructure.cloud-security.encryption-at-rest"
+  name: "Encryption at Rest"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "cloud-infrastructure"
+  category_number: 12
+  subcategory: "cloud-security"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates encryption at rest configuration for cloud storage and data
+    services including S3 buckets, EBS volumes, RDS databases, managed
+    databases, data warehouses, file storage, and secrets managers.
+    Examines encryption enablement, key management, key rotation,
+    and customer-managed key (CMK) usage.
+
+  why_it_matters: |
+    Encryption at rest protects data from unauthorized access if storage
+    media is compromised. Unencrypted data is vulnerable to physical theft,
+    snapshot exposure, and unauthorized access. Compliance frameworks
+    universally require encryption of sensitive data. Proper key management
+    ensures encryption provides actual protection.
+
+  when_to_run:
+    - "During initial infrastructure setup"
+    - "Regular security audits (quarterly minimum)"
+    - "Before storing sensitive data in new services"
+    - "During compliance assessments"
+
+prerequisites:
+  required_artifacts:
+    - type: "cloud-account"
+      description: "Access to cloud storage and data services"
+    - type: "kms-access"
+      description: "Access to key management service"
+
+  access_requirements:
+    - "Permissions to view storage encryption settings"
+    - "Access to KMS key configurations"
+    - "Ability to list storage resources"
+
+discovery:
+  file_patterns:
+    - glob: "**/s3*.tf"
+      purpose: "S3 bucket configurations"
+    - glob: "**/rds*.tf"
+      purpose: "RDS configurations"
+    - glob: "**/ebs*.tf"
+      purpose: "EBS configurations"
+    - glob: "**/kms*.tf"
+      purpose: "KMS key configurations"
+
+  code_patterns:
+    - pattern: "server_side_encryption_configuration"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find S3 encryption settings"
+    - pattern: "storage_encrypted.*true"
+      type: "regex"
+      scope: "config"
+      purpose: "Find database encryption settings"
+    - pattern: "encrypted.*true"
+      type: "regex"
+      scope: "config"
+      purpose: "Find EBS encryption settings"
+
+knowledge_sources:
+  specifications:
+    - id: "aws-encryption"
+      name: "AWS Encryption Best Practices"
+      url: "https://docs.aws.amazon.com/whitepapers/latest/kms-best-practices/aws-kms-and-encryption.html"
+      offline_cache: true
+      priority: "required"
+    - id: "cis-encryption"
+      name: "CIS Benchmark Encryption Controls"
+      url: "https://www.cisecurity.org/benchmark/amazon_web_services"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "kms-best-practices"
+      name: "AWS KMS Best Practices"
+      url: "https://docs.aws.amazon.com/kms/latest/developerguide/best-practices.html"
+      offline_cache: true
+    - id: "gcp-encryption"
+      name: "GCP Encryption at Rest"
+      url: "https://cloud.google.com/security/encryption/default-encryption"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws-cli"
+      purpose: "Query encryption settings"
+      command: "aws s3api get-bucket-encryption --bucket <bucket>"
+    - tool: "prowler"
+      purpose: "Cloud security audit"
+      command: "prowler aws --service s3,rds,ec2"
+    - tool: "ScoutSuite"
+      purpose: "Multi-cloud security auditing"
+      command: "scout aws --services s3,rds,ec2,kms"
+
+  scripts:
+    - id: "encryption-audit"
+      language: "bash"
+      purpose: "Audit encryption configuration"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== S3 Bucket Encryption ==="
+        for bucket in $(aws s3api list-buckets --query 'Buckets[*].Name' --output text); do
+          enc=$(aws s3api get-bucket-encryption --bucket $bucket 2>/dev/null | jq -r '.ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault.SSEAlgorithm' 2>/dev/null)
+          echo "  $bucket: ${enc:-NOT_ENCRYPTED}"
+        done
+        echo "=== EBS Default Encryption ==="
+        aws ec2 get-ebs-encryption-by-default --query EbsEncryptionByDefault
+        echo "=== RDS Encryption Status ==="
+        aws rds describe-db-instances --query 'DBInstances[*].[DBInstanceIdentifier,StorageEncrypted]' --output table
+
+signals:
+  critical:
+    - id: "ENC-REST-CRIT-001"
+      signal: "S3 bucket without encryption"
+      evidence_pattern: "No ServerSideEncryptionConfiguration"
+      explanation: |
+        Unencrypted S3 buckets store data in plain text. If bucket
+        access is compromised or data is accidentally exposed, contents
+        are immediately readable.
+      remediation: "Enable default encryption on all S3 buckets"
+    - id: "ENC-REST-CRIT-002"
+      signal: "Database without encryption"
+      evidence_pattern: "RDS StorageEncrypted: false"
+      explanation: |
+        Unencrypted databases expose sensitive data if snapshots are
+        shared or storage is compromised. Encryption cannot be enabled
+        after creation for some database types.
+      remediation: "Recreate database with encryption enabled"
+    - id: "ENC-REST-CRIT-003"
+      signal: "EBS volumes without encryption"
+      evidence_pattern: "EBS Encrypted: false"
+      explanation: |
+        Unencrypted EBS volumes expose data through snapshots and
+        if volumes are accidentally shared or accessed.
+      remediation: "Enable default EBS encryption and migrate existing volumes"
+
+  high:
+    - id: "ENC-REST-HIGH-001"
+      signal: "Using AWS-managed keys instead of CMK"
+      evidence_pattern: "SSE-S3 or aws/ebs keys instead of customer CMK"
+      explanation: |
+        AWS-managed keys provide less control over key access and
+        rotation. Customer-managed keys enable fine-grained access
+        control and audit logging.
+      remediation: "Use customer-managed KMS keys for sensitive data"
+    - id: "ENC-REST-HIGH-002"
+      signal: "KMS key rotation not enabled"
+      evidence_pattern: "KeyRotationEnabled: false"
+      explanation: |
+        Without key rotation, cryptographic keys are used indefinitely,
+        increasing exposure if a key is compromised.
+      remediation: "Enable automatic key rotation for KMS keys"
+    - id: "ENC-REST-HIGH-003"
+      signal: "Secrets not stored in secrets manager"
+      evidence_pattern: "Secrets in plain text files or environment variables"
+      explanation: |
+        Secrets outside managed storage lack encryption, rotation,
+        and audit logging capabilities.
+      remediation: "Store secrets in AWS Secrets Manager or equivalent"
+
+  medium:
+    - id: "ENC-REST-MED-001"
+      signal: "EBS default encryption not enabled"
+      evidence_pattern: "EbsEncryptionByDefault: false"
+      remediation: "Enable EBS encryption by default at account level"
+    - id: "ENC-REST-MED-002"
+      signal: "Snapshots shared without encryption"
+      evidence_pattern: "Public or cross-account snapshots unencrypted"
+      remediation: "Encrypt snapshots before sharing"
+    - id: "ENC-REST-MED-003"
+      signal: "KMS key policy too permissive"
+      evidence_pattern: "Key policy allows broad access"
+      remediation: "Restrict KMS key policies to specific roles and services"
+
+  low:
+    - id: "ENC-REST-LOW-001"
+      signal: "No key alias naming convention"
+      remediation: "Implement consistent key alias naming"
+    - id: "ENC-REST-LOW-002"
+      signal: "Multiple keys for same purpose"
+      remediation: "Consolidate keys where appropriate"
+
+  positive:
+    - id: "ENC-REST-POS-001"
+      signal: "All storage encrypted with CMK"
+    - id: "ENC-REST-POS-002"
+      signal: "Automatic key rotation enabled"
+    - id: "ENC-REST-POS-003"
+      signal: "Default encryption enabled at account level"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory storage resources"
+      description: |
+        Identify all storage resources requiring encryption assessment.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "List S3 buckets"
+          command: "aws s3api list-buckets --query 'Buckets[*].Name'"
+        - purpose: "List EBS volumes"
+          command: "aws ec2 describe-volumes --query 'Volumes[*].[VolumeId,Encrypted,KmsKeyId]' --output table"
+        - purpose: "List RDS instances"
+          command: "aws rds describe-db-instances --query 'DBInstances[*].[DBInstanceIdentifier,StorageEncrypted,KmsKeyId]' --output table"
+      expected_findings:
+        - "Storage resource inventory"
+        - "Encryption status overview"
+
+    - id: "2"
+      name: "Assess S3 bucket encryption"
+      description: |
+        Check encryption configuration for all S3 buckets.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check bucket encryption"
+          command: "aws s3api get-bucket-encryption --bucket <bucket>"
+        - purpose: "Check bucket policy for encryption enforcement"
+          command: "aws s3api get-bucket-policy --bucket <bucket>"
+      expected_findings:
+        - "Bucket encryption status"
+        - "Encryption enforcement policies"
+
+    - id: "3"
+      name: "Review database encryption"
+      description: |
+        Verify encryption for RDS and other database services.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check RDS encryption"
+          command: "aws rds describe-db-instances --query 'DBInstances[*].[DBInstanceIdentifier,StorageEncrypted,KmsKeyId]'"
+        - purpose: "Check RDS cluster encryption"
+          command: "aws rds describe-db-clusters --query 'DBClusters[*].[DBClusterIdentifier,StorageEncrypted,KmsKeyId]'"
+      expected_findings:
+        - "Database encryption status"
+        - "Encryption key inventory"
+
+    - id: "4"
+      name: "Evaluate KMS key configuration"
+      description: |
+        Review KMS key settings including rotation and policies.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "List KMS keys"
+          command: "aws kms list-keys"
+        - purpose: "Check key rotation"
+          command: "aws kms get-key-rotation-status --key-id <key-id>"
+        - purpose: "Get key policy"
+          command: "aws kms get-key-policy --key-id <key-id> --policy-name default"
+      expected_findings:
+        - "Key rotation status"
+        - "Key policy assessment"
+
+    - id: "5"
+      name: "Check default encryption settings"
+      description: |
+        Verify account-level default encryption is enabled.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Check EBS default encryption"
+          command: "aws ec2 get-ebs-encryption-by-default"
+        - purpose: "Check S3 Block Public Access"
+          command: "aws s3control get-public-access-block --account-id $(aws sts get-caller-identity --query Account --output text)"
+      expected_findings:
+        - "Default encryption status"
+        - "Account-level security settings"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Storage Encryption Analysis"
+        - "Key Management Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct API query results, configuration verification"
+    medium: "Inferred from partial configuration"
+    low: "Based on missing elements"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-encryption"
+        priority: "required"
+      - source_id: "cis-encryption"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive storage analysis"
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "encryption-at-rest-001"
+    item: "All S3 buckets encrypted"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Check each bucket has ServerSideEncryptionConfiguration"
+    expected: "Confirmed by reviewer"
+  - id: "encryption-at-rest-002"
+    item: "All RDS instances encrypted"
+    level: "CRITICAL"
+    verification: "aws rds describe-db-instances --query 'DBInstances[?StorageEncrypted==`false`]' | jq 'length' | awk '{print ($1==0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "encryption-at-rest-003"
+    item: "EBS default encryption enabled"
+    level: "BLOCKING"
+    verification: "aws ec2 get-ebs-encryption-by-default --query EbsEncryptionByDefault | awk '{print ($1==\"true\")?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "encryption-at-rest-004"
+    item: "KMS key rotation enabled"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Check key rotation for all CMKs used for sensitive data"
+    expected: "Confirmed by reviewer"
+  - id: "encryption-at-rest-005"
+    item: "Customer-managed keys for sensitive data"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify CMKs used instead of AWS-managed keys for sensitive data"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC6.1", "CC6.7"]
+    - framework: "PCI-DSS"
+      controls: ["3.4", "3.5", "3.6"]
+    - framework: "HIPAA"
+      controls: ["164.312(a)(2)(iv)", "164.312(e)(2)(ii)"]
+    - framework: "GDPR"
+      controls: ["Article 32"]
+
+relationships:
+  commonly_combined:
+    - "cloud-infrastructure.cloud-security.encryption-in-transit"
+    - "cloud-infrastructure.cloud-security.iam-configuration"
+    - "cloud-infrastructure.cloud-security.compliance-controls"

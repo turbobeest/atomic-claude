@@ -1,0 +1,561 @@
+audit:
+  id: security-trust.data-protection.data-access-logging
+  name: Data Access Logging Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: data-protection
+  tier: phd
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: security
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the organization's data access logging capabilities,
+    focusing on five critical areas:
+
+    1. Audit Trails: Verifies comprehensive logging of who accessed what
+       data, when, and what operations were performed on sensitive data.
+
+    2. Log Immutability: Assesses controls preventing tampering with or
+       deletion of audit logs, including write-once storage and integrity
+       verification.
+
+    3. Retention Policies: Reviews log retention periods against regulatory
+       requirements and organizational needs for incident investigation.
+
+    4. Alerting Mechanisms: Evaluates real-time detection of suspicious
+       data access patterns through automated monitoring and alerting.
+
+    5. Forensic Capability: Assesses the ability to reconstruct access
+       patterns, support incident investigation, and provide evidence
+       for legal proceedings.
+  why_it_matters: |
+    Data access logging is fundamental to security operations and compliance.
+    Without comprehensive logging:
+
+    - Data breaches cannot be detected or investigated effectively
+    - Insider threats remain hidden until damage is extensive
+    - Compliance requirements (GDPR, HIPAA, SOX, PCI-DSS) cannot be met
+    - Legal proceedings lack necessary evidence
+    - Security incidents cannot be properly scoped or remediated
+
+    OWASP ranks "Security Logging and Monitoring Failures" as a Top 10
+    vulnerability. Attackers specifically target and delete logs to
+    cover their tracks.
+  when_to_run:
+  - Initial security assessment
+  - After implementing new data systems
+  - Following security incidents
+  - SOC 2, ISO 27001, or compliance audits
+  - When integrating SIEM or logging systems
+  - Annual security reviews
+prerequisites:
+  required_artifacts:
+  - type: configuration
+    description: Logging configuration files and settings
+  - type: infrastructure
+    description: SIEM and log aggregation system configurations
+  - type: documentation
+    description: Logging policies and retention schedules
+  access_requirements:
+  - Read access to application logging configurations
+  - Access to SIEM and log aggregation systems
+  - Read access to database audit configuration
+  - Access to alerting and monitoring configurations
+discovery:
+  code_patterns:
+  - pattern: (?i)log\.(info|warn|error|debug|audit)\s*\(
+    type: regex
+    scope: source
+    purpose: Find logging statements in application code
+  - pattern: (?i)audit.*log|access.*log|security.*log
+    type: regex
+    scope: config
+    purpose: Identify audit logging configurations
+  - pattern: (?i)logger\s*[=:]|logging\.config|log4j|winston|bunyan
+    type: regex
+    scope: source
+    purpose: Find logging framework configurations
+  - pattern: (?i)retention.*days|expire.*logs|rotate.*log
+    type: regex
+    scope: config
+    purpose: Identify log retention settings
+  - pattern: (?i)immutable|write.*once|worm|append.*only
+    type: regex
+    scope: config
+    purpose: Find immutability configurations
+  file_patterns:
+  - glob: '**/*log*.{yaml,yml,json,conf,properties,xml}'
+    purpose: Logging configuration files
+  - glob: '**/log4j*.xml'
+    purpose: Log4j configuration
+  - glob: '**/logging.conf'
+    purpose: Python logging configuration
+  - glob: '**/fluent*.conf'
+    purpose: Fluentd/Fluent Bit configuration
+  - glob: '**/filebeat*.yml'
+    purpose: Filebeat configuration
+knowledge_sources:
+  specifications:
+  - id: nist-800-53-au
+    name: NIST SP 800-53 Rev 5 - Audit and Accountability Family
+    url: https://csf.tools/reference/nist-sp-800-53/r5/au/
+    offline_cache: true
+    priority: required
+  - id: nist-800-92
+    name: NIST SP 800-92 Guide to Computer Security Log Management
+    url: https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-92.pdf
+    offline_cache: true
+    priority: required
+  - id: iso27001-a815
+    name: ISO 27001:2022 Annex A 8.15 - Logging
+    url: https://hightable.io/iso-27001-annex-a-8-15-logging/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-logging
+    name: OWASP Logging Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-a09
+    name: OWASP Top 10:2021 - A09 Security Logging and Monitoring Failures
+    url: https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: grep/ripgrep
+    purpose: Search for logging patterns and configurations
+    offline_capable: true
+  - tool: semgrep
+    purpose: Detect missing logging in sensitive operations
+    offline_capable: true
+  infrastructure_tools:
+  - tool: aws-cli
+    purpose: Check CloudTrail and CloudWatch logging configuration
+    command: aws cloudtrail describe-trails && aws logs describe-log-groups
+  - tool: az-cli
+    purpose: Verify Azure Monitor and diagnostic settings
+    command: az monitor diagnostic-settings list --resource-id RESOURCE_ID
+  - tool: gcloud
+    purpose: Check Cloud Logging configuration
+    command: gcloud logging sinks list && gcloud logging metrics list
+  monitoring_queries:
+  - system: Elasticsearch/OpenSearch
+    query: GET /_cat/indices?v&h=index,docs.count,store.size
+    purpose: Verify log indices exist and contain data
+    threshold: Expected indices present with recent data
+signals:
+  critical:
+  - id: LOGGING-CRIT-001
+    signal: No audit logging for sensitive data access
+    evidence_pattern: (?i)(select|read|get).*(?!log|audit|track)
+    cwe: CWE-778
+    explanation: |
+      Sensitive data access without audit logging prevents detection of
+      data breaches, insider threats, and unauthorized access. This is
+      a fundamental security control required by all major compliance
+      frameworks.
+    remediation: |
+      Implement comprehensive data access logging:
+      - Enable database audit logging for all SELECT/READ operations on sensitive tables
+      - Add application-level logging for data access functions
+      - Log user ID, timestamp, data accessed, and access context
+      - Send logs to centralized SIEM for correlation
+  - id: LOGGING-CRIT-002
+    signal: Audit logs can be modified or deleted by application users
+    evidence_pattern: (?i)(delete|truncate|drop).*log|log.*chmod.*666|log.*everyone
+    cwe: CWE-779
+    explanation: |
+      If users or compromised applications can modify audit logs, attackers
+      can cover their tracks after a breach. Logs must be immutable to
+      maintain forensic integrity and comply with regulations.
+    remediation: |
+      Implement log immutability:
+      - Forward logs immediately to a separate, secure system
+      - Use append-only or write-once storage for log files
+      - Implement role separation so application accounts cannot modify logs
+      - Enable S3 Object Lock or equivalent for cloud log storage
+  - id: LOGGING-CRIT-003
+    signal: Logging disabled for security-critical operations
+    evidence_pattern: (?i)log.*level.*=.*(off|none|disabled)|logging.*false
+    cwe: CWE-778
+    explanation: |
+      Disabled logging for security operations (authentication, authorization,
+      data access) eliminates visibility into potential attacks and makes
+      incident response impossible.
+    remediation: |
+      Enable logging for all security-critical operations:
+      - Set appropriate log levels (INFO minimum for security events)
+      - Ensure logging cannot be disabled at runtime without alerting
+      - Implement logging health checks
+      - Alert on logging failures or gaps
+  high:
+  - id: LOGGING-HIGH-001
+    signal: Insufficient log detail for forensic investigation
+    evidence_pattern: (?i)log\.(info|debug)\s*\(['"][^'"]*['"]\s*\)
+    cwe: CWE-778
+    explanation: |
+      Logs without sufficient context (user ID, IP address, session ID,
+      resource accessed) cannot support forensic investigation or incident
+      response. ISO 27001 A.8.15 requires comprehensive log content.
+    remediation: |
+      Enhance log content to include:
+      - User ID and authentication method
+      - Source IP address and user agent
+      - Timestamp with timezone (ISO 8601)
+      - Operation performed and data scope
+      - Success or failure status
+      - Correlation/request ID for tracing
+  - id: LOGGING-HIGH-002
+    signal: No centralized log aggregation
+    evidence_indicators:
+    - Logs stored only on local systems
+    - No SIEM or log aggregation system configured
+    - Cannot correlate events across systems
+    explanation: |
+      Distributed logs without centralization cannot be effectively
+      analyzed, create gaps if individual systems are compromised,
+      and make incident investigation extremely difficult.
+    remediation: |
+      Implement centralized log aggregation:
+      - Deploy SIEM or log aggregation platform (ELK, Splunk, etc.)
+      - Configure log shippers on all systems
+      - Implement real-time log forwarding
+      - Enable cross-system correlation
+  - id: LOGGING-HIGH-003
+    signal: Log retention period shorter than regulatory requirements
+    evidence_pattern: (?i)retention.*[=:]\s*[1-9]\d?[d]|expire.*days.*[=:]\s*[1-9]\d?
+    explanation: |
+      Insufficient log retention prevents investigation of incidents
+      discovered after logs expire and violates compliance requirements
+      (e.g., PCI-DSS requires 1 year, SOX typically requires 7 years).
+    remediation: |
+      Align retention with requirements:
+      - Review regulatory requirements for your industry
+      - Set retention to maximum required period (often 1-7 years)
+      - Implement tiered storage (hot/warm/cold) for cost efficiency
+      - Document retention decisions in logging policy
+  - id: LOGGING-HIGH-004
+    signal: No alerting on suspicious access patterns
+    evidence_indicators:
+    - No anomaly detection on data access logs
+    - No alerts for bulk data access
+    - No alerts for access outside business hours
+    explanation: |
+      Without automated alerting, suspicious access patterns go
+      unnoticed until damage is done. The average breach detection
+      time is 277 days without effective monitoring.
+    remediation: |
+      Implement access pattern alerting:
+      - Alert on bulk data queries exceeding thresholds
+      - Alert on access from unusual locations or times
+      - Implement user behavior analytics (UBA)
+      - Configure escalation procedures for alerts
+  medium:
+  - id: LOGGING-MED-001
+    signal: Log timestamps not synchronized
+    evidence_pattern: (?i)ntp.*disabled|time.*sync.*false|no.*ntp
+    cwe: CWE-778
+    explanation: |
+      Unsynchronized timestamps across systems make log correlation
+      impossible and can invalidate logs as legal evidence. ISO 27001
+      requires reliable time synchronization for logging.
+    remediation: |
+      Implement time synchronization:
+      - Configure NTP on all systems
+      - Use consistent timezone (UTC recommended for logs)
+      - Monitor time synchronization status
+      - Alert on clock drift exceeding thresholds
+  - id: LOGGING-MED-002
+    signal: Sensitive data logged without masking
+    evidence_pattern: (?i)log.*(password|credit.*card|ssn|token|secret)
+    cwe: CWE-532
+    explanation: |
+      Logging sensitive data (passwords, credit cards, PII) in plaintext
+      creates a secondary exposure point and violates data protection
+      regulations. Logs should contain enough detail for security
+      purposes without exposing sensitive values.
+    remediation: |
+      Implement log data masking:
+      - Mask or redact sensitive fields before logging
+      - Use parameterized logging to prevent accidental exposure
+      - Implement PII detection in log processing
+      - Regular audit of log content for sensitive data
+  - id: LOGGING-MED-003
+    signal: Failed authentication attempts not logged
+    evidence_pattern: (?i)(login|auth).*fail(?!.*log)
+    cwe: CWE-778
+    explanation: |
+      Failed authentication attempts are key indicators of brute force
+      attacks and credential stuffing. Without logging these events,
+      attacks cannot be detected or investigated.
+    remediation: |
+      Log all authentication events:
+      - Log both successful and failed authentication attempts
+      - Include username attempted (not password)
+      - Include source IP and user agent
+      - Configure alerts for repeated failures
+  low:
+  - id: LOGGING-LOW-001
+    signal: Log format inconsistent across systems
+    evidence_indicators:
+    - Different log formats in different applications
+    - No standardized log schema
+    - Difficulty parsing logs from multiple sources
+    remediation: |
+      Standardize log formats across all systems using a common schema
+      (e.g., Elastic Common Schema, OCSF) to improve analysis and
+      correlation capabilities.
+  - id: LOGGING-LOW-002
+    signal: No logging health monitoring
+    evidence_indicators:
+    - Logging failures not detected
+    - No alerts when log shipping stops
+    - Log gaps go unnoticed
+    remediation: |
+      Implement logging health monitoring including heartbeat checks,
+      log volume monitoring, and alerts for logging pipeline failures.
+  positive:
+  - id: LOGGING-POS-001
+    signal: Comprehensive audit logging implemented
+    evidence_indicators:
+    - All data access operations logged
+    - Logs include user, timestamp, operation, and data scope
+    - Authentication and authorization events logged
+  - id: LOGGING-POS-002
+    signal: Log immutability controls in place
+    evidence_indicators:
+    - Logs forwarded to secure, separate system immediately
+    - Write-once storage or append-only configuration
+    - Role separation prevents log modification
+  - id: LOGGING-POS-003
+    signal: Real-time alerting on suspicious access
+    evidence_indicators:
+    - Anomaly detection configured for data access
+    - Alerts for bulk data queries
+    - SIEM correlation rules active
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Discover Logging Configuration
+    description: |
+      Identify all logging configurations across application code,
+      infrastructure, and databases.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find logging configuration files
+      command: find . -type f \( -name '*log*.yaml' -o -name '*log*.yml' -o -name '*log*.json' -o -name
+        '*log*.conf' -o -name '*log*.xml' \) 2>/dev/null | head -30
+    - purpose: Search for logging framework usage
+      command: grep -r -n -i 'logger\|logging\|log4j\|winston\|bunyan\|serilog' --include='*.py' --include='*.js'
+        --include='*.java' --include='*.cs' . 2>/dev/null | head -30
+    expected_findings:
+    - Logging configuration files and settings
+    - Logging frameworks in use
+    - Log destinations and levels
+  - id: '2'
+    name: Assess Audit Trail Coverage
+    description: |
+      Evaluate whether data access operations are comprehensively
+      logged with sufficient detail.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find data access code patterns
+      command: grep -r -n -i 'select.*from\|find\|get.*by\|read.*record' --include='*.py' --include='*.js'
+        --include='*.java' . 2>/dev/null | head -30
+    - purpose: Check for logging around data access
+      command: grep -r -n -B3 -A3 'log.*access\|audit.*log\|log.*read\|log.*query' --include='*.py' --include='*.js'
+        --include='*.java' . 2>/dev/null | head -30
+    expected_findings:
+    - Data access patterns in code
+    - Logging coverage for data operations
+    - Log detail level assessment
+  - id: '3'
+    name: Verify Log Immutability
+    description: |
+      Assess controls protecting audit logs from modification or
+      deletion.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check for log forwarding configuration
+      command: grep -r -n -i 'syslog\|fluent\|filebeat\|logstash\|forward.*log' --include='*.yaml' --include='*.yml'
+        --include='*.conf' . 2>/dev/null | head -20
+    - purpose: Check for immutable storage configuration
+      command: grep -r -n -i 'immutable\|object.*lock\|worm\|append.*only' --include='*.tf' --include='*.yaml'
+        --include='*.json' . 2>/dev/null | head -20
+    expected_findings:
+    - Log forwarding to centralized system
+    - Immutability controls
+    - Access controls on log storage
+  - id: '4'
+    name: Review Retention Configuration
+    description: |
+      Verify log retention periods meet regulatory and operational
+      requirements.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find retention settings
+      command: grep -r -n -i 'retention\|expire\|rotate\|ttl\|lifecycle' --include='*.yaml' --include='*.yml'
+        --include='*.json' --include='*.conf' . 2>/dev/null | grep -i log | head -20
+    expected_findings:
+    - Log retention periods
+    - Rotation and archival settings
+    - Lifecycle policies
+  - id: '5'
+    name: Evaluate Alerting Capabilities
+    description: |
+      Assess real-time monitoring and alerting for suspicious data
+      access patterns.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find alerting configurations
+      command: grep -r -n -i 'alert\|threshold\|anomaly\|rule.*log' --include='*.yaml' --include='*.yml'
+        --include='*.json' . 2>/dev/null | head -20
+    expected_findings:
+    - Alert rules for data access
+    - Thresholds configured
+    - Notification channels
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Audit Trail Coverage
+    - Log Immutability Assessment
+    - Retention Policy Review
+    - Alerting Capability Evaluation
+    - Forensic Capability Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Configuration verified, test queries executed, coverage confirmed
+    medium: Configuration reviewed but operational verification limited
+    low: Assessment based on documentation or partial evidence
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: nist-800-53-au
+      priority: required
+    - source_id: nist-800-92
+      priority: required
+    - source_id: iso27001-a815
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Comprehensive logging review requires thorough analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: logging-001
+  item: Sensitive data access is logged comprehensively
+  level: CRITICAL
+  verification: |
+    grep -r -i 'log.*access\|audit.*log\|logger.*data' --include='*.py' --include='*.js' --include='*.java' . 2>/dev/null | wc -l | xargs -I {} sh -c '[ {} -gt 0 ] && echo PASS || echo FAIL'
+  expected: PASS
+- id: logging-002
+  item: Audit logs forwarded to centralized system
+  level: CRITICAL
+  verification: |
+    grep -r -i 'syslog\|fluent\|filebeat\|logstash\|cloudwatch\|stackdriver' --include='*.yaml' --include='*.yml' --include='*.conf' . 2>/dev/null | wc -l | xargs -I {} sh -c '[ {} -gt 0 ] && echo PASS || echo FAIL'
+  expected: PASS
+- id: logging-003
+  item: Log immutability controls configured
+  level: BLOCKING
+  verification: manual
+  verification_notes: Reviewer should verify logs cannot be modified by application users and are forwarded
+    to secure storage
+  expected: Confirmed by reviewer
+- id: logging-004
+  item: Log retention meets compliance requirements
+  level: BLOCKING
+  verification: manual
+  verification_notes: 'Reviewer should verify retention period meets applicable regulatory requirements
+    (PCI-DSS: 1yr, SOX: 7yr, etc.)'
+  expected: Confirmed by reviewer
+- id: logging-005
+  item: Alerting configured for suspicious access
+  level: WARNING
+  verification: |
+    grep -r -i 'alert\|threshold\|anomaly' --include='*.yaml' --include='*.yml' . 2>/dev/null | grep -i 'log\|access\|auth' | wc -l | xargs -I {} sh -c '[ {} -gt 0 ] && echo PASS || echo FAIL'
+  expected: PASS
+- id: logging-006
+  item: Time synchronization configured
+  level: WARNING
+  verification: |
+    grep -r -i 'ntp\|time.*sync\|chronyd' --include='*.yaml' --include='*.yml' --include='*.conf' . 2>/dev/null | wc -l | xargs -I {} sh -c '[ {} -gt 0 ] && echo PASS || echo FAIL'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: NIST SP 800-53
+    controls:
+    - AU-2
+    - AU-3
+    - AU-4
+    - AU-5
+    - AU-6
+    - AU-9
+    - AU-11
+    - AU-12
+  - framework: ISO 27001:2022
+    controls:
+    - A.8.15
+    - A.8.16
+    - A.5.28
+  - framework: GDPR
+    controls:
+    - Article 30
+    - Article 33
+  - framework: PCI-DSS v4.0
+    controls:
+    - '10.1'
+    - '10.2'
+    - '10.3'
+    - '10.4'
+    - '10.5'
+    - '10.6'
+    - '10.7'
+  - framework: SOC 2
+    controls:
+    - CC7.1
+    - CC7.2
+    - CC7.3
+  - framework: HIPAA
+    controls:
+    - 164.312(b)
+relationships:
+  commonly_combined:
+  - security-trust.data-protection.data-export-security
+  - security-trust.application-security.security-monitoring
+  - security-trust.authentication.authentication-logging

@@ -1,0 +1,347 @@
+audit:
+  id: observability-instrumentation.debug-troubleshooting.thread-dump-capability
+  name: Thread Dump Capability Audit
+  version: 1.0.0
+  last_updated: '2025-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: debug-troubleshooting
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Assesses the ability to capture thread dumps from production
+    applications for concurrency debugging. Evaluates thread dump
+    trigger mechanisms, analysis capabilities, and ability to
+    diagnose deadlocks, thread starvation, and blocking operations.
+  why_it_matters: |
+    Lack of thread dump capability causes:
+    - Inability to diagnose application hangs
+    - Undetected deadlocks causing service unavailability
+    - Thread pool exhaustion without root cause
+    - Extended incidents from concurrency issues
+    - Guesswork in fixing blocking operations
+    - Repeated issues from unresolved thread contention
+  when_to_run:
+  - After hang or deadlock incidents
+  - During observability capability reviews
+  - When introducing concurrent processing
+  - After platform migrations
+prerequisites:
+  required_artifacts:
+  - type: application_access
+    description: Access to running application instances
+  optional_artifacts:
+  - type: thread_dump_procedures
+    description: Documented thread dump procedures
+  - type: analysis_tools
+    description: Thread dump analysis tools
+  access_requirements:
+  - Application runtime access
+  - JMX or management endpoint access
+  - kubectl exec access for Kubernetes
+discovery:
+  code_patterns:
+  - pattern: (threaddump|thread-dump|stacktrace)
+    type: regex
+    scope: config
+    purpose: Find thread dump configuration
+  - pattern: ThreadMXBean|getAllStackTraces
+    type: regex
+    scope: source
+    purpose: Find thread dump code
+  file_patterns:
+  - glob: '**/actuator/**'
+    purpose: Spring Boot actuator endpoints
+knowledge_sources:
+  guides:
+  - id: java-thread-dumps
+    name: Analyzing Java Thread Dumps
+    url: https://docs.oracle.com/javase/8/docs/technotes/guides/troubleshoot/tooldescr019.html
+    offline_cache: true
+    priority: required
+  - id: fastthread
+    name: fastThread - Online Thread Dump Analyzer
+    url: https://fastthread.io/
+    offline_cache: false
+    priority: recommended
+  learning_resources:
+  - id: java-concurrency
+    title: Java Concurrency in Practice
+    type: book
+    reference: Brian Goetz, ISBN 978-0321349606
+tooling:
+  infrastructure_tools:
+  - tool: jstack
+    purpose: Generate JVM thread dumps
+    command: jstack $PID > thread_dump.txt
+  - tool: jcmd
+    purpose: JVM diagnostic commands
+    command: jcmd $PID Thread.print
+  - tool: kill -3
+    purpose: Signal-based thread dump
+    command: kill -3 $PID
+  - tool: curl
+    purpose: Spring Actuator thread dump
+    command: curl http://localhost:8080/actuator/threaddump
+  scripts:
+  - id: thread-dump-capability-check
+    language: bash
+    purpose: Check thread dump capability
+    source: inline
+    code: |
+      #!/bin/bash
+      # Check thread dump capability
+
+      echo "=== Thread Dump Capability Check ==="
+
+      # Check Spring Actuator endpoint
+      echo ""
+      echo "Checking Spring Actuator thread dump:"
+      status=$(curl -s -o /dev/null -w "%{http_code}" "$APP_URL/actuator/threaddump" 2>/dev/null || echo "N/A")
+      echo "  /actuator/threaddump: $status"
+
+      # Check Go pprof goroutine
+      echo ""
+      echo "Checking Go goroutine dump:"
+      status=$(curl -s -o /dev/null -w "%{http_code}" "$APP_URL/debug/pprof/goroutine" 2>/dev/null || echo "N/A")
+      echo "  /debug/pprof/goroutine: $status"
+
+      # Check jstack availability in containers
+      echo ""
+      echo "Checking jstack availability:"
+      if kubectl exec $POD -- which jstack > /dev/null 2>&1; then
+        echo "  jstack: Available"
+      else
+        echo "  jstack: Not available in container"
+      fi
+signals:
+  critical:
+  - id: THREADDUMP-CRIT-001
+    signal: No thread dump capability in production
+    evidence_indicators:
+    - No management endpoints for thread dump
+    - jstack not available in container
+    - No signal handler for SIGQUIT
+    explanation: |
+      Without thread dump capability, diagnosing hangs, deadlocks,
+      and thread contention requires code changes or container
+      replacement, losing the evidence of the issue.
+    remediation: |
+      Enable thread dump capability:
+      - JVM: Ensure jstack/jcmd available or enable JMX
+      - Spring Boot: Enable /actuator/threaddump
+      - Go: Enable /debug/pprof/goroutine
+      - Ensure kubectl exec access
+  - id: THREADDUMP-CRIT-002
+    signal: Cannot capture thread dump during hang
+    evidence_indicators:
+    - Thread dump times out during high load
+    - Management port unresponsive during issues
+    explanation: |
+      If thread dump capability fails when most needed (during
+      hangs), it provides no value for troubleshooting.
+    remediation: |
+      Test thread dump under load conditions.
+      Use signal-based dump (kill -3) as backup.
+      Ensure separate management port not blocked.
+  high:
+  - id: THREADDUMP-HIGH-001
+    signal: No deadlock detection capability
+    explanation: |
+      Deadlocks cause permanent hangs. Without detection,
+      identifying locked threads requires manual analysis.
+    remediation: |
+      Use tools that detect deadlocks automatically.
+      JVM: jstack -l shows lock information.
+      Configure deadlock detection in monitoring.
+  - id: THREADDUMP-HIGH-002
+    signal: Thread pool metrics not visible
+    explanation: |
+      Thread pool exhaustion is common. Without metrics,
+      saturation is hard to detect before it impacts service.
+    remediation: |
+      Export thread pool metrics:
+      - Active threads
+      - Queue depth
+      - Rejected tasks
+  medium:
+  - id: THREADDUMP-MED-001
+    signal: No thread dump analysis tools
+    remediation: |
+      Provide access to thread dump analyzers:
+      - fastThread.io
+      - TDA (Thread Dump Analyzer)
+      - IntelliJ thread dump viewer
+  - id: THREADDUMP-MED-002
+    signal: Thread dump procedures not documented
+    remediation: |
+      Document thread dump capture for each service type
+      including analysis workflow.
+  - id: THREADDUMP-MED-003
+    signal: No historical thread dump correlation
+    remediation: |
+      Store thread dumps with timestamps for comparison
+      and pattern analysis over time.
+  low:
+  - id: THREADDUMP-LOW-001
+    signal: Thread names not meaningful
+    remediation: |
+      Use descriptive thread names to aid dump analysis.
+      Include context like operation or request ID.
+  positive:
+  - id: THREADDUMP-POS-001
+    signal: Multiple thread dump methods available
+  - id: THREADDUMP-POS-002
+    signal: Automated deadlock detection configured
+  - id: THREADDUMP-POS-003
+    signal: Thread pool metrics exported to monitoring
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Thread Dump Endpoint Check
+    description: |
+      Verify thread dump endpoints are available.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check Spring Actuator
+      command: curl -s $APP_URL/actuator/threaddump | head -50
+    - purpose: Check Go pprof
+      command: curl -s $APP_URL/debug/pprof/goroutine?debug=1 | head -50
+    expected_findings:
+    - Endpoint availability
+    - Response content quality
+  - id: '2'
+    name: Command-line Tool Availability
+    description: |
+      Verify jstack, jcmd, or equivalent tools are accessible.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check jstack in container
+      command: kubectl exec $POD -- jstack -l 1 | head -100
+    - purpose: Check jcmd in container
+      command: kubectl exec $POD -- jcmd 1 Thread.print | head -100
+    expected_findings:
+    - Tool availability
+    - Permission requirements
+  - id: '3'
+    name: Thread Pool Metrics Review
+    description: |
+      Verify thread pool metrics are exported to monitoring.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check thread metrics
+      command: curl -s $APP_URL/actuator/metrics | grep thread
+    expected_findings:
+    - Thread pool metrics availability
+    - Metric coverage
+  - id: '4'
+    name: Analysis Capability Assessment
+    description: |
+      Verify team can analyze captured thread dumps.
+    duration_estimate: 20 min
+    questions:
+    - What analysis tools are available?
+    - Can deadlocks be automatically detected?
+    - Are procedures documented?
+    expected_findings:
+    - Analysis capability
+    - Documentation status
+output:
+  deliverables:
+  - type: thread_dump_capability_assessment
+    format: structured
+    description: Analysis of thread dump capabilities
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Capability Matrix
+    - Tool Availability
+    - Recommendations
+  confidence_guidance:
+    high: Direct capability testing
+    medium: Configuration analysis
+    low: Documentation review
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: java-thread-dumps
+      priority: required
+  degradation:
+  - feature: Live thread dump testing
+    impact: Cannot verify actual capability
+    mitigation: Review configuration and documentation
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires runtime testing
+    full:
+      included: true
+      priority: 14
+    production:
+      included: true
+      priority: 12
+closeout_checklist:
+- id: threaddump-001
+  item: Thread dump endpoint or tool available
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify ability to capture thread dump
+  expected: Confirmed by reviewer
+- id: threaddump-002
+  item: Thread dump works under load
+  level: CRITICAL
+  verification: manual
+  verification_notes: Test during elevated load conditions
+  expected: Confirmed by reviewer
+- id: threaddump-003
+  item: Thread pool metrics exported
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify thread metrics in monitoring
+  expected: Confirmed by reviewer
+- id: threaddump-004
+  item: Thread dump analysis tools available
+  level: WARNING
+  verification: manual
+  verification_notes: Verify access to analyzers
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - microservices
+    - monolith
+    platforms:
+    - jvm
+    - go
+    - kubernetes
+  compliance_frameworks:
+  - framework: Internal Standards
+    controls:
+    - Concurrency Debugging Capability
+relationships:
+  commonly_combined:
+  - observability-instrumentation.debug-troubleshooting.heap-dump-capability
+  - observability-instrumentation.debug-troubleshooting.profiling-capability
+  - observability-instrumentation.metrics.thread-pool-metrics

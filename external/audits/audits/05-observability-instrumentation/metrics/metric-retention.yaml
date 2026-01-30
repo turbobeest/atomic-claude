@@ -1,0 +1,352 @@
+audit:
+  id: observability-instrumentation.metrics.metric-retention
+  name: Metric Retention Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: metrics
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates metric retention policies across the monitoring infrastructure
+    to ensure data is available for required time ranges while managing storage
+    costs. This audit examines retention configuration, downsampling strategies,
+    long-term storage setup, and alignment between retention policies and
+    business requirements such as compliance, capacity planning, and trend
+    analysis needs.
+  why_it_matters: |
+    Incorrect retention policies lead to either data loss for required analysis
+    periods or excessive storage costs. Too short retention prevents year-over-year
+    comparisons, capacity planning, and compliance requirements. Too long retention
+    without downsampling creates unsustainable storage growth. Organizations often
+    discover retention gaps only when historical data is needed and unavailable.
+  when_to_run:
+  - Metrics platform setup or migration
+  - Cost optimization review
+  - Compliance audit preparation
+  - Capacity planning initiatives
+prerequisites:
+  required_artifacts:
+  - type: metrics-infrastructure
+    description: Access to metrics platform configuration
+  - type: retention-requirements
+    description: Documented data retention requirements
+  access_requirements:
+  - Admin access to metrics platform configuration
+  - Storage infrastructure visibility
+  - Compliance/legal requirements documentation
+discovery:
+  code_patterns:
+  - pattern: retention|storage\.tsdb\.retention
+    type: keyword
+    scope: config
+    purpose: Find Prometheus retention configuration
+  - pattern: downsampling|compaction
+    type: keyword
+    scope: config
+    purpose: Find downsampling configuration
+  file_patterns:
+  - glob: '**/prometheus.yml'
+    purpose: Prometheus configuration
+  - glob: '**/thanos-*.yaml'
+    purpose: Thanos long-term storage config
+  - glob: '**/cortex-*.yaml'
+    purpose: Cortex/Mimir configuration
+  metrics_queries:
+  - system: Prometheus
+    query: prometheus_tsdb_retention_limit_bytes
+    purpose: Check configured retention limit
+    threshold: Appropriate for environment
+  - system: Prometheus
+    query: prometheus_tsdb_storage_blocks_bytes
+    purpose: Current storage usage
+    threshold: Within retention budget
+knowledge_sources:
+  specifications:
+  - id: prometheus-storage
+    name: Prometheus Storage Configuration
+    url: https://prometheus.io/docs/prometheus/latest/storage/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: thanos-retention
+    name: Thanos Long-term Storage
+    url: https://thanos.io/tip/components/compact.md/
+    offline_cache: true
+  - id: retention-strategies
+    name: Metrics Retention Strategies
+    url: https://grafana.com/docs/mimir/latest/configure/configure-metrics-storage-retention/
+    offline_cache: true
+  learning_resources:
+  - id: observability-cost
+    title: Managing Observability Costs
+    type: article
+    reference: Various cloud provider documentation
+tooling:
+  infrastructure_tools:
+  - tool: promtool
+    purpose: Check Prometheus configuration
+    command: promtool check config prometheus.yml
+  - tool: kubectl
+    purpose: Check StatefulSet storage
+    command: kubectl get pvc -l app=prometheus
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      # Storage growth rate
+      rate(prometheus_tsdb_storage_blocks_bytes[24h])
+    purpose: Track storage growth
+  - system: Prometheus
+    query: |
+      # Oldest sample age
+      time() - prometheus_tsdb_lowest_timestamp_seconds
+    purpose: Check actual retention
+  - system: Prometheus
+    query: |
+      # Compaction status
+      prometheus_tsdb_compactions_total
+    purpose: Verify compaction is running
+  scripts:
+  - id: retention-calculator
+    language: python
+    purpose: Calculate storage requirements for retention
+    source: inline
+    code: |
+      def calculate_retention_storage(
+          series_count,
+          scrape_interval_seconds,
+          retention_days,
+          bytes_per_sample=2
+      ):
+          """
+          Estimate storage requirements for given retention
+          """
+          samples_per_day = (86400 / scrape_interval_seconds) * series_count
+          total_samples = samples_per_day * retention_days
+          raw_bytes = total_samples * bytes_per_sample
+
+          # Compression typically achieves 1-2 bytes per sample
+          compressed_bytes = raw_bytes * 0.75
+
+          return {
+              'daily_samples': samples_per_day,
+              'total_samples': total_samples,
+              'estimated_bytes': compressed_bytes,
+              'estimated_gb': compressed_bytes / (1024**3)
+          }
+signals:
+  critical:
+  - id: RETAIN-CRIT-001
+    signal: Retention shorter than compliance requirement
+    evidence_pattern: Retention period < regulatory minimum
+    explanation: |
+      Regulatory frameworks often require specific data retention periods.
+      Metrics may be needed for audit evidence. Deletion before required
+      period creates compliance violations.
+    remediation: Extend retention or implement compliant long-term storage
+  - id: RETAIN-CRIT-002
+    signal: No long-term storage for critical metrics
+    evidence_pattern: Prometheus-only setup without object storage
+    explanation: |
+      Relying solely on Prometheus for long-term storage is risky due to
+      limited retention capabilities and lack of durability. Critical metrics
+      need durable long-term storage.
+    remediation: Implement Thanos, Cortex, or managed long-term storage
+  high:
+  - id: RETAIN-HIGH-001
+    signal: Storage approaching capacity limits
+    evidence_pattern: Storage > 80% of allocation
+    explanation: |
+      Approaching storage limits will trigger data eviction or system
+      failures. Proactive capacity management is essential.
+    remediation: Increase storage allocation or implement aggressive downsampling
+  - id: RETAIN-HIGH-002
+    signal: No downsampling for long-term data
+    evidence_pattern: Full resolution retained for > 30 days
+    explanation: |
+      Storing full-resolution data long-term is expensive and usually
+      unnecessary. Older data typically only needs hourly or daily resolution.
+    remediation: Implement downsampling rules for data older than 2 weeks
+  medium:
+  - id: RETAIN-MED-001
+    signal: Inconsistent retention across metric types
+    evidence_pattern: Same retention for SLI metrics and debug metrics
+    remediation: Implement tiered retention based on metric importance
+  - id: RETAIN-MED-002
+    signal: No retention documentation
+    evidence_pattern: Retention periods not documented
+    remediation: Document retention policies and requirements mapping
+  low:
+  - id: RETAIN-LOW-001
+    signal: Retention exceeds requirements without purpose
+    remediation: Review if long retention is necessary or just default
+  positive:
+  - id: RETAIN-POS-001
+    signal: Tiered retention matching data importance
+  - id: RETAIN-POS-002
+    signal: Long-term storage with appropriate downsampling
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Document retention requirements
+    description: |
+      Gather all retention requirements from compliance, business, and
+      operational perspectives.
+    duration_estimate: 30 min
+    questions:
+    - What are regulatory retention requirements?
+    - How far back do capacity planning analyses need to look?
+    - What incident investigation windows are required?
+    expected_findings:
+    - Retention requirements inventory
+    - Compliance constraints
+  - id: '2'
+    name: Audit current retention configuration
+    description: |
+      Document the current retention settings across all metrics
+      storage systems.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check Prometheus retention
+      command: grep -i retention /etc/prometheus/prometheus.yml
+    - purpose: Check actual data age
+      command: curl -s 'http://prometheus:9090/api/v1/query?query=prometheus_tsdb_lowest_timestamp_seconds'
+        | jq '.data.result[0].value[1]'
+    expected_findings:
+    - Current retention settings
+    - Gap between config and actual
+  - id: '3'
+    name: Analyze storage usage
+    description: |
+      Calculate current storage consumption and growth rate to
+      project future needs.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Current storage usage
+      command: curl -s 'http://prometheus:9090/api/v1/query?query=prometheus_tsdb_storage_blocks_bytes'
+        | jq '.data.result[0].value[1]'
+    - purpose: Storage growth rate
+      command: curl -s 'http://prometheus:9090/api/v1/query?query=rate(prometheus_tsdb_storage_blocks_bytes[7d])'
+        | jq '.data.result[0].value[1]'
+    expected_findings:
+    - Storage consumption
+    - Growth projections
+  - id: '4'
+    name: Review downsampling configuration
+    description: |
+      Check if downsampling is configured for long-term storage
+      efficiency.
+    duration_estimate: 30 min
+    questions:
+    - Is downsampling configured for older data?
+    - What resolution is maintained at each time tier?
+    - Are recording rules used for long-term aggregates?
+    expected_findings:
+    - Downsampling status
+    - Resolution tiering
+  - id: '5'
+    name: Verify long-term storage durability
+    description: |
+      Assess the durability and reliability of long-term metric
+      storage infrastructure.
+    duration_estimate: 30 min
+    questions:
+    - Is data replicated across availability zones?
+    - Is backup/recovery tested?
+    - What is the RTO/RPO for metrics data?
+    expected_findings:
+    - Durability assessment
+    - Recovery capabilities
+output:
+  deliverables:
+  - type: retention_analysis
+    format: structured
+    description: Current vs required retention comparison
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Retention Gap Analysis
+    - Storage Capacity Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Direct configuration and storage verification
+    medium: Configuration review without storage validation
+    low: Documentation review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: prometheus-storage
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires infrastructure access and analysis
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: retention-001
+  item: Retention meets compliance requirements
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify retention >= regulatory minimum
+  expected: Confirmed by reviewer
+- id: retention-002
+  item: Long-term storage configured for critical metrics
+  level: CRITICAL
+  verification: manual
+  verification_notes: Confirm durable storage beyond Prometheus
+  expected: Confirmed by reviewer
+- id: retention-003
+  item: Storage capacity sufficient for retention period
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify storage allocation matches retention needs
+  expected: Confirmed by reviewer
+- id: retention-004
+  item: Downsampling configured for cost efficiency
+  level: WARNING
+  verification: manual
+  verification_notes: Check downsampling rules exist
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+  - framework: GDPR
+    controls:
+    - Data Retention
+relationships:
+  commonly_combined:
+  - observability-instrumentation.metrics.metric-cardinality
+  - observability-instrumentation.observability-operations.cost-optimization

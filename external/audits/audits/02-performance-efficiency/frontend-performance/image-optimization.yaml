@@ -1,0 +1,346 @@
+# ============================================================
+# IMAGE OPTIMIZATION AUDIT
+# ============================================================
+# Evaluates image delivery including formats, compression,
+# sizing, and loading strategies.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.frontend-performance.image-optimization"
+  name: "Image Optimization Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "frontend-performance"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes image optimization including format selection (WebP, AVIF),
+    compression levels, responsive images (srcset), lazy loading, and
+    dimension specifications. Examines both static images and dynamically
+    loaded images.
+
+  why_it_matters: |
+    Images typically account for 50% or more of page weight. Unoptimized
+    images significantly impact LCP and page load time. Proper optimization
+    can reduce image payload by 50-80% without visible quality loss.
+    Missing dimensions cause layout shifts (CLS).
+
+  when_to_run:
+    - "After adding new images"
+    - "When page weight exceeds budget"
+    - "During Core Web Vitals optimization"
+    - "Before major releases"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "HTML/templates and image assets"
+
+  access_requirements:
+    - "Read access to source code and assets"
+
+discovery:
+  code_patterns:
+    - pattern: "<img(?!.*loading=\"lazy\")"
+      type: "regex"
+      scope: "source"
+      purpose: "Find images without lazy loading"
+
+    - pattern: "<img(?!.*(width|height))"
+      type: "regex"
+      scope: "source"
+      purpose: "Find images without dimensions (CLS risk)"
+
+    - pattern: "<img(?!.*srcset)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find images without responsive variants"
+
+    - pattern: "\\.png|\\.jpg|\\.gif"
+      type: "regex"
+      scope: "source"
+      purpose: "Find legacy format usage"
+
+  file_patterns:
+    - glob: "**/*.html"
+      purpose: "HTML with img tags"
+    - glob: "**/*.tsx"
+      purpose: "React components with images"
+    - glob: "**/*.png"
+      purpose: "PNG images"
+    - glob: "**/*.jpg"
+      purpose: "JPEG images"
+    - glob: "**/*.webp"
+      purpose: "WebP images"
+    - glob: "**/*.avif"
+      purpose: "AVIF images"
+
+knowledge_sources:
+  guides:
+    - id: "image-optimization"
+      name: "Image Optimization"
+      url: "https://web.dev/fast/#optimize-your-images"
+      offline_cache: true
+
+    - id: "responsive-images"
+      name: "Responsive Images"
+      url: "https://web.dev/responsive-images/"
+      offline_cache: true
+
+    - id: "avif-webp"
+      name: "Using Modern Image Formats"
+      url: "https://web.dev/uses-webp-images/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "Lighthouse"
+      purpose: "Image optimization audits"
+      offline_capable: false
+
+    - tool: "imagemin"
+      purpose: "Image compression"
+      offline_capable: true
+
+    - tool: "sharp"
+      purpose: "Image processing and format conversion"
+      offline_capable: true
+
+  scripts:
+    - id: "find-large-images"
+      language: "bash"
+      purpose: "Find large unoptimized images"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find images larger than 100KB
+        find . -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" \) -size +100k
+        # Check for WebP alternatives
+        find . -type f -name "*.webp" | wc -l
+
+signals:
+  critical:
+    - id: "IMG-CRIT-001"
+      signal: "Large uncompressed images (>500KB)"
+      evidence_threshold: "Image file > 500KB"
+      explanation: |
+        Images over 500KB significantly slow page load, especially on mobile.
+        Most images can be compressed to under 200KB without visible quality loss.
+      remediation: "Compress images, use WebP/AVIF formats, resize to needed dimensions"
+
+    - id: "IMG-CRIT-002"
+      signal: "LCP image not optimized"
+      evidence_pattern: "<img.*hero|banner|main(?!.*preload|fetchpriority)"
+      explanation: |
+        The Largest Contentful Paint element is often an image. If this image
+        is not optimized and prioritized, LCP suffers significantly.
+      remediation: "Preload LCP image, use fetchpriority='high', optimize aggressively"
+
+  high:
+    - id: "IMG-HIGH-001"
+      signal: "Images without width and height attributes"
+      evidence_pattern: "<img(?!.*width.*height|.*height.*width)"
+      explanation: |
+        Images without dimensions cause layout shifts as the browser cannot
+        reserve space until the image loads. This directly impacts CLS.
+      remediation: "Add width and height attributes matching aspect ratio"
+
+    - id: "IMG-HIGH-002"
+      signal: "No lazy loading for below-fold images"
+      evidence_pattern: "<img(?!.*loading=\"lazy\")"
+      explanation: |
+        Loading all images immediately wastes bandwidth and delays more
+        important resources. Below-fold images should load lazily.
+      remediation: "Add loading='lazy' to images below the fold"
+
+    - id: "IMG-HIGH-003"
+      signal: "No responsive images (srcset)"
+      evidence_pattern: "<img(?!.*srcset)"
+      explanation: |
+        Serving the same image to all devices wastes bandwidth on mobile
+        and may look poor on high-DPI displays.
+      remediation: "Implement srcset with appropriate image sizes for different viewports"
+
+  medium:
+    - id: "IMG-MED-001"
+      signal: "Using PNG for photographs"
+      evidence_pattern: "photo.*\\.png|image.*\\.png"
+      remediation: "Use JPEG/WebP for photographs, PNG for graphics with transparency"
+
+    - id: "IMG-MED-002"
+      signal: "No modern format (WebP/AVIF) support"
+      evidence_pattern: "(?!.*\\.webp|\\.avif)"
+      remediation: "Serve WebP with JPEG/PNG fallback using <picture> element"
+
+  low:
+    - id: "IMG-LOW-001"
+      signal: "GIF used for animation"
+      evidence_pattern: "\\.gif"
+      remediation: "Use video (MP4/WebM) for animations - much smaller file size"
+
+  positive:
+    - id: "IMG-POS-001"
+      signal: "Modern image formats used"
+      evidence_pattern: "\\.webp|\\.avif"
+
+    - id: "IMG-POS-002"
+      signal: "Responsive images implemented"
+      evidence_pattern: "srcset=|<picture>"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory images"
+      description: |
+        Find all images and their sizes in the codebase/deployment.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find all images"
+          command: "find . -type f \\( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.webp' -o -name '*.avif' -o -name '*.gif' \\)"
+        - purpose: "Find large images"
+          command: "find . -type f \\( -name '*.png' -o -name '*.jpg' \\) -size +100k -exec ls -lh {} \\;"
+      expected_findings:
+        - "Image inventory with sizes"
+        - "Large image candidates"
+
+    - id: "2"
+      name: "Check img tag attributes"
+      description: |
+        Verify all img tags have proper attributes.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find images without dimensions"
+          command: "grep -rn '<img' --include='*.html' --include='*.tsx' . | grep -v 'width\\|height'"
+        - purpose: "Find images without lazy loading"
+          command: "grep -rn '<img' --include='*.html' --include='*.tsx' . | grep -v 'loading'"
+      expected_findings:
+        - "Images missing dimensions"
+        - "Images missing lazy loading"
+
+    - id: "3"
+      name: "Evaluate format usage"
+      description: |
+        Check if modern formats (WebP, AVIF) are being used.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Count images by format"
+          command: "find . -type f -name '*.webp' | wc -l && find . -type f -name '*.png' | wc -l && find . -type f -name '*.jpg' | wc -l"
+        - purpose: "Find picture elements"
+          command: "grep -rn '<picture>' --include='*.html' --include='*.tsx' ."
+      expected_findings:
+        - "Format distribution"
+        - "Modern format adoption"
+
+    - id: "4"
+      name: "Check responsive images"
+      description: |
+        Verify srcset and sizes attributes are used appropriately.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find srcset usage"
+          command: "grep -rn 'srcset' --include='*.html' --include='*.tsx' ."
+      expected_findings:
+        - "Responsive image implementation"
+        - "Coverage assessment"
+
+    - id: "5"
+      name: "Identify LCP image"
+      description: |
+        Find the likely LCP image and verify it's optimized.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find hero/banner images"
+          command: "grep -rn 'hero\\|banner\\|main.*img' --include='*.html' --include='*.tsx' ."
+      expected_findings:
+        - "LCP image candidates"
+        - "LCP optimization status"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Image Inventory"
+        - "Format Analysis"
+        - "Optimization Recommendations"
+
+  confidence_guidance:
+    high: "File sizes and code patterns clearly show issues"
+    medium: "Patterns suggest optimization opportunity"
+    low: "Requires visual/network testing to confirm"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "image-optimization"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "image-001"
+    item: "No images over 200KB"
+    level: "CRITICAL"
+    verification: "find . -type f \\( -name '*.png' -o -name '*.jpg' \\) -size +200k | wc -l"
+    expected: "0"
+
+  - id: "image-002"
+    item: "All images have width and height"
+    level: "BLOCKING"
+    verification: "grep -rn '<img' --include='*.html' --include='*.tsx' . | grep -cv 'width.*height'"
+    expected: "0"
+
+  - id: "image-003"
+    item: "Below-fold images use lazy loading"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify lazy loading on images below initial viewport"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["webapp", "marketing-site", "ecommerce"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.frontend-performance.core-web-vitals"
+    - "performance-efficiency.frontend-performance.critical-rendering-path"

@@ -1,0 +1,298 @@
+# ============================================================
+# AUDIT: Session Externalization Audit
+# Category: Scalability & Capacity > Horizontal Scaling
+# ============================================================
+
+audit:
+  id: "scalability-capacity.horizontal-scaling.session-externalization"
+  name: "Session Externalization Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "horizontal-scaling"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates whether user sessions are properly externalized to enable
+    horizontal scaling without sticky sessions. Examines session storage
+    configuration, session data serialization, session timeout handling,
+    and failover behavior when sessions are stored externally.
+
+  why_it_matters: |
+    In-memory sessions force load balancers into sticky session mode, reducing
+    load distribution efficiency and creating single points of failure. When
+    an instance fails, all sessions on that instance are lost. Externalized
+    sessions enable true stateless scaling and seamless failover.
+
+  when_to_run:
+    - "Before enabling auto-scaling"
+    - "When configuring load balancers"
+    - "After session-related outages"
+    - "During horizontal scaling architecture review"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code"
+    - type: "configuration"
+      description: "Session and cache configuration files"
+
+  access_requirements:
+    - "Source code repository access"
+    - "Configuration file access"
+    - "Session store access for verification"
+
+discovery:
+  code_patterns:
+    - pattern: "(HttpSession|session\\.|getSession\\()"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect session usage in application"
+
+    - pattern: "spring\\.session\\.|@EnableRedisHttpSession"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect Spring Session configuration"
+
+    - pattern: "(SESSION_ENGINE|session\\.serialize|session_store)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect session store configuration"
+
+    - pattern: "(Serializable|serialVersionUID|@Cacheable)"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect serialization support for session objects"
+
+  file_patterns:
+    - glob: "**/application*.yml"
+      purpose: "Spring configuration files"
+    - glob: "**/application*.properties"
+      purpose: "Spring properties files"
+    - glob: "**/settings.py"
+      purpose: "Django settings"
+    - glob: "**/config/*.json"
+      purpose: "Configuration files"
+
+knowledge_sources:
+  guides:
+    - id: "spring-session"
+      name: "Spring Session Reference"
+      url: "https://docs.spring.io/spring-session/reference/"
+      offline_cache: true
+
+    - id: "redis-session"
+      name: "Redis Session Management Best Practices"
+      url: "https://redis.io/docs/manual/patterns/session-cache/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "grep/ripgrep"
+      purpose: "Pattern-based session detection"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "redis-cli"
+      purpose: "Verify Redis session store connectivity"
+      command: "redis-cli ping"
+
+  scripts:
+    - id: "session-config-checker"
+      language: "bash"
+      purpose: "Verify session externalization configuration"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "Checking session configuration..."
+        rg -l "session.*redis|SESSION.*CACHE" --type yaml --type properties
+        rg -l "@EnableRedisHttpSession|spring.session.store-type" .
+
+signals:
+  critical:
+    - id: "SESS-CRIT-001"
+      signal: "Sessions stored in-memory without externalization"
+      evidence_pattern: "session\\.store-type=none|SESSION_ENGINE.*db"
+      explanation: |
+        In-memory session storage cannot survive instance failures or
+        be shared across scaled instances, breaking horizontal scaling.
+      remediation: "Configure external session store (Redis, Memcached) with spring.session.store-type=redis"
+
+    - id: "SESS-CRIT-002"
+      signal: "Non-serializable objects stored in session"
+      evidence_pattern: "session\\.setAttribute.*(?!implements Serializable)"
+      explanation: |
+        Non-serializable objects cannot be stored in external session stores,
+        causing runtime failures when scaling horizontally.
+      remediation: "Ensure all session-stored objects implement Serializable"
+
+  high:
+    - id: "SESS-HIGH-001"
+      signal: "No session timeout configuration"
+      evidence_pattern: "session\\.timeout|server\\.servlet\\.session\\.timeout"
+      explanation: |
+        Without proper timeout configuration, sessions may accumulate in
+        external stores, causing memory pressure and stale data issues.
+      remediation: "Configure appropriate session timeout (typically 30 minutes)"
+
+    - id: "SESS-HIGH-002"
+      signal: "Large objects stored in session"
+      evidence_pattern: "session\\.setAttribute.*List|session\\.setAttribute.*Map"
+      explanation: |
+        Large objects in sessions increase serialization overhead and
+        network traffic to external session stores.
+      remediation: "Store only essential data in sessions; use external cache for large objects"
+
+  medium:
+    - id: "SESS-MED-001"
+      signal: "Missing session replication configuration for failover"
+      remediation: "Configure session store clustering or replication for high availability"
+
+  positive:
+    - id: "SESS-POS-001"
+      signal: "Redis/Memcached session store properly configured"
+      evidence_pattern: "spring\\.session\\.store-type=redis|SESSION_ENGINE.*redis"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify session usage patterns"
+      description: |
+        Scan codebase to identify all places where sessions are created,
+        read, or modified to understand session usage scope.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find session usage in code"
+          command: "rg '(session\\.|getSession|setAttribute|getAttribute)' --type java"
+        - purpose: "Find session configuration"
+          command: "rg 'session' --type yaml --type properties"
+      expected_findings:
+        - "Complete inventory of session usage"
+        - "Session configuration settings"
+
+    - id: "2"
+      name: "Verify session store configuration"
+      description: |
+        Check that sessions are configured to use an external store
+        rather than in-memory storage.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check Spring session configuration"
+          command: "rg 'spring\\.session\\.' --type yaml --type properties"
+        - purpose: "Check for Redis session integration"
+          command: "rg '@EnableRedisHttpSession|RedisIndexedSessionRepository'"
+      expected_findings:
+        - "External session store type (Redis, Memcached, JDBC)"
+        - "Connection configuration for session store"
+
+    - id: "3"
+      name: "Validate session object serialization"
+      description: |
+        Verify that all objects stored in sessions are properly serializable
+        for external storage.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find session attribute types"
+          command: "rg 'session\\.setAttribute\\([^,]+,\\s*(\\w+)' --type java -o"
+        - purpose: "Check serializable implementations"
+          command: "rg 'implements.*Serializable' --type java"
+      expected_findings:
+        - "List of object types stored in sessions"
+        - "Serialization compliance for session objects"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Session Configuration Status"
+        - "Serialization Compliance"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct configuration and code evidence verified"
+    medium: "Configuration found but runtime behavior unverified"
+    low: "Indirect indicators or missing configuration"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "spring-session"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed configuration analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "session-extern-001"
+    item: "External session store configured"
+    level: "CRITICAL"
+    verification: "rg -c 'session.store-type=(redis|jdbc|hazelcast)' || echo 'NOT_FOUND'"
+    expected: "1 or more matches"
+
+  - id: "session-extern-002"
+    item: "Session timeout properly configured"
+    level: "BLOCKING"
+    verification: "rg 'session\\.timeout|servlet\\.session\\.timeout'"
+    expected: "Configuration present"
+
+  - id: "session-extern-003"
+    item: "All session objects are serializable"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review all session attribute types for Serializable implementation"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["web-service", "api-service"]
+
+  compliance_frameworks:
+    - framework: "AWS Well-Architected"
+      controls: ["REL-7"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.horizontal-scaling.stateless-design"
+    - "scalability-capacity.horizontal-scaling.shared-state-management"

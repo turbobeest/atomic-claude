@@ -1,0 +1,371 @@
+audit:
+  id: cloud-infrastructure.serverless.function-sizing
+  name: Function Sizing
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: serverless
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates serverless function sizing including memory allocation,
+    timeout configurations, and CPU proportionality. Analyzes actual
+    resource utilization versus configured limits to identify right-sizing
+    opportunities for cost optimization and performance improvement.
+  why_it_matters: |
+    Lambda pricing is based on memory-duration product. Over-provisioned
+    functions waste money on unused memory. Under-provisioned functions
+    run slower due to proportional CPU allocation, potentially costing
+    more due to longer execution. Right-sizing can reduce Lambda costs
+    by 20-50% while improving performance.
+  when_to_run:
+  - Cost optimization reviews
+  - Performance optimization projects
+  - After function code changes
+  - Monthly Lambda reviews
+prerequisites:
+  required_artifacts:
+  - type: cloud_access
+    description: Read access to Lambda configurations
+  - type: metrics_access
+    description: Access to Lambda performance metrics
+  access_requirements:
+  - Lambda function configuration access
+  - CloudWatch metrics access
+  - Cost allocation data access
+discovery:
+  metrics_queries:
+  - system: CloudWatch
+    query: |
+      SELECT MAX(MemorySize), AVG(MemoryUsed), MAX(Duration)
+      FROM Lambda
+      WHERE FunctionName = '{function}'
+    purpose: Compare configured vs used memory
+    threshold: Used < 50% of configured suggests over-provisioning
+  - system: CloudWatch
+    query: |
+      SELECT COUNT(*) as timeouts
+      FROM Lambda
+      WHERE FunctionName = '{function}' AND Errors > 0
+    purpose: Identify timeout issues
+    threshold: Timeout errors indicate under-provisioning
+  file_patterns:
+  - glob: '**/serverless.yml'
+    purpose: Find Serverless Framework configurations
+  - glob: '**/terraform/**/*lambda*.tf'
+    purpose: Find Terraform Lambda configurations
+  - glob: '**/sam.yaml'
+    purpose: Find SAM templates
+knowledge_sources:
+  specifications:
+  - id: aws-lambda-limits
+    name: AWS Lambda Quotas
+    url: https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html
+    offline_cache: true
+    priority: required
+  - id: aws-lambda-performance
+    name: AWS Lambda Performance
+    url: https://docs.aws.amazon.com/lambda/latest/operatorguide/computing-power.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: lambda-power-tuning
+    name: AWS Lambda Power Tuning
+    url: https://github.com/alexcasalboni/aws-lambda-power-tuning
+    offline_cache: true
+  - id: lambda-best-practices
+    name: Lambda Best Practices
+    url: https://docs.aws.amazon.com/lambda/latest/dg/best-practices.html
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS CLI
+    purpose: List function configurations
+    command: aws lambda list-functions --query 'Functions[].{Name:FunctionName,Memory:MemorySize,Timeout:Timeout,Runtime:Runtime}'
+  - tool: AWS Lambda Power Tuning
+    purpose: Automated function tuning
+    command: 'aws stepfunctions start-execution --state-machine-arn {power_tuning_arn} --input ''{"lambdaARN":
+      "{function_arn}"}'''
+  scripts:
+  - id: function-sizing-analyzer
+    language: bash
+    purpose: Analyze Lambda function sizing
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Lambda Function Sizing Analysis ==="
+
+      # List all functions with configurations
+      echo "Lambda Function Configurations:"
+      aws lambda list-functions \
+        --query 'Functions[].{Name:FunctionName,Memory:MemorySize,Timeout:Timeout,Runtime:Runtime,CodeSize:CodeSize}' \
+        --output table
+
+      # Functions using default memory (128MB)
+      echo ""
+      echo "Functions Using Default Memory (128MB):"
+      aws lambda list-functions \
+        --query 'Functions[?MemorySize==`128`].FunctionName' \
+        --output table
+
+      # Functions with high memory
+      echo ""
+      echo "Functions with High Memory (>1024MB):"
+      aws lambda list-functions \
+        --query 'Functions[?MemorySize>`1024`].{Name:FunctionName,Memory:MemorySize}' \
+        --output table
+
+      # Functions with long timeout
+      echo ""
+      echo "Functions with Long Timeout (>300s):"
+      aws lambda list-functions \
+        --query 'Functions[?Timeout>`300`].{Name:FunctionName,Timeout:Timeout}' \
+        --output table
+
+      # Get metrics for top functions
+      echo ""
+      echo "Memory Utilization (sample - last 7 days):"
+      for func in $(aws lambda list-functions --query 'Functions[].FunctionName' --output text | head -5); do
+        max_mem=$(aws cloudwatch get-metric-statistics \
+          --namespace AWS/Lambda \
+          --metric-name MaxMemoryUsed \
+          --dimensions Name=FunctionName,Value=$func \
+          --start-time $(date -d '7 days ago' -u +%Y-%m-%dT%H:%M:%SZ) \
+          --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
+          --period 86400 --statistics Maximum \
+          --query 'Datapoints[0].Maximum' --output text 2>/dev/null)
+        configured=$(aws lambda get-function-configuration --function-name $func --query 'MemorySize' --output text)
+        echo "$func: Configured=${configured}MB, MaxUsed=${max_mem:-N/A}MB"
+      done
+signals:
+  critical:
+  - id: FUNCSIZE-CRIT-001
+    signal: Functions timing out regularly
+    evidence_threshold: Timeout errors > 1% of invocations
+    explanation: |
+      Regular timeouts indicate the function cannot complete within
+      the configured limit, causing failures and poor user experience.
+      This may indicate need for more memory (CPU) or longer timeout.
+    remediation: Increase timeout or memory; investigate code efficiency
+  - id: FUNCSIZE-CRIT-002
+    signal: Functions running out of memory
+    evidence_threshold: Memory errors or MaxMemoryUsed > 95% of configured
+    explanation: |
+      Memory exhaustion causes function failures. Running near memory
+      limit risks failures during peak load or slightly larger payloads.
+    remediation: Increase memory allocation with buffer
+  high:
+  - id: FUNCSIZE-HIGH-001
+    signal: Significant over-provisioning (memory usage < 30%)
+    evidence_threshold: MaxMemoryUsed < 30% of MemorySize consistently
+    explanation: |
+      Functions using less than 30% of allocated memory are wasting
+      money. Lambda costs scale with memory allocation.
+    remediation: Right-size memory to ~2x actual usage for buffer
+  - id: FUNCSIZE-HIGH-002
+    signal: Functions using default 128MB without optimization
+    evidence_indicators:
+    - 'MemorySize: 128MB'
+    - No evidence of memory optimization testing
+    explanation: |
+      Default 128MB is rarely optimal. Higher memory provides
+      proportionally more CPU, often reducing duration and cost.
+    remediation: Use Lambda Power Tuning to find optimal memory
+  - id: FUNCSIZE-HIGH-003
+    signal: Timeout set much longer than average duration
+    evidence_threshold: Timeout > 10x average duration
+    explanation: |
+      Very long timeouts relative to normal execution can mask
+      issues and waste resources if functions hang.
+    remediation: Set timeout to ~2-3x expected max duration
+  medium:
+  - id: FUNCSIZE-MED-001
+    signal: Functions not using ARM architecture where applicable
+    remediation: Consider Graviton2 for 34% better price-performance
+  - id: FUNCSIZE-MED-002
+    signal: No provisioned concurrency for latency-sensitive functions
+    remediation: Evaluate provisioned concurrency for consistent latency
+  - id: FUNCSIZE-MED-003
+    signal: Memory allocation not reviewed after code changes
+    remediation: Re-tune functions after significant code changes
+  low:
+  - id: FUNCSIZE-LOW-001
+    signal: Function sizing rationale not documented
+    remediation: Document memory/timeout selection rationale
+  positive:
+  - id: FUNCSIZE-POS-001
+    signal: Functions tuned with Lambda Power Tuning
+  - id: FUNCSIZE-POS-002
+    signal: Memory utilization between 50-80% of configured
+  - id: FUNCSIZE-POS-003
+    signal: ARM architecture used where applicable
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Function Inventory
+    description: |
+      Collect inventory of all Lambda functions with current
+      memory and timeout configurations.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List all functions with configurations
+      command: aws lambda list-functions --query 'Functions[].{Name:FunctionName,Memory:MemorySize,Timeout:Timeout,Runtime:Runtime,Arch:Architectures[0]}'
+        --output table
+    expected_findings:
+    - Complete function inventory
+    - Current configurations
+  - id: '2'
+    name: Memory Utilization Analysis
+    description: |
+      Analyze actual memory utilization versus configured memory
+      to identify over/under-provisioned functions.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Get memory metrics
+      command: for func in $(aws lambda list-functions --query 'Functions[].FunctionName' --output text
+        | head -20); do echo "=== $func ==="; aws cloudwatch get-metric-statistics --namespace AWS/Lambda
+        --metric-name MaxMemoryUsed --dimensions Name=FunctionName,Value=$func --start-time $(date -d
+        '7 days ago' -u +%Y-%m-%dT%H:%M:%SZ) --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) --period 86400
+        --statistics Maximum Average --output table 2>/dev/null || echo 'No metrics'; done
+    expected_findings:
+    - Memory utilization patterns
+    - Over-provisioned functions
+  - id: '3'
+    name: Duration Analysis
+    description: |
+      Analyze execution duration versus timeout to identify
+      optimization opportunities.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get duration metrics
+      command: for func in $(aws lambda list-functions --query 'Functions[].FunctionName' --output text
+        | head -20); do echo "=== $func ==="; aws cloudwatch get-metric-statistics --namespace AWS/Lambda
+        --metric-name Duration --dimensions Name=FunctionName,Value=$func --start-time $(date -d '7 days
+        ago' -u +%Y-%m-%dT%H:%M:%SZ) --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) --period 86400 --statistics
+        Maximum Average --output table 2>/dev/null || echo 'No metrics'; done
+    expected_findings:
+    - Duration patterns
+    - Timeout appropriateness
+  - id: '4'
+    name: Error Analysis
+    description: |
+      Analyze error rates including timeouts and memory
+      exhaustion issues.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Get error metrics
+      command: for func in $(aws lambda list-functions --query 'Functions[].FunctionName' --output text
+        | head -20); do echo "=== $func ==="; aws cloudwatch get-metric-statistics --namespace AWS/Lambda
+        --metric-name Errors --dimensions Name=FunctionName,Value=$func --start-time $(date -d '7 days
+        ago' -u +%Y-%m-%dT%H:%M:%SZ) --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) --period 86400 --statistics
+        Sum --output table 2>/dev/null || echo 'No metrics'; done
+    expected_findings:
+    - Error rates
+    - Timeout incidents
+  - id: '5'
+    name: Optimization Recommendations
+    description: |
+      Generate specific right-sizing recommendations with
+      expected cost/performance impact.
+    duration_estimate: 30 min
+    expected_findings:
+    - Functions to right-size
+    - Expected savings
+    - Performance improvements
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Memory Utilization Analysis
+    - Duration Analysis
+    - Optimization Recommendations
+  - type: spreadsheet
+    format: csv
+    contents: Function inventory with utilization and recommendations
+  confidence_guidance:
+    high: 7+ days of metrics, all functions analyzed
+    medium: Limited metrics or partial function coverage
+    low: Metrics unavailable
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-lambda-limits
+      priority: required
+    - source_id: lambda-best-practices
+      priority: required
+  limitations:
+  - Cannot access live metrics offline
+  - Configuration access requires runtime
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires metrics analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: funcsize-001
+  item: All functions inventoried
+  level: CRITICAL
+  verification: aws lambda list-functions --query 'length(Functions)' | grep -qE '[0-9]+' && echo PASS
+    || echo FAIL
+  expected: PASS
+- id: funcsize-002
+  item: Memory utilization analyzed
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm memory metrics collected for high-volume functions
+  expected: Confirmed by reviewer
+- id: funcsize-003
+  item: Timeout/duration ratio verified
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify timeouts are appropriate for duration patterns
+  expected: Confirmed by reviewer
+- id: funcsize-004
+  item: Optimization opportunities quantified
+  level: WARNING
+  verification: manual
+  verification_notes: Estimated savings documented for recommendations
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: FinOps
+    controls:
+    - Right Sizing
+    - Cost Optimization
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.serverless.cold-start-optimization
+  - cloud-infrastructure.serverless.serverless-monitoring
+  - cloud-infrastructure.compute.instance-right-sizing

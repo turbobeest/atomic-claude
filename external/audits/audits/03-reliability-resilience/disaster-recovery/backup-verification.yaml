@@ -1,0 +1,294 @@
+audit:
+  id: reliability-resilience.disaster-recovery.backup-verification
+  name: Backup Verification Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: disaster-recovery
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates backup verification practices including integrity checks,
+    test restores, checksum validation, and recovery testing procedures.
+    Assesses whether backups are regularly tested to ensure they can
+    actually be restored when needed.
+  why_it_matters: |
+    Backups that cannot be restored are worthless. Many organizations
+    discover backup corruption or incompleteness only during actual
+    emergencies. Regular verification ensures backups remain viable
+    and identifies issues before they become critical during recovery.
+    Untested backups provide false confidence.
+  when_to_run:
+  - Monthly backup verification review
+  - After backup infrastructure changes
+  - Following any failed restore attempt
+  - During disaster recovery planning
+prerequisites:
+  required_artifacts:
+  - type: backup_inventory
+    description: List of all backup jobs and their configurations
+  - type: documentation
+    description: Backup verification procedures and schedules
+  - type: test_results
+    description: Historical backup test/restore results
+  access_requirements:
+  - Read access to backup systems
+  - Access to backup verification logs
+  - Test environment for restore verification
+discovery:
+  file_patterns:
+  - glob: '**/backup-verify*.yaml'
+    purpose: Backup verification job configurations
+  - glob: '**/restore-test*.yaml'
+    purpose: Restore test automation
+  interviews:
+  - role: Platform/SRE Engineers
+    questions:
+    - How often are backup restores tested?
+    - What is the process for verifying backup integrity?
+    - When was the last full restore test performed?
+    - How are verification failures handled?
+    purpose: Understand backup verification practices
+  documents_to_review:
+  - type: Backup verification runbook
+    purpose: Review verification procedures
+  - type: Test restore reports
+    purpose: Assess historical verification success rate
+  metrics_queries:
+  - system: Monitoring system
+    query: backup_verification_success_rate
+    purpose: Track verification success over time
+    threshold: '>= 99%'
+knowledge_sources:
+  specifications:
+  - id: nist-cp
+    name: NIST SP 800-34 - Contingency Planning Guide
+    url: https://csrc.nist.gov/publications/detail/sp/800-34/rev-1/final
+    offline_cache: true
+    priority: required
+  guides:
+  - id: backup-testing-practices
+    name: Backup Testing Best Practices
+    url: https://www.backupacademy.com/best-practices
+    offline_cache: true
+  - id: sre-book
+    name: Site Reliability Engineering
+    url: https://sre.google/sre-book/table-of-contents/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS Backup
+    purpose: Check backup job completion status
+    command: aws backup list-backup-jobs --by-state COMPLETED
+  - tool: Velero
+    purpose: Verify Kubernetes backup integrity
+    command: velero backup describe BACKUP_NAME --details
+  scripts:
+  - id: verify-backup-integrity
+    language: bash
+    purpose: Check backup checksums and integrity
+    source: inline
+    code: |
+      #!/bin/bash
+      # Verify backup integrity using checksums
+      echo "Verifying backup integrity..."
+      # Implementation specific to backup solution
+signals:
+  critical:
+  - id: BV-CRIT-001
+    signal: No backup verification or test restores performed
+    evidence_indicators:
+    - No restore test history found
+    - Verification jobs not configured
+    - Last verification over 90 days ago
+    explanation: |
+      Without verification, backup integrity is unknown. Corrupted or
+      incomplete backups may only be discovered during actual disasters
+      when recovery is critical.
+    remediation: Implement automated backup verification with regular test restores
+  - id: BV-CRIT-002
+    signal: Recent backup verification failures not investigated
+    evidence_indicators:
+    - Failed verification jobs with no follow-up
+    - Repeated failures for same backup
+    explanation: |
+      Unaddressed verification failures indicate potentially unrecoverable
+      backups. Silent failures leave the organization vulnerable.
+    remediation: Investigate all verification failures and implement alerting
+  high:
+  - id: BV-HIGH-001
+    signal: Verification only checks backup existence, not restorability
+    explanation: File existence does not guarantee data integrity or restore capability
+    remediation: Implement full restore verification to isolated test environment
+  - id: BV-HIGH-002
+    signal: No checksum or integrity validation performed
+    explanation: Silent data corruption may go undetected without integrity checks
+    remediation: Enable checksum verification for all backup types
+  medium:
+  - id: BV-MED-001
+    signal: Verification frequency does not match backup criticality
+    remediation: Increase verification frequency for critical system backups
+  - id: BV-MED-002
+    signal: Test restores only performed in non-production environment
+    remediation: Periodically verify production-equivalent restore capability
+  low:
+  - id: BV-LOW-001
+    signal: Verification results not documented or tracked
+  positive:
+  - id: BV-POS-001
+    signal: Automated verification pipeline with regular test restores
+  - id: BV-POS-002
+    signal: Verification metrics tracked and reviewed regularly
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Review Verification Procedures
+    description: |
+      Examine documented backup verification procedures, schedules,
+      and success criteria.
+    duration_estimate: 30 min
+    questions:
+    - What verification methods are used for each backup type?
+    - How often are verifications performed?
+    - What constitutes a successful verification?
+    expected_findings:
+    - Documented verification procedures
+    - Verification schedule by system
+  - id: '2'
+    name: Analyze Verification History
+    description: |
+      Review historical verification results to assess success rates
+      and identify patterns of failures.
+    duration_estimate: 45 min
+    commands:
+    - purpose: List recent backup job results
+      command: aws backup list-backup-jobs --by-state COMPLETED --max-results 50
+    - purpose: Check for failed jobs
+      command: aws backup list-backup-jobs --by-state FAILED
+    expected_findings:
+    - Verification success rate
+    - Common failure patterns
+  - id: '3'
+    name: Validate Integrity Checks
+    description: |
+      Verify that backups include integrity validation such as
+      checksums, manifests, or cryptographic verification.
+    duration_estimate: 30 min
+    questions:
+    - Are checksums calculated and stored for backups?
+    - How is data corruption detected?
+    expected_findings:
+    - Integrity validation methods in use
+    - Checksum storage and verification process
+  - id: '4'
+    name: Assess Test Restore Process
+    description: |
+      Evaluate the test restore process including environment,
+      frequency, and validation of restored data.
+    duration_estimate: 45 min
+    questions:
+    - How are test restores performed?
+    - Is restored data validated for completeness?
+    - How long do test restores take?
+    expected_findings:
+    - Test restore procedure documentation
+    - Restore time measurements
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: verification_report
+    format: table
+    columns:
+    - System
+    - Backup Type
+    - Last Verification
+    - Verification Method
+    - Result
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Verification Coverage
+    - Success Rate Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Verification results directly observed from backup systems
+    medium: Documentation reviewed with sample verification
+    low: Based on interviews without system access
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: nist-cp
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Verification review requires access to backup systems
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: backup-verification-001
+  item: Automated backup verification configured for all critical systems
+  level: CRITICAL
+  verification: manual
+  verification_notes: Review verification job configurations
+  expected: Confirmed by reviewer
+- id: backup-verification-002
+  item: Test restores performed within last 30 days
+  level: CRITICAL
+  verification: manual
+  verification_notes: Check test restore logs and reports
+  expected: Confirmed by reviewer
+- id: backup-verification-003
+  item: Verification failures trigger alerts
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify alerting configuration for backup jobs
+  expected: Confirmed by reviewer
+- id: backup-verification-004
+  item: Checksum validation enabled for backups
+  level: WARNING
+  verification: manual
+  verification_notes: Review backup configuration for integrity checks
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - A1.2
+  - framework: ISO 27001
+    controls:
+    - A.12.3.1
+relationships:
+  commonly_combined:
+  - reliability-resilience.disaster-recovery.backup-strategy
+  - reliability-resilience.disaster-recovery.data-restoration
+  - reliability-resilience.disaster-recovery.dr-test-coverage

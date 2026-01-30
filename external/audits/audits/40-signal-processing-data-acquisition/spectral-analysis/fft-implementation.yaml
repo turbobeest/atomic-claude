@@ -1,0 +1,313 @@
+audit:
+  id: signal-processing-data-acquisition.spectral-analysis.fft-implementation
+  name: FFT Implementation Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: spectral-analysis
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates FFT implementation for correctness and
+    efficient spectral analysis. It examines:
+    - FFT algorithm correctness and validation
+    - FFT size selection and zero-padding
+    - Scaling and normalization conventions
+    - Real vs. complex FFT usage
+    - Frequency bin interpretation
+    - Computational efficiency and optimization
+  why_it_matters: |
+    FFT is fundamental to spectral analysis:
+    - Incorrect implementation gives wrong frequency content
+    - Wrong scaling affects amplitude accuracy
+    - Improper size affects frequency resolution
+    - Real FFT is 2x more efficient for real signals
+    - Frequency bin mapping must be correct
+    - Cooley-Tukey radix-2 requires power-of-two length
+
+    FFT errors propagate to all spectral analysis results,
+    making correct implementation essential.
+  when_to_run:
+  - Spectral analysis system development
+  - FFT library integration
+  - Custom FFT implementation
+  - Performance optimization
+  - Accuracy verification
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: FFT implementation or library usage
+  - type: test_vectors
+    description: Known FFT input/output pairs
+  - type: requirements
+    description: Frequency resolution and accuracy requirements
+  access_requirements:
+  - Access to FFT implementation code
+  - FFT library documentation
+  - Test data for validation
+discovery:
+  code_patterns:
+  - pattern: (fft|FFT|dft|DFT)\s*\(
+    type: regex
+    scope: source
+    purpose: Detect FFT function calls
+  - pattern: (rfft|RFFT|real_fft)
+    type: regex
+    scope: source
+    purpose: Detect real FFT usage
+  - pattern: (fft_size|nfft|n_fft|FFT_LENGTH)
+    type: regex
+    scope: source
+    purpose: Detect FFT size configuration
+  - pattern: (freq_bin|frequency.*bin|bin.*freq)
+    type: regex
+    scope: source
+    purpose: Detect frequency bin handling
+  file_patterns:
+  - glob: '**/fft*.{c,h,cpp,py}'
+    purpose: FFT implementation files
+  - glob: '**/spectrum*.{c,h,cpp,py}'
+    purpose: Spectrum analysis files
+  - glob: '**/dsp*.{c,h,cpp,py}'
+    purpose: DSP library files
+knowledge_sources:
+  specifications:
+  - id: cooley-tukey
+    name: Cooley-Tukey FFT Algorithm
+    url: https://en.wikipedia.org/wiki/Cooley%E2%80%93Tukey_FFT_algorithm
+    offline_cache: true
+    priority: required
+  guides:
+  - id: fftw-manual
+    name: FFTW Manual
+    url: https://www.fftw.org/fftw3_doc/
+    offline_cache: true
+  - id: numpy-fft
+    name: NumPy FFT Documentation
+    url: https://numpy.org/doc/stable/reference/routines.fft.html
+    offline_cache: true
+signals:
+  critical:
+  - id: FFT-CRIT-001
+    signal: FFT implementation produces incorrect results
+    evidence_indicators:
+    - Test vectors do not match expected output
+    - Known sinusoid gives wrong frequency
+    - Parseval's theorem violated
+    explanation: |
+      FFT correctness is fundamental. An incorrect FFT corrupts
+      all frequency analysis. Verification against known inputs
+      is essential before trusting results.
+    remediation: |
+      - Use validated FFT library (FFTW, numpy, CMSIS-DSP)
+      - Test against known sinusoid frequencies
+      - Verify Parseval's theorem (energy conservation)
+      - Compare with reference implementation
+    cwe: CWE-682
+  - id: FFT-CRIT-002
+    signal: Scaling/normalization incorrect
+    evidence_indicators:
+    - Amplitude scaling wrong
+    - Forward/inverse FFT scaling inconsistent
+    - Energy not preserved after round-trip
+    explanation: |
+      FFT libraries use different scaling conventions. Some scale
+      by N, some by 1/N, some by 1/sqrt(N). Inconsistent scaling
+      causes amplitude errors in spectral analysis.
+    remediation: |
+      - Document library scaling convention
+      - Apply appropriate normalization for application
+      - Verify amplitude accuracy with known signal
+      - Use consistent scaling for forward/inverse
+  high:
+  - id: FFT-HIGH-001
+    signal: FFT size inappropriate for frequency resolution
+    evidence_indicators:
+    - Frequency resolution insufficient
+    - FFT size not considering sample rate
+    - Closely spaced frequencies not resolved
+    explanation: |
+      Frequency resolution = fs/N where N is FFT size. Insufficient
+      FFT size cannot resolve closely spaced frequencies. Zero-padding
+      can interpolate but not improve true resolution.
+    remediation: |
+      - Calculate required N for desired resolution
+      - Use longer data record if resolution insufficient
+      - Understand zero-padding interpolation vs. resolution
+      - Document resolution requirements and configuration
+  - id: FFT-HIGH-002
+    signal: Complex FFT used for real signals
+    evidence_indicators:
+    - Real signal processed with complex FFT
+    - Redundant computation for conjugate symmetric output
+    - 2x computation overhead
+    explanation: |
+      Real signals produce conjugate-symmetric FFT output. Using
+      real FFT (RFFT) is approximately 2x more efficient and
+      produces only the non-redundant bins.
+    remediation: |
+      - Use RFFT for real-valued signals
+      - Understand RFFT output format
+      - Account for Nyquist bin special handling
+      - Benchmark real vs. complex FFT performance
+  medium:
+  - id: FFT-MED-001
+    signal: Frequency bin interpretation incorrect
+    evidence_indicators:
+    - Wrong frequency assigned to bins
+    - DC and Nyquist bins handled incorrectly
+    - Negative frequency bins misinterpreted
+    explanation: |
+      FFT bins correspond to specific frequencies: bin k -> k*fs/N.
+      For complex FFT, bins > N/2 represent negative frequencies.
+      Incorrect interpretation leads to wrong frequency identification.
+    remediation: |
+      - Calculate bin-to-frequency mapping correctly
+      - Handle DC (bin 0) and Nyquist (bin N/2) properly
+      - Use fftshift if needed for centered spectrum
+      - Document bin interpretation in code
+  - id: FFT-MED-002
+    signal: Zero-padding used incorrectly
+    evidence_indicators:
+    - Zero-padding mistaken for resolution improvement
+    - Discontinuity at data/zero boundary
+    - Interpolation artifacts
+    explanation: |
+      Zero-padding increases FFT output points (interpolation) but
+      does not improve true frequency resolution. It can also
+      introduce artifacts if not done correctly.
+    remediation: |
+      - Understand zero-padding is interpolation
+      - Use windowing before zero-padding
+      - Don't expect resolution improvement from zeros
+      - Use longer actual data for better resolution
+  low:
+  - id: FFT-LOW-001
+    signal: FFT configuration not documented
+    evidence_indicators:
+    - FFT size selection not explained
+    - Scaling convention not documented
+    - Library usage not specified
+    explanation: |
+      Undocumented FFT configuration makes verification and
+      maintenance difficult. Scaling conventions and size
+      selection rationale should be recorded.
+    remediation: |
+      - Document FFT size selection rationale
+      - Record scaling/normalization convention
+      - Specify library and version
+      - Include frequency resolution calculation
+  positive:
+  - id: FFT-POS-001
+    signal: Well-implemented FFT with validation
+    evidence_indicators:
+    - Validated FFT library used
+    - Test vectors verified
+    - Proper scaling documented
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: dsp-engineer
+  steps:
+  - id: '1'
+    name: FFT Implementation Review
+    description: |
+      Review FFT implementation and configuration.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find FFT usage
+      command: |
+        grep -rniE "(fft|FFT|dft)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -30
+    - purpose: Find FFT size configuration
+      command: |
+        grep -rniE "(fft_size|nfft|FFT_LENGTH)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -20
+    expected_findings:
+    - FFT library identification
+    - FFT size configuration
+    - Scaling approach
+  - id: '2'
+    name: Correctness Verification
+    description: |
+      Verify FFT produces correct results.
+    duration_estimate: 30 min
+    manual_verification: true
+    expected_findings:
+    - Test vector results
+    - Sinusoid frequency verification
+    - Scaling verification
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - FFT Implementation Analysis
+    - Correctness Verification
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 2
+    signal-processing:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: fft-001
+  item: FFT produces correct results
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify against known test vectors
+  expected: Confirmed by reviewer
+- id: fft-002
+  item: Scaling convention documented
+  level: BLOCKING
+  verification: |
+    grep -rniE "(fft.*scale|normalize|1/N)" \
+      --include="*.c" --include="*.h" --include="*.md" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: fft-003
+  item: FFT size appropriate for resolution
+  level: WARNING
+  verification: manual
+  verification_notes: Verify frequency resolution meets requirements
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - signal-processing
+    - audio-systems
+    - scientific-instruments
+    - communications
+relationships:
+  commonly_combined:
+  - signal-processing.spectral-analysis.windowing-function
+  - signal-processing.spectral-analysis.frequency-resolution
+  - signal-processing.spectral-analysis.spectral-leakage
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

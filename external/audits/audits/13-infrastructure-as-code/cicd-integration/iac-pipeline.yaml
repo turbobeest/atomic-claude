@@ -1,0 +1,396 @@
+audit:
+  id: infrastructure-as-code.cicd-integration.iac-pipeline
+  name: IaC Pipeline
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: cicd-integration
+  tier: phd
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the CI/CD pipeline implementation for deploying
+    Infrastructure as Code, evaluating:
+
+    - Pipeline structure and stages (lint, validate, plan, apply)
+    - Separation of plan and apply phases
+    - State backend configuration and locking
+    - Credential management and least privilege
+    - Environment promotion workflows
+    - Atlantis, Terraform Cloud, or custom pipeline implementation
+    - GitOps workflow adherence
+
+    The audit focuses on both the technical implementation and the
+    operational practices around infrastructure deployment pipelines.
+  why_it_matters: |
+    A poorly designed IaC pipeline creates significant risks:
+
+    - Direct applies without review can cause outages
+    - Inadequate credential security exposes cloud accounts
+    - Missing state locking causes corruption and conflicts
+    - No environment separation leads to production accidents
+    - Poor error handling leaves infrastructure in broken states
+
+    Well-designed pipelines provide safety, auditability, and reliability
+    for infrastructure changes at scale.
+  when_to_run:
+  - When establishing IaC deployment practices
+  - After pipeline failures or incidents
+  - During security assessment of infrastructure processes
+  - When migrating to new CI/CD platforms
+prerequisites:
+  required_artifacts:
+  - type: cicd_configuration
+    description: Pipeline configuration files (GitHub Actions, GitLab CI, Jenkins, etc.)
+  - type: terraform_configuration
+    description: Terraform configurations deployed by the pipeline
+  access_requirements:
+  - Read access to CI/CD configuration
+  - Access to pipeline execution logs
+  - Access to state backend configuration
+discovery:
+  code_patterns:
+  - pattern: terraform\s+(init|plan|apply|destroy)
+    type: regex
+    scope: config
+    purpose: Find Terraform execution stages
+  - pattern: atlantis|runatlantis
+    type: regex
+    scope: config
+    purpose: Detect Atlantis usage
+  - pattern: TF_API_TOKEN|TFE_TOKEN
+    type: regex
+    scope: config
+    purpose: Find Terraform Cloud/Enterprise tokens
+  - pattern: AWS_ACCESS_KEY|GOOGLE_CREDENTIALS|AZURE_CLIENT
+    type: regex
+    scope: config
+    purpose: Detect cloud credentials
+  - pattern: -auto-approve
+    type: keyword
+    scope: config
+    purpose: Find automatic apply without confirmation
+  file_patterns:
+  - glob: '**/.github/workflows/*.yml'
+    purpose: GitHub Actions workflows
+  - glob: '**/.gitlab-ci.yml'
+    purpose: GitLab CI configuration
+  - glob: '**/Jenkinsfile'
+    purpose: Jenkins pipeline
+  - glob: '**/atlantis.yaml'
+    purpose: Atlantis configuration
+  - glob: '**/azure-pipelines.yml'
+    purpose: Azure DevOps pipelines
+  - glob: '**/*.tf'
+    purpose: Terraform backend configuration
+knowledge_sources:
+  specifications:
+  - id: terraform-cicd-docs
+    name: HashiCorp CI/CD Integration Guide
+    url: https://developer.hashicorp.com/terraform/tutorials/automation/automate-terraform
+    offline_cache: true
+    priority: required
+  guides:
+  - id: atlantis-docs
+    name: Atlantis Documentation
+    url: https://www.runatlantis.io/docs/
+    offline_cache: true
+  - id: github-actions-terraform
+    name: GitHub Actions for Terraform
+    url: https://github.com/hashicorp/setup-terraform
+    offline_cache: true
+  - id: terrateam-best-practices
+    name: Terraform CI/CD Best Practices
+    url: https://terrateam.io/blog/terraform-best-practices-ci-cd
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: Atlantis
+    purpose: Pull request automation for Terraform
+    command: atlantis plan -d .
+  - tool: Terraform Cloud
+    purpose: Remote execution and state management
+    command: terraform login
+  - tool: Spacelift
+    purpose: GitOps IaC platform
+    command: spacectl stack deploy
+  - tool: Terrateam
+    purpose: GitHub-native Terraform automation
+    command: terrateam apply
+  scripts:
+  - id: pipeline-security-check
+    language: bash
+    purpose: Check pipeline for security issues
+    source: inline
+    code: |
+      #!/bin/bash
+      # Check for security issues in pipeline configurations
+
+      echo "Checking for exposed credentials..."
+      grep -r 'AWS_ACCESS_KEY\|GOOGLE_CREDENTIALS' .github/ 2>/dev/null && echo "WARNING: Credentials may be exposed"
+
+      echo "Checking for auto-approve..."
+      grep -r '\-auto-approve' .github/ .gitlab-ci.yml 2>/dev/null && echo "WARNING: Auto-approve detected"
+
+      echo "Checking for saved plan usage..."
+      if grep -r 'plan.*-out' .github/ 2>/dev/null; then
+        echo "OK: Plan files are saved"
+      else
+        echo "WARNING: Plan files may not be saved"
+      fi
+signals:
+  critical:
+  - id: IAC-PIPE-CRIT-001
+    signal: terraform apply runs without plan review
+    evidence_pattern: terraform apply -auto-approve without preceding approval
+    explanation: |
+      Auto-approve bypasses all human review, allowing any change to
+      reach production. This is the primary cause of IaC-related outages
+      and security incidents.
+    remediation: |
+      Implement plan review workflow:
+      1. Separate plan and apply into distinct stages
+      2. Require manual approval between plan and apply
+      3. Use Atlantis or similar for PR-based review
+      4. Remove -auto-approve from production workflows
+  - id: IAC-PIPE-CRIT-002
+    signal: Cloud credentials stored in plain text in pipeline
+    evidence_pattern: 'AWS_ACCESS_KEY_ID: or hard-coded credentials'
+    explanation: |
+      Plain text credentials in pipeline configurations are exposed in
+      logs, repositories, and to anyone with repo access.
+    remediation: |
+      Use secure credential management:
+      - GitHub: Use secrets and OIDC for AWS/GCP
+      - Use IAM roles (EC2 instance profiles, GKE workload identity)
+      - Terraform Cloud: Use dynamic credentials
+  high:
+  - id: IAC-PIPE-HIGH-001
+    signal: No state locking configured
+    evidence_pattern: backend without dynamodb_table or equivalent
+    explanation: |
+      Without state locking, concurrent applies corrupt state files,
+      causing resource orphaning and configuration drift.
+    remediation: |
+      Enable state locking:
+      terraform {
+        backend "s3" {
+          bucket         = "terraform-state"
+          key            = "state.tfstate"
+          dynamodb_table = "terraform-locks"
+        }
+      }
+  - id: IAC-PIPE-HIGH-002
+    signal: Single pipeline for all environments
+    evidence_pattern: No environment separation in workflows
+    explanation: |
+      Without environment separation, a bug in a dev change can
+      accidentally affect production infrastructure.
+    remediation: |
+      Implement environment separation:
+      - Use separate workflows per environment
+      - Use workspaces or directory structure
+      - Implement promotion workflows (dev -> staging -> prod)
+  medium:
+  - id: IAC-PIPE-MED-001
+    signal: Pipeline does not save plan files
+    evidence_pattern: terraform plan without -out flag
+    remediation: |
+      Save plan files for apply:
+      terraform plan -out=tfplan
+      terraform apply tfplan
+  - id: IAC-PIPE-MED-002
+    signal: No caching of Terraform providers
+    remediation: |
+      Cache providers to speed up pipelines:
+      - uses: actions/cache@v3
+        with:
+          path: ~/.terraform.d/plugin-cache
+          key: terraform-providers
+  low:
+  - id: IAC-PIPE-LOW-001
+    signal: Verbose logging not enabled for debugging
+    remediation: Set TF_LOG=DEBUG when troubleshooting
+  positive:
+  - id: IAC-PIPE-POS-001
+    signal: Atlantis or similar enforces PR-based workflow
+  - id: IAC-PIPE-POS-002
+    signal: OIDC used for cloud authentication
+  - id: IAC-PIPE-POS-003
+    signal: Plan files saved and used for apply
+  - id: IAC-PIPE-POS-004
+    signal: Environment promotion workflow implemented
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify pipeline tooling
+    description: |
+      Determine what CI/CD system and IaC automation tools are used
+      for Terraform deployments.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find CI/CD configurations
+      command: find . -name '*.yml' -path '*/.github/*' -o -name '.gitlab-ci.yml' -o -name 'Jenkinsfile'
+        -o -name 'atlantis.yaml' | head -20
+    - purpose: Check for Terraform Cloud backend
+      command: grep -r 'cloud {\|remote {' --include='*.tf' . | head -10
+    expected_findings:
+    - CI/CD platform in use
+    - IaC automation tooling
+    - Backend configuration
+  - id: '2'
+    name: Analyze pipeline structure
+    description: |
+      Review the pipeline stages and their sequencing.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Extract Terraform commands from pipeline
+      command: grep -r 'terraform' .github/ --include='*.yml' | head -30
+    - purpose: Check for plan/apply separation
+      command: grep -r -A5 -B5 'terraform apply' .github/ --include='*.yml' | head -50
+    expected_findings:
+    - Pipeline stages
+    - Plan/apply separation
+    - Approval gates
+  - id: '3'
+    name: Evaluate credential management
+    description: |
+      Check how cloud credentials are provided to the pipeline.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find credential references
+      command: grep -r 'AWS_\|GOOGLE_\|AZURE_\|TF_' .github/ --include='*.yml' | head -30
+    - purpose: Check for OIDC configuration
+      command: grep -r 'id-token\|oidc\|workload_identity' .github/ --include='*.yml' | head -20
+    expected_findings:
+    - Credential provision method
+    - OIDC usage
+    - Potential credential exposure
+  - id: '4'
+    name: Review state backend configuration
+    description: |
+      Verify state backend is properly configured with locking.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find backend configuration
+      command: grep -r -A20 'backend' --include='*.tf' . | head -50
+    - purpose: Check for state locking
+      command: grep -r 'dynamodb_table\|lock = true' --include='*.tf' . | head -10
+    expected_findings:
+    - Backend type
+    - State locking configuration
+    - Encryption settings
+  - id: '5'
+    name: Assess environment separation
+    description: |
+      Check how different environments (dev, staging, prod) are isolated.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find environment references
+      command: grep -r 'environment\|workspace' .github/ --include='*.yml' | head -30
+    - purpose: Check directory structure
+      command: find . -type d -name 'dev' -o -name 'staging' -o -name 'prod' -o -name 'production' | head
+        -10
+    expected_findings:
+    - Environment separation strategy
+    - Promotion workflow
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Pipeline Architecture Review
+    - Security Assessment
+    - State Management
+    - Recommendations
+  confidence_guidance:
+    high: Pipeline executed and logs reviewed
+    medium: Configuration reviewed without execution
+    low: Only file presence confirmed
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-cicd-docs
+      priority: required
+    - source_id: atlantis-docs
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed configuration review
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      reason: Critical for production safety
+    security:
+      included: true
+      reason: Credential and access security
+closeout_checklist:
+- id: iac-pipe-001
+  item: Plan review required before apply
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify approval gate exists between plan and apply
+  expected: Confirmed by reviewer
+- id: iac-pipe-002
+  item: Credentials use OIDC or IAM roles, not static keys
+  level: CRITICAL
+  verification: grep -r 'id-token\|oidc\|role-to-assume' .github/ | wc -l
+  expected: '>0'
+- id: iac-pipe-003
+  item: State locking enabled
+  level: BLOCKING
+  verification: grep -r 'dynamodb_table\|lock' --include='*.tf' . | wc -l
+  expected: '>0'
+- id: iac-pipe-004
+  item: Plan files saved and used for apply
+  level: BLOCKING
+  verification: grep -r 'plan.*-out\|apply.*tfplan' .github/ | wc -l
+  expected: '>0'
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC8.1
+  - framework: ISO 27001
+    controls:
+    - A.12.1.2
+    - A.14.2.2
+  - framework: CIS Controls
+    controls:
+    - '4.1'
+    - '4.2'
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.cicd-integration.approval-workflow
+  - infrastructure-as-code.cicd-integration.rollback-strategy
+  - infrastructure-as-code.testing-validation.plan-review-process

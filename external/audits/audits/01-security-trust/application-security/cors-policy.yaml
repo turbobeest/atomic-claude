@@ -1,0 +1,413 @@
+audit:
+  id: security-trust.application-security.cors-policy
+  name: CORS Policy Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: application-security
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines Cross-Origin Resource Sharing (CORS) configurations
+    to ensure they properly restrict cross-origin access to sensitive APIs
+    and resources. It evaluates Access-Control-Allow-Origin policies, credential
+    handling, preflight request processing, and origin validation logic.
+  why_it_matters: |
+    Misconfigured CORS policies can expose sensitive APIs to unauthorized
+    cross-origin access, enabling attackers to steal data or perform actions
+    on behalf of users. CWE-942 (Permissive Cross-domain Policy) is classified
+    under OWASP Security Misconfiguration. Trusting arbitrary origins
+    effectively disables same-origin policy protections, allowing third-party
+    sites to access user data and credentials.
+  when_to_run:
+  - API development
+  - Security assessment
+  - After CORS configuration changes
+  - Compliance audits
+prerequisites:
+  required_artifacts:
+  - type: api_documentation
+    description: List of API endpoints and their CORS requirements
+  - type: source_code
+    description: Server-side CORS configuration code
+  access_requirements:
+  - HTTP access to API endpoints
+  - Source code access
+  - Browser developer tools
+discovery:
+  code_patterns:
+  - pattern: Access-Control-Allow-Origin|CORS|cors
+    type: regex
+    scope: config
+    purpose: Identify CORS configuration
+  - pattern: Access-Control-Allow-Credentials|withCredentials
+    type: regex
+    scope: source
+    purpose: Identify credential-sharing configurations
+  - pattern: origin.*\*|allowedOrigins.*\*
+    type: regex
+    scope: config
+    purpose: Find wildcard origin policies
+  file_patterns:
+  - glob: '**/cors*.js'
+    purpose: CORS middleware configuration
+  - glob: '**/cors*.py'
+    purpose: Python CORS configuration
+  - glob: '**/WebSecurityConfig.java'
+    purpose: Java Spring CORS configuration
+knowledge_sources:
+  specifications:
+  - id: cwe-942
+    name: 'CWE-942: Permissive Cross-domain Policy with Untrusted Domains'
+    url: https://cwe.mitre.org/data/definitions/942.html
+    offline_cache: true
+    priority: required
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-cors-testing
+    name: OWASP Testing for CORS
+    url: https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/11-Client-side_Testing/07-Testing_Cross_Origin_Resource_Sharing
+    offline_cache: true
+  - id: mdn-cors
+    name: MDN Cross-Origin Resource Sharing
+    url: https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: curl
+    purpose: Test CORS headers with different origins
+    command: 'curl -H ''Origin: https://evil.com'' -I https://target/api'
+  - tool: burp
+    purpose: CORS misconfiguration testing
+    command: Manual testing with Burp Suite
+  scripts:
+  - id: cors-test
+    language: bash
+    purpose: Test CORS configuration with various origins
+    source: inline
+    code: |
+      #!/bin/bash
+      URL=$1
+      for origin in "https://evil.com" "null" "https://target.com.evil.com"; do
+        echo "Testing Origin: $origin"
+        curl -sI -H "Origin: $origin" "$URL" | grep -i "access-control"
+      done
+signals:
+  critical:
+  - id: CORS-CRIT-001
+    signal: Wildcard origin with credentials allowed
+    cwe_id: CWE-942
+    evidence_pattern: Access-Control-Allow-Origin.*\*.*Access-Control-Allow-Credentials.*true
+    explanation: |
+      Browsers prevent this combination, but server misconfiguration may
+      reflect any origin when credentials are enabled. This allows any
+      site to make authenticated requests and read responses.
+    remediation: Never use wildcard with credentials; implement strict origin allowlist
+  - id: CORS-CRIT-002
+    signal: Origin reflection without validation
+    cwe_id: CWE-942
+    evidence_indicators:
+    - Origin header directly reflected in response
+    - No origin validation logic
+    - Any origin gets Access-Control-Allow-Origin
+    explanation: |
+      Blindly reflecting the Origin header allows any website to access
+      the API. Combined with credentials, this enables complete bypass
+      of same-origin policy.
+    remediation: Validate Origin against explicit allowlist before reflecting
+  - id: CORS-CRIT-003
+    signal: Null origin allowed with credentials
+    cwe_id: CWE-942
+    evidence_pattern: Access-Control-Allow-Origin.*null.*Credentials.*true
+    explanation: |
+      The 'null' origin can be triggered from sandboxed iframes, file://
+      URLs, and redirects. Allowing null origin with credentials enables
+      attacks from local HTML files.
+    remediation: Never allow null origin; remove from allowlist
+  high:
+  - id: CORS-HIGH-001
+    signal: Wildcard origin for sensitive API
+    cwe_id: CWE-942
+    evidence_pattern: Access-Control-Allow-Origin.*\*
+    explanation: |
+      Wildcard allows any website to read API responses. While credentials
+      aren't sent, this may still expose sensitive data in public APIs
+      that rely on IP-based access control.
+    remediation: Replace wildcard with specific origins for sensitive APIs
+  - id: CORS-HIGH-002
+    signal: Regex origin matching with bypass vulnerability
+    cwe_id: CWE-942
+    evidence_pattern: origin\.match|origin\.includes|origin\.endsWith
+    explanation: |
+      Improper regex validation allows bypass. For example, checking if
+      origin ends with 'example.com' allows 'attackerexample.com' or
+      'example.com.attacker.com'.
+    remediation: Use exact match against allowlist; anchor regex patterns properly
+  - id: CORS-HIGH-003
+    signal: Preflight caching too long
+    cwe_id: CWE-942
+    evidence_pattern: Access-Control-Max-Age.*[0-9]{7}
+    explanation: |
+      Long preflight cache duration (Access-Control-Max-Age) means CORS
+      policy changes won't take effect until cache expires. Attackers
+      may exploit the window before policy updates propagate.
+    remediation: Set reasonable max-age (e.g., 3600 seconds maximum)
+  - id: CORS-HIGH-004
+    signal: Exposed headers include sensitive data
+    cwe_id: CWE-200
+    evidence_pattern: Access-Control-Expose-Headers.*(Authorization|Set-Cookie|X-Auth)
+    explanation: |
+      Exposing sensitive headers to cross-origin scripts may leak
+      authentication tokens or session information.
+    remediation: Only expose necessary headers; never expose auth headers
+  medium:
+  - id: CORS-MED-001
+    signal: Overly broad origin allowlist
+    cwe_id: CWE-942
+    evidence_indicators:
+    - Multiple unrelated domains allowed
+    - Partner domains with unknown security posture
+    - Development domains in production
+    explanation: |
+      Each allowed origin is a potential attack vector if compromised.
+      Minimize the allowlist to strictly necessary origins.
+    remediation: Review and minimize origin allowlist; remove unused domains
+  - id: CORS-MED-002
+    signal: CORS policy differs between environments
+    evidence_indicators:
+    - Production allows more origins than expected
+    - Development origins in production config
+    - Inconsistent policy across services
+    explanation: |
+      Environment-specific configurations may leak into production,
+      or production may have accumulated origins over time.
+    remediation: Audit CORS configuration in production; remove dev origins
+  - id: CORS-MED-003
+    signal: Subdomains trusted without validation
+    cwe_id: CWE-942
+    evidence_pattern: \.example\.com|subdomain.*wildcard
+    explanation: |
+      Trusting all subdomains is risky if any subdomain can be compromised
+      or if subdomain takeover is possible.
+    remediation: Explicitly list trusted subdomains; don't use subdomain wildcards
+  low:
+  - id: CORS-LOW-001
+    signal: CORS configuration in application code vs server
+    evidence_indicators:
+    - CORS set at multiple layers
+    - Middleware and application both set CORS
+    - Duplicate headers in response
+    explanation: |
+      Multiple CORS configurations can conflict or be inconsistent,
+      making policy changes difficult.
+    remediation: Consolidate CORS configuration at a single layer
+  positive:
+  - id: CORS-POS-001
+    signal: Strict origin allowlist with validation
+    explanation: Only explicitly allowed origins accepted, properly validated
+  - id: CORS-POS-002
+    signal: No credentials allowed with external origins
+    explanation: Cross-origin requests don't include authentication
+  - id: CORS-POS-003
+    signal: CORS disabled for internal APIs
+    explanation: Internal APIs not exposed to cross-origin requests
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Test Origin Reflection
+    description: |
+      Send requests with various Origin headers to identify if the
+      server reflects arbitrary origins.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Test with attacker origin
+      command: 'curl -sI -H ''Origin: https://evil.com'' https://target/api | grep -i ''access-control'''
+    - purpose: Test with null origin
+      command: 'curl -sI -H ''Origin: null'' https://target/api | grep -i ''access-control'''
+    - purpose: Test with subdomain attack
+      command: 'curl -sI -H ''Origin: https://target.com.evil.com'' https://target/api | grep -i ''access-control'''
+    expected_findings:
+    - Which origins are reflected
+    - Whether arbitrary origins are accepted
+  - id: '2'
+    name: Check Credential Handling
+    description: |
+      Verify how the server handles Access-Control-Allow-Credentials
+      and whether it's combined with permissive origin policies.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check for credentials allowed
+      command: 'curl -sI -H ''Origin: https://trusted.com'' https://target/api | grep -i ''access-control-allow-credentials'''
+    - purpose: Test credentials with arbitrary origin
+      command: 'curl -sI -H ''Origin: https://evil.com'' https://target/api | grep -i ''credentials\|allow-origin'''
+    expected_findings:
+    - Credentials header presence
+    - Origin policy with credentials
+  - id: '3'
+    name: Review CORS Configuration Code
+    description: |
+      Examine server-side code for CORS configuration to understand
+      the validation logic.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find CORS configuration
+      command: grep -rn 'cors\|Access-Control-Allow-Origin\|allowedOrigins' src/ config/
+    - purpose: Check for origin validation
+      command: grep -rn 'origin.*includes\|origin.*match\|origin.*indexOf' src/
+    - purpose: Find wildcard configurations
+      command: grep -rn '"\*".*origin\|origin.*"\*"' src/ config/
+    expected_findings:
+    - CORS configuration method
+    - Origin validation logic
+    - Allowlist contents
+  - id: '4'
+    name: Test Preflight Handling
+    description: |
+      Send OPTIONS preflight requests to verify proper handling and
+      caching configuration.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Send preflight request
+      command: 'curl -sI -X OPTIONS -H ''Origin: https://trusted.com'' -H ''Access-Control-Request-Method:
+        POST'' https://target/api'
+    - purpose: Check preflight cache duration
+      command: 'curl -sI -X OPTIONS -H ''Origin: https://trusted.com'' https://target/api | grep -i ''max-age'''
+    expected_findings:
+    - Preflight response headers
+    - Cache duration
+  - id: '5'
+    name: Identify Sensitive Endpoints
+    description: |
+      Map which endpoints have CORS enabled and evaluate whether
+      they contain sensitive data requiring protection.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Test multiple endpoints
+      command: 'for ep in /api/users /api/account /api/public; do echo "$ep:"; curl -sI -H ''Origin: https://evil.com''
+        "https://target$ep" | grep -i ''access-control''; done'
+    expected_findings:
+    - CORS-enabled endpoints
+    - Sensitive endpoints with CORS
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - CORS Configuration Analysis
+    - Origin Validation Review
+    - Risk Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Direct testing confirms CORS behavior, code reviewed
+    medium: Header testing completed without code access
+    low: Based on configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-cors-testing
+      priority: required
+    - source_id: cwe-942
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: CORS audit requires comprehensive endpoint testing
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: cors-001
+  item: No wildcard origin with credentials
+  level: CRITICAL
+  verification: 'curl -sI -H ''Origin: https://evil.com'' https://$HOST/api 2>/dev/null | grep -qi ''allow-origin.*\*''
+    && grep -qi ''credentials.*true'' && echo ''FAIL'' || echo ''PASS'''
+  expected: PASS
+- id: cors-002
+  item: Arbitrary origins not reflected
+  level: CRITICAL
+  verification: 'curl -sI -H ''Origin: https://evil.com'' https://$HOST/api 2>/dev/null | grep -qi ''allow-origin.*evil.com''
+    && echo ''FAIL'' || echo ''PASS'''
+  expected: PASS
+- id: cors-003
+  item: Null origin not allowed
+  level: CRITICAL
+  verification: 'curl -sI -H ''Origin: null'' https://$HOST/api 2>/dev/null | grep -qi ''allow-origin.*null''
+    && echo ''FAIL'' || echo ''PASS'''
+  expected: PASS
+- id: cors-004
+  item: Origin validation uses exact match
+  level: BLOCKING
+  verification: manual
+  verification_notes: Review code to verify origin validated against explicit allowlist
+  expected: Confirmed by reviewer
+- id: cors-005
+  item: Sensitive headers not exposed
+  level: WARNING
+  verification: curl -sI https://$HOST/api 2>/dev/null | grep -qi 'expose-headers.*authorization' && echo
+    'FAIL' || echo 'PASS'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP-ASVS
+    controls:
+    - 14.5.1
+    - 14.5.2
+    - 14.5.3
+  - framework: PCI-DSS
+    controls:
+    - 6.5.8
+  - framework: NIST-CSF
+    controls:
+    - PR.AC-4
+relationships:
+  commonly_combined:
+  - security-trust.application-security.csrf-protection
+  - security-trust.application-security.security-headers
+  - security-trust.authentication.api-authentication

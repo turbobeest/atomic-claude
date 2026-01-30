@@ -1,0 +1,353 @@
+audit:
+  id: reliability-resilience.fault-tolerance.fallback-strategy
+  name: Fallback Strategy Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: fault-tolerance
+  tier: phd
+  estimated_duration: 2.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: architecture
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates fallback strategy implementations across the system.
+    Fallbacks provide alternative responses when primary operations fail,
+    enabling graceful degradation. The audit examines fallback types (cached
+    data, default values, alternative services, degraded functionality),
+    implementation patterns, data freshness policies, and fallback chain
+    configurations.
+  why_it_matters: |
+    Fallbacks determine user experience during failures. Without fallbacks,
+    service errors propagate directly to users as error pages or failed
+    transactions. Well-designed fallbacks maintain functionality (possibly
+    degraded) and user trust. Poor fallbacks (stale data, inappropriate
+    defaults) can cause worse problems than showing an error. Fallback
+    strategy is essential for meeting availability SLOs.
+  when_to_run:
+  - During architecture design reviews
+  - When adding new external dependencies
+  - After incidents where fallbacks were needed
+  - Quarterly reliability assessments
+prerequisites:
+  required_artifacts:
+  - type: source-code
+    description: Application source code for fallback analysis
+  - type: architecture-docs
+    description: Service dependency documentation
+  access_requirements:
+  - Read access to application source code
+  - Access to error handling configurations
+  - Access to caching layer configurations
+  - Access to feature flag configurations
+discovery:
+  code_patterns:
+  - pattern: fallback|Fallback|fallbackMethod
+    type: regex
+    scope: source
+    purpose: Fallback method implementations
+  - pattern: default.*value|defaultValue|getOrDefault
+    type: regex
+    scope: source
+    purpose: Default value fallbacks
+  - pattern: catch.*return|except.*return|rescue.*return
+    type: regex
+    scope: source
+    purpose: Error handling with fallback returns
+  - pattern: cache.*get.*fallback|getIfPresent.*orElse
+    type: regex
+    scope: source
+    purpose: Cache-based fallbacks
+  - pattern: Optional.*orElse|orElseGet|getOrElse
+    type: regex
+    scope: source
+    purpose: Optional/nullable fallback patterns
+  file_patterns:
+  - glob: '**/src/**/*.{java,go,py,ts,js}'
+    purpose: Application source code
+  - glob: '**/handlers/**/*'
+    purpose: Error and fallback handlers
+  - glob: '**/fallback/**/*'
+    purpose: Fallback implementations
+knowledge_sources:
+  specifications:
+  - id: resilience4j-fallback
+    name: Resilience4j Fallback Strategies
+    url: https://resilience4j.readme.io/docs/getting-started-3
+    offline_cache: true
+    priority: required
+  guides:
+  - id: netflix-hystrix-fallback
+    name: Netflix Hystrix Fallback
+    url: https://github.com/Netflix/Hystrix/wiki/How-To-Use#fallback
+    offline_cache: true
+  - id: aws-caching-fallback
+    name: AWS Caching Best Practices
+    url: https://docs.aws.amazon.com/AmazonElastiCache/latest/mem-ug/BestPractices.html
+    offline_cache: true
+  - id: release-it
+    name: Michael Nygard - Release It!
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+    offline_cache: true
+  - id: sre-book
+    name: Site Reliability Engineering
+    url: https://sre.google/sre-book/table-of-contents/
+    offline_cache: true
+  learning_resources:
+  - id: release-it
+    title: Release It! Second Edition
+    type: book
+    reference: 'ISBN 978-1680502398 - Chapter 5: Fail Fast'
+tooling:
+  static_analysis:
+  - tool: code-analysis
+    purpose: Find fallback patterns in code
+    offline_capable: true
+  monitoring_queries:
+  - system: Prometheus
+    query: fallback_invocations_total
+    purpose: Fallback invocation frequency
+  - system: Prometheus
+    query: cache_hits_total / (cache_hits_total + cache_misses_total)
+    purpose: Cache hit rate for cache fallbacks
+signals:
+  critical:
+  - id: FALL-CRIT-001
+    signal: No fallback for critical user-facing operations
+    evidence_pattern: api.*endpoint.*no.*fallback|critical.*path.*exception
+    explanation: |
+      Critical user operations without fallbacks result in error pages
+      when dependencies fail. Users cannot complete essential tasks like
+      login, checkout, or viewing content. Every critical path must have
+      a fallback strategy, even if degraded.
+    remediation: Implement fallback strategies for all critical user-facing operations
+  - id: FALL-CRIT-002
+    signal: Fallback returns dangerous default values
+    evidence_pattern: fallback.*return.*null|default.*0|fallback.*empty
+    explanation: |
+      Inappropriate defaults can cause worse problems than errors. A null
+      user causes NullPointerException cascades. Default price of 0 gives
+      away products for free. Fallbacks must return safe, semantically
+      correct values.
+    remediation: Ensure fallbacks return safe, semantically appropriate values
+  high:
+  - id: FALL-HIGH-001
+    signal: Cache fallback with no staleness limit
+    evidence_pattern: cache.*fallback.*no.*ttl|stale.*forever
+    explanation: |
+      Using cached data as fallback is common but requires staleness
+      limits. Infinitely stale data can cause incorrect behavior
+      (outdated prices, revoked permissions). Define maximum acceptable
+      staleness for cached fallbacks.
+    remediation: Configure maximum staleness limits for cache-based fallbacks
+  - id: FALL-HIGH-002
+    signal: Fallback hides errors without logging
+    evidence_pattern: catch.*return.*default.*no.*log
+    explanation: |
+      Fallbacks that silently mask errors prevent issue detection.
+      Operators don't know the primary path is failing. All fallback
+      invocations should log the original error and emit metrics.
+    remediation: Log original errors and emit metrics when fallbacks are invoked
+  - id: FALL-HIGH-003
+    signal: Fallback depends on same failing resource
+    evidence_pattern: fallback.*same.*database|fallback.*uses.*primary
+    explanation: |
+      Fallbacks that depend on the same resource as the primary path
+      fail together. A database fallback query fails when the database
+      is down. Fallbacks should use independent resources (cache, local
+      data, alternative service).
+    remediation: Ensure fallbacks use independent resources from primary path
+  medium:
+  - id: FALL-MED-001
+    signal: Fallback response not clearly indicated to user
+    explanation: |
+      Users should know when they're seeing degraded data. A "data may
+      be outdated" notice is better than silently showing stale prices.
+      Transparency maintains trust.
+    remediation: Indicate to users when fallback data is being served
+  - id: FALL-MED-002
+    signal: No fallback chain for cascading dependencies
+    explanation: |
+      Multiple fallback levels provide better resilience. Primary ->
+      Cache -> Static Default -> Error. Single-level fallbacks provide
+      less protection.
+    remediation: Implement fallback chains with multiple levels
+  - id: FALL-MED-003
+    signal: Fallback metrics not tracked
+    explanation: |
+      Tracking fallback frequency helps identify degraded service and
+      tune configurations. High fallback rates indicate underlying
+      issues that need attention.
+    remediation: Implement metrics tracking for fallback invocations
+  low:
+  - id: FALL-LOW-001
+    signal: Fallback behavior not documented
+    explanation: |
+      Documenting fallback behavior helps support and development
+      understand system behavior during failures.
+  positive:
+  - id: FALL-POS-001
+    signal: Fallbacks implemented for all external dependencies
+  - id: FALL-POS-002
+    signal: Fallback invocations logged and metrified
+  - id: FALL-POS-003
+    signal: Cache staleness limits configured for fallbacks
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify critical operations
+    description: |
+      Map operations that must have fallback strategies due to
+      business criticality.
+    duration_estimate: 25 min
+    questions:
+    - Which operations are critical for user experience?
+    - Which operations involve external dependencies?
+    - What is acceptable degraded behavior for each?
+    expected_findings:
+    - Critical operation inventory
+    - Acceptable degradation levels
+  - id: '2'
+    name: Audit fallback implementations
+    description: |
+      Review code for fallback patterns and verify coverage of
+      critical operations.
+    duration_estimate: 35 min
+    commands:
+    - purpose: Find fallback methods
+      command: |
+        grep -r "fallback\|Fallback\|fallbackMethod" --include="*.java" --include="*.go" --include="*.py" src/
+    - purpose: Find error handling with returns
+      command: |
+        grep -r "catch.*return\|except.*return" --include="*.java" --include="*.go" --include="*.py" src/
+    expected_findings:
+    - Fallback coverage
+    - Operations lacking fallbacks
+  - id: '3'
+    name: Evaluate fallback appropriateness
+    description: |
+      Assess whether fallback values and behaviors are appropriate
+      for each use case.
+    duration_estimate: 30 min
+    questions:
+    - Are fallback values semantically correct?
+    - Could fallback values cause incorrect behavior?
+    - Are staleness limits appropriate?
+    expected_findings:
+    - Fallback value appropriateness
+    - Dangerous default issues
+  - id: '4'
+    name: Review fallback observability
+    description: |
+      Verify fallback invocations are logged and metrics are
+      captured for monitoring.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find fallback logging
+      command: |
+        grep -r "fallback.*log\|log.*fallback" --include="*.java" --include="*.go" --include="*.py" src/
+    - purpose: Check fallback metrics
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/label/__name__/values' | jq '.data[] | select(contains("fallback"))'
+    expected_findings:
+    - Logging coverage
+    - Metrics availability
+  - id: '5'
+    name: Test fallback behavior
+    description: |
+      Verify fallbacks work correctly by simulating dependency
+      failures.
+    duration_estimate: 30 min
+    questions:
+    - Have fallbacks been tested under failure conditions?
+    - Is user experience acceptable during fallback?
+    - Do fallbacks recover when primary service returns?
+    expected_findings:
+    - Fallback test results
+    - User experience assessment
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Fallback Coverage Analysis
+    - Fallback Appropriateness Assessment
+    - Observability Review
+    - Recommendations
+  confidence_guidance:
+    high: Fallbacks tested under simulated failure
+    medium: Code review with configuration analysis
+    low: Code review only
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: resilience4j-fallback
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive code analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: fall-001
+  item: Fallbacks implemented for all critical operations
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify fallback exists for each critical user-facing operation
+  expected: Confirmed by reviewer
+- id: fall-002
+  item: Fallback values are semantically appropriate
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify fallbacks don't return dangerous defaults
+  expected: Confirmed by reviewer
+- id: fall-003
+  item: Fallback invocations are logged and metrified
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify logging and metrics for fallback paths
+  expected: Confirmed by reviewer
+- id: fall-004
+  item: Cache fallbacks have staleness limits
+  level: WARNING
+  verification: manual
+  verification_notes: Verify maximum staleness for cached fallback data
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.1
+relationships:
+  commonly_combined:
+  - reliability-resilience.fault-tolerance.circuit-breaker
+  - reliability-resilience.fault-tolerance.graceful-degradation
+  - reliability-resilience.fault-tolerance.dependency-failure-handling

@@ -1,0 +1,391 @@
+audit:
+  id: infrastructure-as-code.drift-detection.manual-change-detection
+  name: IaC Manual Change Detection
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: drift-detection
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit focuses on detecting and analyzing manual changes made to
+    infrastructure outside of the IaC workflow. It examines cloud audit
+    logs, API activity, and console access to identify changes that
+    bypassed the normal change management process.
+
+    Key areas examined:
+    - CloudTrail/Activity Log analysis for console changes
+    - API calls made outside CI/CD pipelines
+    - Direct credential usage patterns
+    - Emergency change tracking
+    - Console access patterns
+    - Manual change attribution and frequency
+  why_it_matters: |
+    Manual changes outside IaC workflows create significant risks:
+    - Security: Changes bypass security review and approval
+    - Compliance: Changes may not be properly documented
+    - Reliability: Changes may be lost during IaC apply
+    - Consistency: Configuration drift accumulates
+    - Accountability: Changes may be untracked
+
+    Detecting manual changes enables:
+    - Security incident investigation
+    - Compliance audit support
+    - Process improvement opportunities
+    - Training and awareness needs identification
+  when_to_run:
+  - During security audits
+  - After suspected unauthorized changes
+  - During compliance assessments
+  - Periodically (monthly/quarterly)
+prerequisites:
+  required_artifacts:
+  - type: cloud_audit_logs
+    description: Access to CloudTrail, Azure Activity Logs, or GCP Audit Logs
+  - type: ci_cd_logs
+    description: Access to CI/CD pipeline execution logs
+  access_requirements:
+  - CloudTrail/Activity Log read access
+  - CI/CD pipeline log access
+  - IAM user/role inventory
+discovery:
+  metrics_queries:
+  - system: CloudTrail
+    query: eventSource=console.amazonaws.com AND NOT userIdentity.type=AssumedRole
+    purpose: Identify console-based changes
+    threshold: Any write operations
+  - system: CloudTrail
+    query: userIdentity.type=IAMUser AND eventCategory=Management
+    purpose: Identify IAM user direct API calls
+    threshold: Write operations outside business hours
+  code_patterns:
+  - pattern: aws_cloudtrail
+    type: keyword
+    scope: config
+    purpose: Find CloudTrail configuration
+  - pattern: azure_monitor_diagnostic_setting
+    type: keyword
+    scope: config
+    purpose: Find Azure diagnostic settings
+knowledge_sources:
+  guides:
+  - id: cloudtrail-analysis
+    name: AWS CloudTrail Analysis
+    url: https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-user-guide.html
+    offline_cache: true
+  - id: azure-activity-log
+    name: Azure Activity Log
+    url: https://docs.microsoft.com/en-us/azure/azure-monitor/essentials/activity-log
+    offline_cache: true
+  - id: gcp-audit-logs
+    name: GCP Cloud Audit Logs
+    url: https://cloud.google.com/logging/docs/audit
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: aws cloudtrail
+    purpose: Query CloudTrail for manual changes
+    command: aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventSource,AttributeValue=ec2.amazonaws.com
+  - tool: aws athena
+    purpose: Query CloudTrail logs at scale
+    command: aws athena start-query-execution --query-string 'SELECT * FROM cloudtrail_logs'
+  - tool: az monitor
+    purpose: Query Azure Activity Logs
+    command: az monitor activity-log list --start-time
+  scripts:
+  - id: manual-change-detector
+    language: bash
+    purpose: Analyze CloudTrail for manual changes
+    source: inline
+    code: |
+      #!/bin/bash
+      # Query CloudTrail for console-based write operations
+      aws cloudtrail lookup-events \
+        --lookup-attributes AttributeKey=EventSource,AttributeValue=console.amazonaws.com \
+        --start-time $(date -d '7 days ago' --iso-8601) \
+        --query 'Events[?contains(EventName, `Create`) || contains(EventName, `Delete`) || contains(EventName, `Modify`) || contains(EventName, `Update`)]'
+signals:
+  critical:
+  - id: IAC-MCD-CRIT-001
+    signal: Security group changes made via console
+    evidence_indicators:
+    - AuthorizeSecurityGroupIngress via console
+    - RevokeSecurityGroupIngress via console
+    - Console-based security group modifications
+    explanation: |
+      Console security group changes bypass code review and may
+      introduce unauthorized access rules. These changes are often
+      made in haste without proper security assessment.
+    remediation: Investigate and revert; implement SCP to prevent console security group changes
+  - id: IAC-MCD-CRIT-002
+    signal: IAM changes made outside IaC
+    evidence_indicators:
+    - CreateRole via console
+    - AttachRolePolicy outside CI/CD
+    - Direct IAM modifications
+    explanation: |
+      IAM changes outside IaC can create unauthorized access paths
+      or privilege escalation opportunities.
+    remediation: Audit all manual IAM changes; reconcile with IaC
+  - id: IAC-MCD-CRIT-003
+    signal: Root account usage detected
+    evidence_indicators:
+    - Root user API calls
+    - Root console access
+    explanation: |
+      Root account usage should be extremely rare. Any root activity
+      requires immediate investigation.
+    remediation: Investigate root usage; enable MFA and minimize root access
+  high:
+  - id: IAC-MCD-HIGH-001
+    signal: High volume of console changes
+    evidence_indicators:
+    - '>10 console write operations per day'
+    - Multiple users making console changes
+    explanation: |
+      High console activity indicates IaC processes are being bypassed
+      regularly, undermining IaC value.
+    remediation: Investigate reasons; address gaps in IaC coverage
+  - id: IAC-MCD-HIGH-002
+    signal: Changes outside business hours
+    evidence_indicators:
+    - Write operations at unusual times
+    - Weekend infrastructure changes
+    explanation: |
+      Off-hours changes may indicate emergency responses that bypass
+      normal process, or potentially unauthorized activity.
+    remediation: Review and categorize; create emergency change process if needed
+  - id: IAC-MCD-HIGH-003
+    signal: Unattributable changes
+    evidence_indicators:
+    - Changes from unknown IAM users
+    - Activity from unexpected roles
+    explanation: |
+      Unattributable changes indicate potential credential compromise
+      or unauthorized access.
+    remediation: Investigate identity; review IAM access
+  medium:
+  - id: IAC-MCD-MED-001
+    signal: Console access without changes
+    evidence_indicators:
+    - Console logins without clear purpose
+    - Browsing activity in AWS Console
+    remediation: Review console access policies; implement read-only console roles
+  - id: IAC-MCD-MED-002
+    signal: Tag modifications via console
+    evidence_indicators:
+    - CreateTags/DeleteTags via console
+    remediation: Add tags to IaC; implement tag policies
+  - id: IAC-MCD-MED-003
+    signal: Read operations suggesting investigation
+    evidence_indicators:
+    - Describe* calls on security resources
+    - List* calls across multiple services
+    remediation: Understand investigation purpose; ensure proper audit logging
+  low:
+  - id: IAC-MCD-LOW-001
+    signal: Console used for read-only operations
+    evidence_indicators:
+    - Console access for monitoring only
+    - No write operations detected
+    remediation: Consider read-only console access policies
+  positive:
+  - id: IAC-MCD-POS-001
+    signal: All changes through CI/CD pipelines
+    evidence_indicators:
+    - All write operations from assumed roles
+    - No console write activity
+  - id: IAC-MCD-POS-002
+    signal: Console access restricted
+    evidence_indicators:
+    - SCP blocking console changes
+    - Limited console access permissions
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: CloudTrail Analysis Setup
+    description: |
+      Configure access to CloudTrail logs and prepare queries
+      for manual change detection.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Verify CloudTrail is enabled
+      command: aws cloudtrail describe-trails
+    - purpose: Check CloudTrail configuration
+      command: aws cloudtrail get-trail-status --name default 2>/dev/null || aws cloudtrail get-trail-status
+        --name $(aws cloudtrail describe-trails --query 'trailList[0].Name' --output text)
+    expected_findings:
+    - CloudTrail configuration
+    - Log availability
+    - Trail coverage
+  - id: '2'
+    name: Console Change Detection
+    description: |
+      Query CloudTrail for changes made via AWS Console rather
+      than API/CLI/IaC.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find console-based changes
+      command: aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventSource,AttributeValue=signin.amazonaws.com
+        --start-time $(date -d '7 days ago' --iso-8601=seconds) --query 'Events[*].{Time:EventTime,User:Username,Event:EventName}'
+        --output table 2>/dev/null | head -50
+    - purpose: Find write operations from console
+      command: aws cloudtrail lookup-events --max-results 50 --query 'Events[?contains(CloudTrailEvent,
+        `console.amazonaws.com`) && !contains(CloudTrailEvent, `Describe`) && !contains(CloudTrailEvent,
+        `List`) && !contains(CloudTrailEvent, `Get`)]'
+    expected_findings:
+    - Console-based changes
+    - User attribution
+    - Change patterns
+  - id: '3'
+    name: Security Resource Changes
+    description: |
+      Focus analysis on security-critical resource changes
+      including IAM and security groups.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find security group changes
+      command: aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventSource,AttributeValue=ec2.amazonaws.com
+        --start-time $(date -d '30 days ago' --iso-8601=seconds) --query 'Events[?contains(EventName,
+        `SecurityGroup`)]'
+    - purpose: Find IAM changes
+      command: aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventSource,AttributeValue=iam.amazonaws.com
+        --start-time $(date -d '30 days ago' --iso-8601=seconds) --max-results 50
+    expected_findings:
+    - Security group modifications
+    - IAM changes
+    - Attribution and timing
+  - id: '4'
+    name: CI/CD vs Manual Attribution
+    description: |
+      Differentiate between changes made by CI/CD pipelines
+      and manual/direct changes.
+    duration_estimate: 25 min
+    commands:
+    - purpose: List assumed roles (typically CI/CD)
+      command: aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventName,AttributeValue=AssumeRole
+        --start-time $(date -d '7 days ago' --iso-8601=seconds) --max-results 20
+    - purpose: Find IAM user direct API calls
+      command: aws cloudtrail lookup-events --start-time $(date -d '7 days ago' --iso-8601=seconds) --query
+        'Events[?CloudTrailEvent contains `"userIdentity":{"type":"IAMUser"`]' 2>/dev/null | head -100
+    expected_findings:
+    - CI/CD role patterns
+    - Direct user actions
+    - Attribution breakdown
+  - id: '5'
+    name: Pattern Analysis and Reporting
+    description: |
+      Analyze patterns in manual changes to identify systemic
+      issues and improvement opportunities.
+    duration_estimate: 20 min
+    questions:
+    - What types of changes are made manually most often?
+    - Which users/teams make the most manual changes?
+    - Are there patterns in timing of manual changes?
+    - What IaC gaps do manual changes reveal?
+    expected_findings:
+    - Common manual change patterns
+    - User/team breakdown
+    - IaC coverage gaps
+    - Process improvement opportunities
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Manual Change Inventory
+    - Security Impact Assessment
+    - Pattern Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Direct CloudTrail evidence
+    medium: Inferred from partial logs
+    low: Based on patterns or assumptions
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: cloudtrail-analysis
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires runtime access to audit logs
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 1
+      reason: Critical for security audit
+closeout_checklist:
+- id: mcd-001
+  item: No unauthorized security group changes detected
+  level: CRITICAL
+  verification: manual
+  verification_notes: Review CloudTrail for security group console changes
+  expected: Confirmed by reviewer
+- id: mcd-002
+  item: No unauthorized IAM changes detected
+  level: CRITICAL
+  verification: manual
+  verification_notes: Review CloudTrail for IAM console/direct changes
+  expected: Confirmed by reviewer
+- id: mcd-003
+  item: Manual changes documented and justified
+  level: BLOCKING
+  verification: manual
+  verification_notes: All detected manual changes have documented justification
+  expected: Confirmed by reviewer
+- id: mcd-004
+  item: IaC gaps identified for manual changes
+  level: WARNING
+  verification: manual
+  verification_notes: Recurring manual changes mapped to IaC coverage gaps
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.8
+    - CC7.1
+    - CC7.2
+  - framework: PCI-DSS
+    controls:
+    - '10.1'
+    - '10.2'
+    - '10.3'
+  - framework: CIS Controls
+    controls:
+    - Control 4
+    - Control 8
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.drift-detection.configuration-drift
+  - infrastructure-as-code.drift-detection.drift-detection-process

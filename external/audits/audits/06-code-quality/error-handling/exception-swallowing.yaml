@@ -1,0 +1,283 @@
+audit:
+  id: code-quality.error-handling.exception-swallowing
+  name: Exception Swallowing Detection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: error-handling
+  tier: expert
+  estimated_duration: 30 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - quality
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Identifies patterns where exceptions are caught but their information is
+    lost or inadequately handled. This includes catching exceptions without
+    logging, returning null or default values on errors, and converting
+    exceptions to generic error messages without context.
+  why_it_matters: |
+    Swallowed exceptions make debugging nearly impossible. Root causes of
+    failures become hidden, leading to longer incident resolution times.
+    Stack traces, error messages, and context are lost, preventing proper
+    diagnosis of production issues.
+  when_to_run:
+  - During code reviews
+  - After production incidents
+  - When investigating flaky behavior
+  - Security audits
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  access_requirements:
+  - Read access to source code repository
+discovery:
+  code_patterns:
+  - pattern: catch\s*\([^)]*\)\s*\{[^}]*return\s+(null|undefined|false|\-1)
+    type: regex
+    scope: source
+    purpose: Detect catch returning sentinel values
+  - pattern: catch\s*\([^)]*\)\s*\{[^}]*return\s+new\s+\w+\(\)
+    type: regex
+    scope: source
+    purpose: Detect catch returning empty object
+  - pattern: catch.*\{(?![^}]*(log|print|console|throw|raise))[^}]*\}
+    type: regex
+    scope: source
+    purpose: Detect catch without logging or throw
+  file_patterns:
+  - glob: '**/*.{java,cs,ts,js,py,rb,go}'
+    purpose: Source code files
+knowledge_sources:
+  specifications:
+  - id: cwe-390
+    name: 'CWE-390: Detection of Error Condition Without Action'
+    url: https://cwe.mitre.org/data/definitions/390.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: exception-handling
+    name: Exception Handling Best Practices
+    url: https://docs.microsoft.com/en-us/dotnet/standard/exceptions/best-practices-for-exceptions
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: sonarqube
+    purpose: Exception swallowing detection
+    offline_capable: false
+  - tool: errorprone
+    purpose: Java exception handling bugs
+    offline_capable: true
+  - tool: eslint-plugin-exception
+    purpose: TypeScript exception rules
+    offline_capable: true
+  scripts:
+  - id: swallow-scan
+    language: bash
+    purpose: Detect exception swallowing patterns
+    source: inline
+    code: |
+      # Find catch blocks returning null
+      grep -rn --include="*.{java,ts}" -E "catch.*\{[^}]*return\s+(null|undefined)" . 2>/dev/null | head -50
+signals:
+  critical:
+  - id: EH-SWALLOW-CRIT-001
+    signal: Exception caught and replaced with null in security code
+    evidence_pattern: catch.*\{.*return\s+null.*(auth|security|valid)
+    cwe: CWE-390
+    explanation: |
+      Returning null on security exceptions may bypass security checks
+      entirely if the caller doesn't properly handle the null.
+    remediation: Propagate exception or return explicit failure result
+  - id: EH-SWALLOW-CRIT-002
+    signal: Original exception not chained when re-throwing
+    evidence_pattern: catch\s*\(\s*(\w+).*throw\s+new.*(?!\1)
+    cwe: CWE-390
+    explanation: |
+      Re-throwing without chaining the original exception loses the
+      root cause and stack trace.
+    remediation: Chain original exception as cause
+  high:
+  - id: EH-SWALLOW-HIGH-001
+    signal: Exception caught and converted to generic error message
+    evidence_pattern: catch.*\{.*return.*error.*occurred
+    cwe: CWE-390
+    explanation: |
+      Generic error messages without specific details make debugging
+      impossible.
+    remediation: Include exception details or code in error response
+  - id: EH-SWALLOW-HIGH-002
+    signal: Exception caught without logging and no throw
+    evidence_pattern: catch.*\{(?![^}]*(log|print|console|throw|raise))[^}]*\}
+    cwe: CWE-390
+    explanation: |
+      Exceptions caught without logging or throwing are silently
+      swallowed, making diagnosis impossible.
+    remediation: Add logging before any other handling
+  medium:
+  - id: EH-SWALLOW-MED-001
+    signal: Exception caught and default value returned
+    evidence_pattern: catch.*\{.*return\s+(false|\-1|0|\[\])
+    remediation: Document behavior or propagate error
+  - id: EH-SWALLOW-MED-002
+    signal: Exception message logged but not stack trace
+    evidence_pattern: catch.*\{.*log.*(e\.message|getMessage)(?![^}]*e\))
+    remediation: Log full exception including stack trace
+  low:
+  - id: EH-SWALLOW-LOW-001
+    signal: Known/expected exception silently handled
+    evidence_pattern: catch.*Expected|Ignored.*\{[^}]*\}
+    remediation: Document why silence is acceptable
+  positive:
+  - id: EH-SWALLOW-POS-001
+    signal: Exceptions logged with full stack trace
+    evidence_pattern: log.*exception|log.*error.*\(e\)
+  - id: EH-SWALLOW-POS-002
+    signal: Exception chaining used consistently
+    evidence_pattern: throw.*new.*Cause|initCause
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Find Swallowing Patterns
+    description: |
+      Search for catch blocks that swallow exceptions by returning
+      sentinel values or not logging/throwing.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find catch returning null
+      command: |
+        grep -rn --include="*.{java,ts}" -E "catch.*\{[^}]*return\s+(null|undefined)" . 2>/dev/null | head -50
+    - purpose: Find catch without logging
+      command: |
+        grep -rn --include="*.{java,ts}" -A5 "catch\s*\(" . 2>/dev/null | grep -v -E "log|print|console|throw" | head -50
+    expected_findings:
+    - Swallowing patterns
+    - Missing logging
+  - id: '2'
+    name: Check Exception Chaining
+    description: |
+      Verify that when exceptions are wrapped and re-thrown, the
+      original is properly chained.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find re-throws
+      command: |
+        grep -rn --include="*.{java,ts}" -E "catch.*throw\s+new" . 2>/dev/null | head -50
+    expected_findings:
+    - Re-throw patterns
+    - Missing cause chaining
+  - id: '3'
+    name: Assess Logging Completeness
+    description: |
+      Check if logged exceptions include full stack traces or just
+      messages.
+    duration_estimate: 5 min
+    commands:
+    - purpose: Find message-only logging
+      command: |
+        grep -rn --include="*.{java,ts}" -E "log.*(getMessage|\.message)" . 2>/dev/null | head -30
+    expected_findings:
+    - Message-only logging
+    - Full exception logging
+  - id: '4'
+    name: Generate Fixes
+    description: |
+      Create prioritized list of swallowing patterns to fix.
+    duration_estimate: 5 min
+    expected_findings:
+    - Priority fixes
+    - Recommended changes
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - location
+    - swallow_pattern
+    - severity
+    - recommendation
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Swallowing Patterns Found
+    - Risk Assessment
+    - Remediation Plan
+  confidence_guidance:
+    high: Clear swallowing pattern detected
+    medium: Potential swallowing, context needed
+    low: May be intentional, review required
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-390
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: swallow-001
+  item: Swallowing pattern scan completed
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.{java,ts}" -E "catch.*\{[^}]*return\s+(null|undefined)" . 2>/dev/null | wc -l
+  expected: Count documented
+- id: swallow-002
+  item: No critical swallowing in security code
+  level: CRITICAL
+  verification: manual
+  verification_notes: Review security-context catches
+  expected: Zero critical findings
+- id: swallow-003
+  item: Exception chaining verified
+  level: WARNING
+  verification: manual
+  verification_notes: Review re-throw patterns
+  expected: All re-throws chain cause
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-390
+  - framework: OWASP
+    controls:
+    - Improper Error Handling
+  - framework: ISO 25010
+    controls:
+    - Reliability
+relationships:
+  commonly_combined:
+  - code-quality.error-handling.empty-catch-block
+  - code-quality.error-handling.error-message-quality
+  - code-quality.error-handling.exception-granularity

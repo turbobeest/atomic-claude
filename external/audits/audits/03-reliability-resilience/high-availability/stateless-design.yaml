@@ -1,0 +1,301 @@
+# ============================================================
+# AUDIT: Stateless Design Audit
+# ============================================================
+
+audit:
+  id: "reliability-resilience.high-availability.stateless-design"
+  name: "Stateless Design Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "high-availability"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates whether services are designed to be stateless, examining
+    session management, local file storage, in-memory caching, and
+    instance-specific state. Identifies state that would be lost on
+    instance termination and verifies externalization strategies.
+
+  why_it_matters: |
+    Stateless design is foundational to horizontal scaling and high
+    availability. Services with local state cannot be freely scaled,
+    load balanced, or replaced during failures. State tied to specific
+    instances creates single points of failure and complicates deployment.
+    Externalizing state to appropriate stores enables true elasticity.
+
+  when_to_run:
+    - "During architecture design review"
+    - "When planning for horizontal scaling"
+    - "When experiencing issues after instance replacement"
+    - "Before containerization or cloud migration"
+
+prerequisites:
+  required_artifacts:
+    - type: "codebase"
+      description: "Application source code"
+    - type: "architecture"
+      description: "System architecture documentation"
+
+  access_requirements:
+    - "Source code repository access"
+    - "Architecture documentation"
+
+discovery:
+  code_patterns:
+    - pattern: "session\\[|req\\.session|HttpSession|@SessionScoped"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify session usage patterns"
+    - pattern: "localStorage|sessionStorage|window\\.localStorage"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify browser storage usage"
+    - pattern: "File\\.write|open\\(.*'w'|fs\\.writeFile|writeFileSync"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify local file writes"
+    - pattern: "static\\s+\\w+\\s*=|class\\s+\\w+.*static"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify static/class-level state"
+
+  file_patterns:
+    - glob: "**/session*.{py,js,java,go}"
+      purpose: "Session management files"
+    - glob: "**/cache*.{py,js,java,go}"
+      purpose: "Cache implementation files"
+
+knowledge_sources:
+  guides:
+    - id: "12-factor-processes"
+      name: "The Twelve-Factor App - Processes"
+      url: "https://12factor.net/processes"
+      offline_cache: true
+    - id: "aws-stateless"
+      name: "AWS Well-Architected - Stateless Design"
+      url: "https://docs.aws.amazon.com/whitepapers/latest/serverless-architectures-lambda/statelessness-and-scalability.html"
+      offline_cache: true
+    - id: "release-it"
+      name: "Michael Nygard - Release It!"
+      url: "https://pragprog.com/titles/mnee2/release-it-second-edition/"
+      offline_cache: true
+    - id: "sre-book"
+      name: "Site Reliability Engineering"
+      url: "https://sre.google/sre-book/table-of-contents/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "grep/semgrep"
+      purpose: "Find state-related patterns"
+      offline_capable: true
+
+  scripts:
+    - id: "find-state-patterns"
+      language: "bash"
+      purpose: "Search for common stateful patterns"
+      source: "inline"
+      code: |
+        # Find session usage
+        grep -rn "session\[" --include="*.py" .
+        grep -rn "req\.session" --include="*.js" .
+        # Find file system writes
+        grep -rn "open(.*'w'" --include="*.py" .
+        grep -rn "fs\.writeFile" --include="*.js" .
+
+signals:
+  critical:
+    - id: "HA-SL-CRIT-001"
+      signal: "Critical data stored only in memory without persistence"
+      evidence_pattern: "In-memory collections storing user or business data without external backing"
+      explanation: |
+        Data stored only in memory is lost when the process restarts,
+        causing data loss and inconsistent user experiences.
+      remediation: "Move critical state to external persistent storage (database, cache cluster)"
+
+    - id: "HA-SL-CRIT-002"
+      signal: "Session state stored on local filesystem"
+      evidence_pattern: "Session files written to local disk paths"
+      explanation: |
+        File-based sessions break when requests hit different instances
+        and are lost when instances are replaced.
+      remediation: "Use distributed session store (Redis, database, or managed service)"
+
+  high:
+    - id: "HA-SL-HIGH-001"
+      signal: "In-process cache without invalidation strategy for multi-instance"
+      explanation: "Instance-local caches become inconsistent across instances"
+      remediation: "Use distributed cache or implement cache invalidation"
+
+    - id: "HA-SL-HIGH-002"
+      signal: "Sticky sessions required due to local state"
+      explanation: "Sticky sessions reduce load balancing effectiveness and create failover complexity"
+      remediation: "Externalize state that requires session affinity"
+
+  medium:
+    - id: "HA-SL-MED-001"
+      signal: "Temporary files created without cleanup"
+      remediation: "Implement cleanup or use ephemeral storage appropriately"
+
+    - id: "HA-SL-MED-002"
+      signal: "Static class variables used for request-scoped data"
+      remediation: "Use request-scoped or thread-local storage instead"
+
+  low:
+    - id: "HA-SL-LOW-001"
+      signal: "Configuration loaded once at startup without refresh capability"
+
+  positive:
+    - id: "HA-SL-POS-001"
+      signal: "Session state externalized to Redis or similar"
+    - id: "HA-SL-POS-002"
+      signal: "Twelve-factor app principles followed for process design"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map Application State"
+      description: |
+        Identify all forms of state in the application: sessions, caches,
+        file storage, and in-memory data structures.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find session-related code"
+          command: "grep -rn 'session' --include='*.py' --include='*.js' --include='*.java' ."
+        - purpose: "Find file write operations"
+          command: "grep -rn 'write\\|save\\|store' --include='*.py' --include='*.js' ."
+      expected_findings:
+        - "Inventory of stateful components"
+        - "State storage mechanisms used"
+
+    - id: "2"
+      name: "Analyze Session Management"
+      description: |
+        Review how user sessions are created, stored, and accessed.
+      duration_estimate: "30 min"
+      questions:
+        - "Where is session data stored?"
+        - "Can sessions be accessed from any instance?"
+        - "What happens to sessions when instances restart?"
+      expected_findings:
+        - "Session storage implementation"
+        - "Session persistence strategy"
+
+    - id: "3"
+      name: "Review Cache Architecture"
+      description: |
+        Examine caching strategy and whether caches are instance-local
+        or distributed.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find caching implementations"
+          command: "grep -rn 'cache\\|Cache\\|@Cacheable' --include='*.py' --include='*.js' --include='*.java' ."
+      expected_findings:
+        - "Cache topology (local vs distributed)"
+        - "Cache invalidation strategy"
+
+    - id: "4"
+      name: "Evaluate Scalability Impact"
+      description: |
+        Assess how identified state affects horizontal scaling capability.
+      duration_estimate: "30 min"
+      questions:
+        - "Can new instances be added without state migration?"
+        - "Is sticky session required for correct behavior?"
+        - "What would be lost if an instance crashed mid-request?"
+      expected_findings:
+        - "Scaling limitations due to state"
+        - "Failover behavior assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "State Inventory"
+        - "Statelessness Assessment"
+        - "Scaling Impact Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Complete code review with runtime verification"
+    medium: "Code pattern analysis without runtime testing"
+    low: "Architecture documentation review only"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "12-factor-processes"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires thorough code analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "stateless-design-001"
+    item: "No critical data stored only in instance memory"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review code for in-memory state holding critical data"
+    expected: "Confirmed by reviewer"
+
+  - id: "stateless-design-002"
+    item: "Session state externalized to distributed store"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Confirm session storage configuration uses external store"
+    expected: "Confirmed by reviewer"
+
+  - id: "stateless-design-003"
+    item: "Application can scale horizontally without state migration"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify new instances can serve traffic immediately"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.high-availability.session-handling-during-failover"
+    - "reliability-resilience.high-availability.rolling-deployment"

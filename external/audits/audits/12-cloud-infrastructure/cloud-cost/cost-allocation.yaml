@@ -1,0 +1,358 @@
+# ============================================================
+# AUDIT FILE: Cost Allocation
+# ============================================================
+
+audit:
+  id: "cloud-infrastructure.cloud-cost.cost-allocation"
+  name: "Cost Allocation"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "cloud-infrastructure"
+  category_number: 12
+  subcategory: "cloud-cost"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates cloud cost allocation practices including tagging strategy,
+    cost allocation tags, resource tagging compliance, cost center mapping,
+    showback/chargeback mechanisms, and organizational cost attribution.
+    Examines how costs are tracked, attributed, and reported to stakeholders.
+
+  why_it_matters: |
+    Without proper cost allocation, organizations cannot understand where
+    cloud spending goes, make informed optimization decisions, or hold
+    teams accountable for their consumption. Poor cost visibility leads
+    to budget overruns, inefficient resource usage, and inability to
+    identify cost optimization opportunities.
+
+  when_to_run:
+    - "During initial cloud setup"
+    - "Regular financial reviews (monthly/quarterly)"
+    - "When onboarding new teams or projects"
+    - "Before budget planning cycles"
+
+prerequisites:
+  required_artifacts:
+    - type: "cloud-account"
+      description: "Access to cloud billing and cost management"
+    - type: "tagging-policy"
+      description: "Organization tagging standards"
+
+  access_requirements:
+    - "Cost Explorer or equivalent billing access"
+    - "Permissions to view resource tags"
+    - "Access to organizational policies"
+
+discovery:
+  file_patterns:
+    - glob: "**/tagging-policy*.yaml"
+      purpose: "Tagging policy documents"
+    - glob: "**/cost-allocation*.yaml"
+      purpose: "Cost allocation configurations"
+    - glob: "**/*.tf"
+      purpose: "Terraform files to check tagging"
+
+  code_patterns:
+    - pattern: "aws_resourcegroupstaggingapi"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find tagging API usage"
+    - pattern: "default_tags"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find default tag configurations"
+    - pattern: "tags\\s*="
+      type: "regex"
+      scope: "config"
+      purpose: "Find tag assignments"
+
+knowledge_sources:
+  specifications:
+    - id: "aws-cost-allocation"
+      name: "AWS Cost Allocation Tags"
+      url: "https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/cost-alloc-tags.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "aws-tagging"
+      name: "AWS Tagging Best Practices"
+      url: "https://docs.aws.amazon.com/general/latest/gr/aws_tagging.html"
+      offline_cache: true
+    - id: "finops"
+      name: "FinOps Framework"
+      url: "https://www.finops.org/framework/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws-cli"
+      purpose: "Query tags and costs"
+      command: "aws ce get-cost-and-usage --time-period Start=<start>,End=<end> --granularity MONTHLY --group-by Type=TAG,Key=<tag>"
+    - tool: "resource-groups"
+      purpose: "Tag compliance checking"
+      command: "aws resourcegroupstaggingapi get-resources --tag-filters Key=<key>"
+
+  scripts:
+    - id: "tag-audit"
+      language: "bash"
+      purpose: "Audit resource tagging"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Untagged EC2 Instances ==="
+        aws ec2 describe-instances --query 'Reservations[*].Instances[?Tags==`null`].[InstanceId,InstanceType]' --output table
+        echo "=== Cost Allocation Tag Status ==="
+        aws ce list-cost-allocation-tags --status Active --query 'CostAllocationTags[*].[TagKey,Status]' --output table
+        echo "=== Resources Missing Required Tags ==="
+        aws resourcegroupstaggingapi get-resources --query 'ResourceTagMappingList[?length(Tags)==`0`].ResourceARN' --output text | head -20
+
+signals:
+  critical:
+    - id: "COST-ALLOC-CRIT-001"
+      signal: "No cost allocation tags activated"
+      evidence_pattern: "Zero active cost allocation tags"
+      explanation: |
+        Without cost allocation tags, costs cannot be attributed to
+        teams, projects, or environments. Cost visibility is impossible.
+      remediation: "Activate required cost allocation tags in billing console"
+    - id: "COST-ALLOC-CRIT-002"
+      signal: "Majority of spend untagged"
+      evidence_pattern: ">50% of costs have no allocation tags"
+      explanation: |
+        High untagged spend means significant costs cannot be attributed,
+        making budgeting and accountability impossible.
+      remediation: "Implement tagging enforcement and tag existing resources"
+
+  high:
+    - id: "COST-ALLOC-HIGH-001"
+      signal: "No tagging policy defined"
+      evidence_pattern: "Missing documented tagging requirements"
+      explanation: |
+        Without a tagging policy, tagging is inconsistent and incomplete.
+        Teams don't know what tags to apply.
+      remediation: "Define and communicate mandatory tagging policy"
+    - id: "COST-ALLOC-HIGH-002"
+      signal: "Critical resources untagged"
+      evidence_pattern: "Production resources missing required tags"
+      explanation: |
+        Untagged critical resources prevent cost attribution for
+        the most important workloads.
+      remediation: "Tag all production resources with required tags"
+    - id: "COST-ALLOC-HIGH-003"
+      signal: "No tagging enforcement"
+      evidence_pattern: "Resources can be created without required tags"
+      explanation: |
+        Without enforcement, tagging compliance degrades over time
+        as new resources are created untagged.
+      remediation: "Implement Service Control Policies or Config rules for enforcement"
+
+  medium:
+    - id: "COST-ALLOC-MED-001"
+      signal: "Inconsistent tag values"
+      evidence_pattern: "Same concept tagged with different values"
+      remediation: "Standardize tag values, implement allowed value lists"
+    - id: "COST-ALLOC-MED-002"
+      signal: "No cost center mapping"
+      evidence_pattern: "Tags don't map to organizational cost centers"
+      remediation: "Map tags to cost centers for financial reporting"
+    - id: "COST-ALLOC-MED-003"
+      signal: "Shared resource costs not allocated"
+      evidence_pattern: "Common services not attributed to consumers"
+      remediation: "Implement shared cost allocation methodology"
+
+  low:
+    - id: "COST-ALLOC-LOW-001"
+      signal: "No tag value governance"
+      remediation: "Implement allowed values or naming conventions"
+    - id: "COST-ALLOC-LOW-002"
+      signal: "Historical tagging not backfilled"
+      remediation: "Consider backfilling tags for trend analysis"
+
+  positive:
+    - id: "COST-ALLOC-POS-001"
+      signal: ">95% of costs tagged"
+    - id: "COST-ALLOC-POS-002"
+      signal: "Tagging enforcement in place"
+    - id: "COST-ALLOC-POS-003"
+      signal: "Regular tagging compliance reports"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Review tagging policy"
+      description: |
+        Examine documented tagging policy including required tags,
+        allowed values, and enforcement mechanisms.
+      duration_estimate: "25 min"
+      questions:
+        - "What tags are mandatory?"
+        - "Are tag values standardized?"
+        - "How is compliance enforced?"
+      expected_findings:
+        - "Tagging policy assessment"
+        - "Policy gaps"
+
+    - id: "2"
+      name: "Assess cost allocation tag status"
+      description: |
+        Check which tags are activated for cost allocation reporting.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "List active cost allocation tags"
+          command: "aws ce list-cost-allocation-tags --status Active"
+        - purpose: "List inactive tags"
+          command: "aws ce list-cost-allocation-tags --status Inactive"
+      expected_findings:
+        - "Active allocation tag inventory"
+        - "Missing allocations"
+
+    - id: "3"
+      name: "Measure tagging compliance"
+      description: |
+        Determine what percentage of resources and costs are properly
+        tagged.
+      duration_estimate: "35 min"
+      commands:
+        - purpose: "Get tagged vs untagged cost"
+          command: "aws ce get-cost-and-usage --time-period Start=<start>,End=<end> --granularity MONTHLY --group-by Type=TAG,Key=<required-tag> --metrics UnblendedCost"
+        - purpose: "Find untagged resources"
+          command: "aws resourcegroupstaggingapi get-resources --query 'ResourceTagMappingList[?length(Tags)==`0`].[ResourceARN]'"
+      expected_findings:
+        - "Tagging compliance percentage"
+        - "Untagged resource inventory"
+
+    - id: "4"
+      name: "Evaluate enforcement mechanisms"
+      description: |
+        Review mechanisms for preventing untagged resource creation.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check SCPs"
+          command: "aws organizations list-policies --filter SERVICE_CONTROL_POLICY"
+        - purpose: "Check Config rules"
+          command: "aws configservice describe-config-rules --query 'ConfigRules[?contains(ConfigRuleName, `tag`)]'"
+      expected_findings:
+        - "Enforcement mechanisms"
+        - "Enforcement gaps"
+
+    - id: "5"
+      name: "Review cost attribution reports"
+      description: |
+        Examine how costs are reported and attributed to stakeholders.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check Cost Explorer reports"
+          command: "aws ce list-cost-categories"
+        - purpose: "Check budget alerts"
+          command: "aws budgets describe-budgets --account-id $(aws sts get-caller-identity --query Account --output text)"
+      expected_findings:
+        - "Report availability"
+        - "Attribution completeness"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Tagging Compliance Analysis"
+        - "Cost Attribution Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct cost and tag API queries"
+    medium: "Sampling-based assessment"
+    low: "Based on policy review without verification"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-cost-allocation"
+        priority: "required"
+      - source_id: "finops"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive tagging analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "cost-allocation-001"
+    item: "Cost allocation tags activated"
+    level: "CRITICAL"
+    verification: "aws ce list-cost-allocation-tags --status Active --query 'CostAllocationTags' | jq 'length' | awk '{print ($1>0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "cost-allocation-002"
+    item: ">80% of costs tagged"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Calculate tagged vs untagged spend percentage"
+    expected: "Confirmed by reviewer"
+  - id: "cost-allocation-003"
+    item: "Tagging policy documented"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify tagging policy exists and is communicated"
+    expected: "Confirmed by reviewer"
+  - id: "cost-allocation-004"
+    item: "Tagging enforcement enabled"
+    level: "WARNING"
+    verification: "aws organizations list-policies --filter SERVICE_CONTROL_POLICY | jq '.Policies | length' | awk '{print ($1>0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "cost-allocation-005"
+    item: "Cost reports available to stakeholders"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify cost reports are generated and distributed"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "FinOps"
+      controls: ["Allocation", "Showback", "Chargeback"]
+    - framework: "SOC2"
+      controls: ["CC6.1"]
+
+relationships:
+  commonly_combined:
+    - "cloud-infrastructure.cloud-cost.budget-monitoring"
+    - "cloud-infrastructure.cloud-cost.unused-resource-detection"
+    - "cloud-infrastructure.cloud-cost.cost-anomaly-detection"

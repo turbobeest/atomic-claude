@@ -1,0 +1,548 @@
+audit:
+  id: security-trust.input-validation.command-injection
+  name: Command Injection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: input-validation
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  - quick
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    This audit examines the codebase for OS command injection vulnerabilities -
+    instances where user-controlled input is passed to system shell commands
+    without proper sanitization. It identifies dangerous functions like
+    os.system(), shell=True in subprocess, Runtime.exec(), and similar patterns.
+  why_it_matters: |
+    Command injection (CWE-78) allows attackers to execute arbitrary commands
+    on the host operating system, leading to complete system compromise. This
+    is one of the most severe vulnerability classes, with CVSS scores ranging
+    from 8.8 to 9.9. Command injection was among the most frequently exploited
+    vulnerabilities in 2024. CISA classifies it as a "Secure by Design" priority.
+  when_to_run:
+  - Initial security audit of any application
+  - Code review for system interaction changes
+  - Before production deployment
+  - When adding file operations or process execution
+  - After integrating external tools or utilities
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Source code including all system interaction modules
+  access_requirements:
+  - Read access to source code repositories
+discovery:
+  code_patterns:
+  - pattern: os\.system\s*\(
+    type: regex
+    scope: source
+    purpose: Detect Python os.system() (always vulnerable)
+  - pattern: subprocess\.call.*shell\s*=\s*True|subprocess\.run.*shell\s*=\s*True
+    type: regex
+    scope: source
+    purpose: Detect Python subprocess with shell=True
+  - pattern: subprocess\.Popen.*shell\s*=\s*True
+    type: regex
+    scope: source
+    purpose: Detect Python Popen with shell=True
+  - pattern: os\.popen\s*\(
+    type: regex
+    scope: source
+    purpose: Detect Python os.popen() (deprecated, dangerous)
+  - pattern: commands\.getoutput|commands\.getstatusoutput
+    type: regex
+    scope: source
+    purpose: Detect Python commands module (deprecated, dangerous)
+  - pattern: child_process\.exec\s*\(|exec\s*\(
+    type: regex
+    scope: source
+    purpose: Detect Node.js child_process.exec (shell-based)
+  - pattern: child_process\.execSync\s*\(
+    type: regex
+    scope: source
+    purpose: Detect Node.js execSync (shell-based)
+  - pattern: shelljs|shell\.exec
+    type: regex
+    scope: source
+    purpose: Detect shelljs library usage
+  - pattern: Runtime\.getRuntime\(\)\.exec|ProcessBuilder
+    type: regex
+    scope: source
+    purpose: Detect Java Runtime.exec or ProcessBuilder
+  - pattern: shell_exec\s*\(|exec\s*\(|system\s*\(|passthru\s*\(
+    type: regex
+    scope: source
+    purpose: Detect PHP command execution functions
+  - pattern: proc_open\s*\(|popen\s*\(
+    type: regex
+    scope: source
+    purpose: Detect PHP process functions
+  - pattern: \`.*\$|\$.*\`
+    type: regex
+    scope: source
+    purpose: Detect PHP backtick execution
+  - pattern: system\s*\(|\`.*\#\{|%x\[|IO\.popen
+    type: regex
+    scope: source
+    purpose: Detect Ruby command execution
+  - pattern: exec\.Command|os/exec
+    type: regex
+    scope: source
+    purpose: Detect Go exec.Command
+  - pattern: '["''].*\$\{.*\}.*["'']|["''].*\+.*["''].*>>'
+    type: regex
+    scope: source
+    purpose: Detect dynamic shell script generation
+  - pattern: subprocess\.run\s*\(\s*\[|subprocess\.call\s*\(\s*\[
+    type: regex
+    scope: source
+    purpose: Detect safe subprocess array usage (positive)
+  - pattern: child_process\.spawn\s*\(|child_process\.execFile\s*\(
+    type: regex
+    scope: source
+    purpose: Detect Node.js spawn/execFile (safer alternatives)
+  file_patterns:
+  - glob: '**/*.py'
+    purpose: Python source files
+  - glob: '**/*.js'
+    purpose: JavaScript source files
+  - glob: '**/*.ts'
+    purpose: TypeScript source files
+  - glob: '**/*.java'
+    purpose: Java source files
+  - glob: '**/*.php'
+    purpose: PHP source files
+  - glob: '**/*.rb'
+    purpose: Ruby source files
+  - glob: '**/*.go'
+    purpose: Go source files
+  - glob: '**/*util*.py'
+    purpose: Utility modules (common injection location)
+  - glob: '**/*helper*.py'
+    purpose: Helper modules
+knowledge_sources:
+  specifications:
+  - id: cwe-78
+    name: 'CWE-78: Improper Neutralization of Special Elements used in an OS Command'
+    url: https://cwe.mitre.org/data/definitions/78.html
+    offline_cache: true
+    priority: required
+  - id: cwe-77
+    name: 'CWE-77: Improper Neutralization of Special Elements used in a Command'
+    url: https://cwe.mitre.org/data/definitions/77.html
+    offline_cache: true
+    priority: required
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: nsa-memory-safety
+    name: 'NSA Cybersecurity Information Sheet: Software Memory Safety'
+    url: https://media.defense.gov/2022/Nov/10/2003112742/-1/-1/0/CSI_SOFTWARE_MEMORY_SAFETY.PDF
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-command-injection
+    name: OWASP Command Injection
+    url: https://owasp.org/www-community/attacks/Command_Injection
+    offline_cache: true
+  - id: owasp-os-command-defense
+    name: OWASP OS Command Injection Defense Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html
+    offline_cache: true
+  - id: cisa-command-injection
+    name: 'CISA Secure by Design Alert: Eliminating OS Command Injection'
+    url: https://www.cisa.gov/resources-tools/resources/secure-design-alert-eliminating-os-command-injection-vulnerabilities
+    offline_cache: true
+  - id: openssf-python-cwe78
+    name: 'OpenSSF Secure Coding Guide for Python: CWE-78'
+    url: https://best.openssf.org/Secure-Coding-Guide-for-Python/CWE-707/CWE-78/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect command injection patterns
+    offline_capable: true
+  - tool: bandit
+    purpose: Python security linting including command injection
+    offline_capable: true
+  - tool: gosec
+    purpose: Go security scanner
+    offline_capable: true
+  - tool: eslint-plugin-security
+    purpose: JavaScript command injection detection
+    offline_capable: true
+  scripts:
+  - id: detect-command-injection
+    language: bash
+    purpose: Detect potential command injection vulnerabilities
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Command Injection Detection ==="
+
+      echo "--- Python os.system ---"
+      grep -rn --include="*.py" "os\.system\s*\(" . 2>/dev/null | head -20 || echo "None found"
+
+      echo "--- Python subprocess shell=True ---"
+      grep -rn --include="*.py" "shell\s*=\s*True" . 2>/dev/null | head -20 || echo "None found"
+
+      echo "--- Python os.popen ---"
+      grep -rn --include="*.py" "os\.popen\s*\(" . 2>/dev/null | head -20 || echo "None found"
+
+      echo "--- Node.js child_process.exec ---"
+      grep -rn --include="*.js" --include="*.ts" "child_process\.exec\s*\(|exec\s*\(" . 2>/dev/null | head -20 || echo "None found"
+
+      echo "--- PHP command execution ---"
+      grep -rn --include="*.php" -E "(shell_exec|exec|system|passthru)\s*\(" . 2>/dev/null | head -20 || echo "None found"
+
+      echo "--- Java Runtime.exec ---"
+      grep -rn --include="*.java" "Runtime\.getRuntime\(\)\.exec" . 2>/dev/null | head -20 || echo "None found"
+signals:
+  critical:
+  - id: CMDI-CRIT-001
+    signal: os.system() called with user input
+    cwe: CWE-78
+    evidence_pattern: os\.system\s*\(.*request|os\.system\s*\(.*user|os\.system\s*\(.*input
+    explanation: |
+      os.system() passes its argument directly to the shell for parsing.
+      Any shell metacharacters (;, |, &, $, etc.) in user input will be
+      interpreted by the shell, allowing command chaining and injection.
+      An attacker can execute arbitrary commands on the system.
+    remediation: |
+      Replace os.system() with subprocess.run() using a list of arguments:
+      - BAD: os.system(f"ls {user_input}")
+      - GOOD: subprocess.run(["ls", user_input], check=True)
+      Use shell=False (the default) and pass arguments as a list.
+  - id: CMDI-CRIT-002
+    signal: subprocess with shell=True and user input
+    cwe: CWE-78
+    evidence_pattern: subprocess\.(run|call|Popen).*shell\s*=\s*True.*request|shell\s*=\s*True.*\+
+    explanation: |
+      subprocess with shell=True passes the command through the shell,
+      enabling shell metacharacter interpretation. If user input is
+      included in the command string, injection is possible.
+    remediation: |
+      Use shell=False (default) and pass command as a list:
+      - BAD: subprocess.run(f"cmd {user_input}", shell=True)
+      - GOOD: subprocess.run(["cmd", user_input])
+      If shell features are required, validate input against an allowlist.
+  - id: CMDI-CRIT-003
+    signal: Node.js child_process.exec with user input
+    cwe: CWE-78
+    evidence_pattern: exec\s*\(.*req\.|exec\s*\(.*user|exec\s*\(`|exec\s*\(.*\$\{
+    explanation: |
+      child_process.exec() runs commands through the shell. Template
+      literals or string concatenation with user input enables injection.
+    remediation: |
+      Use child_process.spawn() or child_process.execFile() which don't
+      use shell interpretation:
+      - BAD: exec(`ls ${userInput}`)
+      - GOOD: spawn('ls', [userInput])
+      execFile() is also safe when first argument is a known command.
+  - id: CMDI-CRIT-004
+    signal: PHP shell execution functions with user input
+    cwe: CWE-78
+    evidence_pattern: (shell_exec|exec|system|passthru)\s*\(.*\$_(GET|POST|REQUEST)
+    explanation: |
+      PHP shell execution functions pass arguments to the system shell.
+      Direct use of user input from $_GET, $_POST, or $_REQUEST enables
+      command injection.
+    remediation: |
+      Avoid shell execution when possible. Use library functions instead.
+      If unavoidable, use escapeshellarg() for arguments:
+      - BAD: system("ls " . $_GET['dir']);
+      - BETTER: system("ls " . escapeshellarg($_GET['dir']));
+      - BEST: Use PHP functions like scandir() instead.
+  high:
+  - id: CMDI-HIGH-001
+    signal: os.system() or os.popen() used anywhere
+    cwe: CWE-78
+    evidence_pattern: os\.system\s*\(|os\.popen\s*\(
+    explanation: |
+      os.system() and os.popen() are inherently dangerous as they always
+      invoke the shell. Even without current user input, future changes
+      could introduce vulnerabilities.
+    remediation: |
+      Replace with subprocess module using shell=False:
+      subprocess.run(["cmd", "arg1", "arg2"])
+      CISA recommends banning these functions in code review.
+  - id: CMDI-HIGH-002
+    signal: Dynamic command string construction
+    cwe: CWE-78
+    evidence_pattern: f["'].*exec|f["'].*system|command.*\+.*\+|cmd.*format\(
+    explanation: |
+      Building command strings dynamically using string formatting or
+      concatenation suggests potential for injection if any variable
+      originates from user input.
+    remediation: |
+      Use parameterized command execution with arrays:
+      cmd = ["program", arg1, arg2]
+      subprocess.run(cmd)
+      Never build command strings from variables.
+  - id: CMDI-HIGH-003
+    signal: Java Runtime.exec with string argument
+    cwe: CWE-78
+    evidence_pattern: Runtime\.getRuntime\(\)\.exec\s*\([^\[]*\+|exec\s*\(.*\+.*\)
+    explanation: |
+      While Java's Runtime.exec() doesn't invoke shell by default,
+      string concatenation with user input can still allow argument
+      injection or exploitation of certain commands.
+    remediation: |
+      Use ProcessBuilder with a List of arguments:
+      ProcessBuilder pb = new ProcessBuilder("cmd", arg1, arg2);
+      Validate all arguments against allowlists.
+  - id: CMDI-HIGH-004
+    signal: shell=True used in subprocess
+    cwe: CWE-78
+    evidence_pattern: shell\s*=\s*True
+    explanation: |
+      Any use of shell=True creates potential for injection if command
+      contents are ever influenced by untrusted data. This should be
+      avoided unless absolutely necessary.
+    remediation: |
+      Remove shell=True and use command list:
+      - BAD: subprocess.run("ls -la", shell=True)
+      - GOOD: subprocess.run(["ls", "-la"])
+      If shell features are needed, document the security review.
+  medium:
+  - id: CMDI-MED-001
+    signal: Command path from configuration
+    cwe: CWE-78
+    evidence_pattern: (config|settings|env).*exec|exec.*(config|settings)
+    explanation: |
+      Commands loaded from configuration files can be modified by
+      attackers who gain config access, leading to command injection.
+    remediation: |
+      Validate command paths against an allowlist of known-good paths.
+      Use absolute paths and verify file integrity.
+  - id: CMDI-MED-002
+    signal: shlex.quote used for sanitization
+    evidence_pattern: shlex\.quote|shlex\.split
+    explanation: |
+      While shlex.quote() helps, relying on quoting for security is
+      fragile. Array-based execution is more robust.
+    remediation: |
+      Prefer array-based command execution over quoting.
+      shlex.quote() is a defense-in-depth measure, not primary protection.
+  low:
+  - id: CMDI-LOW-001
+    signal: Command execution in test files
+    evidence_pattern: test.*os\.system|test.*subprocess.*shell
+    explanation: |
+      Command execution in tests may indicate patterns that could be
+      copied to production code.
+    remediation: |
+      Ensure test patterns follow secure practices to set good examples.
+  positive:
+  - id: CMDI-POS-001
+    signal: subprocess.run with array arguments
+    evidence_pattern: subprocess\.run\s*\(\s*\[|subprocess\.call\s*\(\s*\[
+    explanation: |
+      Using subprocess with command arrays and shell=False is the
+      secure approach to command execution.
+  - id: CMDI-POS-002
+    signal: Node.js spawn/execFile used
+    evidence_pattern: child_process\.spawn\s*\(|child_process\.execFile\s*\(
+    explanation: |
+      spawn() and execFile() don't invoke the shell by default,
+      making them safer than exec().
+  - id: CMDI-POS-003
+    signal: Library functions used instead of shell commands
+    evidence_pattern: os\.makedirs|os\.remove|shutil\.|pathlib\.
+    explanation: |
+      Using built-in library functions avoids shell execution entirely,
+      which is the safest approach.
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Find all command execution
+    description: |
+      Identify all locations where system commands are executed.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find Python command execution
+      command: |
+        grep -rn --include="*.py" \
+          -E "(os\.system|os\.popen|subprocess|commands\.)" . 2>/dev/null | head -50
+    - purpose: Find JavaScript command execution
+      command: |
+        grep -rn --include="*.js" --include="*.ts" \
+          -E "(child_process|exec|spawn|execFile)" . 2>/dev/null | head -50
+    - purpose: Find PHP command execution
+      command: |
+        grep -rn --include="*.php" \
+          -E "(shell_exec|exec|system|passthru|popen|proc_open)" . 2>/dev/null | head -30
+    expected_findings:
+    - Inventory of all command execution points
+    - Classification by function type
+  - id: '2'
+    name: Identify dangerous patterns
+    description: |
+      Find command execution with shell invocation or string building.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find shell=True patterns
+      command: |
+        grep -rn --include="*.py" "shell\s*=\s*True" . 2>/dev/null | head -30
+    - purpose: Find os.system usage
+      command: |
+        grep -rn --include="*.py" "os\.system\s*\(" . 2>/dev/null | head -30
+    - purpose: Find string concatenation in commands
+      command: |
+        grep -rn --include="*.py" --include="*.js" \
+          -E "(exec|system).*\+" . 2>/dev/null | head -30
+    expected_findings:
+    - List of dangerous command patterns
+    - Context for each finding
+  - id: '3'
+    name: Trace user input to commands
+    description: |
+      Analyze data flow to identify user input reaching commands.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find request parameters near commands
+      command: |
+        grep -rn --include="*.py" --include="*.js" \
+          -E "(request|req)\..*(exec|system|subprocess)" . 2>/dev/null | head -30
+    expected_findings:
+    - User input paths to command execution
+    - Risk assessment for each path
+  - id: '4'
+    name: Run static analysis
+    description: |
+      Execute security-focused static analysis for command injection.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Run Semgrep command injection rules
+      command: |
+        semgrep --config=p/command-injection . 2>/dev/null | head -100 || echo "Semgrep not available"
+    - purpose: Run Bandit for Python
+      command: |
+        bandit -r . -f json 2>/dev/null | jq '.results[] | select(.test_id | contains("B605") or contains("B606") or contains("B607"))' | head -50 || echo "Bandit not available"
+    expected_findings:
+    - Static analysis command injection findings
+    - Additional patterns from tooling
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Critical Command Injection Vulnerabilities
+    - Dangerous Function Usage
+    - Safe Pattern Adoption
+    - Remediation Roadmap
+  confidence_guidance:
+    high: Direct evidence of user input in command execution
+    medium: Dangerous functions used, user input source unclear
+    low: Potential issues based on patterns, needs data flow analysis
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-78
+      priority: required
+    - source_id: owasp-os-command-defense
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: Command injection is critical with high CVSS scores
+      priority: 1
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: cmdi-001
+  item: No os.system() or os.popen() usage
+  level: CRITICAL
+  verification: |
+    ! grep -rn --include="*.py" "os\.system\s*\(|os\.popen\s*\(" . 2>/dev/null | grep -v test && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: cmdi-002
+  item: No shell=True in subprocess calls
+  level: CRITICAL
+  verification: |
+    ! grep -rn --include="*.py" "shell\s*=\s*True" . 2>/dev/null | grep -v test && echo "PASS" || echo "NEEDS_REVIEW"
+  expected: PASS
+- id: cmdi-003
+  item: subprocess uses array arguments
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.py" "subprocess\.(run|call)\s*\(\s*\[" . 2>/dev/null | wc -l | \
+      awk '{if ($1 > 0) print "PASS"; else print "NEEDS_REVIEW"}'
+  expected: PASS
+- id: cmdi-004
+  item: Node.js uses spawn/execFile instead of exec
+  level: BLOCKING
+  verification: |
+    ! grep -rn --include="*.js" --include="*.ts" "child_process\.exec\s*\(" . 2>/dev/null | grep -v test && echo "PASS" || echo "NEEDS_REVIEW"
+  expected: PASS
+- id: cmdi-005
+  item: No PHP shell functions with user input
+  level: CRITICAL
+  verification: |
+    ! grep -rn --include="*.php" "(shell_exec|exec|system|passthru)\s*\(.*\$_" . 2>/dev/null && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP Top 10
+    controls:
+    - A03:2021 - Injection
+  - framework: CWE
+    controls:
+    - CWE-78
+    - CWE-77
+  - framework: SANS Top 25
+    controls:
+    - CWE-78
+  - framework: CISA Secure by Design
+    controls:
+    - OS Command Injection Elimination
+  - framework: PCI DSS
+    controls:
+    - 6.5.1
+relationships:
+  commonly_combined:
+  - security-trust.input-validation.sql-injection
+  - security-trust.input-validation.path-traversal
+  - security-trust.input-validation.template-injection

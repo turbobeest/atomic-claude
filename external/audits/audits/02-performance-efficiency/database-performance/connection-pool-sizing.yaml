@@ -1,0 +1,338 @@
+# ============================================================
+# Connection Pool Sizing Audit
+# ============================================================
+# Evaluates database connection pool sizing for optimal
+# performance and resource utilization.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.database-performance.connection-pool-sizing"
+  name: "Connection Pool Sizing Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "database-performance"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates database connection pool sizing to ensure pools are
+    appropriately sized for workload demands. It examines pool configurations,
+    utilization metrics, wait times, and connection limits on both application
+    and database sides.
+
+  why_it_matters: |
+    Connection pool sizing directly impacts application performance and stability.
+    Under-sized pools cause request queuing and timeouts. Over-sized pools waste
+    database resources and can exceed database connection limits. The optimal
+    size depends on workload characteristics, query latency, and available
+    database connections.
+
+  when_to_run:
+    - "After deploying new application instances"
+    - "When investigating database connection timeouts"
+    - "During capacity planning"
+    - "After scaling application horizontally"
+
+prerequisites:
+  required_artifacts:
+    - type: "pool-metrics"
+      description: "Access to connection pool metrics"
+    - type: "database-access"
+      description: "Access to database connection statistics"
+
+  access_requirements:
+    - "Read access to application pool metrics (HikariCP, etc.)"
+    - "Access to database max_connections settings"
+    - "Read access to application configurations"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus (HikariCP)"
+      query: "hikaricp_connections_max"
+      purpose: "Configured maximum pool size"
+      threshold: "Should match formula: connections = ((cpu_cores * 2) + disk_spindles)"
+    - system: "Prometheus (HikariCP)"
+      query: "hikaricp_connections_pending"
+      purpose: "Threads waiting for connection"
+      threshold: "Should be 0 in steady state"
+    - system: "PostgreSQL"
+      query: "SELECT count(*) FROM pg_stat_activity"
+      purpose: "Current active connections"
+      threshold: "Sum of all pools < max_connections - buffer"
+    - system: "PostgreSQL"
+      query: "SHOW max_connections"
+      purpose: "Database maximum connections"
+      threshold: "Should accommodate all application pools"
+
+  code_patterns:
+    - pattern: "maximum-pool-size|maximumPoolSize|maxPoolSize|max_pool_size"
+      type: "regex"
+      scope: "config"
+      purpose: "Pool size configuration"
+    - pattern: "connectionTimeout|connection-timeout"
+      type: "regex"
+      scope: "config"
+      purpose: "Connection timeout settings"
+
+knowledge_sources:
+  specifications:
+    - id: "hikari-sizing"
+      name: "About Pool Sizing"
+      url: "https://github.com/brettwooldridge/HikariCP/wiki/About-Pool-Sizing"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "postgres-connections"
+      name: "PostgreSQL Connection Settings"
+      url: "https://www.postgresql.org/docs/current/runtime-config-connection.html"
+      offline_cache: true
+    - id: "pool-sizing-formula"
+      name: "Connection Pool Sizing Formula"
+      url: "https://github.com/brettwooldridge/HikariCP/wiki/About-Pool-Sizing#the-formula"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "psql"
+      purpose: "Check database connections"
+      command: "psql -c 'SELECT usename, count(*) FROM pg_stat_activity GROUP BY usename'"
+    - tool: "curl"
+      purpose: "Check HikariCP metrics"
+      command: "curl -s http://localhost:8080/actuator/metrics/hikaricp.connections"
+
+  monitoring_queries:
+    - system: "PostgreSQL"
+      query: |
+        SELECT datname, numbackends,
+               (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') as max_conn,
+               round(100.0 * numbackends / (SELECT setting::int FROM pg_settings WHERE name = 'max_connections'), 1) as usage_pct
+        FROM pg_stat_database WHERE datname = current_database()
+      purpose: "Database connection utilization"
+
+signals:
+  critical:
+    - id: "POOLSZ-CRIT-001"
+      signal: "Total application pool sizes exceed database max_connections"
+      evidence_threshold: "sum(pool_max_size * instances) > db_max_connections"
+      explanation: |
+        When the sum of all application pool sizes exceeds database max_connections,
+        connection requests will fail with 'too many connections' errors during
+        peak load or instance scaling events.
+      remediation: "Reduce pool sizes or increase database max_connections"
+
+    - id: "POOLSZ-CRIT-002"
+      signal: "Connection pool exhaustion causing application timeouts"
+      evidence_threshold: "hikaricp_connections_pending > 0 for extended period"
+      explanation: |
+        Threads waiting for connections indicate pool exhaustion. This causes
+        request latency to spike as requests queue behind slow queries. Extended
+        waits lead to connection timeouts and failed requests.
+      remediation: "Increase pool size or reduce query execution time"
+
+  high:
+    - id: "POOLSZ-HIGH-001"
+      signal: "Pool size significantly larger than optimal"
+      evidence_threshold: "pool_size > (cpu_cores * 2) + disk_spindles by 50%+"
+      explanation: |
+        Over-sized pools waste database resources and can cause connection
+        churning. Each connection consumes database memory and process resources.
+        More connections than optimal can actually decrease throughput.
+      remediation: "Reduce pool size to formula recommendation"
+
+    - id: "POOLSZ-HIGH-002"
+      signal: "Pool size too small for concurrent request volume"
+      evidence_threshold: "concurrent_requests > pool_size regularly"
+      explanation: |
+        When pool size is smaller than typical concurrent database operations,
+        threads block waiting for connections. This serializes parallel work
+        and increases latency.
+      remediation: "Increase pool size to match concurrency needs"
+
+  medium:
+    - id: "POOLSZ-MED-001"
+      signal: "Connection validation overhead too frequent"
+      evidence_threshold: "validation_queries > 10% of total queries"
+      remediation: "Increase validationTimeout or reduce validation frequency"
+
+    - id: "POOLSZ-MED-002"
+      signal: "Connection timeout too short for workload"
+      evidence_threshold: "connectionTimeout < average_query_time * 2"
+      remediation: "Increase connectionTimeout appropriately"
+
+  low:
+    - id: "POOLSZ-LOW-001"
+      signal: "Pool sizing not documented in configuration"
+
+  positive:
+    - id: "POOLSZ-POS-001"
+      signal: "Pool sizes follow formula recommendations"
+    - id: "POOLSZ-POS-002"
+      signal: "Zero connection timeouts in monitoring period"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory pool configurations"
+      description: |
+        Collect connection pool configurations from all application instances
+        to understand total connection demand.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "List pool configurations"
+          command: |
+            grep -r "maximum-pool-size\|maxPoolSize\|max_pool_size" --include="*.yaml" --include="*.properties" --include="*.json"
+        - purpose: "Get current pool settings via actuator"
+          command: |
+            curl -s http://localhost:8080/actuator/configprops | jq '.contexts[].beans | to_entries[] | select(.key | contains("hikari")) | .value.properties'
+      expected_findings:
+        - "Pool configurations per application"
+        - "Total pool capacity across instances"
+
+    - id: "2"
+      name: "Check database connection limits"
+      description: |
+        Verify database max_connections and compare against total
+        application pool demand.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Check PostgreSQL max_connections"
+          command: |
+            psql -c "SHOW max_connections; SELECT count(*) as current_connections FROM pg_stat_activity"
+        - purpose: "Check MySQL max_connections"
+          command: |
+            mysql -e "SHOW VARIABLES LIKE 'max_connections'; SELECT COUNT(*) as current FROM information_schema.processlist"
+      expected_findings:
+        - "Database connection limits"
+        - "Current connection usage"
+
+    - id: "3"
+      name: "Analyze pool utilization"
+      description: |
+        Query pool metrics to understand utilization patterns and
+        identify sizing issues.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Pool utilization metrics"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=hikaricp_connections_active/hikaricp_connections_max' | jq '.data.result'
+        - purpose: "Pending connection requests"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=hikaricp_connections_pending' | jq '.data.result'
+        - purpose: "Connection wait time"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=hikaricp_connections_acquire_seconds' | jq '.data.result'
+      expected_findings:
+        - "Pool utilization percentages"
+        - "Wait times and pending counts"
+
+    - id: "4"
+      name: "Calculate optimal pool size"
+      description: |
+        Apply the pool sizing formula to determine optimal configuration
+        based on available CPU and workload characteristics.
+      duration_estimate: "15 min"
+      questions:
+        - "Number of CPU cores available?"
+        - "Number of disk spindles (or 1 for SSD)?"
+        - "Typical query execution time?"
+        - "Peak concurrent requests?"
+      expected_findings:
+        - "Recommended pool size"
+        - "Comparison to current configuration"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Current Configuration"
+        - "Utilization Analysis"
+        - "Optimal Sizing Recommendation"
+        - "Action Items"
+
+  confidence_guidance:
+    high: "Metrics from production with representative load"
+    medium: "Configuration review with limited runtime data"
+    low: "Configuration review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "hikari-sizing"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "poolsz-001"
+    item: "Total pool sizes do not exceed database max_connections"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Sum of (pool_size * instances) < max_connections - 20% buffer"
+    expected: "Confirmed by reviewer"
+
+  - id: "poolsz-002"
+    item: "No connection timeout events in past 24 hours"
+    level: "CRITICAL"
+    verification: |
+      curl -s 'http://prometheus:9090/api/v1/query?query=increase(hikaricp_connections_timeout_total[24h])' | jq '.data.result[0].value[1] | tonumber == 0'
+    expected: "true"
+
+  - id: "poolsz-003"
+    item: "Pool sizes follow sizing formula within 50%"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify pool_size ~ (cpu_cores * 2) + disk_spindles"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.resource-utilization.connection-pool-utilization"
+    - "performance-efficiency.database-performance.query-optimization"

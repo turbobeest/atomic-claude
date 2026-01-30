@@ -1,0 +1,361 @@
+audit:
+  id: human-organizational.team-structure.on-call-rotation
+  name: On-Call Rotation Health Assessment
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: human-organizational
+  category_number: 17
+  subcategory: team-structure
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: organizational
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines on-call rotation practices to assess:
+    - Rotation frequency and coverage adequacy
+    - Load distribution fairness across team members
+    - Skill coverage during on-call shifts
+    - Escalation path effectiveness
+    - Impact on engineer well-being and retention
+
+    It identifies unsustainable patterns and gaps in incident response capability.
+  why_it_matters: |
+    Poor on-call practices create multiple risks:
+    - Burnout and attrition from unfair or excessive load
+    - Incident response failures when skills don't match problems
+    - Extended outages when escalation paths are unclear
+    - Team morale issues from perceived unfairness
+
+    Healthy on-call rotations enable reliable incident response while
+    maintaining engineer quality of life and team sustainability.
+  when_to_run:
+  - Quarterly operational review
+  - When on-call complaints increase
+  - After team size changes significantly
+  - Following major incident post-mortems
+prerequisites:
+  required_artifacts:
+  - type: operational
+    description: On-call schedules for past 3+ months
+  - type: metrics
+    description: Incident and paging data
+  access_requirements:
+  - Access to on-call scheduling system (PagerDuty, OpsGenie, etc.)
+  - Historical incident and alert data
+  - Interviews with on-call participants
+discovery:
+  interviews:
+  - role: On-Call Engineers
+    questions:
+    - How often are you on-call and does it feel sustainable?
+    - Do you feel equipped to handle incidents during your shifts?
+    - Are escalation paths clear when you need help?
+    - How does on-call impact your work-life balance?
+    - Are there patterns in pages you receive?
+    purpose: Understand on-call experience and pain points
+  - role: Engineering Managers
+    questions:
+    - How do you distribute on-call load?
+    - What feedback do you receive about on-call?
+    - How do you handle skill gaps in coverage?
+    - What compensation or recognition exists for on-call?
+    purpose: Understand management approach and known issues
+  documents_to_review:
+  - type: On-call schedules
+    purpose: Analyze rotation patterns and load distribution
+  - type: Incident data
+    purpose: Correlate pages with responder skills
+  - type: Team roster
+    purpose: Calculate rotation frequency per person
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/CODEOWNERS'
+    purpose: Code ownership files
+  - glob: '**/*.org'
+    purpose: Org structure files
+  - glob: '**/team*.yaml'
+    purpose: Team configuration
+  code_patterns:
+  - pattern: '@team|@owner|maintainer'
+    type: regex
+    scope: all
+    purpose: Ownership references
+knowledge_sources:
+  guides:
+  - id: sre-workbook-oncall
+    name: Google SRE Workbook - On-Call Chapter
+    url: https://sre.google/workbook/on-call/
+    offline_cache: true
+  papers:
+  - id: oncall-burnout-study
+    title: Developer Experience and On-Call Burnout
+    url: https://queue.acm.org/detail.cfm?id=3595878
+  learning_resources:
+  - id: sre-book
+    title: 'Site Reliability Engineering: How Google Runs Production Systems'
+    type: book
+    reference: ISBN 978-1491929124
+tooling:
+  infrastructure_tools:
+  - tool: PagerDuty Analytics
+    purpose: Analyze on-call load distribution and patterns
+    command: pd analytics oncall-report
+  - tool: OpsGenie Reports
+    purpose: Generate on-call metrics and distribution data
+  assessment_tools:
+  - tool: On-Call Survey
+    purpose: Gather engineer feedback on on-call experience
+  scripts:
+  - id: oncall-analysis
+    language: python
+    purpose: Calculate on-call distribution metrics
+    source: inline
+    code: |
+      # Analyze on-call distribution from schedule data
+      # Input: CSV with columns date, oncall_primary, oncall_secondary
+      import pandas as pd
+      from collections import Counter
+
+      def analyze_oncall(schedule_file):
+          df = pd.read_csv(schedule_file)
+          primary_counts = Counter(df['oncall_primary'])
+
+          total_shifts = len(df)
+          for person, count in primary_counts.most_common():
+              pct = (count / total_shifts) * 100
+              print(f"{person}: {count} shifts ({pct:.1f}%)")
+signals:
+  critical:
+  - id: ONCALL-CRIT-001
+    signal: Single person handles majority of on-call
+    evidence_indicators:
+    - One person assigned >50% of on-call shifts
+    - No backup or secondary on-call
+    - Person expresses burnout symptoms
+    explanation: |
+      Concentrating on-call burden on one person is unsustainable
+      and creates extreme risk if that person becomes unavailable.
+      This pattern often leads to burnout and attrition.
+    remediation: Immediately redistribute on-call load and build team capacity
+  - id: ONCALL-CRIT-002
+    signal: No qualified on-call coverage for critical system
+    evidence_indicators:
+    - On-call rotation excludes people with critical system knowledge
+    - Incidents consistently escalate to off-rotation experts
+    - Resolution times extend due to skill mismatch
+    explanation: |
+      When on-call engineers lack skills for the systems they support,
+      incidents become extended emergencies requiring escalation.
+    remediation: Cross-train on-call engineers or restructure rotation
+  high:
+  - id: ONCALL-HIGH-001
+    signal: Unsustainable on-call frequency
+    evidence_indicators:
+    - Engineers on-call more than 1 week per month
+    - Rotation pool too small (<4 people)
+    - No provisions for time off or swaps
+    explanation: |
+      High frequency on-call degrades quality of life, leads to fatigue,
+      and increases error rates during incident response.
+    remediation: Expand rotation pool or reduce on-call scope
+  - id: ONCALL-HIGH-002
+    signal: High page volume during off-hours
+    evidence_indicators:
+    - Average >5 pages per night shift
+    - Pages are often actionable (not noise)
+    - Sleep disruption is common
+    explanation: |
+      Frequent off-hours pages indicate system reliability issues
+      that are being absorbed by engineers rather than fixed.
+    remediation: Prioritize reliability improvements to reduce page volume
+  medium:
+  - id: ONCALL-MED-001
+    signal: Uneven load distribution
+    evidence_indicators:
+    - Some engineers take 2x the on-call of others
+    - New engineers excluded from rotation too long
+    - Senior engineers bear disproportionate load
+    remediation: Implement fair rotation algorithm with clear criteria
+  - id: ONCALL-MED-002
+    signal: Unclear escalation paths
+    evidence_indicators:
+    - On-call engineers unsure when/how to escalate
+    - Escalation often goes to wrong person
+    - No documented escalation criteria
+    remediation: Document clear escalation paths and criteria
+  - id: ONCALL-MED-003
+    signal: No on-call compensation or recognition
+    evidence_indicators:
+    - On-call is uncompensated responsibility
+    - No comp time or other recognition
+    - Team members express resentment
+    remediation: Implement fair compensation model for on-call burden
+  low:
+  - id: ONCALL-LOW-001
+    signal: Manual schedule management
+    evidence_indicators:
+    - Schedules managed in spreadsheets
+    - No automated swap or override process
+    remediation: Adopt proper on-call scheduling tool
+  positive:
+  - id: ONCALL-POS-001
+    signal: Healthy on-call practice
+    evidence_indicators:
+    - Even distribution across team
+    - Sustainable frequency (<1 week/month)
+    - Clear escalation paths
+    - Fair compensation model
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: organizational_auditor
+  steps:
+  - id: '1'
+    name: Gather On-Call Data
+    description: |
+      Collect on-call schedules and incident data for analysis:
+      - Export schedule history (3+ months)
+      - Export incident/page history
+      - Document current rotation structure
+    duration_estimate: 30 min
+    questions:
+    - What is the current on-call rotation structure?
+    - How many people are in the rotation pool?
+    - What is the typical shift duration?
+    expected_findings:
+    - Complete on-call schedule history
+    - Incident/page data correlated with on-call shifts
+  - id: '2'
+    name: Analyze Load Distribution
+    description: |
+      Calculate metrics for on-call fairness:
+      - Shifts per person
+      - Pages per person during shifts
+      - Off-hours vs business hours distribution
+    duration_estimate: 45 min
+    questions:
+    - Is on-call load evenly distributed?
+    - What is the page volume per shift?
+    - How much is off-hours vs business hours?
+    expected_findings:
+    - Distribution metrics showing fairness (or lack thereof)
+  - id: '3'
+    name: Assess Skill Coverage
+    description: |
+      Map on-call engineers' skills against systems they support:
+      - Can each on-call person handle common incidents?
+      - What percentage of incidents require escalation?
+      - Are there skill gaps in coverage?
+    duration_estimate: 30 min
+    questions:
+    - What percentage of incidents are handled without escalation?
+    - Which systems have skill gaps in on-call coverage?
+    - Who gets escalated to and how often?
+    expected_findings:
+    - Skill coverage assessment for on-call rotation
+  - id: '4'
+    name: Interview Participants
+    description: |
+      Gather qualitative feedback from on-call engineers:
+      - Experience and satisfaction
+      - Pain points and concerns
+      - Suggestions for improvement
+    duration_estimate: 1 hour
+    questions:
+    - How sustainable does on-call feel?
+    - What are the biggest pain points?
+    - Do engineers feel equipped and supported?
+    expected_findings:
+    - Qualitative assessment of on-call experience
+  - id: '5'
+    name: Synthesize Recommendations
+    description: |
+      Combine quantitative and qualitative findings into
+      prioritized recommendations for on-call improvements.
+    duration_estimate: 30 min
+    expected_findings:
+    - Prioritized recommendations with expected impact
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: oncall_analysis
+    format: tabular
+    sections:
+    - Load Distribution Metrics
+    - Skill Coverage Assessment
+    - Page Volume Analysis
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Key Findings
+    - Recommendations
+  confidence_guidance:
+    high: Data from on-call system combined with participant interviews
+    medium: Based on data or interviews alone
+    low: Limited data or small sample size
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: sre-workbook-oncall
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires data analysis and interviews
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: oncall-001
+  item: On-call schedule data collected
+  level: CRITICAL
+  verification: manual
+  verification_notes: At least 3 months of schedule history
+  expected: Confirmed by reviewer
+- id: oncall-002
+  item: Load distribution analyzed
+  level: BLOCKING
+  verification: manual
+  verification_notes: Distribution metrics calculated per person
+  expected: Confirmed by reviewer
+- id: oncall-003
+  item: Participant interviews completed
+  level: BLOCKING
+  verification: manual
+  verification_notes: At least 50% of rotation participants interviewed
+  expected: Confirmed by reviewer
+- id: oncall-004
+  item: Skill coverage assessed
+  level: WARNING
+  verification: manual
+  verification_notes: Coverage gaps identified
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.2
+relationships:
+  commonly_combined:
+  - human-organizational.team-structure.skill-coverage
+  - human-organizational.team-structure.bus-factor
+  - human-organizational.communication.escalation-path

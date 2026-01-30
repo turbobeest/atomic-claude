@@ -1,0 +1,396 @@
+# ============================================================
+# AUDIT: Largest Contentful Paint (LCP) Optimization
+# ============================================================
+# Evaluates LCP performance, a Core Web Vital measuring when
+# the largest content element becomes visible.
+# ============================================================
+
+audit:
+  id: "seo-discoverability.core-web-vitals.largest-contentful-paint"
+
+  name: "Largest Contentful Paint (LCP) Optimization Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "seo-discoverability"
+  category_number: 16
+  subcategory: "core-web-vitals"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "runtime"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines Largest Contentful Paint (LCP) performance,
+    a Core Web Vital that measures loading performance. LCP marks
+    the point when the largest image or text block becomes visible
+    within the viewport. It evaluates current LCP scores, identifies
+    the LCP element, analyzes causes of slow LCP, and provides
+    optimization recommendations.
+
+  why_it_matters: |
+    LCP is one of Google's Core Web Vitals and directly impacts search
+    rankings. Good LCP (under 2.5 seconds) indicates pages load quickly
+    for users. Poor LCP (over 4 seconds) creates a negative user
+    experience and can hurt rankings. LCP is particularly important
+    for mobile users with slower connections.
+
+  when_to_run:
+    - "During performance optimization"
+    - "After major feature releases"
+    - "When rankings decline"
+    - "During Core Web Vitals audits"
+    - "Before major traffic events"
+
+prerequisites:
+  required_artifacts:
+    - type: "website"
+      description: "Live website accessible for testing"
+    - type: "crux_data"
+      description: "Chrome User Experience Report data (optional)"
+
+  access_requirements:
+    - "PageSpeed Insights API access"
+    - "Google Search Console (Core Web Vitals report)"
+    - "Chrome DevTools or Lighthouse"
+
+discovery:
+  code_patterns:
+    - pattern: "loading=[\"']lazy[\"']"
+      type: "regex"
+      scope: "source"
+      purpose: "Find lazy-loaded images that may delay LCP"
+    - pattern: "fetchpriority=[\"']high[\"']"
+      type: "regex"
+      scope: "source"
+      purpose: "Find prioritized images"
+    - pattern: "rel=[\"']preload[\"']"
+      type: "regex"
+      scope: "source"
+      purpose: "Find preloaded resources"
+
+  file_patterns:
+    - glob: "**/*.html"
+      purpose: "Check HTML for image optimization"
+    - glob: "**/next.config.{js,ts}"
+      purpose: "Next.js image optimization config"
+
+knowledge_sources:
+  specifications:
+    - id: "web-vitals-lcp"
+      name: "web.dev: Largest Contentful Paint"
+      url: "https://web.dev/lcp/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "google-lcp-optimize"
+      name: "Google: Optimize LCP"
+      url: "https://web.dev/optimize-lcp/"
+      offline_cache: true
+    - id: "google-lcp-elements"
+      name: "Google: LCP Element Types"
+      url: "https://web.dev/lcp/#what-elements-are-considered"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "Lighthouse"
+      purpose: "LCP measurement and diagnostics"
+      offline_capable: true
+    - tool: "WebPageTest"
+      purpose: "Detailed waterfall analysis"
+      offline_capable: false
+
+  infrastructure_tools:
+    - tool: "PageSpeed Insights"
+      purpose: "Field and lab LCP data"
+      command: "https://pagespeed.web.dev/"
+    - tool: "Google Search Console"
+      purpose: "Site-wide Core Web Vitals report"
+      command: "Core Web Vitals report"
+    - tool: "Chrome DevTools"
+      purpose: "Performance panel for LCP debugging"
+      command: "Performance > Web Vitals"
+
+  scripts:
+    - id: "lcp-checker"
+      language: "bash"
+      purpose: "Quick LCP check via PageSpeed Insights API"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        URL=$1
+        API_KEY=$2
+
+        echo "=== LCP Analysis for: $URL ==="
+
+        # Query PageSpeed Insights API
+        RESULT=$(curl -s "https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=$URL&key=$API_KEY&strategy=mobile")
+
+        # Extract LCP values
+        echo "Lab LCP (ms):"
+        echo $RESULT | jq '.lighthouseResult.audits["largest-contentful-paint"].numericValue'
+
+        echo ""
+        echo "Field LCP (75th percentile):"
+        echo $RESULT | jq '.loadingExperience.metrics.LARGEST_CONTENTFUL_PAINT_MS.percentile'
+
+        echo ""
+        echo "LCP Element:"
+        echo $RESULT | jq '.lighthouseResult.audits["largest-contentful-paint-element"]'
+
+signals:
+  critical:
+    - id: "LCP-CRIT-001"
+      signal: "LCP exceeds 4 seconds (poor threshold)"
+      evidence_threshold: "LCP > 4000ms"
+      explanation: |
+        LCP over 4 seconds is classified as "poor" by Google and
+        will negatively impact search rankings and user experience.
+        Users are highly likely to abandon pages with this level of delay.
+      remediation: "Prioritize LCP element loading, optimize server response, reduce render-blocking resources"
+
+    - id: "LCP-CRIT-002"
+      signal: "LCP element is lazy-loaded"
+      evidence_indicators:
+        - "LCP image has loading='lazy'"
+        - "LCP element loaded via JavaScript"
+      explanation: |
+        Lazy-loading the LCP element delays its appearance, directly
+        increasing LCP time. The largest above-fold content should
+        load eagerly.
+      remediation: "Remove lazy loading from LCP element, use fetchpriority='high'"
+
+  high:
+    - id: "LCP-HIGH-001"
+      signal: "LCP between 2.5-4 seconds (needs improvement)"
+      evidence_threshold: "LCP > 2500ms && LCP <= 4000ms"
+      explanation: |
+        LCP in this range is classified as "needs improvement" and
+        may still impact rankings, especially compared to faster
+        competitors.
+      remediation: "Implement LCP optimizations to achieve < 2.5s"
+
+    - id: "LCP-HIGH-002"
+      signal: "LCP image not preloaded"
+      explanation: |
+        Without preloading, browsers discover the LCP image late in
+        the loading process, delaying its download.
+      remediation: "Add <link rel='preload'> for LCP image"
+
+    - id: "LCP-HIGH-003"
+      signal: "Slow server response time (TTFB > 800ms)"
+      explanation: |
+        High Time to First Byte delays everything, including LCP.
+        Server performance is a foundational LCP factor.
+      remediation: "Optimize server performance, use CDN, implement caching"
+
+  medium:
+    - id: "LCP-MED-001"
+      signal: "Render-blocking resources delaying LCP"
+      remediation: "Defer non-critical CSS/JS, inline critical CSS"
+
+    - id: "LCP-MED-002"
+      signal: "LCP image not properly sized (too large)"
+      remediation: "Use responsive images, proper sizing, modern formats"
+
+    - id: "LCP-MED-003"
+      signal: "No fetchpriority hint on LCP element"
+      remediation: "Add fetchpriority='high' to LCP image"
+
+  low:
+    - id: "LCP-LOW-001"
+      signal: "LCP varies significantly between pages"
+
+  positive:
+    - id: "LCP-POS-001"
+      signal: "LCP under 2.5 seconds (good threshold)"
+    - id: "LCP-POS-002"
+      signal: "LCP element preloaded with high priority"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Gather LCP Field Data"
+      description: |
+        Collect real-user LCP data from Chrome User Experience
+        Report via PageSpeed Insights and Google Search Console.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Get field data from GSC"
+          command: "Google Search Console > Core Web Vitals report"
+        - purpose: "Get field data from PSI"
+          command: "PageSpeed Insights for key page types"
+      expected_findings:
+        - "Field LCP scores by page type"
+        - "Good/Needs Improvement/Poor distribution"
+        - "Mobile vs desktop LCP"
+
+    - id: "2"
+      name: "Run Lab Tests"
+      description: |
+        Use Lighthouse to measure lab LCP and identify the LCP
+        element on key pages.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Run Lighthouse audit"
+          command: "Chrome DevTools > Lighthouse > Performance"
+      expected_findings:
+        - "Lab LCP scores"
+        - "LCP element identification"
+        - "Performance opportunities"
+
+    - id: "3"
+      name: "Identify LCP Element"
+      description: |
+        Determine what the LCP element is on each key page type
+        and analyze its loading characteristics.
+      duration_estimate: "20 min"
+      expected_findings:
+        - "LCP element per page type"
+        - "Element size and type"
+        - "Loading method"
+
+    - id: "4"
+      name: "Analyze LCP Causes"
+      description: |
+        Use waterfall analysis to understand what delays LCP,
+        including TTFB, render-blocking resources, and resource priority.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Waterfall analysis"
+          command: "WebPageTest or Chrome DevTools Network panel"
+      expected_findings:
+        - "Time breakdown to LCP"
+        - "Blocking resources"
+        - "Critical request chain"
+
+    - id: "5"
+      name: "Check LCP Optimization Techniques"
+      description: |
+        Verify implementation of LCP optimization best practices
+        like preload, fetchpriority, and avoiding lazy-load on LCP.
+      duration_estimate: "20 min"
+      expected_findings:
+        - "Preload usage"
+        - "fetchpriority usage"
+        - "Lazy-load conflicts"
+
+    - id: "6"
+      name: "Test on Mobile Connection"
+      description: |
+        Simulate slow 4G connection to understand LCP under
+        real-world mobile conditions.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Mobile simulation"
+          command: "Chrome DevTools with 4G throttling"
+      expected_findings:
+        - "Mobile LCP scores"
+        - "Connection-sensitive issues"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "LCP Performance Summary"
+        - "LCP Element Analysis"
+        - "Optimization Opportunities"
+        - "Implementation Recommendations"
+
+  confidence_guidance:
+    high: "Field data from CrUX with large sample size"
+    medium: "Lab data verified with multiple tools"
+    low: "Single lab test without field validation"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "web-vitals-lcp"
+        priority: "required"
+      - source_id: "google-lcp-optimize"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed performance analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "lcp-001"
+    item: "LCP under 2.5 seconds on key pages"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Check PageSpeed Insights field data"
+    expected: "Confirmed by reviewer"
+
+  - id: "lcp-002"
+    item: "LCP element not lazy-loaded"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify LCP image loads eagerly"
+    expected: "Confirmed by reviewer"
+
+  - id: "lcp-003"
+    item: "LCP image preloaded with high priority"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Check for preload and fetchpriority"
+    expected: "Confirmed by reviewer"
+
+  - id: "lcp-004"
+    item: "TTFB under 800ms"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Check server response time in Lighthouse"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["web-application", "marketing-site", "ecommerce", "content-site"]
+
+  compliance_frameworks:
+    - framework: "Google Core Web Vitals"
+      controls: ["LCP", "Loading Performance"]
+
+relationships:
+  commonly_combined:
+    - "seo-discoverability.core-web-vitals.time-to-first-byte"
+    - "seo-discoverability.core-web-vitals.first-contentful-paint"
+    - "seo-discoverability.core-web-vitals.cumulative-layout-shift"

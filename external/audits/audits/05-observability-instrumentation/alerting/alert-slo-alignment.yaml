@@ -1,0 +1,254 @@
+audit:
+  id: observability-instrumentation.alerting.alert-slo-alignment
+  name: Alert SLO Alignment Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: alerting
+  tier: expert
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Reviews the alignment between alerting rules and defined Service Level
+    Objectives (SLOs). Verifies that alerts are derived from error budget
+    burn rates, SLI breaches, and that alert thresholds correlate with
+    customer-impacting conditions.
+  why_it_matters: |
+    Alerts not aligned with SLOs may page for non-impactful issues while
+    missing actual user-facing degradation. SLO-aligned alerting ensures
+    engineering effort focuses on what matters to users, reducing noise
+    and improving incident relevance.
+  when_to_run:
+  - After SLO changes
+  - When alerts don't match user complaints
+  - Quarterly SLO review
+  - New service SLO definition
+prerequisites:
+  required_artifacts:
+  - type: slo_definitions
+    description: Documented Service Level Objectives
+  - type: alert_rules
+    description: Current alert configurations
+  access_requirements:
+  - SLO documentation
+  - Alert rule configuration
+  - Error budget metrics
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: slo:sli_error:ratio_rate5m
+    purpose: Check for SLO-based metrics
+    threshold: SLO metrics present
+  - system: Prometheus
+    query: ALERTS{slo_name!=""}
+    purpose: Find SLO-linked alerts
+    threshold: Critical services have SLO alerts
+  code_patterns:
+  - pattern: slo|error_budget|burn_rate|sli
+    type: regex
+    scope: alert_rules
+    purpose: Identify SLO-derived alerts
+  file_patterns:
+  - glob: '**/slo*.yaml'
+    purpose: SLO definitions
+  - glob: '**/sloth*.yaml'
+    purpose: Sloth SLO configurations
+  - glob: '**/error-budget*.yaml'
+    purpose: Error budget alerts
+knowledge_sources:
+  specifications:
+  - id: sre-workbook-alerting
+    name: SRE Workbook - Alerting on SLOs
+    url: https://sre.google/workbook/alerting-on-slos/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: sloth
+    name: Sloth SLO Generator
+    url: https://sloth.dev/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: sloth
+    purpose: Generate SLO-based alerts
+    command: sloth generate -i slo.yaml
+  - tool: prometheus
+    purpose: Query error budget
+    command: curl -s 'http://prometheus:9090/api/v1/query?query=1-slo:sli_error:ratio_rate30d'
+  monitoring_queries:
+  - system: Prometheus
+    query: slo:error_budget_remaining:ratio
+    purpose: Check current error budget
+signals:
+  critical:
+  - id: SLO-ALIGN-CRIT-001
+    signal: No SLO-based alerts for customer-facing services
+    evidence_pattern: Customer services use only infrastructure alerts
+    explanation: |
+      Without SLO-based alerts, there's no guarantee that alerts fire
+      for user-impacting issues. Infrastructure alerts may miss
+      degradation that users experience.
+    remediation: Implement error budget burn rate alerts for all SLOs
+  - id: SLO-ALIGN-CRIT-002
+    signal: SLO breaches not generating alerts
+    evidence_pattern: SLO violated without alert firing
+    explanation: |
+      If SLOs can be breached without alerting, the alerting system
+      is fundamentally misaligned with business objectives.
+    remediation: Add alerts triggered by SLO error budget consumption
+  high:
+  - id: SLO-ALIGN-HIGH-001
+    signal: Alert thresholds don't match SLO targets
+    evidence_pattern: Alert at 99% when SLO is 99.9%
+    explanation: |
+      Mismatched thresholds mean alerts fire too late (after SLO
+      is already violated) or too early (before impact).
+    remediation: Derive alert thresholds from SLO error budgets
+  - id: SLO-ALIGN-HIGH-002
+    signal: No multi-window burn rate alerts
+    evidence_pattern: Only single time window for SLO alerts
+    explanation: |
+      Single time windows miss either fast burns (short window)
+      or slow burns (long window). Multi-window detects both.
+    remediation: Implement multi-window burn rate alerting
+  medium:
+  - id: SLO-ALIGN-MED-001
+    signal: SLO alerts not prioritized by burn rate
+    evidence_pattern: All SLO alerts same severity
+    remediation: Set severity based on burn rate (fast vs slow)
+  - id: SLO-ALIGN-MED-002
+    signal: No error budget tracking dashboard
+    evidence_pattern: Error budget not visible to teams
+    remediation: Create error budget visibility dashboards
+  low:
+  - id: SLO-ALIGN-LOW-001
+    signal: SLO-alert relationship not documented
+    remediation: Document how alerts relate to SLOs
+  positive:
+  - id: SLO-ALIGN-POS-001
+    signal: Complete SLO-based alerting with burn rate tiers
+    evidence_pattern: Multi-window burn rate alerts for all SLOs
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory SLOs and related alerts
+    description: |
+      Document all defined SLOs and map them to their
+      corresponding alert rules.
+    duration_estimate: 40 min
+    commands:
+    - purpose: List SLO definitions
+      command: kubectl get prometheusrules -A -o yaml | grep -A 30 'slo:'
+    - purpose: Find SLO-related alerts
+      command: curl -s 'http://prometheus:9090/api/v1/rules' | jq '.data.groups[].rules[] | select(.type=="alerting"
+        and (.query | test("slo|error_budget|burn")))'
+    expected_findings:
+    - SLO inventory
+    - Alert-SLO mapping
+  - id: '2'
+    name: Validate alignment
+    description: |
+      Verify that alert thresholds are derived from SLO targets
+      and fire appropriately for budget consumption.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Check current error budget
+      command: curl -s 'http://prometheus:9090/api/v1/query?query=1-(sum(rate(http_errors_total[30d]))/sum(rate(http_requests_total[30d])))'
+        | jq '.data.result[0].value[1]'
+    - purpose: Verify burn rate calculation
+      command: curl -s 'http://prometheus:9090/api/v1/query?query=rate(http_errors_total[1h])/rate(http_requests_total[1h])/(1-0.999)'
+    expected_findings:
+    - Threshold alignment
+    - Burn rate accuracy
+  - id: '3'
+    name: Review alerting strategy
+    description: |
+      Assess whether alerting strategy follows SLO best practices
+      including multi-window and severity tiering.
+    duration_estimate: 35 min
+    commands:
+    - purpose: Check for multi-window alerts
+      command: curl -s 'http://prometheus:9090/api/v1/rules' | jq '[.data.groups[].rules[] | select(.query
+        | test("rate.*\\[1h\\].*rate.*\\[6h\\]"))] | length'
+    expected_findings:
+    - Multi-window implementation
+    - Severity tiering
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - SLO-Alert Mapping
+    - Alignment Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Full SLO-alert mapping with threshold verification
+    medium: Mapping review with sample validation
+    low: Configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: sre-workbook-alerting
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires SLO-alert mapping analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: slo-align-001
+  item: SLO inventory complete
+  level: CRITICAL
+  verification: manual
+  expected: All SLOs documented
+- id: slo-align-002
+  item: Alert-SLO mapping verified
+  level: CRITICAL
+  verification: manual
+  expected: All SLOs have corresponding alerts
+- id: slo-align-003
+  item: Burn rate alerts implemented
+  level: BLOCKING
+  verification: curl -sf 'http://prometheus:9090/api/v1/rules' | jq -e '[.data.groups[].rules[] | select(.query
+    | test("burn"))] | length > 0'
+  expected: 'true'
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SRE Best Practices
+    controls:
+    - SLO-Based Alerting
+relationships:
+  commonly_combined:
+  - observability-instrumentation.alerting.alert-threshold
+  - observability-instrumentation.alerting.alert-fatigue
+  - observability-instrumentation.distributed-tracing.trace-coverage

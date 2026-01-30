@@ -1,0 +1,294 @@
+audit:
+  id: performance-efficiency.frontend-performance.third-party-script-impact
+  name: Third-Party Script Impact Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: frontend-performance
+  tier: expert
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Analyzes the impact of third-party scripts (analytics, ads, widgets,
+    social embeds) on page performance. Examines blocking behavior, main
+    thread time, network requests, and total bytes loaded. Identifies
+    scripts that disproportionately impact performance.
+  why_it_matters: |
+    Third-party scripts are often the largest source of performance problems.
+    A single poorly-behaved script can block interactivity, delay LCP, and
+    consume significant bandwidth. Third-party code is outside your control
+    but still impacts your users' experience and Core Web Vitals.
+  when_to_run:
+  - When adding new third-party services
+  - When Core Web Vitals degrade unexpectedly
+  - Quarterly review of third-party performance
+  - During performance audits
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: HTML with script tags
+  - type: deployed_application
+    description: Running application for testing
+  access_requirements:
+  - Read access to source code
+  - Access to Chrome DevTools
+discovery:
+  code_patterns:
+  - pattern: googletagmanager|gtag|analytics
+    type: regex
+    scope: source
+    purpose: Find Google Analytics/Tag Manager
+  - pattern: facebook|fb\.net|connect\.facebook
+    type: regex
+    scope: source
+    purpose: Find Facebook scripts
+  - pattern: hotjar|clarity|fullstory|heap
+    type: regex
+    scope: source
+    purpose: Find session recording tools
+  - pattern: intercom|drift|crisp|zendesk
+    type: regex
+    scope: source
+    purpose: Find chat widgets
+  - pattern: <script.*src=.*http
+    type: regex
+    scope: source
+    purpose: Find external scripts
+  file_patterns:
+  - glob: '**/*.html'
+    purpose: HTML with script tags
+  - glob: '**/index.html'
+    purpose: Entry HTML
+knowledge_sources:
+  guides:
+  - id: third-party-perf
+    name: Loading Third-Party JavaScript
+    url: https://web.dev/efficiently-load-third-party-javascript/
+    offline_cache: true
+  - id: third-party-facades
+    name: Replace Third-Party Embeds with Facades
+    url: https://web.dev/third-party-facades/
+    offline_cache: true
+  learning_resources:
+  - id: third-party-web
+    title: Third-Party Web
+    type: article
+    reference: https://www.thirdpartyweb.today/
+tooling:
+  static_analysis:
+  - tool: Lighthouse
+    purpose: Third-party usage audit
+    offline_capable: false
+  - tool: WebPageTest
+    purpose: Third-party impact analysis
+    offline_capable: false
+  - tool: Request Map Generator
+    purpose: Visualize third-party requests
+    offline_capable: false
+  scripts:
+  - id: find-third-party
+    language: bash
+    purpose: Find third-party script references
+    source: inline
+    code: |
+      #!/bin/bash
+      # Find external script sources
+      grep -rn '<script.*src=' --include='*.html' . | grep -v 'localhost\|/static\|/assets'
+      # Find common third-party domains
+      grep -rn 'google\|facebook\|twitter\|linkedin\|hotjar' --include='*.html' --include='*.js' .
+signals:
+  critical:
+  - id: 3P-CRIT-001
+    signal: Third-party script blocking main thread >250ms
+    evidence_threshold: Main thread blocked > 250ms by single script
+    explanation: |
+      A third-party script blocking the main thread for over 250ms
+      directly degrades interactivity (INP) and can delay LCP. Users
+      experience unresponsive interfaces.
+    remediation: Defer or lazy-load the script, use facade patterns, or remove if not essential
+  - id: 3P-CRIT-002
+    signal: Synchronous third-party script in document head
+    explanation: |
+      Synchronous scripts in the head block parsing and rendering until
+      they download and execute. Third-party server issues directly
+      impact your page load.
+    remediation: Add async or defer attribute, move to end of body
+    evidence_description: <head>[^]*<script(?!.*defer|async).*src="https?://(?!localhost)
+  high:
+  - id: 3P-HIGH-001
+    signal: Third-party scripts > 300KB total
+    evidence_threshold: Total third-party JS > 300KB
+    explanation: |
+      Excessive third-party JavaScript adds significant download time
+      and parsing/execution cost, especially on mobile devices.
+    remediation: Audit necessity of each script, lazy-load non-critical scripts
+  - id: 3P-HIGH-002
+    signal: Many third-party domains (>10)
+    evidence_threshold: '> 10 unique third-party domains'
+    explanation: |
+      Each domain requires DNS lookup and connection establishment.
+      Many domains increase connection overhead significantly.
+    remediation: Consolidate where possible, use resource hints (preconnect)
+  - id: 3P-HIGH-003
+    signal: Third-party script without async/defer
+    evidence_pattern: <script\s+src="https?://(?!localhost)[^"]+"(?!.*async|defer)
+    explanation: |
+      Third-party scripts without async or defer block page loading.
+      External server latency directly impacts your page.
+    remediation: Add async for independent scripts, defer for scripts needing DOM
+  medium:
+  - id: 3P-MED-001
+    signal: Social embeds loading eagerly
+    evidence_pattern: twitter-tweet|facebook.*iframe|instagram-media
+    remediation: Use facades that load embeds on user interaction
+  - id: 3P-MED-002
+    signal: Chat widget loading on page load
+    evidence_pattern: intercom|drift|crisp|zendesk.*widget
+    remediation: Defer chat widget loading until user scrolls or shows intent
+  low:
+  - id: 3P-LOW-001
+    signal: No preconnect for third-party origins
+    evidence_pattern: (?!.*preconnect)
+    remediation: Add <link rel='preconnect'> for critical third-party origins
+  positive:
+  - id: 3P-POS-001
+    signal: Third-party scripts properly deferred
+    evidence_pattern: <script.*async.*src="https://|<script.*defer.*src="https://
+  - id: 3P-POS-002
+    signal: Facades used for social embeds
+    evidence_pattern: lite-youtube|facade|click.*load
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory third-party scripts
+    description: |
+      Identify all third-party scripts loaded on the page.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find third-party scripts in HTML
+      command: grep -rn '<script.*src=' --include='*.html' . | grep -v 'localhost\|/static\|/assets'
+    - purpose: Find common third-party services
+      command: grep -rn 'google\|facebook\|hotjar\|intercom' --include='*.html' --include='*.js' .
+    expected_findings:
+    - Complete third-party inventory
+    - Script sources and purposes
+  - id: '2'
+    name: Measure third-party impact
+    description: |
+      Use Lighthouse and DevTools to measure actual impact.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Run Lighthouse third-party audit
+      command: lighthouse URL --only-audits=third-party-summary,third-party-facades --output=json
+    expected_findings:
+    - Main thread time per script
+    - Bytes per third-party
+  - id: '3'
+    name: Check loading strategies
+    description: |
+      Verify scripts use async/defer appropriately.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find scripts without async/defer
+      command: grep -rn '<script.*src="https' --include='*.html' . | grep -v 'async\|defer'
+    expected_findings:
+    - Blocking scripts
+    - Optimization opportunities
+  - id: '4'
+    name: Evaluate necessity
+    description: |
+      Assess whether each third-party script provides sufficient value.
+    duration_estimate: 25 min
+    questions:
+    - What business value does each script provide?
+    - Are there lighter alternatives?
+    - Can any scripts be removed?
+    expected_findings:
+    - Value assessment per script
+    - Removal candidates
+  - id: '5'
+    name: Check resource hints
+    description: |
+      Verify preconnect hints exist for critical third-party origins.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find preconnect hints
+      command: grep -rn 'preconnect' --include='*.html' .
+    expected_findings:
+    - Current preconnect usage
+    - Missing hints
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Third-Party Inventory
+    - Performance Impact
+    - Recommendations
+  confidence_guidance:
+    high: Lighthouse/DevTools clearly shows impact metrics
+    medium: Code patterns suggest impact
+    low: Requires runtime testing to quantify
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: third-party-perf
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires runtime analysis
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: 3p-001
+  item: All third-party scripts use async or defer
+  level: CRITICAL
+  verification: grep -rn '<script.*src="https' --include='*.html' . | grep -cv 'async\|defer'
+  expected: '0'
+- id: 3p-002
+  item: Third-party main thread time < 500ms total
+  level: BLOCKING
+  verification: lighthouse URL --only-audits=third-party-summary
+  expected: Main thread time < 500ms
+- id: 3p-003
+  item: Preconnect hints for critical third-party origins
+  level: WARNING
+  verification: grep -rn 'preconnect' --include='*.html' . | wc -l
+  expected: '> 0'
+governance:
+  applicable_to:
+    archetypes:
+    - webapp
+    - marketing-site
+    - ecommerce
+relationships:
+  commonly_combined:
+  - performance-efficiency.frontend-performance.core-web-vitals
+  - performance-efficiency.frontend-performance.javascript-bundle-size

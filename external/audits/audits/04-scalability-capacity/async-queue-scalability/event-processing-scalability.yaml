@@ -1,0 +1,297 @@
+audit:
+  id: scalability-capacity.async-queue-scalability.event-processing-scalability
+  name: Event Processing Scalability Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: scalability-capacity
+  category_number: 4
+  subcategory: async-queue-scalability
+  tier: phd
+  estimated_duration: 4 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Comprehensive evaluation of event processing pipeline scalability,
+    including event sourcing systems, stream processing frameworks, and
+    complex event processing (CEP) implementations. Analyzes processing
+    throughput, state management scalability, windowing strategies, and
+    the ability to handle event bursts while maintaining processing guarantees.
+  why_it_matters: |
+    Event processing systems often handle business-critical workflows
+    including order processing, fraud detection, and real-time analytics.
+    Scalability limitations cause processing delays, stale insights, and
+    business impact. Understanding processing capacity and bottlenecks
+    enables proactive scaling and prevents cascading failures during
+    high-load events.
+  when_to_run:
+  - Before production deployment of event-driven workflows
+  - When experiencing event processing latency increases
+  - During capacity planning for anticipated growth
+  - After adding new event types or processing complexity
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Event processing and handler implementations
+  - type: stream_topology
+    description: Stream processing topology definitions
+  - type: metrics_system
+    description: Processing throughput and latency metrics
+  access_requirements:
+  - Access to event processor source code
+  - Access to stream processing configurations
+  - Access to processing metrics and dashboards
+discovery:
+  code_patterns:
+  - pattern: '@EventHandler|@StreamListener|onEvent'
+    type: regex
+    scope: source
+    purpose: Find event handler implementations
+  - pattern: KStream|KTable|Flink.*DataStream
+    type: regex
+    scope: source
+    purpose: Find stream processing code
+  - pattern: window\(|timeWindow|sessionWindow
+    type: regex
+    scope: source
+    purpose: Find windowing implementations
+  - pattern: checkpoint|savepoint|exactly.once
+    type: regex
+    scope: config
+    purpose: Find processing guarantee configurations
+  file_patterns:
+  - glob: '**/*handler*.{java,ts,py,go}'
+    purpose: Event handler implementations
+  - glob: '**/*stream*.{java,ts,py,go}'
+    purpose: Stream processing code
+  - glob: '**/flink*.yaml'
+    purpose: Flink job configurations
+  metrics_queries:
+  - system: Prometheus
+    query: rate(events_processed_total[5m])
+    purpose: Event processing throughput
+    threshold: Should match or exceed event production rate
+  - system: Prometheus
+    query: histogram_quantile(0.99, event_processing_duration_seconds)
+    purpose: P99 processing latency
+    threshold: Based on SLA requirements
+knowledge_sources:
+  guides:
+  - id: kafka-streams
+    name: Kafka Streams Architecture
+    url: https://kafka.apache.org/documentation/streams/architecture
+    offline_cache: true
+  - id: flink-scalability
+    name: Apache Flink Scalability Guide
+    url: https://nightlies.apache.org/flink/flink-docs-stable/docs/ops/state/large_state_tuning/
+    offline_cache: true
+  papers:
+  - id: stream-processing
+    title: 'The Dataflow Model: A Practical Approach to Balancing Correctness, Latency, and Cost'
+    url: https://research.google/pubs/pub43864/
+  learning_resources:
+  - id: streaming-systems
+    title: Streaming Systems
+    type: book
+    reference: ISBN 978-1491983874
+tooling:
+  infrastructure_tools:
+  - tool: kafka-streams-application-reset
+    purpose: Reset stream application state for testing
+    command: kafka-streams-application-reset.sh --application-id <app-id>
+  - tool: flink
+    purpose: Monitor Flink job status and scaling
+    command: flink list -r
+  monitoring_queries:
+  - system: Prometheus
+    query: kafka_streams_task_process_latency_avg
+    purpose: Per-task processing latency
+  - system: Prometheus
+    query: flink_taskmanager_job_task_numRecordsInPerSecond
+    purpose: Flink task throughput
+  scripts:
+  - id: event-throughput-analyzer
+    language: bash
+    purpose: Analyze event processing patterns
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "Searching for event processing patterns..."
+      grep -r "@EventHandler\|@StreamListener\|KStream" --include='*.java' . 2>/dev/null
+signals:
+  critical:
+  - id: EVENT-CRIT-001
+    signal: Single-threaded event processing blocking parallelism
+    evidence_pattern: Sequential event handling without parallelism
+    explanation: |
+      Single-threaded processing creates a hard throughput ceiling
+      that cannot be overcome with horizontal scaling. This becomes
+      the bottleneck as event volume grows.
+    remediation: Implement parallel processing with partition-based concurrency
+  - id: EVENT-CRIT-002
+    signal: Unbounded state growth in stream processing
+    evidence_pattern: KTable or state store without TTL or cleanup
+    explanation: |
+      State stores that grow unbounded will eventually exhaust memory
+      or disk, causing processing failures and data loss.
+    remediation: Implement state TTLs and compaction policies
+  high:
+  - id: EVENT-HIGH-001
+    signal: Processing throughput below event production rate
+    explanation: Consumer lag will grow unbounded over time
+    remediation: Scale processing parallelism or optimize handlers
+  - id: EVENT-HIGH-002
+    signal: No checkpointing for exactly-once processing
+    explanation: Recovery from failures causes duplicate processing
+    remediation: Enable checkpointing with appropriate intervals
+  medium:
+  - id: EVENT-MED-001
+    signal: Window sizes not optimized for use case
+    remediation: Tune window durations based on business requirements
+  - id: EVENT-MED-002
+    signal: Event handlers perform synchronous I/O
+    remediation: Use async I/O or separate I/O from processing
+  low:
+  - id: EVENT-LOW-001
+    signal: Processing metrics not granular by event type
+  positive:
+  - id: EVENT-POS-001
+    signal: Parallel processing scales linearly with partitions
+  - id: EVENT-POS-002
+    signal: State management with TTLs and cleanup policies
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Map Event Processing Topology
+    description: |
+      Identify all event handlers, stream processors, and their
+      connections, documenting the processing graph.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find event handlers
+      command: grep -r '@EventHandler\|@StreamListener' --include='*.java' .
+    expected_findings:
+    - Complete event processing topology
+    - Handler-to-topic mappings
+  - id: '2'
+    name: Analyze Processing Parallelism
+    description: |
+      Review how parallel processing is achieved, including
+      partition-based parallelism and threading models.
+    duration_estimate: 45 min
+    questions:
+    - How many parallel processors can run?
+    - What limits parallelism (partitions, threads, instances)?
+    - Is processing stateless or stateful?
+    expected_findings:
+    - Parallelism model and limits
+    - Scalability ceiling
+  - id: '3'
+    name: Review State Management
+    description: |
+      Examine state stores, their sizing, TTLs, and
+      recovery mechanisms.
+    duration_estimate: 30 min
+    expected_findings:
+    - State store configurations
+    - State cleanup policies
+  - id: '4'
+    name: Evaluate Processing Guarantees
+    description: |
+      Verify checkpointing, exactly-once semantics, and
+      recovery behavior.
+    duration_estimate: 30 min
+    expected_findings:
+    - Processing guarantee configurations
+    - Checkpoint intervals and storage
+  - id: '5'
+    name: Throughput and Latency Analysis
+    description: |
+      Review metrics to understand current throughput,
+      latency percentiles, and capacity headroom.
+    duration_estimate: 30 min
+    expected_findings:
+    - Current vs maximum throughput
+    - Latency distribution
+    - Bottleneck identification
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Processing Topology Map
+    - Scalability Analysis
+    - State Management Review
+    - Recommendations
+  confidence_guidance:
+    high: Code reviewed, metrics analyzed, capacity verified
+    medium: Code review with limited production metrics
+    low: Code review only without metrics data
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: kafka-streams
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires deep code analysis and metrics review
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: event-processing-001
+  item: Processing throughput exceeds production rate with headroom
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify processing_rate > 1.5x production_rate
+  expected: Confirmed by reviewer
+- id: event-processing-002
+  item: State stores have TTL and cleanup policies
+  level: BLOCKING
+  verification: manual
+  verification_notes: All stateful processors have state management
+  expected: Confirmed by reviewer
+- id: event-processing-003
+  item: Checkpointing enabled for failure recovery
+  level: WARNING
+  verification: manual
+  verification_notes: Checkpoint intervals configured appropriately
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - event-driven
+    - data-pipeline
+    - real-time-analytics
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC7.1
+    - CC7.2
+relationships:
+  commonly_combined:
+  - scalability-capacity.async-queue-scalability.partition-shard-key-design
+  - scalability-capacity.async-queue-scalability.consumer-scaling

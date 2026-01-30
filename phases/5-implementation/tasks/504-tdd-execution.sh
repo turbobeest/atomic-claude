@@ -38,7 +38,10 @@ task_504_tdd_execution() {
     export _504_REFACTOR_AGENT_PROMPT=""
     export _504_VERIFY_AGENT_PROMPT=""
 
-    local agent_repo="${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}"
+    # Check embedded repo first (monorepo deployment), then env var, then default
+    local agent_repo="$ATOMIC_ROOT/repos/agents"
+    [[ -f "$ATOMIC_ROOT/external/agents/agent-inventory.csv" ]] && agent_repo="$ATOMIC_ROOT/external/agents"
+    [[ -n "$ATOMIC_AGENT_REPO" ]] && agent_repo="$ATOMIC_AGENT_REPO"
 
     if [[ -f "$agents_file" ]]; then
         echo -e "  ${DIM}Loading TDD agents from selection...${NC}"

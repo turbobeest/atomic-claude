@@ -1,0 +1,231 @@
+audit:
+  id: dependency-supply-chain.supply-chain-security.artifact-integrity
+  name: Artifact Integrity Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: dependency-supply-chain
+  category_number: 32
+  subcategory: supply-chain-security
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: dependencies
+  default_profiles:
+  - full
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit verifies the integrity of software artifacts through
+    checksums, signatures, and comparison against known-good values.
+    It ensures artifacts haven't been tampered with during download,
+    storage, or deployment.
+  why_it_matters: |
+    Artifact integrity is the foundation of supply chain security.
+    Without verification, any component could be replaced with a
+    malicious version. Integrity checks catch tampering, corruption,
+    and supply chain attacks.
+  when_to_run:
+  - After downloading dependencies
+  - Before deployments
+  - During security audits
+  - After suspected incidents
+prerequisites:
+  required_artifacts:
+  - type: artifacts
+    description: Downloaded packages, containers, binaries
+  - type: checksums
+    description: Published checksums or signatures
+  access_requirements:
+  - Read access to artifacts
+  - Access to checksum sources
+discovery:
+  file_patterns:
+  - glob: '**/*.sha256'
+    purpose: Find SHA256 checksum files
+  - glob: '**/*.sha512'
+    purpose: Find SHA512 checksum files
+  - glob: '**/CHECKSUMS*'
+    purpose: Find checksum files
+  - glob: '**/*.sig'
+    purpose: Find signature files
+knowledge_sources:
+  guides:
+  - id: verifying-downloads
+    name: Verifying Software Downloads
+    url: https://www.gnupg.org/gph/en/manual/x135.html
+  standards:
+  - id: slsa-integrity
+    name: SLSA Integrity Requirements
+    relevance: Artifact verification
+tooling:
+  analysis_tools:
+  - tool: sha256sum
+    purpose: Verify SHA256 checksums
+  - tool: gpg
+    purpose: Verify GPG signatures
+  - tool: cosign
+    purpose: Verify container signatures
+signals:
+  critical:
+  - id: DEP-INT-CRIT-001
+    signal: Artifact checksum doesn't match expected value
+    evidence_indicators:
+    - SHA256 mismatch
+    - Downloaded file differs from published hash
+    explanation: |
+      Checksum mismatch indicates tampering, corruption, or wrong
+      artifact. This is a serious security event requiring immediate
+      investigation.
+    remediation: Do not use artifact; investigate source; re-download from trusted source
+  - id: DEP-INT-CRIT-002
+    signal: No integrity verification performed
+    evidence_indicators:
+    - Artifacts downloaded without checksum verification
+    - No verification in install process
+    remediation: Implement mandatory integrity verification
+  high:
+  - id: DEP-INT-HIGH-001
+    signal: Checksums retrieved from same source as artifact
+    evidence_indicators:
+    - Checksum file from same server
+    - No independent verification
+    remediation: Verify checksums from independent trusted source
+  - id: DEP-INT-HIGH-002
+    signal: Using weak hash algorithms
+    evidence_indicators:
+    - MD5 verification only
+    - SHA1 for security-critical artifacts
+    remediation: Use SHA-256 or SHA-512 for verification
+  medium:
+  - id: DEP-INT-MED-001
+    signal: Integrity verification not automated
+    evidence_indicators:
+    - Manual checksum verification
+    - Not in CI/CD pipeline
+    remediation: Automate integrity checks in build process
+  - id: DEP-INT-MED-002
+    signal: Partial integrity coverage
+    evidence_indicators:
+    - Some artifacts verified, others not
+    - Inconsistent verification
+    remediation: Verify all downloaded artifacts
+  low:
+  - id: DEP-INT-LOW-001
+    signal: Checksum verification logs not retained
+    evidence_indicators:
+    - No audit trail of verification
+    - Cannot prove past verification
+    remediation: Log verification results for audit trail
+  positive:
+  - id: DEP-INT-POS-001
+    signal: All artifacts verified against trusted checksums
+  - id: DEP-INT-POS-002
+    signal: Integrity verification automated in pipeline
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Check npm Integrity
+    description: Verify npm uses integrity checking
+    commands:
+    - purpose: Verify npm ci performs integrity check
+      command: npm ci --dry-run 2>&1 | head -20 || echo 'npm ci check not available'
+  - id: '2'
+    name: Check for Checksum Files
+    description: Find published checksums
+    commands:
+    - purpose: Find checksum files
+      command: find . -name '*.sha256' -o -name '*.sha512' -o -name 'CHECKSUMS*' -o -name 'SHA256SUMS*'
+        2>/dev/null | grep -v node_modules | head -10
+  - id: '3'
+    name: Verify Downloaded Artifact
+    description: Check artifact against published checksum
+    commands:
+    - purpose: Example checksum verification
+      command: |-
+        echo 'Verify artifact:
+        sha256sum -c artifact.sha256
+
+        Or calculate and compare:
+        sha256sum artifact.tar.gz'
+  - id: '4'
+    name: Check Package Manager Integrity Settings
+    description: Verify package managers verify integrity
+    commands:
+    - purpose: Check npm config
+      command: npm config get strict-ssl 2>/dev/null || echo 'npm config not available'
+    - purpose: Check pip verify
+      command: pip config get global.require-hashes 2>/dev/null || echo 'pip config not available'
+  - id: '5'
+    name: Check Container Integrity
+    description: Verify container image integrity
+    commands:
+    - purpose: Check docker content trust
+      command: echo $DOCKER_CONTENT_TRUST || echo 'DOCKER_CONTENT_TRUST not set'
+  - id: '6'
+    name: Verify CI/CD Integrity Checks
+    description: Ensure pipeline verifies artifacts
+    commands:
+    - purpose: Check CI for integrity verification
+      command: grep -rE '(sha256sum|integrity|verify|checksum)' .github/workflows/ 2>/dev/null || echo
+        'No explicit integrity checks in CI'
+output:
+  deliverables:
+  - type: integrity_verification_report
+    format: structured
+    description: Results of integrity verification
+  - type: coverage_assessment
+    format: structured
+    description: Assessment of integrity check coverage
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Verification Results
+    - Coverage Analysis
+    - Recommendations
+closeout_checklist:
+- id: dep-int-001
+  item: All downloaded artifacts verified
+  level: CRITICAL
+  verification: Verification results documented
+- id: dep-int-002
+  item: Package managers use integrity verification
+  level: CRITICAL
+  verification: npm ci/pip hash mode used
+- id: dep-int-003
+  item: Strong hash algorithms used
+  level: REQUIRED
+  verification: SHA-256 or better
+- id: dep-int-004
+  item: Integrity checks automated
+  level: REQUIRED
+  verification: CI includes verification
+governance:
+  applicable_to:
+    archetypes:
+    - all-software-projects
+  compliance_mappings:
+  - framework: SLSA
+    control: Build L1
+    description: Artifact integrity
+  - framework: SOC 2
+    control: CC6.6
+    description: Integrity controls
+relationships:
+  commonly_combined:
+  - dependency-supply-chain.supply-chain-security.dependency-pinning
+  depends_on:
+  - dependency-supply-chain.supply-chain-security.dependency-pinning
+  feeds_into:
+  - security-trust.secure-development

@@ -1,0 +1,409 @@
+audit:
+  id: infrastructure-as-code.security-compliance.least-privilege
+  name: IaC Least Privilege
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: security-compliance
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: security
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates the implementation of least privilege principles
+    in Infrastructure as Code, focusing on IAM policies, service accounts,
+    and access controls defined through IaC.
+
+    Key areas examined:
+    - IAM policy granularity and scope
+    - Wildcard usage in permissions
+    - Service account permissions
+    - Cross-account access controls
+    - Resource-based policies
+    - Terraform execution credentials
+  why_it_matters: |
+    Least privilege is fundamental to security:
+    - Limits blast radius of compromised credentials
+    - Reduces attack surface
+    - Supports compliance requirements
+    - Enables audit and accountability
+    - Prevents privilege escalation
+
+    Overly permissive IaC creates:
+    - Lateral movement opportunities for attackers
+    - Compliance violations
+    - Difficult-to-audit access patterns
+    - Potential for accidental damage
+  when_to_run:
+  - During security architecture review
+  - Before compliance audits
+  - After security incidents
+  - When adding new IAM resources
+prerequisites:
+  required_artifacts:
+  - type: iac_repository
+    description: Access to infrastructure code repository
+  - type: iam_inventory
+    description: Understanding of IAM resources in IaC
+  access_requirements:
+  - Read access to IaC repositories
+  - Understanding of cloud IAM models
+discovery:
+  code_patterns:
+  - pattern: '"Action":\s*"\*"'
+    type: regex
+    scope: config
+    purpose: Find wildcard actions in policies
+  - pattern: '"Resource":\s*"\*"'
+    type: regex
+    scope: config
+    purpose: Find wildcard resources in policies
+  - pattern: aws_iam_policy|aws_iam_role_policy
+    type: regex
+    scope: config
+    purpose: Find IAM policy definitions
+  - pattern: actions\s*=\s*\["\*"\]
+    type: regex
+    scope: config
+    purpose: Find Terraform wildcard actions
+  - pattern: AdministratorAccess|PowerUserAccess
+    type: regex
+    scope: config
+    purpose: Find overly permissive managed policies
+  file_patterns:
+  - glob: '**/iam*.tf'
+    purpose: IAM Terraform files
+  - glob: '**/policies/*.json'
+    purpose: IAM policy JSON files
+  - glob: '**/roles/*.tf'
+    purpose: Role definitions
+knowledge_sources:
+  guides:
+  - id: aws-iam-best-practices
+    name: AWS IAM Best Practices
+    url: https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html
+    offline_cache: true
+  - id: aws-least-privilege
+    name: AWS Granting Least Privilege
+    url: https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html#grant-least-privilege
+    offline_cache: true
+  - id: azure-rbac
+    name: Azure RBAC Best Practices
+    url: https://docs.microsoft.com/en-us/azure/role-based-access-control/best-practices
+    offline_cache: true
+  - id: gcp-iam
+    name: GCP IAM Best Practices
+    url: https://cloud.google.com/iam/docs/using-iam-securely
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: checkov
+    purpose: Check for IAM best practices
+    offline_capable: true
+  - tool: tfsec
+    purpose: Detect overly permissive IAM
+    offline_capable: true
+  - tool: parliament
+    purpose: AWS IAM linting
+    offline_capable: true
+  - tool: iamlive
+    purpose: Generate least privilege policies
+    offline_capable: false
+  infrastructure_tools:
+  - tool: aws iam
+    purpose: Analyze IAM policies
+    command: aws iam get-account-authorization-details
+  - tool: aws iam access-analyzer
+    purpose: Validate policies for least privilege
+    command: aws accessanalyzer validate-policy
+  scripts:
+  - id: wildcard-detector
+    language: bash
+    purpose: Find wildcard permissions in Terraform
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Wildcard Actions ==="
+      grep -rn '"Action"\s*:\s*"\*"' --include='*.tf' --include='*.json'
+      grep -rn 'actions\s*=\s*\["\*"\]' --include='*.tf'
+
+      echo ""
+      echo "=== Wildcard Resources ==="
+      grep -rn '"Resource"\s*:\s*"\*"' --include='*.tf' --include='*.json'
+      grep -rn 'resources\s*=\s*\["\*"\]' --include='*.tf'
+
+      echo ""
+      echo "=== Admin Policies ==="
+      grep -rn 'AdministratorAccess\|PowerUserAccess\|FullAccess' --include='*.tf'
+signals:
+  critical:
+  - id: IAC-LP-CRIT-001
+    signal: Wildcard actions with wildcard resources
+    evidence_pattern: '"Action":\s*"\*"[^}]*"Resource":\s*"\*"'
+    explanation: |
+      Action:* with Resource:* grants full administrative access to
+      all AWS services. This is the maximum privilege and should
+      almost never be used.
+    remediation: Restrict to specific actions and resources needed
+  - id: IAC-LP-CRIT-002
+    signal: AdministratorAccess policy attached to resources
+    evidence_pattern: AdministratorAccess
+    explanation: |
+      AdministratorAccess is the most permissive AWS managed policy.
+      Its use indicates no least privilege implementation.
+    remediation: Create custom policy with only required permissions
+  - id: IAC-LP-CRIT-003
+    signal: Terraform execution role has excessive permissions
+    evidence_indicators:
+    - CI/CD role with admin access
+    - Deployment role with wildcard permissions
+    explanation: |
+      Overly permissive Terraform execution roles can be exploited
+      to compromise the entire infrastructure.
+    remediation: Scope Terraform role to only resources it manages
+  high:
+  - id: IAC-LP-HIGH-001
+    signal: Wildcard actions on specific services
+    evidence_pattern: '"Action":\s*"[a-z]+:\*"'
+    explanation: |
+      Service-wide wildcard actions (e.g., s3:*) grant more
+      permissions than typically needed.
+    remediation: Specify exact actions required (e.g., s3:GetObject, s3:PutObject)
+  - id: IAC-LP-HIGH-002
+    signal: Wildcard resources in IAM policies
+    evidence_pattern: '"Resource":\s*"\*"'
+    explanation: |
+      Resource:* applies permissions to all resources of that type,
+      violating least privilege.
+    remediation: Specify exact resource ARNs or use conditions
+  - id: IAC-LP-HIGH-003
+    signal: Cross-account access without conditions
+    evidence_indicators:
+    - Principal from other accounts without conditions
+    - No ExternalId or condition keys
+    explanation: |
+      Unrestricted cross-account access can be exploited through
+      confused deputy attacks.
+    remediation: Add ExternalId or other condition keys to cross-account access
+  medium:
+  - id: IAC-LP-MED-001
+    signal: Service-linked roles not used where available
+    evidence_indicators:
+    - Custom roles for AWS services
+    - Manual role creation for service integration
+    remediation: Use AWS service-linked roles when available
+  - id: IAC-LP-MED-002
+    signal: No permission boundaries on IAM entities
+    evidence_indicators:
+    - Roles without permissions_boundary
+    - Users without permission limits
+    remediation: Implement permission boundaries for defense in depth
+  - id: IAC-LP-MED-003
+    signal: Instance profiles with excessive permissions
+    evidence_indicators:
+    - EC2 roles with broad access
+    - Lambda roles with unnecessary permissions
+    remediation: Scope instance profile permissions to actual needs
+  low:
+  - id: IAC-LP-LOW-001
+    signal: IAM policies not using conditions
+    evidence_indicators:
+    - No condition blocks in policies
+    - Missing IP or time restrictions
+    remediation: Add conditions where appropriate (IP ranges, MFA, time)
+  positive:
+  - id: IAC-LP-POS-001
+    signal: Granular IAM policies with specific actions and resources
+    evidence_indicators:
+    - Specific action lists
+    - Resource ARNs specified
+    - Conditions used appropriately
+  - id: IAC-LP-POS-002
+    signal: Permission boundaries implemented
+    evidence_pattern: permissions_boundary
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Wildcard Permission Detection
+    description: |
+      Scan for wildcard actions and resources in IAM policies.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find wildcard actions
+      command: grep -rn '"Action"\s*:\s*"\*"\|actions\s*=\s*\["\*"\]' --include='*.tf' --include='*.json'
+    - purpose: Find wildcard resources
+      command: grep -rn '"Resource"\s*:\s*"\*"\|resources\s*=\s*\["\*"\]' --include='*.tf' --include='*.json'
+    - purpose: Find service wildcards
+      command: grep -rEn '"Action"\s*:\s*"[a-z0-9]+:\*"' --include='*.tf' --include='*.json' | head -30
+    expected_findings:
+    - Wildcard permissions
+    - Service-level wildcards
+    - Overly broad policies
+  - id: '2'
+    name: Managed Policy Review
+    description: |
+      Identify use of overly permissive AWS managed policies.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find admin policies
+      command: grep -rn 'AdministratorAccess\|PowerUserAccess\|FullAccess' --include='*.tf'
+    - purpose: List all managed policy references
+      command: grep -rn 'arn:aws:iam::aws:policy/' --include='*.tf' | head -30
+    - purpose: Find policy attachments
+      command: grep -rA5 'aws_iam_role_policy_attachment\|aws_iam_user_policy_attachment' --include='*.tf'
+        | head -50
+    expected_findings:
+    - Overly permissive managed policies
+    - Policy attachment patterns
+    - Admin policy usage
+  - id: '3'
+    name: Custom Policy Analysis
+    description: |
+      Review custom IAM policies for least privilege
+      compliance.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find custom policy documents
+      command: grep -rA30 'aws_iam_policy_document' --include='*.tf' | head -100
+    - purpose: Find inline policy statements
+      command: grep -rA20 'policy\s*=\s*jsonencode' --include='*.tf' | head -100
+    - purpose: Check for condition blocks
+      command: grep -rn 'condition\s*{\|"Condition"' --include='*.tf' --include='*.json' | wc -l
+    expected_findings:
+    - Custom policy definitions
+    - Policy granularity
+    - Condition usage
+  - id: '4'
+    name: Cross-Account Access Review
+    description: |
+      Analyze cross-account access configurations for
+      proper restrictions.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find assume role policies
+      command: grep -rA20 'assume_role_policy' --include='*.tf' | head -100
+    - purpose: Check for external principals
+      command: grep -rn 'Principal.*arn:aws' --include='*.tf' --include='*.json' | head -30
+    - purpose: Find ExternalId usage
+      command: grep -rn 'ExternalId\|external_id\|sts:ExternalId' --include='*.tf' --include='*.json'
+    expected_findings:
+    - Cross-account trust relationships
+    - External ID protection
+    - Principal restrictions
+  - id: '5'
+    name: Terraform Execution Role Review
+    description: |
+      Assess the permissions of roles used to execute
+      Terraform.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find CI/CD role configurations
+      command: grep -rn 'terraform\|deploy\|pipeline' --include='*.tf' | grep -i role | head -20
+    - purpose: Check provider assume_role
+      command: grep -rA10 'provider\s*"aws"' --include='*.tf' | grep assume_role
+    expected_findings:
+    - Terraform execution role scope
+    - CI/CD role permissions
+    - Provider configuration
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Permission Analysis
+    - Wildcard Usage Report
+    - Cross-Account Access Review
+    - Recommendations
+  confidence_guidance:
+    high: Direct policy analysis
+    medium: Inferred from naming and patterns
+    low: Based on documentation
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: aws-iam-best-practices
+      priority: required
+    - source_id: aws-least-privilege
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+      reason: Wildcard detection is quick and critical
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: lp-001
+  item: No wildcard actions with wildcard resources
+  level: CRITICAL
+  verification: grep -rEn '"Action"\s*:\s*"\*"' --include='*.tf' --include='*.json' -l | xargs -I{} grep
+    -l '"Resource"\s*:\s*"\*"' {} 2>/dev/null | wc -l | xargs -I{} test {} -eq 0 && echo PASS || echo
+    FAIL
+  expected: PASS
+- id: lp-002
+  item: No AdministratorAccess policy usage
+  level: CRITICAL
+  verification: grep -rn 'AdministratorAccess' --include='*.tf' | wc -l | xargs -I{} test {} -eq 0 &&
+    echo PASS || echo FAIL
+  expected: PASS
+- id: lp-003
+  item: Cross-account access uses ExternalId
+  level: BLOCKING
+  verification: manual
+  verification_notes: Review all assume_role_policy with external principals for ExternalId
+  expected: Confirmed by reviewer
+- id: lp-004
+  item: Service wildcards justified and documented
+  level: WARNING
+  verification: manual
+  verification_notes: Review any service:* actions and verify business justification
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.3
+  - framework: PCI-DSS
+    controls:
+    - '7.1'
+    - '7.2'
+  - framework: CIS AWS Foundations
+    controls:
+    - '1.16'
+    - '1.22'
+  - framework: NIST CSF
+    controls:
+    - PR.AC-4
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.state-management.state-backend-security
+  - infrastructure-as-code.security-compliance.policy-as-code

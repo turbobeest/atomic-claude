@@ -1,0 +1,397 @@
+# ============================================================
+# AUDIT: Polling vs Push
+# ============================================================
+
+audit:
+  id: "api-integration.integration-patterns.polling-vs-push"
+  name: "Polling vs Push Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "api-integration"
+  category_number: 9
+  subcategory: "integration-patterns"
+
+  tier: "expert"
+  estimated_duration: "75 minutes"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "api"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the choice between polling and push-based patterns for
+    data synchronization and event notification. Analyzes polling
+    efficiency, push availability, pattern appropriateness, and
+    resource utilization.
+
+  why_it_matters: |
+    Inefficient polling wastes bandwidth and server resources while
+    introducing latency. Missing push options force clients to poll
+    frequently, multiplying load. Correct pattern choice significantly
+    impacts scalability, latency, and operational costs.
+
+  when_to_run:
+    - "API architecture review"
+    - "Scalability optimization"
+    - "Resource utilization analysis"
+    - "Real-time requirements assessment"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "API endpoints and client code"
+    - type: "metrics"
+      description: "API traffic patterns"
+
+  access_requirements:
+    - "Read access to API source code"
+    - "Access to traffic metrics"
+
+discovery:
+  code_patterns:
+    - pattern: "poll|setInterval|schedule"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect polling patterns"
+
+    - pattern: "websocket|WebSocket|SSE|EventSource"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect push mechanisms"
+
+    - pattern: "subscribe|subscription|stream"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect subscription patterns"
+
+  file_patterns:
+    - glob: "**/websocket/**"
+      purpose: "WebSocket implementations"
+    - glob: "**/streaming/**"
+      purpose: "Streaming endpoints"
+    - glob: "**/events/**"
+      purpose: "Event endpoints"
+
+knowledge_sources:
+  specifications:
+    - id: "building-microservices"
+      name: "Sam Newman - Building Microservices"
+      url: "https://www.oreilly.com/library/view/building-microservices-2nd/9781492034018/"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "push-vs-poll"
+      name: "Push vs Poll Architecture"
+      url: "https://docs.microsoft.com/en-us/azure/architecture/patterns/priority-queue"
+      offline_cache: true
+
+    - id: "websocket-best-practices"
+      name: "WebSocket Best Practices"
+      url: "https://www.pubnub.com/blog/websocket-best-practices/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "real-time-web"
+      title: "Real-Time Web Technologies"
+      type: "article"
+      reference: "MDN Web Docs"
+
+tooling:
+  static_analysis:
+    - tool: "asyncapi-validator"
+      purpose: "Validate async API specifications"
+      offline_capable: true
+
+  scripts:
+    - id: "polling-push-scan"
+      language: "bash"
+      purpose: "Analyze polling vs push patterns"
+      source: "inline"
+      code: |
+        echo "=== Polling vs Push Analysis ==="
+        echo "--- Polling patterns ---"
+        grep -rn "poll\|setInterval\|setTimeout.*loop\|schedule" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+
+        echo "--- Push mechanisms ---"
+        grep -rn "WebSocket\|websocket\|SSE\|EventSource\|stream" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+
+        echo "--- Subscription patterns ---"
+        grep -rn "subscribe\|subscription\|listen" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+
+signals:
+  critical:
+    - id: "PP-CRIT-001"
+      signal: "High-frequency polling without rate limiting"
+      evidence_pattern: "Client polling every 1-5 seconds with no throttling"
+      explanation: |
+        High-frequency polling multiplies server load by the number of
+        clients. Without rate limiting, server resources are overwhelmed.
+        A push pattern would provide faster updates with less load.
+      remediation: "Implement webhooks/SSE/WebSocket, or add rate limits to polling"
+
+    - id: "PP-CRIT-002"
+      signal: "Polling endpoint returns unchanged data"
+      evidence_pattern: "No ETag or last-modified handling"
+      explanation: |
+        Polling endpoints that return full data on every request waste
+        bandwidth and processing. Most polls return unchanged data that
+        could be eliminated with conditional requests.
+      remediation: "Support conditional requests with ETag or If-Modified-Since"
+
+  high:
+    - id: "PP-HIGH-001"
+      signal: "Real-time features implemented via polling"
+      evidence_pattern: "Chat, notifications, or live updates via repeated GET"
+      explanation: |
+        Real-time features using polling create poor user experience
+        (delayed updates) and high server load. WebSocket or SSE
+        provide true real-time with lower resource usage.
+      remediation: "Use WebSocket or SSE for real-time features"
+
+    - id: "PP-HIGH-002"
+      signal: "No push option available for event-driven data"
+      evidence_pattern: "Events only available through list endpoint polling"
+      explanation: |
+        When only polling is available for event data, clients must
+        poll frequently to avoid missing events. This creates unnecessary
+        load and still misses events between polls.
+      remediation: "Offer webhook or streaming alternative"
+
+    - id: "PP-HIGH-003"
+      signal: "Push mechanism without fallback"
+      evidence_pattern: "WebSocket only with no polling fallback"
+      explanation: |
+        Some environments block WebSocket or SSE. Without polling
+        fallback, clients in restricted networks cannot use the service.
+      remediation: "Provide polling fallback for push mechanisms"
+
+  medium:
+    - id: "PP-MED-001"
+      signal: "Polling interval not configurable"
+      evidence_pattern: "Hardcoded poll frequency"
+      remediation: "Allow clients to configure polling interval within limits"
+
+    - id: "PP-MED-002"
+      signal: "No long-polling option"
+      evidence_pattern: "Only short polling available"
+      remediation: "Implement long polling as middle ground between poll and push"
+
+    - id: "PP-MED-003"
+      signal: "WebSocket without heartbeat"
+      evidence_pattern: "No ping/pong or keepalive mechanism"
+      remediation: "Implement heartbeat to detect dead connections"
+
+  low:
+    - id: "PP-LOW-001"
+      signal: "Polling recommended when push available"
+      evidence_pattern: "Documentation suggests polling over webhooks"
+      remediation: "Update documentation to recommend push patterns"
+
+  positive:
+    - id: "PP-POS-001"
+      signal: "Webhooks available for all events"
+      evidence_pattern: "Push notification for state changes"
+
+    - id: "PP-POS-002"
+      signal: "ETag support for polling endpoints"
+      evidence_pattern: "Conditional requests reduce unnecessary data"
+
+    - id: "PP-POS-003"
+      signal: "Multiple push options available"
+      evidence_pattern: "WebSocket, SSE, and webhooks supported"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Polling Patterns"
+      description: |
+        Find endpoints and clients that use polling.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find polling code"
+          command: |
+            grep -rn "poll\|setInterval\|setTimeout" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+        - purpose: "Find repeated requests"
+          command: |
+            grep -rn "while.*fetch\|loop.*request\|interval.*get" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -20
+
+      expected_findings:
+        - "Polling implementations"
+        - "Poll frequencies"
+
+    - id: "2"
+      name: "Identify Push Mechanisms"
+      description: |
+        Find available push/streaming endpoints.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find WebSocket/SSE"
+          command: |
+            grep -rn "WebSocket\|websocket\|EventSource\|SSE" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Push implementations"
+        - "Protocol used"
+
+    - id: "3"
+      name: "Analyze Polling Efficiency"
+      description: |
+        Check if polling endpoints support conditional requests.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find ETag handling"
+          command: |
+            grep -rn "ETag\|etag\|If-None-Match\|If-Modified" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -20
+
+      expected_findings:
+        - "Conditional request support"
+        - "Efficiency measures"
+
+    - id: "4"
+      name: "Evaluate Pattern Appropriateness"
+      description: |
+        Assess if correct pattern is used for use case.
+      duration_estimate: "15 min"
+      questions:
+        - "Are real-time features using push patterns?"
+        - "Are infrequent checks using efficient polling?"
+        - "Is there fallback between patterns?"
+
+      expected_findings:
+        - "Pattern appropriateness"
+        - "Missing options"
+
+    - id: "5"
+      name: "Check Connection Management"
+      description: |
+        For push patterns, verify connection handling.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Find connection handling"
+          command: |
+            grep -rn "heartbeat\|ping\|keepalive\|reconnect" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -20
+
+      expected_findings:
+        - "Connection management"
+        - "Reconnection logic"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "polling_inventory"
+        - "push_inventory"
+        - "pattern_assessment"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Pattern Analysis"
+        - "Efficiency Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear inefficient polling or missing push option"
+    medium: "Pattern exists but optimization potential"
+    low: "Requires load analysis to confirm inefficiency"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "push-vs-poll"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires architecture analysis"
+    full:
+      included: true
+      priority: 1
+    architecture:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "pp-001"
+    item: "Push option available for real-time data"
+    level: "BLOCKING"
+    verification: |
+      grep -rn "WebSocket\|webhook\|SSE\|EventSource" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "pp-002"
+    item: "Polling endpoints support conditional requests"
+    level: "WARNING"
+    verification: |
+      grep -rn "ETag\|etag\|If-Modified\|Last-Modified" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "pp-003"
+    item: "Polling rate limits enforced"
+    level: "WARNING"
+    verification: |
+      grep -rn "rateLimit\|rate.limit\|throttle" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Performance Efficiency", "Resource Utilization"]
+
+relationships:
+  commonly_combined:
+    - "api-integration.integration-patterns.webhook-design"
+    - "api-integration.integration-patterns.synchronous-vs-async-choice"
+    - "performance-efficiency.network.bandwidth-optimization"

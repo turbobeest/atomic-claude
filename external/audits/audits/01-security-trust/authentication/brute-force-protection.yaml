@@ -1,0 +1,429 @@
+audit:
+  id: security-trust.authentication.brute-force-protection
+  name: Brute Force Protection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: authentication
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates brute force attack protection mechanisms including
+    account lockout policies, rate limiting, CAPTCHA implementation,
+    exponential backoff, IP-based blocking, and progressive delays. It
+    assesses compliance with OWASP guidelines and NIST SP 800-63B
+    recommendations for authentication throttling.
+  why_it_matters: |
+    Brute force attacks are automated attempts to guess credentials by
+    trying many passwords against accounts. Without proper protection,
+    attackers can compromise accounts through dictionary attacks, password
+    spraying, or credential stuffing. OWASP recommends multi-layered
+    defenses including rate limiting, lockouts, and CAPTCHA. NIST SP 800-63B
+    limits consecutive failed attempts to 100 maximum.
+  when_to_run:
+  - Before production deployment
+  - After changes to authentication endpoints
+  - During security assessments
+  - When implementing new login functionality
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Authentication endpoints and rate limiting code
+  - type: configuration
+    description: Rate limiting and lockout configuration
+  access_requirements:
+  - Read access to authentication service codebase
+  - Access to rate limiting configuration
+  - Understanding of authentication flow
+discovery:
+  code_patterns:
+  - pattern: rate.*limit|rateLimit|RateLimiter
+    type: regex
+    scope: source
+    purpose: Locate rate limiting implementation
+  - pattern: lockout|lock.*account|account.*lock
+    type: regex
+    scope: source
+    purpose: Find account lockout logic
+  - pattern: captcha|CAPTCHA|recaptcha|hcaptcha
+    type: regex
+    scope: source
+    purpose: Identify CAPTCHA implementation
+  - pattern: failed.*attempt|login.*attempt|attempt.*count
+    type: regex
+    scope: source
+    purpose: Find failed attempt tracking
+  - pattern: throttle|Throttle|delay.*login|backoff
+    type: regex
+    scope: source
+    purpose: Check for throttling/backoff
+  - pattern: ip.*block|block.*ip|banned.*ip
+    type: regex
+    scope: source
+    purpose: Find IP blocking mechanism
+  - pattern: express-rate-limit|rate-limiter-flexible|redis.*rate
+    type: regex
+    scope: source
+    purpose: Identify rate limiting libraries
+  - pattern: max.*attempt|MAX_ATTEMPTS|attempt.*threshold
+    type: regex
+    scope: source
+    purpose: Find attempt thresholds
+  file_patterns:
+  - glob: '**/auth/**'
+    purpose: Authentication module files
+  - glob: '**/middleware/**'
+    purpose: Middleware files
+  - glob: '**/security*'
+    purpose: Security configuration files
+  - glob: '**/rate*'
+    purpose: Rate limiting files
+knowledge_sources:
+  specifications:
+  - id: nist-800-63b
+    name: NIST SP 800-63B Authentication and Lifecycle Management
+    url: https://pages.nist.gov/800-63-3/sp800-63b.html
+    offline_cache: true
+    priority: required
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: NIST SP 800-207 Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-brute-force
+    name: OWASP Blocking Brute Force Attacks
+    url: https://owasp.org/www-community/controls/Blocking_Brute_Force_Attacks
+    offline_cache: true
+  - id: owasp-auth
+    name: OWASP Authentication Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-testing-lockout
+    name: OWASP Testing for Weak Lock Out Mechanism
+    url: https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/04-Authentication_Testing/03-Testing_for_Weak_Lock_Out_Mechanism
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Brute force protection patterns
+    offline_capable: true
+  scripts:
+  - id: brute-force-scanner
+    language: bash
+    purpose: Scan for brute force protection
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Brute Force Protection Scanner ==="
+      echo "Rate Limiting:"
+      grep -rn "rate.*limit\|rateLimit\|throttle" --include="*.js" --include="*.ts" --include="*.py" --include="*.java" .
+      echo ""
+      echo "Account Lockout:"
+      grep -rn "lockout\|lock.*account\|MAX_ATTEMPTS\|failed.*attempt" --include="*.js" --include="*.ts" --include="*.py" --include="*.java" .
+      echo ""
+      echo "CAPTCHA:"
+      grep -rn "captcha\|recaptcha\|hcaptcha" --include="*.js" --include="*.ts" --include="*.py" .
+signals:
+  critical:
+  - id: AUTH-BRUTE-CRIT-001
+    signal: No rate limiting on authentication endpoints
+    cwe: CWE-307
+    evidence_pattern: app\.(post|put)\(['"]\/(login|auth|signin)(?!.*rate|.*limit|.*throttle)
+    explanation: |
+      Authentication endpoints without rate limiting allow unlimited
+      login attempts. Attackers can perform rapid brute force attacks,
+      testing thousands of passwords per second without restriction.
+    remediation: |
+      Implement rate limiting on all authentication endpoints.
+      Use stricter limits than general API rate limiting.
+      Consider 5-10 requests per minute per IP for login endpoints.
+  - id: AUTH-BRUTE-CRIT-002
+    signal: No account lockout after failed attempts
+    cwe: CWE-307
+    evidence_pattern: login(?!.*lockout|.*attempt.*count|.*failed.*limit)|auth(?!.*lock|.*throttle)
+    explanation: |
+      Without account lockout, attackers can indefinitely attempt
+      passwords against specific accounts. Even with rate limiting,
+      distributed attacks can eventually guess weak passwords.
+    remediation: |
+      Implement account lockout after 5-10 failed attempts.
+      Use temporary lockout (15-30 minutes) to balance security
+      and usability. Consider soft lockout with CAPTCHA requirement.
+  high:
+  - id: AUTH-BRUTE-HIGH-001
+    signal: Rate limiting easily bypassed (no IP tracking)
+    cwe: CWE-307
+    evidence_pattern: rateLimit(?!.*ip|.*IP|.*remoteAddress)|limit.*user(?!.*ip)
+    explanation: |
+      Rate limiting based only on username allows attackers to
+      bypass limits by trying different usernames. IP-based rate
+      limiting is required to slow distributed attacks.
+    remediation: |
+      Implement both per-IP and per-account rate limiting.
+      Use X-Forwarded-For with caution (validate trusted proxies).
+      Consider device fingerprinting for sophisticated attackers.
+  - id: AUTH-BRUTE-HIGH-002
+    signal: Lockout threshold too high (>100 attempts)
+    cwe: CWE-307
+    evidence_pattern: MAX_ATTEMPTS.*[=:]\s*(100|[1-9][0-9]{2,})|attempt.*threshold.*(100|[1-9][0-9]{2})
+    explanation: |
+      NIST SP 800-63B recommends limiting consecutive failed attempts
+      to no more than 100. Higher thresholds allow significant
+      brute force attempts before any protection activates.
+    remediation: |
+      Set lockout threshold to 5-10 failed attempts per account.
+      Implement progressive delays after 3 failed attempts.
+      Reset counter after successful authentication.
+  - id: AUTH-BRUTE-HIGH-003
+    signal: Lockout duration too short (<5 minutes)
+    cwe: CWE-307
+    evidence_pattern: lockout.*duration.*[=:]\s*([1-4]|[0-9]+s)|unlock.*time.*(60|120|180|240)
+    explanation: |
+      Short lockout durations allow attackers to wait briefly and
+      resume attacks. Minimum 15-30 minute lockouts significantly
+      slow brute force attacks while remaining user-friendly.
+    remediation: |
+      Set lockout duration to minimum 15 minutes.
+      Implement exponential backoff for repeated lockouts.
+      Consider permanent lockout requiring admin intervention.
+  - id: AUTH-BRUTE-HIGH-004
+    signal: No protection on password reset endpoint
+    cwe: CWE-640
+    evidence_pattern: password.*reset|forgot.*password|reset.*token(?!.*rate|.*limit|.*captcha)
+    explanation: |
+      Password reset endpoints without protection enable account
+      enumeration and denial of service by flooding users with
+      reset emails. Apply same protections as login endpoints.
+    remediation: |
+      Apply rate limiting to password reset endpoints.
+      Implement CAPTCHA after initial requests.
+      Use consistent response regardless of account existence.
+  medium:
+  - id: AUTH-BRUTE-MED-001
+    signal: No CAPTCHA after failed attempts
+    cwe: CWE-804
+    evidence_pattern: failed.*attempt(?!.*captcha)|lockout(?!.*captcha|.*challenge)
+    remediation: |
+      Implement CAPTCHA after 3-5 failed attempts.
+      Use progressive CAPTCHA difficulty.
+      Consider invisible CAPTCHA for user experience.
+  - id: AUTH-BRUTE-MED-002
+    signal: No exponential backoff on failed attempts
+    cwe: CWE-307
+    evidence_pattern: failed.*attempt(?!.*backoff|.*delay|.*progressive)
+    remediation: |
+      Implement progressive delays after failures.
+      Start with 1 second, double on each failure.
+      Cap at maximum delay (e.g., 30 seconds).
+  - id: AUTH-BRUTE-MED-003
+    signal: Rate limit state stored only in memory
+    cwe: CWE-307
+    evidence_pattern: rateLimit.*memory|new.*Map\(\).*rate|limit.*count.*=
+    remediation: |
+      Use distributed rate limiting with Redis or similar.
+      Ensure rate limits survive application restarts.
+      Implement rate limiting at infrastructure level.
+  - id: AUTH-BRUTE-MED-004
+    signal: No notification on multiple failed attempts
+    cwe: CWE-778
+    evidence_pattern: failed.*attempt(?!.*notify|.*alert|.*email|.*log)
+    remediation: |
+      Alert users of failed login attempts via email.
+      Log failed attempts with IP and timestamp.
+      Implement anomaly detection for attack patterns.
+  low:
+  - id: AUTH-BRUTE-LOW-001
+    signal: Lockout status visible in error messages
+    evidence_pattern: error.*account.*locked|message.*lockout|locked.*for.*minutes
+    remediation: |
+      Use generic error messages that don't reveal lockout.
+      Avoid indicating remaining lockout time.
+      Implement consistent response timing.
+  positive:
+  - id: AUTH-BRUTE-POS-001
+    signal: Rate limiting library in use
+    evidence_pattern: express-rate-limit|rate-limiter-flexible|@nestjs/throttler
+  - id: AUTH-BRUTE-POS-002
+    signal: Account lockout implemented
+    evidence_pattern: lockout.*threshold|MAX_FAILED_ATTEMPTS|account.*lock
+  - id: AUTH-BRUTE-POS-003
+    signal: CAPTCHA integration present
+    evidence_pattern: recaptcha|hcaptcha|turnstile|@google.*recaptcha
+  - id: AUTH-BRUTE-POS-004
+    signal: Distributed rate limiting (Redis)
+    evidence_pattern: redis.*rate|RedisStore.*rate|rate.*redis
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Rate Limiting
+    description: |
+      Check for rate limiting implementation on auth endpoints.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find rate limiting code
+      command: grep -rn 'rate.*limit\|rateLimit\|throttle\|express-rate-limit' --include='*.js' --include='*.ts'
+        --include='*.py' --include='*.java' .
+    - purpose: Check rate limit configuration
+      command: grep -rn 'max.*request\|window.*ms\|limit.*[=:]\s*[0-9]' --include='*.js' --include='*.ts'
+        --include='*.py' --include='*.yaml' .
+    expected_findings:
+    - Rate limiting implementation status
+    - Rate limit configuration values
+  - id: '2'
+    name: Review Account Lockout
+    description: |
+      Verify account lockout mechanism and thresholds.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find lockout implementation
+      command: grep -rn 'lockout\|lock.*account\|MAX_ATTEMPTS\|failed.*attempt\|attempt.*count' --include='*.js'
+        --include='*.ts' --include='*.py' --include='*.java' .
+    - purpose: Check lockout thresholds
+      command: grep -rn 'attempts.*[=:]\s*[0-9]\|threshold.*[=:]\s*[0-9]\|MAX.*[=:]\s*[0-9]' --include='*.js'
+        --include='*.ts' --include='*.py' --include='*.yaml' .
+    expected_findings:
+    - Lockout mechanism implementation
+    - Threshold and duration values
+  - id: '3'
+    name: Check CAPTCHA Integration
+    description: |
+      Verify CAPTCHA is used for brute force mitigation.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find CAPTCHA integration
+      command: grep -rn 'captcha\|recaptcha\|hcaptcha\|turnstile' --include='*.js' --include='*.ts' --include='*.py'
+        --include='*.html' .
+    expected_findings:
+    - CAPTCHA integration status
+  - id: '4'
+    name: Audit Related Endpoints
+    description: |
+      Check protection on password reset and other sensitive endpoints.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find password reset endpoints
+      command: grep -rn 'password.*reset\|forgot.*password\|reset.*token' --include='*.js' --include='*.ts'
+        --include='*.py' .
+    - purpose: Verify protection applied
+      command: grep -rn 'reset.*rate\|forgot.*limit\|reset.*captcha' --include='*.js' --include='*.ts'
+        --include='*.py' .
+    expected_findings:
+    - Password reset endpoint protection
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Rate Limiting Assessment
+    - Lockout Mechanism Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Direct evidence from code and configuration
+    medium: Configuration patterns requiring runtime verification
+    low: Potential issues requiring load testing
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-brute-force
+      priority: required
+    - source_id: nist-800-63b
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: Critical security check
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: brute-001
+  item: Rate limiting on authentication endpoints
+  level: CRITICAL
+  verification: |
+    if grep -rq 'rate.*limit\|rateLimit\|throttle' --include='*.js' --include='*.ts' --include='*.py' .; then echo "PASS"; else echo "FAIL - No rate limiting found"; fi
+  expected: PASS
+- id: brute-002
+  item: Account lockout mechanism implemented
+  level: CRITICAL
+  verification: |
+    if grep -rq 'lockout\|MAX_ATTEMPTS\|failed.*attempt.*count' --include='*.js' --include='*.ts' --include='*.py' .; then echo "PASS"; else echo "FAIL - No lockout found"; fi
+  expected: PASS
+- id: brute-003
+  item: Lockout threshold is 100 or less
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify lockout threshold is between 5-100 per NIST guidelines
+  expected: Confirmed by reviewer
+- id: brute-004
+  item: Password reset endpoint protected
+  level: BLOCKING
+  verification: |
+    if grep -rq 'reset.*rate\|forgot.*limit\|reset.*captcha' --include='*.js' --include='*.ts' --include='*.py' .; then echo "PASS"; else echo "WARNING - Verify reset protection"; fi
+  expected: PASS
+- id: brute-005
+  item: CAPTCHA implemented for repeated failures
+  level: WARNING
+  verification: |
+    if grep -rq 'captcha\|recaptcha\|hcaptcha' --include='*.js' --include='*.ts' --include='*.py' .; then echo "PASS"; else echo "WARNING - No CAPTCHA found"; fi
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: NIST SP 800-63B
+    controls:
+    - 5.2.2
+  - framework: OWASP ASVS
+    controls:
+    - V2.2.1
+  - framework: PCI DSS
+    controls:
+    - 8.1.6
+relationships:
+  commonly_combined:
+  - security-trust.authentication.credential-stuffing-resistance
+  - security-trust.authentication.authentication-bypass
+  - security-trust.authentication.mfa-implementation

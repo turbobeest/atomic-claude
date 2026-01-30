@@ -1,0 +1,304 @@
+audit:
+  id: usability-interaction.forms-input.input-type-appropriateness
+  name: Input Type Appropriateness Assessment
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: usability-interaction
+  category_number: 14
+  subcategory: forms-input
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates whether forms use the most appropriate input types
+    and UI controls for the data being collected. It examines HTML5 input
+    types (email, tel, date, number, etc.), custom controls (date pickers,
+    sliders, autocomplete), and the match between data requirements and
+    input mechanisms.
+  why_it_matters: |
+    Using appropriate input types improves user experience by displaying
+    the correct keyboard on mobile devices, enabling browser autofill,
+    providing built-in validation, and reducing input errors. Inappropriate
+    types (like text for dates or phone numbers) force users to work harder
+    and increase error rates significantly.
+  when_to_run:
+  - During form design and development
+  - When optimizing for mobile users
+  - When form error rates are high for specific fields
+  - During accessibility and usability audits
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Form component source code
+  - type: data_schema
+    description: Data model or API schema showing expected data types
+  access_requirements:
+  - Access to form component source files
+  - Mobile device or emulator for keyboard testing
+discovery:
+  code_patterns:
+  - pattern: type=["']text["']
+    type: regex
+    scope: source
+    purpose: Find generic text inputs that might need specific types
+  - pattern: type=["'](email|tel|url|number|date|time|password)["']
+    type: regex
+    scope: source
+    purpose: Find proper HTML5 input type usage
+  - pattern: inputmode=["']
+    type: regex
+    scope: source
+    purpose: Find inputmode attribute usage for mobile keyboards
+  - pattern: DatePicker|TimePicker|Autocomplete|Select
+    type: regex
+    scope: source
+    purpose: Find custom input components
+  file_patterns:
+  - glob: '**/*form*'
+    purpose: Find form components
+  - glob: '**/components/**/*input*'
+    purpose: Find input components
+  - glob: '**/components/**/*picker*'
+    purpose: Find picker components
+knowledge_sources:
+  specifications:
+  - id: html5-input-types
+    name: HTML5 Input Types Specification
+    url: https://html.spec.whatwg.org/multipage/input.html
+    offline_cache: true
+    priority: required
+  - id: inputmode-spec
+    name: HTML inputmode Attribute
+    url: https://html.spec.whatwg.org/multipage/interaction.html#input-modalities:-the-inputmode-attribute
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: mdn-input-types
+    name: MDN - Input Types
+    url: https://developer.mozilla.org/en-US/docs/Learn/Forms/HTML5_input_types
+    offline_cache: true
+  - id: web-dev-forms
+    name: web.dev - Best practices for form input types
+    url: https://web.dev/learn/forms/fields
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: eslint-plugin-html
+    purpose: Lint HTML for input type issues
+    offline_capable: true
+  scripts:
+  - id: input-type-analyzer
+    language: bash
+    purpose: Analyze input type usage patterns
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Input Type Distribution ==="
+      grep -roh "type=[\"'][a-z]*[\"']" --include="*.jsx" --include="*.tsx" --include="*.html" | \
+        sort | uniq -c | sort -rn
+
+      echo "=== Potential Mismatches ==="
+      # Find text inputs with email/phone/date related names
+      grep -rn "type=[\"']text[\"']" --include="*.jsx" --include="*.tsx" | \
+        grep -i "email\|phone\|tel\|date\|url\|zip\|postal" | head -10
+signals:
+  critical:
+  - id: INPUTTYPE-CRIT-001
+    signal: Password field not using type='password'
+    evidence_pattern: Password input with type='text'
+    explanation: |
+      Displaying passwords in clear text is a security vulnerability
+      and prevents password managers from functioning correctly.
+    remediation: Use type='password' for all password fields
+  high:
+  - id: INPUTTYPE-HIGH-001
+    signal: Email field using type='text' instead of type='email'
+    evidence_pattern: Input with 'email' in name/id but type='text'
+    explanation: |
+      type='email' provides automatic format validation, displays the
+      email keyboard on mobile, and enables browser autofill.
+    remediation: Change to type='email' for email address fields
+  - id: INPUTTYPE-HIGH-002
+    signal: Phone field using type='text' instead of type='tel'
+    evidence_pattern: Input with 'phone' or 'tel' in name/id but type='text'
+    explanation: |
+      type='tel' displays the numeric phone keyboard on mobile devices,
+      significantly improving input speed and accuracy.
+    remediation: Use type='tel' for phone number fields
+  - id: INPUTTYPE-HIGH-003
+    signal: Numeric field using type='text' instead of type='number'
+    evidence_pattern: Input expecting numbers but using type='text'
+    explanation: |
+      type='number' provides numeric keyboard on mobile, increment/decrement
+      controls, and prevents non-numeric input.
+    remediation: Use type='number' with appropriate min/max/step attributes
+  medium:
+  - id: INPUTTYPE-MED-001
+    signal: Date field using text input instead of date picker
+    evidence_pattern: Date input with type='text' and manual parsing
+    explanation: |
+      Native date inputs or custom date pickers prevent format errors
+      and provide better UX than free text date entry.
+    remediation: Use type='date', type='datetime-local', or a date picker component
+  - id: INPUTTYPE-MED-002
+    signal: URL field using type='text' instead of type='url'
+    evidence_pattern: Input with 'url' or 'website' in name/id but type='text'
+    remediation: Use type='url' for URL inputs to enable validation and correct mobile keyboard
+  - id: INPUTTYPE-MED-003
+    signal: Search field not using type='search'
+    evidence_pattern: Search input with type='text'
+    remediation: Use type='search' for search fields to get clear button and search keyboard
+  low:
+  - id: INPUTTYPE-LOW-001
+    signal: Missing inputmode attribute for specialized keyboards
+    remediation: Add inputmode='numeric' for non-number numeric inputs (credit cards, OTP)
+  - id: INPUTTYPE-LOW-002
+    signal: Range input could replace number input for bounded values
+    remediation: Consider type='range' for values with clear min/max where precision is not critical
+  positive:
+  - id: INPUTTYPE-POS-001
+    signal: Appropriate HTML5 input types used throughout
+  - id: INPUTTYPE-POS-002
+    signal: Custom components enhance native behavior appropriately
+  - id: INPUTTYPE-POS-003
+    signal: inputmode attributes used for optimal mobile keyboards
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Input Types
+    description: |
+      Scan the codebase to create an inventory of all input types
+      currently in use.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Count input types in use
+      command: grep -roh "type=[\"'][a-z]*[\"']" --include='*.jsx' --include='*.tsx' --include='*.html'
+        src/ | sort | uniq -c | sort -rn
+    - purpose: Find custom input components
+      command: grep -rn 'DatePicker\|TimePicker\|Autocomplete\|NumberInput' src/
+    expected_findings:
+    - Distribution of input types
+    - Custom input component usage
+  - id: '2'
+    name: Cross-Reference with Data Types
+    description: |
+      Compare input types with the expected data types from schemas
+      or naming conventions to identify mismatches.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find potential email type mismatches
+      command: grep -rn "type=[\"']text[\"']" --include='*.jsx' --include='*.tsx' | grep -i email
+    - purpose: Find potential phone type mismatches
+      command: grep -rn "type=[\"']text[\"']" --include='*.jsx' --include='*.tsx' | grep -i 'phone\|tel'
+    - purpose: Find potential date type mismatches
+      command: grep -rn "type=[\"']text[\"']" --include='*.jsx' --include='*.tsx' | grep -i date
+    expected_findings:
+    - Fields using incorrect input types
+    - Opportunities for type optimization
+  - id: '3'
+    name: Mobile Keyboard Testing
+    description: |
+      Test forms on mobile devices to verify correct keyboards are
+      displayed for each input type.
+    duration_estimate: 25 min
+    questions:
+    - Do email fields show the email keyboard (with @)?
+    - Do phone fields show the numeric dialpad?
+    - Do number fields show the numeric keyboard?
+    - Do URL fields show the URL keyboard (with .com)?
+    expected_findings:
+    - Keyboard optimization opportunities
+    - Mobile UX issues
+  - id: '4'
+    name: Evaluate Custom Controls
+    description: |
+      Assess whether custom input components are appropriate and
+      well-implemented for their use cases.
+    duration_estimate: 20 min
+    questions:
+    - Do date pickers provide good UX across devices?
+    - Are autocomplete components accessible?
+    - Do custom number inputs handle edge cases?
+    expected_findings:
+    - Custom component quality assessment
+    - Accessibility of custom controls
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Input Type Inventory
+    - Type Mismatch Analysis
+    - Mobile Optimization
+    - Recommendations
+  confidence_guidance:
+    high: Issues verified through code review and mobile device testing
+    medium: Issues identified through code review and naming analysis
+    low: Potential issues based on pattern matching only
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: html5-input-types
+      priority: required
+    - source_id: mdn-input-types
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed analysis and mobile testing
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: input-type-001
+  item: All password fields use type='password'
+  level: CRITICAL
+  verification: grep -rn "password" --include='*.jsx' --include='*.tsx' | grep "type=[\"']text[\"']"
+  expected: No results (no text-type password fields)
+- id: input-type-002
+  item: Email fields use type='email'
+  level: WARNING
+  verification: manual
+  verification_notes: Verify email inputs use type='email' for validation and mobile keyboard
+  expected: Confirmed by reviewer
+- id: input-type-003
+  item: Phone fields use type='tel'
+  level: WARNING
+  verification: manual
+  verification_notes: Verify phone inputs use type='tel' for mobile keyboard
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - web-application
+    - mobile-application
+    - saas
+  compliance_frameworks:
+  - framework: WCAG
+    controls:
+    - 1.3.5
+relationships:
+  commonly_combined:
+  - usability-interaction.forms-input.autofill-compatibility
+  - usability-interaction.forms-input.validation-message
+  - usability-interaction.mobile-touch.responsive-behavior

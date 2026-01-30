@@ -1,0 +1,390 @@
+# ============================================================
+# AUDIT: Resource Tagging
+# Category: 31 - Cost & Economics
+# Subcategory: cost-visibility
+# ============================================================
+# Evaluates the completeness, consistency, and compliance of
+# resource tagging strategies across cloud infrastructure to
+# enable accurate cost attribution and visibility.
+# ============================================================
+
+audit:
+  id: "cost-economics.cost-visibility.resource-tagging"
+  name: "Resource Tagging Audit"
+  version: "1.0.0"
+  last_updated: "2025-01-22"
+  status: "active"
+
+  category: "cost-economics"
+  category_number: 31
+  subcategory: "cost-visibility"
+
+  tier: "expert"
+  estimated_duration: "3-5 hours"  # median: 4h
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "full"
+  severity: "high"
+  scope: "organizational"
+
+  default_profiles:
+    - "full"
+    - "finops"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines the completeness and consistency of resource tagging
+    across cloud infrastructure. It evaluates mandatory tag compliance,
+    tag naming conventions, tag value standardization, and identifies
+    untagged or improperly tagged resources that hinder cost attribution.
+
+  why_it_matters: |
+    Resource tagging is the foundation of cloud cost visibility. Without
+    consistent tagging, organizations cannot accurately attribute costs
+    to business units, applications, environments, or projects. Poor tagging
+    leads to orphaned costs, disputed chargebacks, and inability to make
+    informed optimization decisions. The FinOps Foundation identifies tagging
+    as a critical capability for achieving cost transparency.
+
+  when_to_run:
+    - "Monthly as part of FinOps practice"
+    - "Before cost allocation reporting cycles"
+    - "After major infrastructure changes or migrations"
+    - "When onboarding new teams or projects"
+    - "During cloud governance audits"
+
+prerequisites:
+  required_artifacts:
+    - type: "cloud-credentials"
+      description: "Read access to cloud provider resource APIs (AWS, Azure, GCP)"
+    - type: "tagging-policy"
+      description: "Documented tagging policy with mandatory tags"
+    - type: "cost-management"
+      description: "Access to cloud cost management tools"
+
+  access_requirements:
+    - "Read access to AWS Resource Groups Tagging API"
+    - "Read access to Azure Resource Graph"
+    - "Read access to GCP Asset Inventory"
+    - "Access to tag policy documentation"
+
+discovery:
+  api_queries:
+    - provider: "AWS"
+      service: "Resource Groups Tagging API"
+      operation: "GetResources"
+      purpose: "Inventory all resources and their tags"
+    - provider: "AWS"
+      service: "Cost Explorer"
+      operation: "GetCostAndUsageWithResources"
+      purpose: "Identify untagged cost attribution"
+    - provider: "Azure"
+      service: "Resource Graph"
+      query: "Resources | project name, type, tags"
+      purpose: "Enumerate resource tags across subscriptions"
+    - provider: "GCP"
+      service: "Cloud Asset Inventory"
+      purpose: "List all resources with labels"
+
+  file_patterns:
+    - glob: "**/terraform/**/*.tf"
+      purpose: "Infrastructure-as-code tag definitions"
+    - glob: "**/cloudformation/**/*.yaml"
+      purpose: "CloudFormation template tags"
+    - glob: "**/policies/tagging*.yaml"
+      purpose: "Tag policy documentation"
+
+knowledge_sources:
+  specifications:
+    - id: "finops-tagging"
+      name: "FinOps Foundation - Resource Metadata and Hierarchy"
+      url: "https://www.finops.org/framework/capabilities/resource-metadata/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "aws-tagging-best-practices"
+      name: "AWS Tagging Best Practices"
+      url: "https://docs.aws.amazon.com/general/latest/gr/aws_tagging.html"
+      offline_cache: true
+    - id: "azure-naming-tagging"
+      name: "Azure Naming and Tagging Strategy"
+      url: "https://docs.microsoft.com/azure/cloud-adoption-framework/ready/azure-best-practices/naming-and-tagging"
+      offline_cache: true
+    - id: "gcp-labeling"
+      name: "GCP Resource Labeling Best Practices"
+      url: "https://cloud.google.com/resource-manager/docs/creating-managing-labels"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "AWS CLI"
+      purpose: "Query resource tags"
+      command: "aws resourcegroupstaggingapi get-resources --no-paginate"
+    - tool: "Azure CLI"
+      purpose: "Query resource tags"
+      command: "az resource list --query '[].{name:name, tags:tags}'"
+    - tool: "gcloud"
+      purpose: "Query resource labels"
+      command: "gcloud asset search-all-resources --format='table(name,labels)'"
+
+  analysis_tools:
+    - tool: "cloud-custodian"
+      purpose: "Enforce and audit tagging policies"
+      config_example: |
+        policies:
+          - name: untagged-resources
+            resource: ec2
+            filters:
+              - "tag:CostCenter": absent
+
+signals:
+  critical:
+    - id: "TAG-CRIT-001"
+      signal: "More than 20% of cloud spend is unattributed due to missing tags"
+      evidence_threshold: "untagged_cost_percentage > 20%"
+      explanation: |
+        When a significant portion of cloud spend cannot be attributed to
+        business units or applications, organizations lose visibility into
+        actual costs and cannot make informed optimization decisions. This
+        often leads to budget overruns and disputed chargebacks.
+      remediation: "Implement mandatory tagging policies with enforcement mechanisms"
+
+    - id: "TAG-CRIT-002"
+      signal: "No tagging policy defined or enforced"
+      evidence_pattern: "Missing tagging policy documentation or enforcement"
+      explanation: |
+        Without a formal tagging policy, teams create inconsistent tags
+        that cannot be aggregated or analyzed. This results in fragmented
+        cost data and inability to generate accurate reports.
+      remediation: "Define and document a tagging strategy with mandatory tags"
+
+  high:
+    - id: "TAG-HIGH-001"
+      signal: "Mandatory tags missing from production resources"
+      evidence_threshold: "production_resources_without_mandatory_tags > 10%"
+      explanation: |
+        Production resources without mandatory tags (e.g., environment,
+        owner, cost-center) create gaps in cost attribution and make it
+        difficult to identify responsible teams during incidents.
+      remediation: "Retroactively tag resources and implement preventive controls"
+
+    - id: "TAG-HIGH-002"
+      signal: "Tag value inconsistencies across resources"
+      evidence_pattern: "Same logical entity tagged with different values"
+      explanation: |
+        Inconsistent tag values (e.g., 'prod' vs 'production' vs 'PROD')
+        prevent accurate aggregation and reporting. This data quality
+        issue undermines the entire tagging strategy.
+      remediation: "Standardize tag values and implement validation"
+
+  medium:
+    - id: "TAG-MED-001"
+      signal: "Auto-scaling resources not inheriting tags from parent"
+      evidence_pattern: "Dynamically created resources missing inherited tags"
+      remediation: "Configure tag propagation for auto-scaling groups"
+
+    - id: "TAG-MED-002"
+      signal: "Infrastructure-as-code templates missing default tags"
+      evidence_pattern: "Terraform/CloudFormation without default_tags"
+      remediation: "Add default tag blocks to all IaC modules"
+
+  low:
+    - id: "TAG-LOW-001"
+      signal: "Optional recommended tags not widely adopted"
+      evidence_pattern: "Low adoption of optional tags like project, version"
+      remediation: "Promote adoption of recommended tags through documentation"
+
+  positive:
+    - id: "TAG-POS-001"
+      signal: "Comprehensive tagging coverage exceeds 95%"
+    - id: "TAG-POS-002"
+      signal: "Automated tag enforcement prevents untagged resource creation"
+    - id: "TAG-POS-003"
+      signal: "Tag governance process includes regular audits and remediation"
+
+procedure:
+  context:
+    cognitive_mode: "analytical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Review tagging policy"
+      description: |
+        Examine the documented tagging policy to understand mandatory tags,
+        naming conventions, and value constraints. Identify gaps in policy.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "List of mandatory and optional tags"
+        - "Tag naming conventions"
+        - "Value standardization rules"
+
+    - id: "2"
+      name: "Inventory all cloud resources"
+      description: |
+        Query cloud provider APIs to enumerate all resources and their
+        current tags across all accounts and regions.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "AWS resource tag inventory"
+          command: |
+            aws resourcegroupstaggingapi get-resources \
+              --output json > aws-resource-tags.json
+        - purpose: "Analyze tag coverage"
+          command: |
+            jq '.ResourceTagMappingList | group_by(has(.Tags)) |
+              {tagged: .[1] | length, untagged: .[0] | length}' aws-resource-tags.json
+      expected_findings:
+        - "Total resource count by type"
+        - "Tag coverage percentage"
+
+    - id: "3"
+      name: "Assess mandatory tag compliance"
+      description: |
+        Evaluate compliance with mandatory tags across all resources.
+        Calculate compliance percentages by resource type and account.
+      duration_estimate: "60 min"
+      expected_findings:
+        - "Mandatory tag compliance rate"
+        - "Resources missing mandatory tags"
+        - "Compliance by account/subscription"
+
+    - id: "4"
+      name: "Analyze tag value consistency"
+      description: |
+        Identify variations and inconsistencies in tag values that
+        prevent accurate aggregation and reporting.
+      duration_estimate: "45 min"
+      expected_findings:
+        - "Tag value variations"
+        - "Normalization recommendations"
+
+    - id: "5"
+      name: "Calculate unattributed cost"
+      description: |
+        Query cost data to determine the percentage of spend that
+        cannot be attributed due to missing or invalid tags.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "AWS untagged cost analysis"
+          command: |
+            aws ce get-cost-and-usage \
+              --time-period Start=2025-01-01,End=2025-01-31 \
+              --granularity MONTHLY \
+              --metrics UnblendedCost \
+              --group-by Type=TAG,Key=CostCenter
+      expected_findings:
+        - "Percentage of unattributed spend"
+        - "Cost impact of tagging gaps"
+
+    - id: "6"
+      name: "Review enforcement mechanisms"
+      description: |
+        Evaluate preventive controls such as SCPs, Azure Policy,
+        or GCP organization policies that enforce tagging at creation.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Enforcement mechanism inventory"
+        - "Coverage of enforcement policies"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Tagging Policy Assessment"
+        - "Compliance Analysis"
+        - "Unattributed Cost Impact"
+        - "Recommendations"
+
+    - type: "metrics_dashboard"
+      metrics:
+        - "Tag compliance rate by mandatory tag"
+        - "Untagged resource count by type"
+        - "Unattributed cost percentage"
+        - "Tag value consistency score"
+
+  confidence_guidance:
+    high: "Direct API queries with complete resource enumeration"
+    medium: "Sampling-based analysis or partial access"
+    low: "Manual review without API access"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "finops-tagging"
+        priority: "required"
+      - source_id: "aws-tagging-best-practices"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+      reduced_scope: "Analyze sample of high-cost resources only"
+    full:
+      included: true
+      priority: 1
+    finops:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "tag-001"
+    item: "Tagging policy documented and accessible"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Confirm policy document exists and is current"
+    expected: "Policy document available"
+
+  - id: "tag-002"
+    item: "Mandatory tag compliance exceeds 90%"
+    level: "BLOCKING"
+    verification: "automated"
+    expected: "compliance_rate >= 0.90"
+
+  - id: "tag-003"
+    item: "Unattributed cost less than 10%"
+    level: "WARNING"
+    verification: "automated"
+    expected: "unattributed_percentage < 0.10"
+
+  - id: "tag-004"
+    item: "Tag enforcement mechanisms in place"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify preventive controls exist"
+    expected: "Enforcement confirmed"
+
+governance:
+  applicable_to:
+    archetypes:
+      - "cloud-native"
+      - "hybrid"
+      - "multi-cloud"
+
+  compliance_frameworks:
+    - framework: "FinOps Foundation"
+      controls: ["Resource Metadata and Hierarchy", "Cost Allocation"]
+    - framework: "AWS Well-Architected"
+      controls: ["COST-01", "COST-02"]
+
+relationships:
+  commonly_combined:
+    - "cost-economics.cost-allocation.chargeback"
+    - "cost-economics.cost-visibility.cost-attribution"
+    - "cost-economics.cloud-cost-management.finops-maturity"

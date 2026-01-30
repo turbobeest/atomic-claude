@@ -1,0 +1,330 @@
+# ============================================================
+# AUDIT: E2E Test Stability
+# ============================================================
+# Evaluates the reliability and flakiness of E2E tests to
+# ensure consistent, trustworthy test results.
+# ============================================================
+
+audit:
+  id: "testing-quality-assurance.e2e-testing.e2e-test-stability"
+  name: "E2E Test Stability"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "testing-quality-assurance"
+  category_number: 10
+  subcategory: "e2e-testing"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "testing"
+
+  default_profiles:
+    - "full"
+    - "quality"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Assesses the stability and reliability of E2E tests including flakiness
+    rates, causes of intermittent failures, retry strategies, wait handling,
+    and test isolation. Evaluates practices that contribute to or mitigate
+    test flakiness.
+
+  why_it_matters: |
+    Flaky tests erode trust in the test suite. When tests fail randomly,
+    teams stop investigating failures and real bugs slip through. Stable
+    E2E tests provide reliable quality gates and enable confident releases.
+    Flaky suites become expensive noise.
+
+  when_to_run:
+    - "When test failures are frequently ignored"
+    - "CI pipeline reliability assessments"
+    - "Before increasing E2E test count"
+    - "After significant E2E test additions"
+
+prerequisites:
+  required_artifacts:
+    - type: "e2e_tests"
+      description: "End-to-end test files"
+    - type: "ci_history"
+      description: "CI build history for flakiness analysis"
+
+  access_requirements:
+    - "Source code repository access"
+    - "CI/CD history and logs"
+    - "Test execution reports"
+
+discovery:
+  file_patterns:
+    - glob: "**/e2e/**/*.{spec,test}.{js,ts}"
+      purpose: "E2E test files"
+    - glob: "**/cypress/**/*.{spec,cy}.{js,ts}"
+      purpose: "Cypress tests"
+    - glob: "**/playwright/**/*.spec.{js,ts}"
+      purpose: "Playwright tests"
+
+  code_patterns:
+    - pattern: "wait|sleep|pause|timeout"
+      type: "keyword"
+      scope: "source"
+      purpose: "Identify wait patterns"
+    - pattern: "retry|retries|flaky"
+      type: "keyword"
+      scope: "source"
+      purpose: "Identify retry configurations"
+    - pattern: "waitFor|waitUntil|toBeVisible"
+      type: "keyword"
+      scope: "source"
+      purpose: "Identify proper wait strategies"
+
+knowledge_sources:
+  guides:
+    - id: "flaky-tests"
+      name: "Avoiding Flaky Tests"
+      url: "https://docs.cypress.io/guides/references/best-practices#Flaky-Tests"
+      offline_cache: true
+    - id: "test-stability"
+      name: "Test Stability Best Practices"
+      url: "https://playwright.dev/docs/best-practices"
+      offline_cache: true
+
+  learning_resources:
+    - id: "e2e-reliability"
+      title: "Reliable Web Testing"
+      type: "book"
+      reference: "ISBN 978-1680508758"
+
+tooling:
+  static_analysis:
+    - tool: "test-retry-analyzer"
+      purpose: "Analyze retry patterns and flaky tests"
+      offline_capable: true
+
+  scripts:
+    - id: "stability-analyzer"
+      language: "bash"
+      purpose: "Analyze E2E test stability patterns"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== E2E Test Stability Analysis ==="
+        echo "Fixed wait/sleep usage (anti-pattern):"
+        grep -r -c 'cy.wait(\d\|sleep\|setTimeout' --include='*.spec.*' --include='*.cy.*' . 2>/dev/null | grep -v ':0' | head -15
+        echo ""
+        echo "Proper wait strategies:"
+        grep -r -c 'waitFor\|toBeVisible\|should.*visible\|waitUntil' --include='*.spec.*' --include='*.cy.*' . 2>/dev/null | grep -v ':0' | head -15
+        echo ""
+        echo "Retry configuration:"
+        grep -r 'retries\|retry' --include='*.config.*' --include='*.spec.*' . 2>/dev/null | head -10
+
+signals:
+  critical:
+    - id: "STABLE-CRIT-001"
+      signal: "High flakiness rate (>10% of runs fail inconsistently)"
+      evidence_pattern: "Same tests pass and fail on consecutive runs"
+      explanation: |
+        High flakiness means tests can't be trusted. Teams ignore failures,
+        real bugs slip through, and CI becomes a bottleneck.
+      remediation: "Investigate and fix flaky tests systematically"
+
+    - id: "STABLE-CRIT-002"
+      signal: "Excessive fixed timeouts used instead of proper waits"
+      evidence_pattern: "cy.wait(5000) or similar fixed delays"
+      explanation: |
+        Fixed timeouts are slow and unreliable. They either waste time
+        waiting for fast operations or fail for slow ones.
+      remediation: "Replace fixed waits with proper wait-for-condition patterns"
+
+  high:
+    - id: "STABLE-HIGH-001"
+      signal: "No retry strategy for inherently unstable operations"
+      evidence_pattern: "Network calls without retry handling"
+      explanation: |
+        Some operations (network, animations) can fail transiently.
+        Proper retry strategies catch transient issues without masking bugs.
+      remediation: "Add targeted retry strategies for unstable operations"
+
+    - id: "STABLE-HIGH-002"
+      signal: "Tests depend on animation timing"
+      evidence_pattern: "Tests fail during animations"
+      explanation: |
+        Animation-dependent tests are inherently flaky because timing
+        varies between environments and runs.
+      remediation: "Wait for animation completion or disable animations in tests"
+
+  medium:
+    - id: "STABLE-MED-001"
+      signal: "Test isolation issues causing interference"
+      evidence_pattern: "Tests fail when run in different order"
+      remediation: "Ensure proper test isolation and cleanup"
+
+    - id: "STABLE-MED-002"
+      signal: "External service dependencies cause flakiness"
+      evidence_pattern: "Tests fail when external services are slow"
+      remediation: "Mock external services or add appropriate timeouts"
+
+  low:
+    - id: "STABLE-LOW-001"
+      signal: "Flaky test tracking not implemented"
+      evidence_pattern: "No flaky test report or quarantine"
+
+  positive:
+    - id: "STABLE-POS-001"
+      signal: "Proper wait-for-condition patterns used"
+      evidence_pattern: "waitFor, toBeVisible, should patterns"
+    - id: "STABLE-POS-002"
+      signal: "Flaky test quarantine in place"
+      evidence_pattern: "Flaky tests tracked and isolated"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Analyze wait patterns"
+      description: |
+        Review how tests handle asynchronous operations and
+        identify problematic wait patterns.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find fixed waits"
+          command: "grep -r -n 'cy.wait(\\d\\|sleep(\\|setTimeout' --include='*.spec.*' --include='*.cy.*' . 2>/dev/null | head -20"
+        - purpose: "Find proper waits"
+          command: "grep -r -n 'waitFor\\|toBeVisible\\|should.*visible' --include='*.spec.*' --include='*.cy.*' . 2>/dev/null | head -20"
+      expected_findings:
+        - "Wait pattern distribution"
+        - "Anti-pattern instances"
+
+    - id: "2"
+      name: "Review retry configuration"
+      description: |
+        Check retry configuration at both framework and test level.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find retry config"
+          command: "grep -r 'retries\\|retry' --include='*.config.*' . 2>/dev/null | head -15"
+        - purpose: "Find test-level retries"
+          command: "grep -r 'retries\\|retry' --include='*.spec.*' --include='*.cy.*' . 2>/dev/null | head -15"
+      expected_findings:
+        - "Retry configuration"
+        - "Test-specific retries"
+
+    - id: "3"
+      name: "Check CI failure history"
+      description: |
+        Review CI build history to identify patterns of
+        intermittent failures.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check for flaky test handling"
+          command: "grep -r 'flaky\\|quarantine\\|skip' --include='*.spec.*' --include='*.cy.*' . 2>/dev/null | head -15"
+      questions:
+        - "What is the failure rate trend?"
+        - "Which tests fail most frequently?"
+        - "Are failures consistent or random?"
+      expected_findings:
+        - "Flakiness rate estimate"
+        - "Common failure patterns"
+
+    - id: "4"
+      name: "Assess stability practices"
+      description: |
+        Evaluate overall stability practices including isolation,
+        cleanup, and environment handling.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find cleanup patterns"
+          command: "grep -r 'beforeEach\\|afterEach\\|beforeAll\\|afterAll' --include='*.spec.*' --include='*.cy.*' . 2>/dev/null | head -15"
+      expected_findings:
+        - "Stability practices"
+        - "Isolation patterns"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "stability_report"
+      format: "table"
+      sections:
+        - "Wait Pattern Analysis"
+        - "Retry Configuration"
+        - "Flakiness Assessment"
+        - "Stability Practices"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Stability Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "CI history analyzed with multiple runs"
+    medium: "Code patterns reviewed"
+    low: "Based on file patterns only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "flaky-tests"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Stability analysis requires CI history"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "stable-001"
+    item: "Wait patterns analyzed"
+    level: "CRITICAL"
+    verification: "grep -r 'cy.wait(\\d' --include='*.spec.*' . | wc -l"
+    expected: "PASS (anti-patterns documented)"
+
+  - id: "stable-002"
+    item: "Retry configuration reviewed"
+    level: "BLOCKING"
+    verification: "grep -r 'retries' --include='*.config.*' . | wc -l"
+    expected: "PASS (configuration documented)"
+
+  - id: "stable-003"
+    item: "Flakiness assessment completed"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Document flakiness rate and top flaky tests"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Reliability"]
+
+relationships:
+  commonly_combined:
+    - "testing-quality-assurance.e2e-testing.e2e-coverage"
+    - "testing-quality-assurance.e2e-testing.e2e-execution-time"
+    - "testing-quality-assurance.integration-testing.integration-test-isolation"

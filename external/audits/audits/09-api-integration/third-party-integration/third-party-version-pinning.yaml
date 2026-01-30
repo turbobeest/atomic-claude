@@ -1,0 +1,384 @@
+# ============================================================
+# AUDIT: Third-Party Version Pinning
+# ============================================================
+
+audit:
+  id: "api-integration.third-party-integration.third-party-version-pinning"
+  name: "Third-Party Version Pinning Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "api-integration"
+  category_number: 9
+  subcategory: "third-party-integration"
+
+  tier: "expert"
+  estimated_duration: "60 minutes"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates version pinning practices for third-party APIs and SDKs
+    including API version specification, SDK version locking, upgrade
+    strategy, deprecation monitoring, and version compatibility testing.
+    Analyzes whether version changes can cause unexpected breakage.
+
+  why_it_matters: |
+    Unpinned API versions can change without notice, breaking your
+    integration. Automatic SDK updates can introduce bugs or breaking
+    changes. Proper version pinning ensures stability while allowing
+    controlled upgrades.
+
+  when_to_run:
+    - "Dependency audits"
+    - "Before major deployments"
+    - "After third-party breakage"
+    - "Quarterly maintenance reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "API client configuration"
+    - type: "configuration"
+      description: "Dependency manifests"
+
+  access_requirements:
+    - "Read access to dependency configuration"
+    - "Access to API version configuration"
+
+discovery:
+  code_patterns:
+    - pattern: "v[0-9]+|/v[0-9]+/|version.*[0-9]"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect API version specifications"
+
+    - pattern: "api-version|apiVersion|API_VERSION"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect API version headers"
+
+  file_patterns:
+    - glob: "**/package.json"
+      purpose: "NPM dependencies"
+    - glob: "**/requirements.txt"
+      purpose: "Python dependencies"
+    - glob: "**/pom.xml"
+      purpose: "Maven dependencies"
+    - glob: "**/go.mod"
+      purpose: "Go dependencies"
+
+knowledge_sources:
+  guides:
+    - id: "semantic-versioning"
+      name: "Semantic Versioning"
+      url: "https://semver.org/"
+      offline_cache: true
+
+    - id: "dependency-pinning"
+      name: "Dependency Pinning Best Practices"
+      url: "https://docs.microsoft.com/en-us/azure/devops/artifacts/concepts/best-practices"
+      offline_cache: true
+
+  learning_resources:
+    - id: "supply-chain"
+      title: "Software Supply Chain Security"
+      type: "article"
+      reference: "SLSA Framework"
+
+tooling:
+  static_analysis:
+    - tool: "npm-audit"
+      purpose: "Audit NPM dependencies"
+      offline_capable: false
+
+    - tool: "dependabot"
+      purpose: "Track dependency updates"
+      offline_capable: false
+
+  scripts:
+    - id: "version-pinning-scan"
+      language: "bash"
+      purpose: "Analyze version pinning"
+      source: "inline"
+      code: |
+        echo "=== Version Pinning Analysis ==="
+        echo "--- NPM dependencies ---"
+        cat package.json 2>/dev/null | grep -E '"\^|"~|"\*' | head -20
+
+        echo "--- API version usage ---"
+        grep -rn "v[0-9]\|api-version\|apiVersion" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+
+        echo "--- SDK versions ---"
+        grep -rn "stripe\|twilio\|aws-sdk" \
+          --include="package.json" --include="requirements.txt" . 2>/dev/null | \
+          head -10
+
+signals:
+  critical:
+    - id: "VPN-CRIT-001"
+      signal: "No API version specified"
+      evidence_pattern: "API calls without version in URL or header"
+      explanation: |
+        Without explicit API version, your integration uses whatever
+        version the vendor defaults to - which can change. A vendor
+        update could break your integration overnight.
+      remediation: "Always specify API version in requests"
+
+    - id: "VPN-CRIT-002"
+      signal: "SDKs using wildcard versions"
+      evidence_pattern: "\"*\" or \"latest\" in dependency version"
+      explanation: |
+        Wildcard versions pull whatever is current at install time.
+        Different builds get different versions. A malicious or buggy
+        version could be automatically installed.
+      remediation: "Pin all SDK dependencies to exact versions"
+
+  high:
+    - id: "VPN-HIGH-001"
+      signal: "Unpinned major versions in dependencies"
+      evidence_pattern: "^1.0.0 allowing major version changes"
+      explanation: |
+        Caret (^) ranges allow major version updates in some cases.
+        Major versions can have breaking changes that cause runtime
+        failures.
+      remediation: "Use exact versions or tilde (~) ranges at most"
+
+    - id: "VPN-HIGH-002"
+      signal: "No lock file committed"
+      evidence_pattern: "package-lock.json or yarn.lock not in repo"
+      explanation: |
+        Without a lock file, each install resolves dependencies fresh.
+        Different environments get different versions, causing
+        hard-to-debug inconsistencies.
+      remediation: "Commit lock files to ensure consistent installs"
+
+    - id: "VPN-HIGH-003"
+      signal: "Using deprecated API version"
+      evidence_pattern: "API version marked as deprecated"
+      explanation: |
+        Deprecated API versions will be removed eventually. Continuing
+        to use them increases risk of sudden failure when sunset
+        occurs.
+      remediation: "Plan migration to current API version"
+
+  medium:
+    - id: "VPN-MED-001"
+      signal: "No API deprecation monitoring"
+      evidence_pattern: "No process to track vendor deprecation notices"
+      remediation: "Subscribe to vendor deprecation announcements"
+
+    - id: "VPN-MED-002"
+      signal: "SDK versions significantly outdated"
+      evidence_pattern: "SDK version > 2 major versions behind current"
+      remediation: "Plan SDK upgrade; may be missing security fixes"
+
+    - id: "VPN-MED-003"
+      signal: "No version compatibility testing"
+      evidence_pattern: "New versions not tested before upgrade"
+      remediation: "Test third-party updates in staging before production"
+
+  low:
+    - id: "VPN-LOW-001"
+      signal: "Version pinning strategy not documented"
+      evidence_pattern: "No documentation of version policy"
+      remediation: "Document version pinning and upgrade strategy"
+
+  positive:
+    - id: "VPN-POS-001"
+      signal: "All dependencies pinned to exact versions"
+      evidence_pattern: "No ^, ~, or * in version specifications"
+
+    - id: "VPN-POS-002"
+      signal: "API versions explicitly specified"
+      evidence_pattern: "Version in URL path or header"
+
+    - id: "VPN-POS-003"
+      signal: "Lock file committed and maintained"
+      evidence_pattern: "package-lock.json or equivalent in repo"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Audit Dependency Versions"
+      description: |
+        Check SDK and library version specifications.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Check NPM versions"
+          command: |
+            cat package.json 2>/dev/null | grep -E '"dependencies"|"devDependencies"' -A 50 | \
+              grep -E '"\^|"~|"\*' | head -30
+        - purpose: "Check for lock file"
+          command: |
+            ls -la package-lock.json yarn.lock pnpm-lock.yaml 2>/dev/null || \
+              echo "No lock file found"
+
+      expected_findings:
+        - "Version ranges"
+        - "Lock file presence"
+
+    - id: "2"
+      name: "Review API Version Usage"
+      description: |
+        Check if API versions are explicitly specified.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find API version specifications"
+          command: |
+            grep -rn "/v[0-9]/\|api-version\|apiVersion\|API_VERSION" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "API versioning"
+        - "Version consistency"
+
+    - id: "3"
+      name: "Check for Outdated Versions"
+      description: |
+        Identify significantly outdated dependencies.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find major SDKs"
+          command: |
+            grep -rn "stripe\|twilio\|aws-sdk\|@google-cloud" \
+              --include="package.json" --include="requirements.txt" . 2>/dev/null | \
+              head -20
+
+      expected_findings:
+        - "SDK versions"
+        - "Outdated packages"
+
+    - id: "4"
+      name: "Evaluate Upgrade Process"
+      description: |
+        Check if there's a process for version upgrades.
+      duration_estimate: "10 min"
+      questions:
+        - "Is there a process for evaluating SDK updates?"
+        - "Are updates tested before deployment?"
+        - "How are breaking changes handled?"
+
+      expected_findings:
+        - "Upgrade process"
+        - "Testing practice"
+
+    - id: "5"
+      name: "Review Deprecation Monitoring"
+      description: |
+        Check for tracking of deprecated APIs/SDKs.
+      duration_estimate: "5 min"
+      questions:
+        - "How are vendor deprecations tracked?"
+        - "Is there alerting for sunset dates?"
+        - "Are deprecated APIs documented?"
+
+      expected_findings:
+        - "Deprecation tracking"
+        - "Monitoring gaps"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "version_inventory"
+        - "pinning_assessment"
+        - "outdated_dependencies"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Version Analysis"
+        - "Risk Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear unpinned versions or missing lock file"
+    medium: "Versions pinned but age uncertain"
+    low: "Requires vendor research to assess"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "semantic-versioning"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "vpn-001"
+    item: "API versions explicitly specified"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "/v[0-9]/\|api-version\|apiVersion" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "vpn-002"
+    item: "Lock file committed"
+    level: "CRITICAL"
+    verification: |
+      test -f package-lock.json -o -f yarn.lock -o -f pnpm-lock.yaml && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "vpn-003"
+    item: "No wildcard dependencies"
+    level: "WARNING"
+    verification: |
+      cat package.json 2>/dev/null | grep -E '"\*"' | wc -l | \
+        xargs -I {} test {} -eq 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SLSA"
+      controls: ["Build Integrity"]
+    - framework: "ISO 27001"
+      controls: ["A.14 System Acquisition"]
+
+relationships:
+  commonly_combined:
+    - "api-integration.third-party-integration.third-party-api-dependency"
+    - "security-trust.supply-chain.dependency-integrity"
+    - "code-quality.dependency-management.version-management"

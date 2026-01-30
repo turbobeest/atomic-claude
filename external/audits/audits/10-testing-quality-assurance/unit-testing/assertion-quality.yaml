@@ -1,0 +1,342 @@
+# ============================================================
+# AUDIT: Assertion Quality
+# ============================================================
+# Evaluates the quality and effectiveness of assertions in
+# unit tests to ensure tests actually verify correct behavior.
+# ============================================================
+
+audit:
+  id: "testing-quality-assurance.unit-testing.assertion-quality"
+  name: "Assertion Quality"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "testing-quality-assurance"
+  category_number: 10
+  subcategory: "unit-testing"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "testing"
+
+  default_profiles:
+    - "full"
+    - "quality"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes the quality of assertions in unit tests including assertion
+    specificity, assertion count per test, use of appropriate matchers,
+    error message clarity, and whether assertions actually verify the
+    intended behavior rather than just executing code.
+
+  why_it_matters: |
+    Tests without meaningful assertions provide false confidence - they
+    pass even when the code is broken. Weak assertions (like just checking
+    for truthy values) miss bugs. Good assertions make tests valuable as
+    both verification and documentation of expected behavior.
+
+  when_to_run:
+    - "Test quality assessment"
+    - "When tests pass but bugs reach production"
+    - "Code review verification"
+    - "Test suite maintenance reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "test_suite"
+      description: "Unit test files to analyze"
+
+  access_requirements:
+    - "Source code repository access"
+
+discovery:
+  file_patterns:
+    - glob: "**/*.test.{js,ts,jsx,tsx}"
+      purpose: "JavaScript/TypeScript unit tests"
+    - glob: "**/*.spec.{js,ts,jsx,tsx}"
+      purpose: "Spec-style unit tests"
+    - glob: "**/test_*.py"
+      purpose: "Python unit tests"
+
+  code_patterns:
+    - pattern: "expect\\(|assert\\.|should\\."
+      type: "regex"
+      scope: "source"
+      purpose: "Identify assertion statements"
+    - pattern: "toBe\\(true\\)|toBe\\(false\\)|toBeTruthy|toBeFalsy"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify weak boolean assertions"
+    - pattern: "toEqual|toStrictEqual|toMatchObject"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify equality assertions"
+    - pattern: "toThrow|rejects\\.toThrow"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify error assertions"
+
+knowledge_sources:
+  specifications:
+    - id: "xunit-patterns"
+      name: "xUnit Test Patterns"
+      url: "http://xunitpatterns.com/"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "assertion-best-practices"
+      name: "Writing Better Assertions"
+      url: "https://jestjs.io/docs/expect"
+      offline_cache: true
+    - id: "tdd-by-example"
+      name: "Kent Beck - Test Driven Development"
+      url: "https://www.oreilly.com/library/view/test-driven-development/0321146530/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "unit-testing-book"
+      title: "Unit Testing Principles, Practices, and Patterns"
+      type: "book"
+      reference: "ISBN 978-1617296277"
+
+tooling:
+  static_analysis:
+    - tool: "eslint-plugin-jest"
+      purpose: "Detect assertion issues"
+      offline_capable: true
+
+  scripts:
+    - id: "assertion-analyzer"
+      language: "bash"
+      purpose: "Analyze assertion patterns"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Assertion Quality Analysis ==="
+        echo "Total assertions found:"
+        grep -r -c 'expect(\|assert\.' --include='*.test.*' . 2>/dev/null | awk -F: '{sum += $2} END {print sum}'
+        echo ""
+        echo "Tests with no assertions:"
+        for f in $(find . -name '*.test.*' 2>/dev/null | grep -v node_modules | head -50); do
+          count=$(grep -c 'expect(' "$f" 2>/dev/null || echo 0)
+          if [ "$count" -eq 0 ]; then echo "$f"; fi
+        done | head -10
+        echo ""
+        echo "Weak boolean assertions:"
+        grep -r 'toBe(true)\|toBe(false)\|toBeTruthy\|toBeFalsy' --include='*.test.*' . 2>/dev/null | grep -v node_modules | wc -l
+
+signals:
+  critical:
+    - id: "ASSERT-CRIT-001"
+      signal: "Tests with no assertions"
+      evidence_pattern: "Test blocks without expect() or assert"
+      explanation: |
+        Tests without assertions only verify that code runs without
+        throwing. They don't verify correct behavior and provide
+        false confidence in code quality.
+      remediation: "Add meaningful assertions to all tests"
+
+    - id: "ASSERT-CRIT-002"
+      signal: "Only checking that function doesn't throw"
+      evidence_pattern: "expect(() => fn()).not.toThrow() as only assertion"
+      explanation: |
+        Only verifying no exception doesn't confirm correct output.
+        The function could return wrong values and tests would pass.
+      remediation: "Add assertions verifying return values and side effects"
+
+  high:
+    - id: "ASSERT-HIGH-001"
+      signal: "Weak boolean assertions instead of specific checks"
+      evidence_pattern: "toBeTruthy() instead of specific value checks"
+      explanation: |
+        toBeTruthy/toBeFalsy accept multiple values, missing bugs.
+        Example: expect(arr.length).toBeTruthy() passes for length 1
+        when you expect length 3.
+      remediation: "Use specific assertions: toBe(), toEqual(), toHaveLength()"
+
+    - id: "ASSERT-HIGH-002"
+      signal: "Single assertion testing multiple things"
+      evidence_pattern: "One expect with complex object comparison"
+      explanation: |
+        Testing too much in one assertion makes failures harder to
+        diagnose and may miss specific property issues.
+      remediation: "Break into specific assertions for clarity"
+
+  medium:
+    - id: "ASSERT-MED-001"
+      signal: "Assertions lack custom error messages"
+      evidence_pattern: "expect() without .because() or descriptive matchers"
+      remediation: "Add custom messages for complex assertions"
+
+    - id: "ASSERT-MED-002"
+      signal: "Using toEqual when toStrictEqual appropriate"
+      evidence_pattern: "toEqual for objects where undefined properties matter"
+      remediation: "Use toStrictEqual for exact object comparison"
+
+  low:
+    - id: "ASSERT-LOW-001"
+      signal: "Inconsistent assertion style across tests"
+      evidence_pattern: "Mixed expect/should/assert styles"
+
+  positive:
+    - id: "ASSERT-POS-001"
+      signal: "Specific, descriptive assertions throughout"
+      evidence_pattern: "toBe, toEqual, toHaveProperty used appropriately"
+    - id: "ASSERT-POS-002"
+      signal: "Error cases have specific error assertions"
+      evidence_pattern: "toThrow with specific error type/message"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Count assertions per test"
+      description: |
+        Analyze the distribution of assertions across tests to
+        identify tests with zero or very few assertions.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find tests with assertion counts"
+          command: "for f in $(find . -name '*.test.*' 2>/dev/null | grep -v node_modules | head -30); do echo \"$f: $(grep -c 'expect(' \"$f\" 2>/dev/null)\"; done"
+        - purpose: "Find assertion-less test blocks"
+          command: "grep -r -B5 -A5 'it(\\|test(' --include='*.test.*' . 2>/dev/null | grep -v expect | head -30"
+      expected_findings:
+        - "Assertion count distribution"
+        - "Tests without assertions"
+
+    - id: "2"
+      name: "Analyze assertion specificity"
+      description: |
+        Review the types of assertions used and identify weak
+        or overly broad assertions.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Count weak boolean assertions"
+          command: "grep -r -c 'toBeTruthy\\|toBeFalsy\\|toBe(true)\\|toBe(false)' --include='*.test.*' . 2>/dev/null | awk -F: '$2 > 0 {print}' | head -20"
+        - purpose: "Count specific assertions"
+          command: "grep -r -c 'toEqual\\|toStrictEqual\\|toBe(' --include='*.test.*' . 2>/dev/null | awk -F: '$2 > 0 {sum += $2} END {print sum}'"
+      expected_findings:
+        - "Weak vs specific assertion ratio"
+        - "Common assertion patterns"
+
+    - id: "3"
+      name: "Review error handling assertions"
+      description: |
+        Check whether error cases are tested with specific
+        error type and message assertions.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find error assertions"
+          command: "grep -r 'toThrow\\|rejects' --include='*.test.*' . 2>/dev/null | head -20"
+        - purpose: "Check error specificity"
+          command: "grep -r 'toThrow(' --include='*.test.*' . 2>/dev/null | grep -v 'toThrow()' | head -10"
+      expected_findings:
+        - "Error assertion patterns"
+        - "Specificity of error assertions"
+
+    - id: "4"
+      name: "Evaluate assertion clarity"
+      description: |
+        Assess whether assertions are clear, self-documenting,
+        and produce useful failure messages.
+      duration_estimate: "20 min"
+      questions:
+        - "Do assertions clearly state expected behavior?"
+        - "Would failure messages help diagnose issues?"
+        - "Are complex assertions broken into simpler ones?"
+      expected_findings:
+        - "Assertion clarity assessment"
+        - "Error message quality"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "assertion_report"
+      format: "table"
+      sections:
+        - "Assertion Counts"
+        - "Assertion Types"
+        - "Quality Assessment"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Assertion Quality Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "All assertions reviewed with context"
+    medium: "Pattern-based analysis"
+    low: "Based on grep counts only"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "assertion-best-practices"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: "Quick assertion count check"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "assert-001"
+    item: "Assertion-less tests identified"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "List tests with zero assertions"
+    expected: "Confirmed by reviewer"
+
+  - id: "assert-002"
+    item: "Weak assertions documented"
+    level: "BLOCKING"
+    verification: "grep -r 'toBeTruthy\\|toBeFalsy' --include='*.test.*' . 2>/dev/null | wc -l"
+    expected: "PASS (count documented)"
+
+  - id: "assert-003"
+    item: "Error assertion quality assessed"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Document error assertion specificity"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Testability"]
+
+relationships:
+  commonly_combined:
+    - "testing-quality-assurance.unit-testing.unit-test-coverage"
+    - "testing-quality-assurance.unit-testing.edge-case-testing"
+    - "testing-quality-assurance.unit-testing.test-maintainability"

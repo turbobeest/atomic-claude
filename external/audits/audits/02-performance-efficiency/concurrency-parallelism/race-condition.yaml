@@ -1,0 +1,363 @@
+# ============================================================
+# RACE CONDITION AUDIT
+# ============================================================
+# Detects race conditions where concurrent access to shared
+# resources leads to unpredictable behavior.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.concurrency-parallelism.race-condition"
+  name: "Race Condition Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "concurrency-parallelism"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Identifies race conditions including data races (unsynchronized access to
+    shared memory), check-then-act races (TOCTOU), and signal races. Examines
+    code for read-modify-write sequences, shared state access, and timing-
+    dependent logic that could behave differently under concurrent execution.
+
+  why_it_matters: |
+    Race conditions cause intermittent bugs that are extremely difficult to
+    reproduce because they depend on exact timing. They can lead to data
+    corruption, security vulnerabilities (CWE-362), and system instability.
+    A race condition that appears once in a million runs can cause production
+    outages.
+
+  when_to_run:
+    - "Before deploying concurrent code"
+    - "When experiencing intermittent/unreproducible bugs"
+    - "After modifying shared state access patterns"
+    - "During security reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code with concurrent execution"
+
+  access_requirements:
+    - "Read access to source code repository"
+    - "Ability to run race detection tools"
+
+discovery:
+  code_patterns:
+    - pattern: "if.*exists.*then.*create|if.*contains.*then.*add"
+      type: "regex"
+      scope: "source"
+      purpose: "Find check-then-act patterns (TOCTOU)"
+
+    - pattern: "read.*write.*same|get.*set"
+      type: "regex"
+      scope: "source"
+      purpose: "Find read-modify-write sequences"
+
+    - pattern: "\\+\\+|--"
+      type: "regex"
+      scope: "source"
+      purpose: "Find non-atomic increment/decrement"
+
+    - pattern: "static\\s+\\w+\\s+\\w+\\s*[^=]|var\\s+\\w+\\s*="
+      type: "regex"
+      scope: "source"
+      purpose: "Find shared state candidates"
+
+  file_patterns:
+    - glob: "**/*.java"
+      purpose: "Java source files"
+    - glob: "**/*.go"
+      purpose: "Go source files"
+    - glob: "**/*.py"
+      purpose: "Python source files"
+    - glob: "**/*.c"
+      purpose: "C source files"
+    - glob: "**/*.cpp"
+      purpose: "C++ source files"
+
+knowledge_sources:
+  specifications:
+    - id: "cwe-362"
+      name: "CWE-362: Concurrent Execution Using Shared Resource with Improper Synchronization (Race Condition)"
+      url: "https://cwe.mitre.org/data/definitions/362.html"
+      offline_cache: true
+      priority: "required"
+
+    - id: "cwe-367"
+      name: "CWE-367: Time-of-check Time-of-use (TOCTOU) Race Condition"
+      url: "https://cwe.mitre.org/data/definitions/367.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "tsan-docs"
+      name: "ThreadSanitizer Documentation"
+      url: "https://clang.llvm.org/docs/ThreadSanitizer.html"
+      offline_cache: true
+
+    - id: "go-race"
+      name: "Go Race Detector"
+      url: "https://go.dev/doc/articles/race_detector"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "ThreadSanitizer (TSan)"
+      purpose: "Runtime data race detection"
+      offline_capable: true
+
+    - tool: "Go race detector"
+      purpose: "Go-specific race detection"
+      offline_capable: true
+
+    - tool: "Helgrind"
+      purpose: "Valgrind tool for race detection"
+      offline_capable: true
+
+    - tool: "SpotBugs"
+      purpose: "Java race condition detection"
+      offline_capable: true
+
+  scripts:
+    - id: "find-toctou"
+      language: "bash"
+      purpose: "Find check-then-act patterns"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find TOCTOU patterns
+        grep -rn -A3 "if.*exist\|if.*contains" --include="*.java" --include="*.go" . | \
+          grep -E "create|add|put|delete|remove"
+
+signals:
+  critical:
+    - id: "RACE-CRIT-001"
+      signal: "Data race on shared memory"
+      evidence_pattern: "concurrent access without synchronization"
+      explanation: |
+        Multiple threads accessing the same memory location where at least
+        one access is a write, without synchronization. This causes undefined
+        behavior - data corruption, crashes, or security vulnerabilities.
+      remediation: "Add synchronization (mutex, atomic), or make access thread-local"
+      cwe: "CWE-362"
+
+    - id: "RACE-CRIT-002"
+      signal: "Time-of-check time-of-use (TOCTOU) vulnerability"
+      evidence_pattern: "if.*exists.*\\{[^}]*create|if.*null.*\\{[^}]*new"
+      explanation: |
+        Checking a condition and then acting on it allows another thread or
+        process to change the condition between check and use. This is a
+        common source of security vulnerabilities in file operations.
+      remediation: "Use atomic operations (putIfAbsent), or hold lock during check-and-act"
+      cwe: "CWE-367"
+
+  high:
+    - id: "RACE-HIGH-001"
+      signal: "Non-atomic read-modify-write"
+      evidence_pattern: "\\w+\\s*=\\s*\\w+\\s*[+\\-*/]|\\+\\+|--"
+      explanation: |
+        Operations like i++ or value = value + 1 are three separate operations
+        (read, modify, write) that can be interleaved by other threads,
+        causing lost updates.
+      remediation: "Use atomic operations (AtomicInteger, atomic.AddInt64)"
+      cwe: "CWE-362"
+
+    - id: "RACE-HIGH-002"
+      signal: "Shared collection modified during iteration"
+      evidence_pattern: "for.*\\{[^}]*(add|remove|put|delete)"
+      explanation: |
+        Modifying a collection while iterating over it can cause
+        ConcurrentModificationException or skip/duplicate elements.
+      remediation: "Use ConcurrentHashMap, copy-on-write, or synchronized iteration"
+
+    - id: "RACE-HIGH-003"
+      signal: "Lazy initialization race"
+      evidence_pattern: "if.*==\\s*null.*=\\s*new"
+      explanation: |
+        Multiple threads checking if an object is null and then initializing
+        it can result in multiple initializations or returning partially
+        constructed objects.
+      remediation: "Use double-checked locking with volatile, sync.Once, or eager init"
+      cwe: "CWE-609"
+
+  medium:
+    - id: "RACE-MED-001"
+      signal: "Shared state in singleton without synchronization"
+      evidence_pattern: "getInstance.*static.*instance"
+      remediation: "Use thread-safe singleton patterns (enum, holder class)"
+
+    - id: "RACE-MED-002"
+      signal: "File TOCTOU vulnerability"
+      evidence_pattern: "exists\\(\\).*create|isFile\\(\\).*read"
+      remediation: "Use atomic file operations or lock files"
+
+  low:
+    - id: "RACE-LOW-001"
+      signal: "Benign race in logging or metrics"
+      evidence_pattern: "log.*count|metric.*increment"
+      remediation: "Consider atomic counters if accuracy matters"
+
+  positive:
+    - id: "RACE-POS-001"
+      signal: "Use of atomic operations"
+      evidence_pattern: "AtomicInteger|atomic\\.Add|Atomic\\w+\\.compareAndSet"
+
+    - id: "RACE-POS-002"
+      signal: "Proper use of putIfAbsent pattern"
+      evidence_pattern: "putIfAbsent|computeIfAbsent|LoadOrStore"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify shared state"
+      description: |
+        Find all variables that could be accessed by multiple threads:
+        static fields, instance fields of shared objects, global variables.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find static fields in Java"
+          command: "grep -rn 'static ' --include='*.java' . | grep -v 'static final\\|static class'"
+        - purpose: "Find global variables in Go"
+          command: "grep -rn '^var ' --include='*.go' ."
+      expected_findings:
+        - "Inventory of shared state"
+        - "Access patterns for each"
+
+    - id: "2"
+      name: "Find check-then-act patterns"
+      description: |
+        Look for code that checks a condition and then acts on it without
+        holding a lock.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find TOCTOU patterns"
+          command: "grep -rn -A5 'if.*contains\\|if.*exists\\|if.*null' --include='*.java' --include='*.go' ."
+      expected_findings:
+        - "Check-then-act patterns"
+        - "Potential TOCTOU vulnerabilities"
+
+    - id: "3"
+      name: "Run race detector"
+      description: |
+        Execute test suite with race detection enabled.
+      duration_estimate: "60 min"
+      commands:
+        - purpose: "Run Go race detector"
+          command: "go test -race ./..."
+        - purpose: "Run with ThreadSanitizer"
+          command: "GOFLAGS='-race' go test ./..."
+      expected_findings:
+        - "Race conditions detected at runtime"
+        - "Stack traces of racing accesses"
+
+    - id: "4"
+      name: "Analyze read-modify-write operations"
+      description: |
+        Find compound operations on shared state that are not atomic.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find increment/decrement operations"
+          command: "grep -rn '\\+\\+\\|--\\|+=\\|-=' --include='*.java' --include='*.go' --include='*.py' ."
+      expected_findings:
+        - "Non-atomic compound operations"
+        - "Operations requiring atomic primitives"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Critical Race Conditions"
+        - "TOCTOU Vulnerabilities"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Race detector found issue, or clear pattern with confirmed sharing"
+    medium: "Pattern matches but threading context uncertain"
+    low: "Potential race requiring further analysis"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "cwe-362"
+        priority: "required"
+      - source_id: "cwe-367"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime race detection"
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "race-condition-001"
+    item: "Race detector executed with no findings"
+    level: "CRITICAL"
+    verification: "go test -race ./... 2>&1 | grep -c 'DATA RACE'"
+    expected: "0"
+
+  - id: "race-condition-002"
+    item: "TOCTOU patterns eliminated or documented"
+    level: "CRITICAL"
+    verification: "grep -rn 'if.*exists.*create\\|if.*contains.*add' --include='*.java' --include='*.go' . | wc -l"
+    expected: "0 (or documented exceptions)"
+
+  - id: "race-condition-003"
+    item: "Non-atomic operations on shared state reviewed"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "All increment/decrement on shared state uses atomics"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["api", "service", "library"]
+
+  compliance_frameworks:
+    - framework: "CWE"
+      controls: ["CWE-362", "CWE-367"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.concurrency-parallelism.thread-safety"
+    - "performance-efficiency.concurrency-parallelism.deadlock-risk"

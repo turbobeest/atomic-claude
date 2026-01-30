@@ -1,0 +1,320 @@
+# ============================================================
+# SERIALIZATION EFFICIENCY AUDIT
+# ============================================================
+# Evaluates serialization/deserialization performance and format
+# choices for data interchange and storage.
+
+audit:
+  id: "performance-efficiency.algorithmic-efficiency.serialization-efficiency"
+  name: "Serialization Efficiency Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "algorithmic-efficiency"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes serialization format choices and implementation efficiency
+    for data interchange (APIs, messaging) and storage (caching, persistence).
+    Compares JSON, Protocol Buffers, MessagePack, and other formats for
+    appropriate use cases.
+
+  why_it_matters: |
+    Serialization is often the hidden performance bottleneck. JSON parsing
+    large payloads can take longer than the actual business logic. Binary
+    formats like Protocol Buffers can be 10x faster and produce 3x smaller
+    payloads, reducing both CPU and bandwidth costs.
+
+  when_to_run:
+    - "API performance optimization"
+    - "High-volume messaging systems"
+    - "Cache storage optimization"
+    - "Mobile/bandwidth-constrained scenarios"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code"
+
+  access_requirements:
+    - "Source code repository access"
+    - "API schema definitions"
+
+discovery:
+  code_patterns:
+    - pattern: "JSON\\.parse|JSON\\.stringify|json\\.loads|json\\.dumps"
+      type: "regex"
+      scope: "source"
+      purpose: "Find JSON serialization"
+
+    - pattern: "protobuf|Protocol.*Buffer|ParseFrom|SerializeToString"
+      type: "regex"
+      scope: "source"
+      purpose: "Find Protocol Buffers usage"
+
+    - pattern: "msgpack|messagepack|pack\\(|unpack\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find MessagePack usage"
+
+    - pattern: "pickle|marshal|ObjectOutputStream|ObjectInputStream"
+      type: "regex"
+      scope: "source"
+      purpose: "Find native serialization"
+
+  file_patterns:
+    - glob: "**/*.proto"
+      purpose: "Protocol Buffer definitions"
+    - glob: "**/schema*.{json,yaml}"
+      purpose: "Schema definitions"
+    - glob: "**/*serializ*.{py,js,ts,java,go}"
+      purpose: "Serialization utilities"
+
+knowledge_sources:
+  guides:
+    - id: "protobuf-guide"
+      name: "Protocol Buffers Documentation"
+      url: "https://developers.google.com/protocol-buffers"
+      offline_cache: true
+
+    - id: "json-performance"
+      name: "JSON Performance Best Practices"
+      url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "grep/ripgrep"
+      purpose: "Find serialization patterns"
+      offline_capable: true
+
+  scripts:
+    - id: "serialization-finder"
+      language: "bash"
+      purpose: "Catalog serialization usage"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== JSON Serialization ==="
+        rg -c 'JSON\.(parse|stringify)|json\.(loads|dumps)' --type py --type js --type ts
+        echo
+        echo "=== Binary Serialization ==="
+        rg -c 'protobuf|msgpack|avro' --type py --type js --type java
+
+signals:
+  critical:
+    - id: "SERIAL-CRIT-001"
+      signal: "JSON parsing large payloads in hot path"
+      evidence_pattern: "JSON.parse on payloads > 100KB in high-frequency handlers"
+      explanation: |
+        JSON parsing is CPU-intensive and allocates many objects. Parsing a
+        1MB JSON payload can take 50ms+ and create significant GC pressure.
+        Binary formats can be 10x faster.
+      remediation: "Use streaming JSON parsing or migrate to binary format (protobuf, msgpack)"
+
+    - id: "SERIAL-CRIT-002"
+      signal: "Redundant serialization/deserialization cycles"
+      evidence_pattern: "Data serialized, passed through, then deserialized unchanged"
+      explanation: |
+        Unnecessary round-trips through serialization waste CPU and memory.
+        Pass-through data should remain in serialized form until actually needed.
+      remediation: "Pass raw bytes through intermediaries, deserialize only at endpoints"
+
+  high:
+    - id: "SERIAL-HIGH-001"
+      signal: "Text format used for internal service communication"
+      evidence_pattern: "JSON between internal microservices"
+      explanation: |
+        Internal services don't need human-readable formats. Binary formats
+        are faster to parse, smaller on the wire, and provide schema evolution.
+      remediation: "Use Protocol Buffers or gRPC for internal communication"
+
+    - id: "SERIAL-HIGH-002"
+      signal: "No schema validation on deserialization"
+      evidence_pattern: "JSON.parse without validation"
+      explanation: |
+        Deserializing untrusted data without validation can cause runtime
+        errors, security issues, and makes debugging difficult.
+      remediation: "Add schema validation (JSON Schema, Zod, io-ts)"
+
+  medium:
+    - id: "SERIAL-MED-001"
+      signal: "Serializing more data than needed"
+      evidence_pattern: "Full object serialization when subset would suffice"
+      explanation: |
+        Serializing entire objects when only a few fields are needed wastes
+        CPU and bandwidth.
+      remediation: "Create DTOs with only needed fields"
+
+    - id: "SERIAL-MED-002"
+      signal: "Inefficient date/time serialization"
+      evidence_pattern: "ISO string dates instead of epoch timestamps"
+      explanation: |
+        ISO date strings are 20+ bytes and require parsing. Epoch timestamps
+        are 8 bytes (or 4 for seconds) and trivial to parse.
+      remediation: "Use epoch timestamps for internal data, ISO for external APIs"
+
+  low:
+    - id: "SERIAL-LOW-001"
+      signal: "JSON pretty-printing in production"
+      evidence_pattern: "JSON.stringify(obj, null, 2) or indent parameter"
+      remediation: "Use compact JSON in production"
+
+  positive:
+    - id: "SERIAL-POS-001"
+      signal: "Binary format used for high-volume internal communication"
+
+    - id: "SERIAL-POS-002"
+      signal: "Streaming serialization for large payloads"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory serialization usage"
+      description: |
+        Catalog all serialization/deserialization in the codebase by format
+        and context (API, cache, messaging, persistence).
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find JSON usage"
+          command: "rg -n 'JSON\\.(parse|stringify)|json\\.(loads|dumps)' --type py --type js --type ts"
+        - purpose: "Find binary formats"
+          command: "rg -n 'protobuf|msgpack|avro|thrift' --type py --type js --type java"
+
+      expected_findings:
+        - "Serialization format inventory"
+        - "Usage context mapping"
+
+    - id: "2"
+      name: "Identify high-volume serialization"
+      description: |
+        Determine which serialization operations are in hot paths or
+        handle large payloads.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find serialization in handlers"
+          command: "rg -l '@app.route|@router|def handle' --type py --type js | xargs rg -n 'JSON|json'"
+
+      expected_findings:
+        - "Hot path serialization identification"
+        - "Payload size estimates"
+
+    - id: "3"
+      name: "Evaluate format appropriateness"
+      description: |
+        Assess whether the chosen format is appropriate for each use case
+        (human-readable API vs internal communication vs storage).
+      duration_estimate: "30 min"
+
+      expected_findings:
+        - "Format appropriateness assessment"
+        - "Migration candidates"
+
+    - id: "4"
+      name: "Check for redundant serialization"
+      description: |
+        Identify data flows where data is serialized and deserialized
+        unnecessarily.
+      duration_estimate: "20 min"
+
+      expected_findings:
+        - "Redundant serialization patterns"
+        - "Optimization opportunities"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Serialization Inventory"
+        - "Performance Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Profiling data with payload size analysis"
+    medium: "Code analysis with estimated volumes"
+    low: "Pattern matching without context"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "protobuf-guide"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed serialization analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "serial-001"
+    item: "No JSON parsing of large payloads in hot paths"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Large payload parsing uses streaming or binary format"
+    expected: "Confirmed by reviewer"
+
+  - id: "serial-002"
+    item: "Internal services use efficient serialization"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Service-to-service communication uses binary format"
+    expected: "Confirmed by reviewer"
+
+  - id: "serial-003"
+    item: "No redundant serialization cycles"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Pass-through data remains serialized"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Performance"
+      controls: ["Data Interchange"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.algorithmic-efficiency.compression-efficiency"
+    - "performance-efficiency.network-efficiency.payload-size"
+    - "performance-efficiency.algorithmic-efficiency.hot-path-optimization"

@@ -1,0 +1,398 @@
+audit:
+  id: cloud-infrastructure.networking.network-security-groups
+  name: Network Security Groups
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: networking
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: security
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates security group and network ACL configurations including
+    ingress/egress rules, rule justification, unused groups, and
+    compliance with least-privilege principles. Examines whether
+    firewall rules appropriately restrict network access.
+  why_it_matters: |
+    Security groups are the primary network access control in cloud
+    environments. Overly permissive rules expose services to attack.
+    Missing egress controls allow data exfiltration. Unused security
+    groups create confusion and potential misconfiguration. Proper
+    security group management is essential for defense in depth.
+  when_to_run:
+  - Security assessments
+  - Compliance audits
+  - After infrastructure changes
+  - Regular security reviews
+prerequisites:
+  required_artifacts:
+  - type: cloud_access
+    description: Read access to security group configurations
+  - type: application_requirements
+    description: Required network access documentation
+  access_requirements:
+  - Security group configuration access
+  - Network ACL access
+  - VPC configuration access
+discovery:
+  code_patterns:
+  - pattern: 0\.0\.0\.0/0
+    type: regex
+    scope: config
+    purpose: Find overly permissive CIDR rules
+  - pattern: from_port.*0.*to_port.*65535|from_port.*-1
+    type: regex
+    scope: config
+    purpose: Find all-port rules
+  file_patterns:
+  - glob: '**/terraform/**/*security*.tf'
+    purpose: Find Terraform security group configurations
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: Find CloudFormation security definitions
+knowledge_sources:
+  specifications:
+  - id: aws-security-groups
+    name: AWS Security Groups
+    url: https://docs.aws.amazon.com/vpc/latest/userguide/VPC_SecurityGroups.html
+    offline_cache: true
+    priority: required
+  - id: aws-nacl
+    name: AWS Network ACLs
+    url: https://docs.aws.amazon.com/vpc/latest/userguide/vpc-network-acls.html
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: 'NIST SP 800-207: Zero Trust Architecture'
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  guides:
+  - id: cis-aws-security
+    name: CIS AWS Foundations Benchmark
+    url: https://www.cisecurity.org/benchmark/amazon_web_services
+    offline_cache: true
+  - id: aws-security-best-practices
+    name: AWS Security Best Practices
+    url: https://docs.aws.amazon.com/vpc/latest/userguide/vpc-security-best-practices.html
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS CLI
+    purpose: List security groups
+    command: aws ec2 describe-security-groups
+  - tool: AWS CLI
+    purpose: Find permissive rules
+    command: aws ec2 describe-security-groups --query 'SecurityGroups[?IpPermissions[?IpRanges[?CidrIp==`0.0.0.0/0`]]]'
+  - tool: AWS CLI
+    purpose: Find unused security groups
+    command: aws ec2 describe-security-groups --query 'SecurityGroups[?length(IpPermissions)==`0` && length(IpPermissionsEgress)==`1`]'
+  scripts:
+  - id: security-group-analyzer
+    language: bash
+    purpose: Analyze security group configurations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Security Group Analysis ==="
+
+      # Summary
+      echo "Security Group Summary:"
+      aws ec2 describe-security-groups \
+        --query 'SecurityGroups[].{ID:GroupId,Name:GroupName,VPC:VpcId,Ingress:length(IpPermissions),Egress:length(IpPermissionsEgress)}' \
+        --output table
+
+      # Find 0.0.0.0/0 ingress rules
+      echo ""
+      echo "Security Groups with 0.0.0.0/0 Ingress:"
+      aws ec2 describe-security-groups \
+        --query 'SecurityGroups[?IpPermissions[?IpRanges[?CidrIp==`0.0.0.0/0`]]].{ID:GroupId,Name:GroupName}' \
+        --output table
+
+      # Find all-ports rules
+      echo ""
+      echo "Security Groups Allowing All Ports:"
+      aws ec2 describe-security-groups \
+        --query 'SecurityGroups[?IpPermissions[?FromPort==`-1` || (FromPort==`0` && ToPort==`65535`)]].{ID:GroupId,Name:GroupName}' \
+        --output table
+
+      # Find SSH open to world
+      echo ""
+      echo "Security Groups with SSH (22) Open to 0.0.0.0/0:"
+      aws ec2 describe-security-groups \
+        --filters "Name=ip-permission.from-port,Values=22" "Name=ip-permission.cidr,Values=0.0.0.0/0" \
+        --query 'SecurityGroups[].{ID:GroupId,Name:GroupName}' \
+        --output table
+
+      # Find RDP open to world
+      echo ""
+      echo "Security Groups with RDP (3389) Open to 0.0.0.0/0:"
+      aws ec2 describe-security-groups \
+        --filters "Name=ip-permission.from-port,Values=3389" "Name=ip-permission.cidr,Values=0.0.0.0/0" \
+        --query 'SecurityGroups[].{ID:GroupId,Name:GroupName}' \
+        --output table
+
+      # Find database ports open to world
+      echo ""
+      echo "Security Groups with Database Ports Open to 0.0.0.0/0:"
+      for port in 3306 5432 1433 27017 6379; do
+        sgs=$(aws ec2 describe-security-groups \
+          --filters "Name=ip-permission.from-port,Values=$port" "Name=ip-permission.cidr,Values=0.0.0.0/0" \
+          --query 'SecurityGroups[].GroupId' --output text)
+        [ ! -z "$sgs" ] && echo "Port $port: $sgs"
+      done
+signals:
+  critical:
+  - id: SECGROUP-CRIT-001
+    signal: Database ports open to 0.0.0.0/0
+    evidence_pattern: Ports 3306, 5432, 1433, 27017, 6379 with 0.0.0.0/0
+    explanation: |
+      Database ports exposed to the internet are immediately
+      targeted by automated scanners and attackers. This creates
+      critical vulnerability for data breaches.
+    remediation: Restrict database ports to application security groups only
+  - id: SECGROUP-CRIT-002
+    signal: All traffic allowed from 0.0.0.0/0
+    evidence_pattern: 'FromPort: -1 or 0-65535 with 0.0.0.0/0'
+    explanation: |
+      Allowing all traffic from anywhere defeats all network
+      security controls and exposes all services to attack.
+    remediation: Remove or restrict to specific required ports
+  - id: SECGROUP-CRIT-003
+    signal: SSH/RDP open to 0.0.0.0/0
+    evidence_pattern: Port 22 or 3389 with 0.0.0.0/0
+    explanation: |
+      Management ports exposed to internet are constantly
+      attacked. Even with strong passwords, this creates
+      significant risk.
+    remediation: Restrict SSH/RDP to bastion hosts or VPN endpoints
+  high:
+  - id: SECGROUP-HIGH-001
+    signal: Overly broad CIDR ranges in rules
+    evidence_threshold: CIDR ranges like /8 or /16
+    explanation: |
+      Very broad CIDR ranges allow more access than necessary,
+      violating least privilege principle.
+    remediation: Narrow CIDR ranges to actual required sources
+  - id: SECGROUP-HIGH-002
+    signal: No egress restrictions
+    evidence_pattern: Default allow-all egress without restrictions
+    explanation: |
+      Without egress controls, compromised systems can freely
+      exfiltrate data or communicate with C2 servers.
+    remediation: Implement egress filtering for sensitive workloads
+  - id: SECGROUP-HIGH-003
+    signal: Security groups with no description
+    evidence_pattern: Description is default or empty
+    explanation: |
+      Undocumented security groups make it impossible to
+      determine if rules are legitimate, leading to
+      perpetuation of bad rules.
+    remediation: Add descriptions documenting purpose of each rule
+  medium:
+  - id: SECGROUP-MED-001
+    signal: Unused security groups
+    remediation: Delete unused security groups to reduce confusion
+  - id: SECGROUP-MED-002
+    signal: Duplicate rules across security groups
+    remediation: Consolidate duplicate rules for manageability
+  - id: SECGROUP-MED-003
+    signal: IPv6 not considered in security groups
+    remediation: Add IPv6 rules where dual-stack is enabled
+  low:
+  - id: SECGROUP-LOW-001
+    signal: No naming convention for security groups
+    remediation: Implement consistent naming convention
+  positive:
+  - id: SECGROUP-POS-001
+    signal: Least-privilege rules with specific ports and sources
+  - id: SECGROUP-POS-002
+    signal: All rules documented with justification
+  - id: SECGROUP-POS-003
+    signal: Egress filtering implemented
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Security Group Inventory
+    description: |
+      Collect complete inventory of security groups with
+      rule counts and associations.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List all security groups
+      command: aws ec2 describe-security-groups --query 'SecurityGroups[].{ID:GroupId,Name:GroupName,VPC:VpcId,Description:Description,IngressCount:length(IpPermissions),EgressCount:length(IpPermissionsEgress)}'
+        --output table
+    expected_findings:
+    - Complete security group inventory
+    - Association patterns
+  - id: '2'
+    name: Permissive Rule Analysis
+    description: |
+      Identify overly permissive rules including 0.0.0.0/0
+      and all-port allowances.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find 0.0.0.0/0 ingress
+      command: aws ec2 describe-security-groups --query 'SecurityGroups[?IpPermissions[?IpRanges[?CidrIp==`0.0.0.0/0`]]].{ID:GroupId,Name:GroupName,Rules:IpPermissions[?IpRanges[?CidrIp==`0.0.0.0/0`]]}'
+        --output yaml
+    - purpose: Find all-ports rules
+      command: aws ec2 describe-security-groups --query 'SecurityGroups[?IpPermissions[?FromPort==`-1`]].{ID:GroupId,Name:GroupName}'
+        --output table
+    expected_findings:
+    - Internet-exposed rules
+    - All-port rules
+  - id: '3'
+    name: Critical Port Analysis
+    description: |
+      Specifically analyze exposure of critical ports like
+      SSH, RDP, and database ports.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check SSH exposure
+      command: aws ec2 describe-security-groups --filters 'Name=ip-permission.from-port,Values=22' 'Name=ip-permission.cidr,Values=0.0.0.0/0'
+        --query 'SecurityGroups[].{ID:GroupId,Name:GroupName}' --output table
+    - purpose: Check database exposure
+      command: for port in 3306 5432 1433 27017 6379; do echo "Port $port:"; aws ec2 describe-security-groups
+        --filters "Name=ip-permission.from-port,Values=$port" "Name=ip-permission.cidr,Values=0.0.0.0/0"
+        --query 'SecurityGroups[].GroupId' --output text; done
+    expected_findings:
+    - SSH/RDP exposure
+    - Database port exposure
+  - id: '4'
+    name: Egress Rule Analysis
+    description: |
+      Review egress rules for appropriate restrictions
+      on outbound traffic.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check egress rules
+      command: aws ec2 describe-security-groups --query 'SecurityGroups[].{ID:GroupId,Name:GroupName,EgressRules:IpPermissionsEgress}'
+        --output yaml | head -100
+    expected_findings:
+    - Egress restriction status
+    - Unrestricted egress groups
+  - id: '5'
+    name: Unused Group Identification
+    description: |
+      Identify security groups that are not attached to
+      any resources for cleanup.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find unattached groups
+      command: 'for sg in $(aws ec2 describe-security-groups --query ''SecurityGroups[].GroupId'' --output
+        text); do enis=$(aws ec2 describe-network-interfaces --filters "Name=group-id,Values=$sg" --query
+        ''length(NetworkInterfaces)'' --output text); [ "$enis" -eq 0 ] && echo "Unused: $sg"; done 2>/dev/null
+        | head -20'
+    expected_findings:
+    - Unused security groups
+    - Cleanup candidates
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Critical Exposures
+    - Permissive Rule Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Full access to security groups and network interfaces
+    medium: Security group access without full network mapping
+    low: Limited access
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-security-groups
+      priority: required
+    - source_id: cis-aws-security
+      priority: required
+  limitations:
+  - Cannot access live configurations offline
+  - Attachment analysis requires runtime
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: Critical security control
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: secgroup-001
+  item: No database ports open to 0.0.0.0/0
+  level: CRITICAL
+  verification: for p in 3306 5432 1433 27017 6379; do aws ec2 describe-security-groups --filters "Name=ip-permission.from-port,Values=$p"
+    "Name=ip-permission.cidr,Values=0.0.0.0/0" --query 'SecurityGroups[].GroupId' --output text | grep
+    -q . && echo FAIL && exit 1; done; echo PASS
+  expected: PASS
+- id: secgroup-002
+  item: SSH/RDP not open to 0.0.0.0/0
+  level: CRITICAL
+  verification: aws ec2 describe-security-groups --filters 'Name=ip-permission.from-port,Values=22' 'Name=ip-permission.cidr,Values=0.0.0.0/0'
+    --query 'SecurityGroups[].GroupId' --output text | grep -q . && echo FAIL || echo PASS
+  expected: PASS
+- id: secgroup-003
+  item: All permissive rules documented with justification
+  level: BLOCKING
+  verification: manual
+  verification_notes: Document business justification for any 0.0.0.0/0 rules
+  expected: Confirmed by reviewer
+- id: secgroup-004
+  item: Unused security groups identified for cleanup
+  level: WARNING
+  verification: manual
+  verification_notes: List unused groups for removal
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CIS AWS
+    controls:
+    - '5.1'
+    - '5.2'
+    - '5.3'
+    - '5.4'
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.6
+  - framework: PCI-DSS
+    controls:
+    - '1.2'
+    - '1.3'
+  - framework: HIPAA
+    controls:
+    - 164.312(e)(1)
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.networking.network-segmentation
+  - cloud-infrastructure.networking.vpc-design
+  - security.access-control.least-privilege

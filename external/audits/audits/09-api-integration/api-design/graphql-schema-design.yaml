@@ -1,0 +1,334 @@
+# ============================================================
+# AUDIT: GraphQL Schema Design Assessment
+# ============================================================
+# Evaluates GraphQL schema quality, patterns, and best practices
+# ============================================================
+
+audit:
+  id: "api-integration.api-design.graphql-schema-design"
+
+  name: "GraphQL Schema Design Assessment"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "api-integration"
+  category_number: 9
+  subcategory: "api-design"
+
+  tier: "expert"
+  estimated_duration: "2.5 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates GraphQL schema design for type safety, query efficiency,
+    security considerations, and adherence to GraphQL best practices.
+    Examines type definitions, resolver patterns, N+1 query problems,
+    depth limiting, complexity analysis, and schema evolution strategies.
+
+  why_it_matters: |
+    Poor GraphQL schema design leads to performance issues (N+1 queries),
+    security vulnerabilities (denial of service via complex queries),
+    breaking changes that affect all clients, and schemas that are hard
+    to evolve. Well-designed schemas enable efficient data fetching and
+    type-safe client development.
+
+  when_to_run:
+    - "Before GraphQL schema releases"
+    - "During performance optimization"
+    - "When adding new types or fields"
+    - "Security assessment of GraphQL APIs"
+
+prerequisites:
+  required_artifacts:
+    - type: "graphql-schema"
+      description: "GraphQL schema definitions (.graphql, .gql files)"
+    - type: "resolver-source"
+      description: "Resolver implementations"
+
+  access_requirements:
+    - "Read access to GraphQL schema files"
+    - "Read access to resolver code"
+
+discovery:
+  code_patterns:
+    - pattern: "type\\s+\\w+\\s*\\{|input\\s+\\w+\\s*\\{"
+      type: "regex"
+      scope: "source"
+      purpose: "GraphQL type definitions"
+    - pattern: "Query\\s*\\{|Mutation\\s*\\{|Subscription\\s*\\{"
+      type: "regex"
+      scope: "source"
+      purpose: "Root operation types"
+    - pattern: "@Resolver|@Query|@Mutation|@ResolveField"
+      type: "regex"
+      scope: "source"
+      purpose: "Resolver decorators"
+    - pattern: "DataLoader|dataloader|batchLoad"
+      type: "regex"
+      scope: "source"
+      purpose: "Batching/DataLoader usage"
+
+  file_patterns:
+    - glob: "**/*.graphql"
+      purpose: "GraphQL schema files"
+    - glob: "**/*.gql"
+      purpose: "GraphQL schema files"
+    - glob: "**/resolvers/**/*.{js,ts}"
+      purpose: "Resolver implementations"
+    - glob: "**/schema/**/*.{js,ts}"
+      purpose: "Schema definitions"
+
+knowledge_sources:
+  specifications:
+    - id: "graphql-spec"
+      name: "GraphQL Specification"
+      url: "https://spec.graphql.org/"
+      offline_cache: true
+      priority: "required"
+    - id: "openapi-spec"
+      name: "OpenAPI Specification"
+      url: "https://spec.openapis.org/oas/latest.html"
+      offline_cache: true
+      priority: "recommended"
+    - id: "owasp-api-security"
+      name: "OWASP API Security Top 10"
+      url: "https://owasp.org/API-Security/"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "graphql-rules"
+      name: "GraphQL Rules - Production Best Practices"
+      url: "https://graphql-rules.com/"
+      offline_cache: true
+    - id: "apollo-best-practices"
+      name: "Apollo GraphQL Best Practices"
+      url: "https://www.apollographql.com/docs/technotes/"
+      offline_cache: false
+
+tooling:
+  static_analysis:
+    - tool: "graphql-eslint"
+      purpose: "Lint GraphQL schemas and operations"
+      offline_capable: true
+    - tool: "graphql-inspector"
+      purpose: "Detect breaking changes and validate schema"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "GQL-CRIT-001"
+      signal: "No query depth limiting configured"
+      evidence_pattern: "depthLimit|maxDepth|queryDepth"
+      explanation: |
+        Without depth limiting, attackers can craft deeply nested queries
+        that consume excessive server resources, causing denial of service.
+        A query like {user{friends{friends{friends{...}}}}} can explode exponentially.
+      remediation: "Implement depth limiting (typically max 10-15 levels)"
+
+    - id: "GQL-CRIT-002"
+      signal: "No query complexity analysis"
+      evidence_pattern: "complexity|costAnalysis|queryComplexity"
+      explanation: |
+        Without complexity limits, attackers can craft queries that request
+        expensive computed fields or large datasets, overwhelming the server.
+      remediation: "Implement query complexity analysis with appropriate limits"
+
+  high:
+    - id: "GQL-HIGH-001"
+      signal: "N+1 query problem in resolvers"
+      evidence_pattern: "async.*forEach|map.*await|for.*await.*find"
+      explanation: |
+        Resolvers that fetch data one-by-one for each item cause N+1 queries,
+        dramatically degrading performance. A list of 100 users each fetching
+        their posts creates 101 database queries.
+      remediation: "Use DataLoader for batching and caching"
+
+    - id: "GQL-HIGH-002"
+      signal: "Unbounded list queries without pagination"
+      evidence_pattern: "\\[\\w+\\]!?\\s*$|type.*\\[.*\\](?!.*first|after|last|before)"
+      explanation: |
+        Queries returning unbounded lists can return millions of records,
+        causing memory exhaustion and timeout issues.
+      remediation: "Implement cursor-based pagination (Relay-style) for all list fields"
+
+  medium:
+    - id: "GQL-MED-001"
+      signal: "Non-nullable fields without defaults"
+      evidence_pattern: "\\w+:\\s*\\w+!"
+      remediation: "Carefully consider nullability - prefer nullable for evolvability"
+
+    - id: "GQL-MED-002"
+      signal: "Missing input validation"
+      evidence_indicators:
+        - "No @constraint directives"
+        - "No input validation in resolvers"
+      remediation: "Add input validation using directives or resolver validation"
+
+  low:
+    - id: "GQL-LOW-001"
+      signal: "Inconsistent naming conventions"
+      remediation: "Use camelCase for fields, PascalCase for types"
+
+  positive:
+    - id: "GQL-POS-001"
+      signal: "DataLoader used for batching"
+    - id: "GQL-POS-002"
+      signal: "Relay-style pagination implemented"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Analyze Schema Structure"
+      description: |
+        Examine GraphQL type definitions and their relationships.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find all type definitions"
+          command: "grep -rn 'type\\s\\+\\w\\+\\s*{' --include='*.graphql' --include='*.gql' ."
+        - purpose: "Find Query root type"
+          command: "grep -rn -A50 'type\\s\\+Query' --include='*.graphql' --include='*.gql' ."
+        - purpose: "Find Mutation root type"
+          command: "grep -rn -A50 'type\\s\\+Mutation' --include='*.graphql' --include='*.gql' ."
+      expected_findings:
+        - "Type definitions and structure"
+        - "Query and mutation operations"
+
+    - id: "2"
+      name: "Check Security Controls"
+      description: |
+        Verify depth limiting and complexity analysis are configured.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find depth limiting config"
+          command: "grep -rn 'depthLimit\\|maxDepth\\|queryDepth' --include='*.js' --include='*.ts' --include='*.yaml' ."
+        - purpose: "Find complexity analysis"
+          command: "grep -rn 'complexity\\|costAnalysis\\|queryComplexity' --include='*.js' --include='*.ts' ."
+        - purpose: "Find rate limiting"
+          command: "grep -rn 'rateLimit\\|throttle' --include='*.js' --include='*.ts' ."
+      expected_findings:
+        - "Security control configuration"
+        - "Missing protections"
+
+    - id: "3"
+      name: "Evaluate Resolver Performance"
+      description: |
+        Check for N+1 query problems and batching implementation.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find DataLoader usage"
+          command: "grep -rn 'DataLoader\\|dataloader\\|batchLoad' --include='*.js' --include='*.ts' ."
+        - purpose: "Find potential N+1 patterns"
+          command: "grep -rn 'async.*map\\|forEach.*await\\|for.*of.*await' --include='*.js' --include='*.ts' . | head -30"
+        - purpose: "Find resolver definitions"
+          command: "grep -rn '@Resolver\\|@ResolveField\\|resolve.*:.*async' --include='*.ts' --include='*.js' ."
+      expected_findings:
+        - "Batching implementation status"
+        - "N+1 query patterns"
+
+    - id: "4"
+      name: "Check Pagination Support"
+      description: |
+        Verify list fields support pagination.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find list return types"
+          command: "grep -rn '\\[\\w\\+\\]' --include='*.graphql' --include='*.gql' ."
+        - purpose: "Find pagination arguments"
+          command: "grep -rn 'first:\\|after:\\|last:\\|before:\\|Connection' --include='*.graphql' --include='*.gql' ."
+      expected_findings:
+        - "List fields without pagination"
+        - "Pagination implementation style"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Schema Analysis"
+        - "Security Assessment"
+        - "Performance Findings"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Schema files and resolvers fully analyzed"
+    medium: "Partial schema or resolver coverage"
+    low: "Limited GraphQL artifacts found"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "graphql-spec"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires thorough schema and resolver analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "graphql-001"
+    item: "Query depth limiting is configured"
+    level: "CRITICAL"
+    verification: |
+      if grep -rq 'depthLimit\|maxDepth\|queryDepth' --include='*.js' --include='*.ts' --include='*.yaml' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+  - id: "graphql-002"
+    item: "Query complexity analysis is implemented"
+    level: "CRITICAL"
+    verification: |
+      if grep -rq 'complexity\|costAnalysis\|queryComplexity' --include='*.js' --include='*.ts' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+  - id: "graphql-003"
+    item: "DataLoader used for relationship resolvers"
+    level: "BLOCKING"
+    verification: |
+      if grep -rq 'DataLoader\|dataloader\|batchLoad' --include='*.js' --include='*.ts' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+  - id: "graphql-004"
+    item: "List fields support pagination"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms list queries use cursor-based pagination"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["graphql-api", "bff", "api-gateway"]
+
+relationships:
+  commonly_combined:
+    - "api-integration.api-contracts.schema-validation"
+    - "api-integration.error-handling.error-response-format"

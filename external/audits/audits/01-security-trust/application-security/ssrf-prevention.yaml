@@ -1,0 +1,444 @@
+audit:
+  id: security-trust.application-security.ssrf-prevention
+  name: Server-Side Request Forgery (SSRF) Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: application-security
+  tier: phd
+  estimated_duration: 2.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines Server-Side Request Forgery (SSRF) vulnerabilities
+    where user-controlled input is used to make server-side HTTP requests.
+    It evaluates URL validation, allowlist implementation, internal network
+    protection, and cloud metadata access prevention.
+  why_it_matters: |
+    SSRF (CWE-918) is OWASP Top 10 A10:2021 and API Security Top 10 API7:2023.
+    Attackers exploit SSRF to access internal services, cloud metadata
+    (169.254.169.254), and bypass firewalls. Modern applications with webhooks,
+    URL previews, and SSO make SSRF more common. Cloud environments make it
+    more dangerous due to accessible metadata services that expose credentials.
+  when_to_run:
+  - Feature using external URLs
+  - Webhook implementations
+  - URL preview functionality
+  - SSO/OAuth implementations
+  - Security assessment
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Code making HTTP requests based on user input
+  - type: running_application
+    description: Application for testing SSRF
+  access_requirements:
+  - Source code access
+  - Test environment access
+  - Network monitoring for SSRF detection
+discovery:
+  code_patterns:
+  - pattern: http\.get|http\.post|requests\.get|fetch|axios|urllib
+    type: regex
+    scope: source
+    purpose: Identify HTTP request operations
+  - pattern: url.*param|req\.query|user.*url|webhook
+    type: regex
+    scope: source
+    purpose: Identify user-controlled URLs
+  - pattern: redirect|follow|allowRedirect
+    type: regex
+    scope: source
+    purpose: Identify redirect handling
+  file_patterns:
+  - glob: '**/webhook*.js'
+    purpose: Webhook handlers
+  - glob: '**/fetch*.py'
+    purpose: URL fetching code
+  - glob: '**/proxy*.java'
+    purpose: Proxy implementations
+knowledge_sources:
+  specifications:
+  - id: cwe-918
+    name: 'CWE-918: Server-Side Request Forgery'
+    url: https://cwe.mitre.org/data/definitions/918.html
+    offline_cache: true
+    priority: required
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-ssrf-cheatsheet
+    name: OWASP SSRF Prevention Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-top10-ssrf
+    name: OWASP Top 10 2021 - SSRF
+    url: https://owasp.org/Top10/2021/A10_2021-Server-Side_Request_Forgery_(SSRF)/
+    offline_cache: true
+  - id: owasp-api-ssrf
+    name: OWASP API Security - SSRF
+    url: https://owasp.org/API-Security/editions/2023/en/0xa7-server-side-request-forgery/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: curl
+    purpose: Test SSRF with internal IPs
+    command: curl 'https://target/fetch?url=http://127.0.0.1:22'
+  - tool: burp
+    purpose: SSRF testing with Collaborator
+    command: Manual testing with Burp Collaborator
+  scripts:
+  - id: ssrf-test
+    language: bash
+    purpose: Test common SSRF payloads
+    source: inline
+    code: |
+      #!/bin/bash
+      URL=$1
+      PAYLOADS=(
+        "http://127.0.0.1"
+        "http://localhost"
+        "http://169.254.169.254/latest/meta-data/"
+        "http://[::1]"
+        "http://0.0.0.0"
+        "http://0177.0.0.1"
+        "http://2130706433"
+      )
+      for payload in "${PAYLOADS[@]}"; do
+        echo -n "$payload: "
+        curl -s "$URL?url=$payload" -o /dev/null -w "%{http_code}\n"
+      done
+signals:
+  critical:
+  - id: SSRF-CRIT-001
+    signal: No URL validation on server-side requests
+    cwe_id: CWE-918
+    evidence_indicators:
+    - User URL directly used in HTTP request
+    - No protocol validation
+    - No host validation
+    explanation: |
+      Without URL validation, attackers can make the server request any
+      URL including internal services, cloud metadata, and local files.
+    remediation: Implement strict URL validation with allowlist approach
+  - id: SSRF-CRIT-002
+    signal: Cloud metadata service accessible
+    cwe_id: CWE-918
+    evidence_indicators:
+    - 169.254.169.254 not blocked
+    - Cloud instance credentials exposed
+    - IMDSv1 accessible
+    explanation: |
+      Cloud metadata services expose instance credentials. SSRF to
+      metadata endpoints (AWS, GCP, Azure) can compromise the entire
+      cloud account.
+    remediation: Block metadata IPs; use IMDSv2 with hop limit; network-level blocking
+  - id: SSRF-CRIT-003
+    signal: Internal network accessible via SSRF
+    cwe_id: CWE-918
+    evidence_indicators:
+    - Private IPs (10.x, 172.16-31.x, 192.168.x) accessible
+    - Localhost accessible
+    - Internal services enumerable
+    explanation: |
+      SSRF to internal networks bypasses firewalls and network segmentation,
+      allowing attackers to access internal services that should not be
+      publicly reachable.
+    remediation: Block private IP ranges; implement allowlist of permitted hosts
+  high:
+  - id: SSRF-HIGH-001
+    signal: Denylist used instead of allowlist
+    cwe_id: CWE-918
+    evidence_pattern: block.*127|blacklist|denylist
+    explanation: |
+      Denylists are bypassable using IP encoding (0177.0.0.1, 2130706433),
+      DNS rebinding, or URL parsing inconsistencies. OWASP explicitly
+      recommends against denylist approaches.
+    remediation: Replace denylist with allowlist of permitted domains
+  - id: SSRF-HIGH-002
+    signal: Redirects followed without validation
+    cwe_id: CWE-918
+    evidence_pattern: follow.*redirect|maxRedirects|allowRedirect
+    explanation: |
+      Even with URL validation, following redirects can bypass protections
+      if the redirect target isn't validated. Attacker controls redirect
+      destination via their server.
+    remediation: Validate URLs after each redirect; limit redirect count
+  - id: SSRF-HIGH-003
+    signal: DNS rebinding vulnerability
+    cwe_id: CWE-918
+    evidence_indicators:
+    - URL validated but not resolved IP
+    - Time between validation and request
+    - No IP validation
+    explanation: |
+      DNS rebinding attacks resolve to allowed IP during validation, then
+      to internal IP when request is made. TOCTOU vulnerability.
+    remediation: Validate resolved IP address, not just hostname
+  - id: SSRF-HIGH-004
+    signal: Protocol not restricted
+    cwe_id: CWE-918
+    evidence_indicators:
+    - file:// protocol allowed
+    - gopher:// protocol allowed
+    - dict:// protocol allowed
+    explanation: |
+      Non-HTTP protocols like file://, gopher://, and dict:// enable
+      local file access and protocol smuggling attacks.
+    remediation: Restrict to http:// and https:// protocols only
+  medium:
+  - id: SSRF-MED-001
+    signal: Webhook URL not validated
+    cwe_id: CWE-918
+    evidence_indicators:
+    - User-provided webhook URL
+    - No URL validation on webhook registration
+    - Webhook fires to user URL
+    explanation: |
+      Webhooks that fire to user-controlled URLs without validation
+      can be used for SSRF when the webhook is triggered.
+    remediation: Validate webhook URLs; verify ownership; use callback verification
+  - id: SSRF-MED-002
+    signal: Error messages leak internal info
+    cwe_id: CWE-200
+    evidence_indicators:
+    - Connection errors reveal internal IPs
+    - Error messages show internal ports
+    - Timeout differences reveal service existence
+    explanation: |
+      Error messages and timing differences help attackers enumerate
+      internal services even without direct access.
+    remediation: Return generic errors; normalize response times
+  - id: SSRF-MED-003
+    signal: No network-level SSRF protection
+    cwe_id: CWE-918
+    evidence_indicators:
+    - No egress filtering for app server
+    - App server can reach any internal service
+    - Metadata service not blocked at network level
+    explanation: |
+      Network-level controls provide defense in depth against SSRF
+      even if application controls fail.
+    remediation: Implement egress filtering; block metadata IPs at network level
+  low:
+  - id: SSRF-LOW-001
+    signal: SSRF attempts not logged
+    cwe_id: CWE-778
+    evidence_indicators:
+    - No logging of URL fetch requests
+    - Blocked requests not logged
+    explanation: |
+      Without logging, SSRF attempts and exploitation go undetected.
+    remediation: Log all URL fetch requests including blocked attempts
+  positive:
+  - id: SSRF-POS-001
+    signal: Strict allowlist implemented
+    explanation: Only known, trusted URLs/domains permitted
+  - id: SSRF-POS-002
+    signal: Resolved IP validated against internal ranges
+    explanation: DNS rebinding protection implemented
+  - id: SSRF-POS-003
+    signal: Network-level egress filtering
+    explanation: Defense in depth with network controls
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify SSRF-Prone Functionality
+    description: |
+      Locate all code that makes HTTP requests based on user input.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find HTTP request code
+      command: grep -rn 'requests\.get\|http\.get\|fetch\|axios\|urllib' src/
+    - purpose: Find user-controlled URLs
+      command: grep -rn 'url.*param\|user.*url\|webhook\|callback' src/
+    - purpose: Find URL handling
+      command: grep -rn 'parseUrl\|URL\(\|new URL' src/
+    expected_findings:
+    - URL fetch locations
+    - User input to URL flow
+  - id: '2'
+    name: Test Internal IP Access
+    description: |
+      Test if the application can be made to request internal IP addresses.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Test localhost access
+      command: curl 'https://target/fetch?url=http://127.0.0.1'
+    - purpose: Test private IP ranges
+      command: curl 'https://target/fetch?url=http://10.0.0.1'
+    - purpose: Test IP encoding bypass
+      command: curl 'https://target/fetch?url=http://0x7f000001'
+    expected_findings:
+    - Internal IP access status
+    - Bypass possibilities
+  - id: '3'
+    name: Test Cloud Metadata Access
+    description: |
+      Verify that cloud metadata services are blocked.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Test AWS metadata
+      command: curl 'https://target/fetch?url=http://169.254.169.254/latest/meta-data/'
+    - purpose: Test GCP metadata
+      command: curl 'https://target/fetch?url=http://metadata.google.internal/computeMetadata/v1/'
+    - purpose: Test Azure metadata
+      command: curl 'https://target/fetch?url=http://169.254.169.254/metadata/instance'
+    expected_findings:
+    - Metadata access blocked
+    - Cloud credential exposure risk
+  - id: '4'
+    name: Review URL Validation Code
+    description: |
+      Examine URL validation implementation for weaknesses.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find URL validation
+      command: grep -rn 'validate.*url\|isValid.*Url\|allowedHosts' src/
+    - purpose: Check for denylist
+      command: grep -rn 'blacklist\|denylist\|blocked.*hosts' src/
+    - purpose: Check redirect handling
+      command: grep -rn 'redirect\|follow\|maxRedirects' src/
+    expected_findings:
+    - Validation approach (allowlist vs denylist)
+    - Redirect handling
+  - id: '5'
+    name: Test Protocol Handling
+    description: |
+      Verify that dangerous protocols are blocked.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Test file protocol
+      command: curl 'https://target/fetch?url=file:///etc/passwd'
+    - purpose: Test gopher protocol
+      command: curl 'https://target/fetch?url=gopher://internal:25'
+    - purpose: Test dict protocol
+      command: curl 'https://target/fetch?url=dict://localhost:11211'
+    expected_findings:
+    - Protocol restrictions
+    - Non-HTTP protocol handling
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - SSRF Vector Analysis
+    - URL Validation Review
+    - Cloud Metadata Risk
+    - Recommendations
+  confidence_guidance:
+    high: Direct testing confirms SSRF possible, code reviewed
+    medium: Testing completed without code access
+    low: Based on configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-ssrf-cheatsheet
+      priority: required
+    - source_id: cwe-918
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: SSRF audit requires comprehensive testing
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: ssrf-001
+  item: URL validation uses allowlist approach
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify allowlist is used, not denylist
+  expected: Confirmed by reviewer
+- id: ssrf-002
+  item: Cloud metadata endpoints blocked
+  level: CRITICAL
+  verification: curl 'https://$HOST/fetch?url=http://169.254.169.254/' -s -w '%{http_code}' | grep -q
+    '400\|403' && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: ssrf-003
+  item: Private IP ranges blocked
+  level: CRITICAL
+  verification: manual
+  verification_notes: Test that 10.x, 172.16-31.x, 192.168.x, 127.x are blocked
+  expected: Confirmed by reviewer
+- id: ssrf-004
+  item: Only HTTP/HTTPS protocols allowed
+  level: BLOCKING
+  verification: curl 'https://$HOST/fetch?url=file:///etc/passwd' -s -w '%{http_code}' | grep -q '400\|403'
+    && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: ssrf-005
+  item: Redirects validated or limited
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify redirect targets are validated
+  expected: Confirmed by reviewer
+- id: ssrf-006
+  item: Resolved IP address validated
+  level: WARNING
+  verification: manual
+  verification_notes: Verify DNS rebinding protection
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP-ASVS
+    controls:
+    - 12.3.1
+    - 12.6.1
+  - framework: PCI-DSS
+    controls:
+    - 6.5.1
+  - framework: NIST-CSF
+    controls:
+    - PR.DS-5
+relationships:
+  commonly_combined:
+  - security-trust.network-security.egress-control
+  - security-trust.input-validation.url-validation
+  - security-trust.application-security.open-redirect

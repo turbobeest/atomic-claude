@@ -1,0 +1,283 @@
+# ============================================================
+# AUDIT: Rolling Deployment Audit
+# ============================================================
+
+audit:
+  id: "reliability-resilience.high-availability.rolling-deployment"
+  name: "Rolling Deployment Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "high-availability"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "deployment"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates rolling deployment configuration including update strategy,
+    surge and unavailable settings, health check integration, rollback
+    triggers, and the handling of long-running requests during pod
+    replacement. Examines both Kubernetes rolling updates and other
+    orchestration approaches.
+
+  why_it_matters: |
+    Rolling deployments enable continuous delivery while maintaining
+    availability. Poorly configured rolling updates can cause service
+    degradation, dropped connections, or complete outages during
+    deployment. Proper configuration ensures smooth transitions with
+    automatic rollback on failures.
+
+  when_to_run:
+    - "When setting up CI/CD pipelines"
+    - "After deployment-related incidents"
+    - "When changing deployment strategy"
+    - "During production readiness review"
+
+prerequisites:
+  required_artifacts:
+    - type: "config"
+      description: "Deployment manifests (Kubernetes, ECS, etc.)"
+    - type: "config"
+      description: "CI/CD pipeline configuration"
+
+  access_requirements:
+    - "Access to deployment configuration files"
+    - "Access to CI/CD system"
+
+discovery:
+  file_patterns:
+    - glob: "**/k8s/**/*.yaml"
+      purpose: "Kubernetes deployment manifests"
+    - glob: "**/.github/workflows/*.yaml"
+      purpose: "GitHub Actions workflows"
+    - glob: "**/deployment*.yaml"
+      purpose: "Deployment configurations"
+
+  code_patterns:
+    - pattern: "RollingUpdate|rollingUpdate|maxSurge|maxUnavailable"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find rolling update configurations"
+
+knowledge_sources:
+  specifications:
+    - id: "k8s-rolling-update"
+      name: "Kubernetes Rolling Update Documentation"
+      url: "https://kubernetes.io/docs/tutorials/kubernetes-basics/update/update-intro/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "k8s-deployment-strategies"
+      name: "Kubernetes Deployment Strategies"
+      url: "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy"
+      offline_cache: true
+    - id: "release-it"
+      name: "Michael Nygard - Release It!"
+      url: "https://pragprog.com/titles/mnee2/release-it-second-edition/"
+      offline_cache: true
+    - id: "sre-book"
+      name: "Site Reliability Engineering"
+      url: "https://sre.google/sre-book/table-of-contents/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Review deployment configuration"
+      command: "kubectl get deployment -o yaml | grep -A10 'strategy:'"
+
+  static_analysis:
+    - tool: "yaml-lint"
+      purpose: "Validate deployment manifest syntax"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "HA-RD-CRIT-001"
+      signal: "maxUnavailable set to 100% or Recreate strategy"
+      evidence_pattern: "maxUnavailable: 100%|strategy: Recreate"
+      explanation: |
+        This configuration causes complete downtime during deployments
+        as all pods are terminated before new ones are ready.
+      remediation: "Use RollingUpdate strategy with appropriate maxUnavailable (25% or less)"
+
+    - id: "HA-RD-CRIT-002"
+      signal: "No readiness probe preventing traffic during startup"
+      evidence_pattern: "Deployment without readinessProbe"
+      explanation: |
+        Without readiness probes, traffic is sent to pods before they
+        can handle requests, causing errors during deployment.
+      remediation: "Configure readiness probes for all containers"
+
+  high:
+    - id: "HA-RD-HIGH-001"
+      signal: "No preStop hook for graceful shutdown"
+      explanation: "Pods may be terminated while still handling requests"
+      remediation: "Add preStop hook to allow in-flight requests to complete"
+
+    - id: "HA-RD-HIGH-002"
+      signal: "terminationGracePeriodSeconds too short for workload"
+      explanation: "Long-running requests may be forcibly terminated"
+      remediation: "Set grace period to accommodate maximum expected request duration"
+
+  medium:
+    - id: "HA-RD-MED-001"
+      signal: "maxSurge and maxUnavailable both set to zero"
+      remediation: "At least one must be non-zero for rolling updates to progress"
+
+    - id: "HA-RD-MED-002"
+      signal: "minReadySeconds not configured"
+      remediation: "Set minReadySeconds to ensure pods are stable before proceeding"
+
+  low:
+    - id: "HA-RD-LOW-001"
+      signal: "No progressDeadlineSeconds configured"
+
+  positive:
+    - id: "HA-RD-POS-001"
+      signal: "Automated rollback on health check failure"
+    - id: "HA-RD-POS-002"
+      signal: "Canary or blue-green deployment patterns implemented"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Review Deployment Strategy"
+      description: |
+        Examine the deployment strategy configuration in manifests.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Extract deployment strategy"
+          command: "grep -A20 'strategy:' deployment.yaml"
+      expected_findings:
+        - "Deployment strategy type"
+        - "maxSurge and maxUnavailable settings"
+
+    - id: "2"
+      name: "Analyze Pod Lifecycle Hooks"
+      description: |
+        Review preStop hooks and termination grace period settings.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find lifecycle hooks"
+          command: "grep -A10 'lifecycle:' deployment.yaml"
+      expected_findings:
+        - "preStop hook configuration"
+        - "terminationGracePeriodSeconds value"
+
+    - id: "3"
+      name: "Verify Health Check Integration"
+      description: |
+        Ensure readiness probes are configured to gate traffic
+        during rolling updates.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check readiness probe"
+          command: "grep -A10 'readinessProbe:' deployment.yaml"
+      expected_findings:
+        - "Readiness probe configuration"
+        - "Startup probe for slow-starting apps"
+
+    - id: "4"
+      name: "Evaluate Rollback Configuration"
+      description: |
+        Review automatic rollback triggers and manual rollback procedures.
+      duration_estimate: "30 min"
+      questions:
+        - "What conditions trigger automatic rollback?"
+        - "How is rollback initiated manually?"
+        - "Is revision history maintained?"
+      expected_findings:
+        - "Rollback trigger configuration"
+        - "revisionHistoryLimit setting"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Deployment Strategy Analysis"
+        - "Graceful Shutdown Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full configuration review with deployment testing"
+    medium: "Configuration review without deployment testing"
+    low: "Documentation review only"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "k8s-rolling-update"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "rolling-deployment-001"
+    item: "RollingUpdate strategy configured with appropriate limits"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify strategy type and maxUnavailable setting"
+    expected: "Confirmed by reviewer"
+
+  - id: "rolling-deployment-002"
+    item: "Readiness probe configured for deployment gating"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Confirm readinessProbe exists in deployment spec"
+    expected: "Confirmed by reviewer"
+
+  - id: "rolling-deployment-003"
+    item: "Graceful shutdown configured with preStop hook"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify preStop hook or adequate termination grace period"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.high-availability.zero-downtime-deployment"
+    - "reliability-resilience.high-availability.health-check"

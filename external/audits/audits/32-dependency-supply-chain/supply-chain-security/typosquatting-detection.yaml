@@ -1,0 +1,232 @@
+audit:
+  id: dependency-supply-chain.supply-chain-security.typosquatting-detection
+  name: Typosquatting Detection Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: dependency-supply-chain
+  category_number: 32
+  subcategory: supply-chain-security
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: dependencies
+  default_profiles:
+  - full
+  - security
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    This audit detects potential typosquatting attacks where malicious
+    packages use names similar to popular legitimate packages. It identifies
+    dependencies with names that could be confused with well-known packages
+    and checks for known typosquatting indicators.
+  why_it_matters: |
+    Typosquatting is a common supply chain attack vector. Attackers create
+    packages like 'loadash' (instead of 'lodash') hoping developers will
+    mistype. These malicious packages can steal credentials, inject
+    backdoors, or exfiltrate data.
+  when_to_run:
+  - After adding new dependencies
+  - During security audits
+  - When onboarding new projects
+  - Regularly as part of supply chain checks
+prerequisites:
+  required_artifacts:
+  - type: dependency_manifest
+    description: package.json, requirements.txt, etc.
+  access_requirements:
+  - Read access to dependency files
+  - Access to typosquatting detection tools
+discovery:
+  file_patterns:
+  - glob: '**/package.json'
+    purpose: Find npm dependencies
+  - glob: '**/requirements.txt'
+    purpose: Find Python dependencies
+knowledge_sources:
+  guides:
+  - id: npm-typosquatting
+    name: npm Typosquatting Detection
+    url: https://snyk.io/blog/typosquatting-attacks/
+  - id: socket-supply-chain
+    name: Socket Supply Chain Security
+    url: https://socket.dev/
+  standards:
+  - id: supply-chain-attacks
+    name: Supply Chain Attack Types
+    relevance: Dependency confusion and typosquatting
+tooling:
+  analysis_tools:
+  - tool: socket
+    purpose: Supply chain security scanning
+  - tool: npm-audit
+    purpose: Check for known malicious packages
+  - tool: snyk
+    purpose: Detect suspicious packages
+signals:
+  critical:
+  - id: DEP-TYPO-CRIT-001
+    signal: Known malicious typosquat package detected
+    evidence_indicators:
+    - Package flagged by npm/PyPI as malicious
+    - Known typosquatting variant of popular package
+    explanation: |
+      A known malicious package in your dependencies is an active
+      security incident. The package may be stealing credentials,
+      installing backdoors, or exfiltrating data.
+    remediation: Remove immediately; investigate for compromise; rotate credentials
+  - id: DEP-TYPO-CRIT-002
+    signal: Package with suspicious install scripts
+    evidence_indicators:
+    - Preinstall/postinstall scripts with obfuscated code
+    - Network calls during installation
+    remediation: Review scripts before installing; consider removal
+  high:
+  - id: DEP-TYPO-HIGH-001
+    signal: Package name similar to popular package
+    evidence_indicators:
+    - One character different from known package
+    - Common misspelling pattern
+    remediation: Verify package is correct; check npm/PyPI page
+  - id: DEP-TYPO-HIGH-002
+    signal: Suspicious package metadata
+    evidence_indicators:
+    - Very recent publication
+    - No README or minimal documentation
+    - Single maintainer with no history
+    remediation: Research package thoroughly before use
+  medium:
+  - id: DEP-TYPO-MED-001
+    signal: Package from unverified source
+    evidence_indicators:
+    - Git URL from unknown repository
+    - Alternative registry package
+    remediation: Verify source authenticity
+  - id: DEP-TYPO-MED-002
+    signal: Package name pattern matches typosquatting
+    evidence_indicators:
+    - Hyphen vs underscore variation
+    - Plural/singular variation
+    remediation: Confirm package is legitimate
+  low:
+  - id: DEP-TYPO-LOW-001
+    signal: Package naming could cause confusion
+    evidence_indicators:
+    - Similar name to another package
+    - Could be mistaken for official package
+    remediation: Document to avoid future confusion
+  positive:
+  - id: DEP-TYPO-POS-001
+    signal: No typosquatting indicators detected
+  - id: DEP-TYPO-POS-002
+    signal: All packages verified as legitimate
+procedure:
+  context:
+    cognitive_mode: investigative
+    ensemble_role: security-auditor
+  steps:
+  - id: '1'
+    name: Run Socket Analysis
+    description: Check dependencies with Socket.dev
+    commands:
+    - purpose: Run socket scan
+      command: npx socket scan 2>/dev/null || echo 'socket CLI not available'
+  - id: '2'
+    name: Check for Known Typosquats
+    description: Compare against known typosquatting patterns
+    commands:
+    - purpose: List dependencies for review
+      command: cat package.json 2>/dev/null | jq -r '.dependencies + .devDependencies | keys[]' | head
+        -50 || echo 'package.json not available'
+  - id: '3'
+    name: Check Package Metadata
+    description: Review suspicious package metadata
+    commands:
+    - purpose: Check package info
+      command: 'npm info lodash 2>/dev/null | head -30 || echo ''Example: npm info [package] to check
+        metadata'''
+  - id: '4'
+    name: Look for Similar Names
+    description: Find packages with similar names to popular ones
+    commands:
+    - purpose: Generate common typosquatting checks
+      command: |-
+        echo 'Common Typosquatting Patterns:
+
+        lodash -> loadash, lodas, lodesh
+        react -> reakt, raect, react-js (not official)
+        axios -> axois, axioss, axios-http
+        express -> expres, expresss
+
+        Check your deps against official package names.'
+  - id: '5'
+    name: Check Install Scripts
+    description: Review preinstall/postinstall scripts
+    commands:
+    - purpose: Find packages with install scripts
+      command: find node_modules -maxdepth 2 -name 'package.json' -exec grep -l '"preinstall"\|"postinstall"'
+        {} \; 2>/dev/null | head -20 || echo 'Install script check requires node_modules'
+  - id: '6'
+    name: Review New Dependencies
+    description: Flag recently added dependencies for review
+    commands:
+    - purpose: Check recent additions
+      command: git diff HEAD~10 -- package.json 2>/dev/null | grep '+' | grep -v '"version"' | head -20
+        || echo 'Could not check recent changes'
+output:
+  deliverables:
+  - type: typosquat_assessment
+    format: structured
+    description: Analysis of potential typosquatting
+  - type: suspicious_packages
+    format: list
+    description: Packages requiring further review
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Suspicious Findings
+    - Package Verification
+    - Recommendations
+closeout_checklist:
+- id: dep-typo-001
+  item: No known malicious packages present
+  level: CRITICAL
+  verification: Socket/npm audit clean
+- id: dep-typo-002
+  item: Package names verified as legitimate
+  level: REQUIRED
+  verification: Manual verification complete
+- id: dep-typo-003
+  item: Suspicious install scripts reviewed
+  level: REQUIRED
+  verification: Script analysis complete
+- id: dep-typo-004
+  item: New dependencies reviewed before merge
+  level: RECOMMENDED
+  verification: Review process documented
+governance:
+  applicable_to:
+    archetypes:
+    - all-software-projects
+  compliance_mappings:
+  - framework: SOC 2
+    control: CC6.1
+    description: Malware prevention
+  - framework: NIST CSF
+    control: DE.CM-4
+    description: Malicious code detection
+relationships:
+  commonly_combined:
+  - dependency-supply-chain.vulnerability-scanning.cve-detection
+  depends_on:
+  - dependency-supply-chain.dependency-inventory.dependency-enumeration
+  feeds_into:
+  - security-trust.malware-prevention

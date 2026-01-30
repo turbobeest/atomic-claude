@@ -1,0 +1,386 @@
+audit:
+  id: security-trust.cryptography.hashing-algorithms
+  name: Hashing Algorithm Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: cryptography
+  tier: phd
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    Examines the use of cryptographic hash functions across the application
+    for password hashing, data integrity, digital signatures, and other
+    purposes. Verifies use of appropriate algorithms (Argon2id, bcrypt,
+    SHA-256+) and proper configuration including salting, work factors,
+    and context-appropriate selection.
+  why_it_matters: |
+    Weak hashing algorithms (MD5, SHA-1) are vulnerable to collision and
+    preimage attacks. Password hashing without adaptive functions (Argon2id,
+    bcrypt) enables offline brute-force attacks. OWASP Top 10 A02:2021
+    covers cryptographic failures. CWE-328 (Use of Weak Hash) and CWE-916
+    (Use of Password Hash with Insufficient Computational Effort) directly
+    apply.
+  when_to_run:
+  - Initial security assessment
+  - After authentication changes
+  - During cryptographic review
+  - When upgrading hash algorithms
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application with hashing operations
+  access_requirements:
+  - Read access to source code
+  - Access to authentication implementation
+discovery:
+  code_patterns:
+  - pattern: (MD5|md5|Md5)\s*\(
+    type: regex
+    scope: source
+    purpose: Find MD5 usage
+  - pattern: (SHA1|sha1|SHA-1)\s*\(
+    type: regex
+    scope: source
+    purpose: Find SHA-1 usage
+  - pattern: (bcrypt|scrypt|argon2|pbkdf2|PBKDF2)
+    type: regex
+    scope: source
+    purpose: Find password hashing algorithms
+  - pattern: (hash|Hash|digest|Digest)\s*\(
+    type: regex
+    scope: source
+    purpose: Find general hashing
+  - pattern: (salt|Salt|SALT)
+    type: regex
+    scope: source
+    purpose: Find salting patterns
+  file_patterns:
+  - glob: '**/auth/**'
+    purpose: Authentication modules
+  - glob: '**/password/**'
+    purpose: Password handling
+  - glob: '**/crypto/**'
+    purpose: Cryptography modules
+  - glob: '**/hash/**'
+    purpose: Hashing utilities
+knowledge_sources:
+  specifications:
+  - id: rfc-9106
+    name: 'RFC 9106: Argon2 Memory-Hard Function'
+    url: https://www.rfc-editor.org/rfc/rfc9106
+    offline_cache: true
+    priority: required
+  - id: nist-sp-800-132
+    name: 'NIST SP 800-132: Password-Based Key Derivation'
+    url: https://csrc.nist.gov/publications/detail/sp/800-132/final
+    offline_cache: true
+    priority: required
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-password-storage
+    name: OWASP Password Storage Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-crypto
+    name: OWASP Cryptographic Storage Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect weak hash usage
+    offline_capable: true
+  - tool: bandit
+    purpose: Python security linting
+    offline_capable: true
+  scripts:
+  - id: hash-search
+    language: bash
+    purpose: Find hashing patterns
+    source: inline
+    code: |
+      # Search for hashing-related patterns
+      grep -rn --include="*.{js,ts,py,java,go,rb,cs}" \
+        -E "(md5|sha1|sha256|bcrypt|argon2|hash)" .
+signals:
+  critical:
+  - id: HASH-CRIT-001
+    signal: MD5 used for password hashing
+    evidence_pattern: (MD5|md5)\.*(hash|digest|password|createHash)
+    cwe: CWE-328
+    explanation: |
+      MD5 is cryptographically broken and unsuitable for password hashing.
+      Collision attacks are practical, and MD5 is too fast for password
+      protection, enabling rapid brute-force attacks.
+    remediation: Use Argon2id, bcrypt, or scrypt for password hashing
+  - id: HASH-CRIT-002
+    signal: Password hashing without salt
+    evidence_pattern: (hash|Hash)\(password\)|password.*hash(?!.*salt)
+    cwe: CWE-759
+    explanation: |
+      Passwords are hashed without salt, making them vulnerable to
+      rainbow table attacks and enabling identification of users with
+      the same password.
+    remediation: Use per-password random salt (automatic with Argon2id/bcrypt)
+  - id: HASH-CRIT-003
+    signal: Fast hash used for passwords (SHA-1/SHA-256)
+    evidence_pattern: (SHA1|SHA256|sha1|sha256).*password|password.*(SHA1|SHA256)
+    cwe: CWE-916
+    explanation: |
+      Fast cryptographic hashes (SHA-1, SHA-256) are unsuitable for
+      password hashing because they can be computed rapidly (billions
+      per second on GPU), enabling brute-force attacks.
+    remediation: 'Use adaptive password hashing: Argon2id (preferred), bcrypt, or scrypt'
+  high:
+  - id: HASH-HIGH-001
+    signal: Low work factor for password hash
+    evidence_pattern: (cost|rounds|iterations).*[1-8][^0-9]|bcrypt.*cost.*[1-8][^0-9]
+    cwe: CWE-916
+    explanation: |
+      Password hash work factor is too low. OWASP recommends bcrypt
+      cost 10+, Argon2id with 19MiB memory and 2 iterations minimum.
+    remediation: 'Increase work factor: bcrypt cost 10+, Argon2id memory 19MiB+'
+  - id: HASH-HIGH-002
+    signal: SHA-1 used for security purposes
+    evidence_pattern: (SHA1|sha1|SHA-1).*\((secret|signature|token|verify)
+    cwe: CWE-328
+    explanation: |
+      SHA-1 has known collision vulnerabilities and should not be
+      used for security-critical hashing like signatures or tokens.
+    remediation: Use SHA-256 or SHA-3 for security-critical hashing
+  - id: HASH-HIGH-003
+    signal: Hardcoded salt or pepper
+    evidence_pattern: (salt|pepper)\s*[=:]\s*['"][^'"]+['"]
+    cwe: CWE-760
+    explanation: |
+      Salt or pepper values are hardcoded, making them available to
+      anyone with code access and consistent across all passwords.
+    remediation: Generate random salt per password; store pepper in secure secrets manager
+  medium:
+  - id: HASH-MED-001
+    signal: MD5/SHA-1 for non-security purposes
+    evidence_pattern: (md5|sha1).*(checksum|etag|cache)
+    cwe: CWE-328
+    remediation: Consider SHA-256 even for non-security hashing; document exception
+  - id: HASH-MED-002
+    signal: Custom password hashing implementation
+    evidence_pattern: function.*hashPassword|def.*hash_password(?!.*bcrypt|argon)
+    cwe: CWE-327
+    remediation: Use established libraries (bcrypt, argon2) instead of custom implementation
+  low:
+  - id: HASH-LOW-001
+    signal: Inconsistent hash algorithm usage
+    evidence_pattern: (md5|sha1|sha256|bcrypt|argon2)
+    remediation: Standardize on single recommended algorithm per use case
+  positive:
+  - id: HASH-POS-001
+    signal: Argon2id used for password hashing
+    evidence_pattern: (argon2id|Argon2id|ARGON2ID)
+  - id: HASH-POS-002
+    signal: bcrypt with appropriate cost
+    evidence_pattern: bcrypt.*(cost|rounds).*(10|11|12|1[3-9])
+  - id: HASH-POS-003
+    signal: SHA-256 or better for integrity
+    evidence_pattern: (SHA256|SHA-256|SHA384|SHA-384|SHA512|SHA-512)
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Password Hashing
+    description: |
+      Locate all password hashing implementations and verify
+      use of appropriate adaptive algorithms.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find password hashing
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(password|Password).*(hash|Hash|encrypt|Encrypt)" .
+    - purpose: Find adaptive hash algorithms
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(bcrypt|scrypt|argon2|pbkdf2|PBKDF2)" .
+    expected_findings:
+    - Argon2id, bcrypt, or scrypt for passwords
+    - Appropriate work factors
+  - id: '2'
+    name: Detect Weak Hash Algorithms
+    description: |
+      Search for deprecated or weak hash algorithms
+      (MD5, SHA-1) in security contexts.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find MD5 usage
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -iE \
+          "md5|MD5" .
+    - purpose: Find SHA-1 usage
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -iE \
+          "sha1|SHA1|SHA-1" .
+    expected_findings:
+    - No MD5 for security
+    - No SHA-1 for security
+  - id: '3'
+    name: Verify Salting Practices
+    description: |
+      Ensure passwords are salted with unique random
+      values (or use algorithms that auto-salt).
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find salt usage
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(salt|Salt|SALT)" .
+    - purpose: Check for random salt generation
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(genSalt|randomBytes|SecureRandom).*salt" .
+    expected_findings:
+    - Random salt per password
+    - No hardcoded salts
+  - id: '4'
+    name: Analyze Work Factor Configuration
+    description: |
+      Verify that password hashing work factors meet
+      current recommendations.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find work factor configuration
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(cost|rounds|iterations|workFactor).*[0-9]+" .
+    - purpose: Check bcrypt cost
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "bcrypt.*(cost|rounds).*[0-9]+" .
+    expected_findings:
+    - bcrypt cost 10+
+    - Argon2id memory 19MiB+
+  - id: '5'
+    name: Review Integrity Hashing
+    description: |
+      Check hash algorithms used for data integrity,
+      signatures, and verification.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find integrity hashing
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(hash|digest).*(verify|checksum|signature|integrity)" .
+    - purpose: Verify SHA-256+ usage
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(SHA256|SHA-256|SHA384|SHA512)" .
+    expected_findings:
+    - SHA-256 or better for integrity
+    - No MD5/SHA-1 for signatures
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Password Hashing Analysis
+    - Integrity Hashing Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Argon2id/bcrypt with proper configuration for passwords; SHA-256+ for integrity
+    medium: Acceptable algorithms but configuration concerns
+    low: Hashing patterns found but algorithms unclear
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-password-storage
+      priority: required
+    - source_id: nist-sp-800-132
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: hash-001
+  item: No MD5 for password hashing
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" -i "md5.*password\|password.*md5" . | wc -l
+  expected: '0'
+- id: hash-002
+  item: Adaptive hash for passwords (Argon2id/bcrypt/scrypt)
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "(argon2\|bcrypt\|scrypt)" . | wc -l
+  expected: Greater than 0 if password hashing exists
+- id: hash-003
+  item: No hardcoded salt values
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "salt\\s*[=:]\\s*['\"][^'\"]{8,}['\"]" . | wc -l
+  expected: '0'
+- id: hash-004
+  item: Appropriate work factor configured
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" -E "bcrypt.*cost.*(10|11|12|1[3-9])" . | wc -l
+  expected: Greater than 0 if bcrypt used
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-328
+    - CWE-759
+    - CWE-916
+  - framework: OWASP Top 10 2021
+    controls:
+    - A02:2021
+  - framework: NIST SP 800-132
+    controls:
+    - Password-Based Key Derivation
+  - framework: FIPS 180-4
+    controls:
+    - Secure Hash Standard
+relationships:
+  commonly_combined:
+  - security-trust.authentication.password-storage
+  - security-trust.cryptography.encryption-at-rest
+  - security-trust.cryptography.key-management

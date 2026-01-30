@@ -1,0 +1,322 @@
+# ============================================================
+# BATCH VS STREAM PROCESSING AUDIT
+# ============================================================
+# Evaluates whether batch or stream processing is appropriate
+# for different data processing workloads.
+
+audit:
+  id: "performance-efficiency.algorithmic-efficiency.batch-vs-stream-processing"
+  name: "Batch vs Stream Processing Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "algorithmic-efficiency"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes data processing patterns to determine whether batch or streaming
+    approaches are appropriate based on latency requirements, data volume,
+    resource constraints, and exactly-once processing needs.
+
+  why_it_matters: |
+    Batch processing when streaming is needed causes unacceptable latency.
+    Streaming when batch would suffice adds complexity and cost. The wrong
+    choice leads to either slow business insights, resource waste, or
+    over-engineered systems that are hard to maintain.
+
+  when_to_run:
+    - "Data pipeline design"
+    - "Latency requirements analysis"
+    - "Processing architecture review"
+    - "Cost optimization"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application and data processing code"
+    - type: "architecture_docs"
+      description: "Data flow documentation"
+
+  access_requirements:
+    - "Source code repository access"
+    - "Data pipeline configuration access"
+
+discovery:
+  code_patterns:
+    - pattern: "stream\\(|pipe\\(|Observable|AsyncIterator|ReadStream"
+      type: "regex"
+      scope: "source"
+      purpose: "Find streaming patterns"
+
+    - pattern: "batch|bulk|forEach.*await|Promise\\.all\\(.*map"
+      type: "regex"
+      scope: "source"
+      purpose: "Find batch processing patterns"
+
+    - pattern: "kafka|kinesis|pubsub|RabbitMQ|SQS"
+      type: "regex"
+      scope: "source"
+      purpose: "Find message queue usage"
+
+    - pattern: "cron|schedule|@Scheduled|setInterval.*process"
+      type: "regex"
+      scope: "source"
+      purpose: "Find scheduled batch jobs"
+
+  file_patterns:
+    - glob: "**/jobs/**/*.{py,js,ts,java}"
+      purpose: "Background job files"
+    - glob: "**/workers/**/*.{py,js,ts,java}"
+      purpose: "Worker process files"
+    - glob: "**/stream*.{py,js,ts,java}"
+      purpose: "Stream processing files"
+    - glob: "**/pipeline*.{py,js,ts,java}"
+      purpose: "Data pipeline files"
+
+knowledge_sources:
+  guides:
+    - id: "kafka-streams"
+      name: "Kafka Streams Documentation"
+      url: "https://kafka.apache.org/documentation/streams/"
+      offline_cache: true
+
+    - id: "spark-streaming"
+      name: "Spark Streaming Guide"
+      url: "https://spark.apache.org/docs/latest/streaming-programming-guide.html"
+      offline_cache: true
+
+  papers:
+    - id: "streaming-101"
+      title: "Streaming 101: The world beyond batch"
+      url: "https://www.oreilly.com/ideas/streaming-101"
+
+tooling:
+  static_analysis:
+    - tool: "grep/ripgrep"
+      purpose: "Find processing patterns"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "BATCH-STREAM-CRIT-001"
+      signal: "Batch processing for real-time requirements"
+      evidence_pattern: "Hourly/daily cron for data needing sub-minute freshness"
+      explanation: |
+        Using batch processing for real-time requirements creates unacceptable
+        latency. If business needs data within minutes, hourly batch jobs
+        cannot meet the requirement.
+      remediation: "Migrate to streaming for low-latency requirements"
+
+    - id: "BATCH-STREAM-CRIT-002"
+      signal: "Streaming processing for bounded datasets"
+      evidence_pattern: "Kafka consumers processing small, bounded data"
+      explanation: |
+        Streaming infrastructure for small bounded datasets adds unnecessary
+        complexity and cost. If processing a CSV file once, batch is simpler
+        and cheaper.
+      remediation: "Use batch processing for bounded, infrequent workloads"
+
+  high:
+    - id: "BATCH-STREAM-HIGH-001"
+      signal: "Memory accumulation in pseudo-streaming"
+      evidence_pattern: "Collecting all stream items before processing"
+      explanation: |
+        Collecting all items from a stream into memory defeats the purpose
+        of streaming. This creates memory exhaustion risk and processing
+        delays.
+      remediation: "Process items as they arrive without accumulation"
+
+    - id: "BATCH-STREAM-HIGH-002"
+      signal: "No backpressure handling in streaming"
+      evidence_pattern: "Stream consumer without rate limiting or backpressure"
+      explanation: |
+        Without backpressure, fast producers can overwhelm slow consumers,
+        causing memory exhaustion, dropped messages, or cascading failures.
+      remediation: "Implement backpressure handling (bounded queues, rate limiting)"
+
+  medium:
+    - id: "BATCH-STREAM-MED-001"
+      signal: "Micro-batching when true streaming is feasible"
+      evidence_pattern: "Small batch windows (< 1 min) when single-event processing is viable"
+      explanation: |
+        Micro-batching adds latency without providing batch benefits. If
+        processing single events is feasible, true streaming provides
+        lower latency.
+      remediation: "Consider single-event processing or justify batch window"
+
+    - id: "BATCH-STREAM-MED-002"
+      signal: "Large batch windows causing freshness issues"
+      evidence_threshold: "Batch windows > 24 hours for non-archival data"
+      explanation: |
+        Very large batch windows delay insights significantly. Consider
+        whether more frequent batches or streaming would provide better
+        business value.
+      remediation: "Reduce batch window or evaluate streaming alternative"
+
+  low:
+    - id: "BATCH-STREAM-LOW-001"
+      signal: "Processing pattern not documented"
+      remediation: "Document latency requirements and processing choice rationale"
+
+  positive:
+    - id: "BATCH-STREAM-POS-001"
+      signal: "Processing model matches latency requirements"
+
+    - id: "BATCH-STREAM-POS-002"
+      signal: "Proper backpressure handling implemented"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify data processing workloads"
+      description: |
+        Catalog all data processing jobs and pipelines, including their
+        purpose, volume, and current processing model.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find batch jobs"
+          command: "rg -n 'cron|schedule|@Scheduled|batch' --type py --type js --type java"
+        - purpose: "Find streaming"
+          command: "rg -n 'stream|kafka|kinesis|pubsub' --type py --type js --type java"
+
+      expected_findings:
+        - "Processing workload inventory"
+        - "Current processing model per workload"
+
+    - id: "2"
+      name: "Analyze latency requirements"
+      description: |
+        For each processing workload, determine the business latency
+        requirements (real-time, near-real-time, daily, etc.).
+      duration_estimate: "30 min"
+
+      questions:
+        - "How fresh does the processed data need to be?"
+        - "What is the business impact of processing delay?"
+        - "Are there SLAs for data freshness?"
+
+      expected_findings:
+        - "Latency requirements per workload"
+        - "SLA documentation"
+
+    - id: "3"
+      name: "Evaluate processing model fit"
+      description: |
+        Compare current processing model against latency requirements
+        and identify mismatches.
+      duration_estimate: "30 min"
+
+      expected_findings:
+        - "Model-requirement alignment assessment"
+        - "Mismatch identification"
+
+    - id: "4"
+      name: "Review streaming implementation"
+      description: |
+        For streaming workloads, verify proper implementation including
+        backpressure, exactly-once semantics, and error handling.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find backpressure handling"
+          command: "rg -n 'backpressure|highWaterMark|buffer.*size|rate.*limit' --type py --type js"
+
+      expected_findings:
+        - "Streaming implementation quality"
+        - "Backpressure handling assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Processing Workload Inventory"
+        - "Model-Requirement Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Code analysis with documented latency requirements"
+    medium: "Code analysis with inferred requirements"
+    low: "Pattern matching without business context"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "kafka-streams"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed processing analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "batch-stream-001"
+    item: "Processing model matches latency requirements"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Each processing job meets its freshness SLA"
+    expected: "Confirmed by reviewer"
+
+  - id: "batch-stream-002"
+    item: "Streaming implementations handle backpressure"
+    level: "BLOCKING"
+    verification: "rg -l 'backpressure|highWaterMark' && echo PASS || echo 'REVIEW streaming code'"
+    expected: "PASS if streaming exists"
+
+  - id: "batch-stream-003"
+    item: "Processing patterns documented"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Rationale for batch vs stream choice is documented"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Data Architecture"
+      controls: ["Processing Model Selection"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.algorithmic-efficiency.space-complexity"
+    - "performance-efficiency.latency.processing-latency"
+    - "performance-efficiency.throughput.pipeline-throughput"

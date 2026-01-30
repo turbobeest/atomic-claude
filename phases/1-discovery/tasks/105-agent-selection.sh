@@ -30,6 +30,7 @@ EXPERT_AGENTS_DIR=""
 # Load agent repo path from Phase 0 config or use defaults
 _105_load_agent_config() {
     local setup_config="$ATOMIC_OUTPUT_DIR/0-setup/project-config.json"
+    local embedded_repo="$ATOMIC_ROOT/external/agents"
     local default_repo="$ATOMIC_ROOT/repos/agents"
 
     # Try to load from Phase 0 config
@@ -38,6 +39,11 @@ _105_load_agent_config() {
         if [[ -n "$configured_repo" && "$configured_repo" != "null" && "$configured_repo" != "builtin" ]]; then
             AGENT_REPO="$configured_repo"
         fi
+    fi
+
+    # Check for embedded repo (monorepo deployment)
+    if [[ -z "$AGENT_REPO" && -f "$embedded_repo/agent-manifest.json" ]]; then
+        AGENT_REPO="$embedded_repo"
     fi
 
     # Fall back to environment variable or default

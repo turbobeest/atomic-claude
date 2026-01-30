@@ -1,0 +1,387 @@
+audit:
+  id: infrastructure-as-code.cicd-integration.rollback-strategy
+  name: Rollback Strategy
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: cicd-integration
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: process
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the strategy and mechanisms for rolling back
+    infrastructure changes when deployments cause issues. It evaluates:
+
+    - Git-based rollback (reverting code changes)
+    - State-based rollback (restoring previous state)
+    - Blue-green or canary deployment patterns
+    - Automated rollback triggers
+    - Rollback testing and validation
+    - Time-to-recovery metrics
+
+    The focus is on ensuring infrastructure can be quickly restored to
+    a known-good state when issues occur.
+  why_it_matters: |
+    Infrastructure deployments can fail or cause unexpected issues.
+    Without a rollback strategy:
+
+    - Outages persist while teams debug and fix forward
+    - Manual rollback attempts introduce additional errors
+    - No tested recovery procedure leads to panic decisions
+    - Mean Time to Recovery (MTTR) is unpredictable
+    - Some changes may be irreversible (data loss)
+
+    A tested rollback strategy ensures rapid recovery and reduces
+    the blast radius of infrastructure incidents.
+  when_to_run:
+  - When establishing IaC deployment procedures
+  - After incidents requiring rollback
+  - During disaster recovery planning
+  - When implementing new IaC patterns
+prerequisites:
+  required_artifacts:
+  - type: runbooks
+    description: Rollback procedures and runbooks
+  - type: cicd_configuration
+    description: Pipeline configurations
+  - type: state_backend
+    description: Terraform state backend configuration
+  access_requirements:
+  - Access to state backend (versioning/backups)
+  - Access to deployment history
+  - Access to runbooks and documentation
+discovery:
+  code_patterns:
+  - pattern: rollback|revert|restore
+    type: keyword
+    scope: config
+    purpose: Find rollback references in pipelines
+  - pattern: state.*backup|backup.*state
+    type: regex
+    scope: config
+    purpose: Find state backup configuration
+  - pattern: blue.*green|canary
+    type: regex
+    scope: config
+    purpose: Detect deployment patterns
+  - pattern: versioning.*enabled|version.*true
+    type: regex
+    scope: config
+    purpose: Find S3 versioning for state
+  file_patterns:
+  - glob: '**/runbooks/**'
+    purpose: Rollback runbooks
+  - glob: '**/docs/**rollback**'
+    purpose: Rollback documentation
+  - glob: '**/*backend*.tf'
+    purpose: Backend configuration for state versioning
+  interviews:
+  - role: On-call engineers
+    questions:
+    - Walk me through the last time you had to rollback an infrastructure change
+    - How long does a typical rollback take?
+    - What's the process for rolling back a production change?
+    purpose: Understand actual rollback practices
+  - role: SRE/Platform team
+    questions:
+    - Is state backup/versioning enabled?
+    - Have rollback procedures been tested?
+    purpose: Verify technical capabilities
+knowledge_sources:
+  specifications:
+  - id: terraform-state-recovery
+    name: Terraform State Recovery
+    url: https://developer.hashicorp.com/terraform/cli/state/recover
+    offline_cache: true
+    priority: required
+  guides:
+  - id: s3-versioning
+    name: AWS S3 Versioning for Terraform State
+    url: https://docs.aws.amazon.com/AmazonS3/latest/userguide/Versioning.html
+    offline_cache: true
+  - id: terraform-cloud-state-versions
+    name: Terraform Cloud State Versions
+    url: https://developer.hashicorp.com/terraform/cloud-docs/workspaces/state
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: terraform state pull
+    purpose: Retrieve current state for backup
+    command: terraform state pull > state-backup.json
+  - tool: terraform state push
+    purpose: Restore state from backup
+    command: terraform state push state-backup.json
+  - tool: aws s3api list-object-versions
+    purpose: List state file versions for rollback
+    command: aws s3api list-object-versions --bucket terraform-state --prefix state.tfstate
+  scripts:
+  - id: state-rollback
+    language: bash
+    purpose: Rollback state to previous version
+    source: inline
+    code: |
+      #!/bin/bash
+      # Rollback to previous state version (S3 backend)
+
+      BUCKET="terraform-state"
+      KEY="state.tfstate"
+
+      # List last 5 versions
+      aws s3api list-object-versions --bucket $BUCKET --prefix $KEY \
+        --query 'Versions[0:5].{VersionId:VersionId,LastModified:LastModified}' \
+        --output table
+
+      # Download specific version
+      read -p "Enter VersionId to restore: " VERSION_ID
+      aws s3api get-object --bucket $BUCKET --key $KEY \
+        --version-id $VERSION_ID ./restored-state.tfstate
+
+      echo "Review restored-state.tfstate before pushing"
+      echo "To restore: terraform state push ./restored-state.tfstate"
+signals:
+  critical:
+  - id: IAC-ROLL-CRIT-001
+    signal: No state versioning or backup mechanism
+    evidence_pattern: S3 backend without versioning or no state backup
+    explanation: |
+      Without state versioning, rollback requires manually recreating
+      resources or relying on disaster recovery from cloud provider
+      backups. State corruption or bad applies may be unrecoverable.
+    remediation: |
+      Enable state versioning:
+      terraform {
+        backend "s3" {
+          bucket         = "terraform-state"
+          key            = "state.tfstate"
+          versioning     = true
+          # Or use Terraform Cloud which versions automatically
+        }
+      }
+  - id: IAC-ROLL-CRIT-002
+    signal: No documented rollback procedure
+    evidence_pattern: Absence of rollback runbooks or documentation
+    explanation: |
+      Without documented procedures, engineers must improvise during
+      incidents, leading to errors and extended outages. Each rollback
+      becomes a unique, high-stress problem-solving exercise.
+    remediation: |
+      Create rollback runbook:
+      1. Define when to rollback vs fix forward
+      2. Document git-based rollback procedure
+      3. Document state-based rollback procedure
+      4. Include verification steps
+      5. Test and validate periodically
+  high:
+  - id: IAC-ROLL-HIGH-001
+    signal: Rollback procedure not tested
+    evidence_pattern: No evidence of rollback drills or tests
+    explanation: |
+      Untested procedures fail when needed. Rollback mechanisms may
+      have unexpected issues (permissions, state conflicts) that
+      only surface during actual incidents.
+    remediation: |
+      Implement rollback testing:
+      - Run quarterly rollback drills
+      - Include rollback validation in CI/CD
+      - Document lessons learned from tests
+  - id: IAC-ROLL-HIGH-002
+    signal: No automated rollback triggers
+    evidence_pattern: Manual-only rollback initiation
+    explanation: |
+      If rollback requires human intervention, recovery time depends
+      on alert response time and engineer availability. Automated
+      triggers can initiate rollback faster for detectable failures.
+    remediation: |
+      Implement automated rollback triggers:
+      - Monitor health checks after deploy
+      - Trigger rollback on failure thresholds
+      - Alert on automatic rollback actions
+  medium:
+  - id: IAC-ROLL-MED-001
+    signal: Rollback only possible via git revert
+    remediation: |
+      Complement git-based rollback with state recovery:
+      - Git revert works for code changes
+      - State rollback needed for apply failures
+      - Both should be documented and tested
+  - id: IAC-ROLL-MED-002
+    signal: No distinction between rollback strategies by resource type
+    remediation: |
+      Define rollback strategies by resource:
+      - Stateless resources: git revert + apply
+      - Stateful resources: careful state management
+      - Data resources: may require backup/restore
+  low:
+  - id: IAC-ROLL-LOW-001
+    signal: Rollback metrics not tracked
+    remediation: Track MTTR and rollback frequency
+  positive:
+  - id: IAC-ROLL-POS-001
+    signal: State versioning enabled with retention policy
+  - id: IAC-ROLL-POS-002
+    signal: Documented and tested rollback runbook
+  - id: IAC-ROLL-POS-003
+    signal: Automated rollback on health check failure
+  - id: IAC-ROLL-POS-004
+    signal: Regular rollback drills conducted
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Verify state backup/versioning
+    description: |
+      Check that state backend has versioning or backup enabled.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check S3 versioning
+      command: aws s3api get-bucket-versioning --bucket terraform-state 2>/dev/null
+    - purpose: Check backend configuration
+      command: grep -r -A10 'backend' --include='*.tf' . | head -30
+    - purpose: Check Terraform Cloud state versions
+      command: terraform state list 2>/dev/null | head -5
+    expected_findings:
+    - State versioning status
+    - Backup mechanism
+  - id: '2'
+    name: Review rollback documentation
+    description: |
+      Check for rollback runbooks and procedures.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find rollback documentation
+      command: find . -name '*rollback*' -o -name '*runbook*' | head -20
+    - purpose: Search for rollback procedures
+      command: grep -r 'rollback' --include='*.md' . | head -20
+    expected_findings:
+    - Rollback documentation exists
+    - Procedure completeness
+  - id: '3'
+    name: Check for rollback mechanisms in pipeline
+    description: |
+      Look for rollback capabilities in CI/CD configuration.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find rollback jobs in CI
+      command: grep -r 'rollback\|revert' .github/ .gitlab-ci.yml 2>/dev/null | head -20
+    - purpose: Check for deployment tracking
+      command: grep -r 'deployment\|release' .github/ --include='*.yml' | head -20
+    expected_findings:
+    - Rollback automation
+    - Deployment history tracking
+  - id: '4'
+    name: Interview operations team
+    description: |
+      Understand actual rollback practices and experiences.
+    duration_estimate: 30 min
+    questions:
+    - When was the last infrastructure rollback?
+    - How long did it take?
+    - What procedure was followed?
+    - Were there any issues with the rollback?
+    expected_findings:
+    - Rollback frequency
+    - Time to recovery
+    - Procedure effectiveness
+  - id: '5'
+    name: Test rollback capability
+    description: |
+      If safe, verify rollback mechanisms work as documented.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List state versions available
+      command: aws s3api list-object-versions --bucket terraform-state --prefix state.tfstate --max-keys
+        5 2>/dev/null | jq '.Versions[:5]'
+    - purpose: Pull current state
+      command: terraform state pull > /tmp/current-state.json 2>/dev/null && echo 'State pulled successfully'
+    expected_findings:
+    - State versions accessible
+    - Recovery mechanisms functional
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - State Backup/Versioning Assessment
+    - Rollback Procedure Review
+    - Recovery Time Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Rollback tested or recent rollback evidence reviewed
+    medium: Documentation and configuration reviewed
+    low: Only file presence confirmed
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-state-recovery
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires process investigation
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      reason: Critical for production resilience
+closeout_checklist:
+- id: rollback-001
+  item: State versioning or backup enabled
+  level: CRITICAL
+  verification: aws s3api get-bucket-versioning --bucket terraform-state | jq '.Status'
+  expected: Enabled
+- id: rollback-002
+  item: Rollback procedure documented
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify rollback runbook exists
+  expected: Confirmed by reviewer
+- id: rollback-003
+  item: Rollback procedure tested
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify evidence of rollback testing or drills
+  expected: Confirmed by reviewer
+- id: rollback-004
+  item: Recovery time objective defined
+  level: WARNING
+  verification: manual
+  verification_notes: Verify RTO is documented for infrastructure
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC9.1
+  - framework: ISO 27001
+    controls:
+    - A.17.1.1
+    - A.17.1.2
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.cicd-integration.iac-pipeline
+  - infrastructure-as-code.iac-operations.import-state-management

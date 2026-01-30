@@ -1,0 +1,331 @@
+# ============================================================
+# GPU Utilization Audit
+# ============================================================
+# Evaluates GPU resource allocation, compute utilization, memory
+# usage, and scheduling efficiency for GPU workloads.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.resource-utilization.gpu-utilization"
+  name: "GPU Utilization Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "resource-utilization"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines GPU resource utilization including compute utilization,
+    GPU memory consumption, multi-GPU efficiency, scheduling patterns, and
+    identifies underutilized or misconfigured GPU resources. It covers both
+    training and inference workloads in ML/AI environments.
+
+  why_it_matters: |
+    GPUs are expensive resources - often 10-100x the cost of CPU resources.
+    Poor GPU utilization directly translates to wasted infrastructure spend.
+    Underutilized GPUs indicate scheduling problems, inefficient code, or
+    over-provisioning. In multi-tenant environments, proper GPU management
+    is critical for cost efficiency.
+
+  when_to_run:
+    - "After deploying ML/AI workloads"
+    - "During GPU capacity planning"
+    - "When investigating training/inference performance"
+    - "Monthly cost optimization reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "gpu-metrics"
+      description: "Access to NVIDIA DCGM or equivalent GPU metrics"
+    - type: "container-orchestration"
+      description: "Kubernetes with GPU device plugin"
+
+  access_requirements:
+    - "Read access to GPU metrics (nvidia-smi, DCGM)"
+    - "Access to Kubernetes GPU scheduling data"
+    - "Access to GPU cost data"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus (DCGM)"
+      query: "DCGM_FI_DEV_GPU_UTIL"
+      purpose: "GPU compute utilization"
+      threshold: "> 70% for training, > 50% for inference"
+    - system: "Prometheus (DCGM)"
+      query: "DCGM_FI_DEV_FB_USED / DCGM_FI_DEV_FB_TOTAL"
+      purpose: "GPU memory utilization"
+      threshold: "Should match workload requirements"
+    - system: "Prometheus"
+      query: "kube_pod_container_resource_requests{resource='nvidia_com_gpu'}"
+      purpose: "GPU requests per pod"
+      threshold: "Should be allocated to active workloads"
+    - system: "Prometheus (DCGM)"
+      query: "DCGM_FI_DEV_POWER_USAGE"
+      purpose: "GPU power consumption"
+      threshold: "Correlates with utilization"
+
+  file_patterns:
+    - glob: "**/deployment*.yaml"
+      purpose: "Kubernetes deployments with GPU requests"
+    - glob: "**/training*.yaml"
+      purpose: "ML training job configurations"
+
+knowledge_sources:
+  specifications:
+    - id: "k8s-gpu"
+      name: "Kubernetes GPU Management"
+      url: "https://kubernetes.io/docs/tasks/manage-gpus/scheduling-gpus/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "nvidia-dcgm"
+      name: "NVIDIA DCGM User Guide"
+      url: "https://docs.nvidia.com/datacenter/dcgm/latest/user-guide/index.html"
+      offline_cache: true
+    - id: "ml-gpu-optimization"
+      name: "GPU Performance Optimization for Deep Learning"
+      url: "https://developer.nvidia.com/blog/optimizing-gpu-performance-tensor-cores/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "nvidia-smi"
+      purpose: "Real-time GPU monitoring"
+      command: "nvidia-smi --query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total --format=csv"
+    - tool: "kubectl"
+      purpose: "Check GPU allocations"
+      command: "kubectl describe nodes | grep -A 5 'nvidia.com/gpu'"
+    - tool: "dcgmi"
+      purpose: "DCGM metrics inspection"
+      command: "dcgmi dmon -e 155,150,203"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        avg(DCGM_FI_DEV_GPU_UTIL) by (pod, namespace)
+      purpose: "Average GPU utilization per pod"
+
+signals:
+  critical:
+    - id: "GPU-CRIT-001"
+      signal: "GPUs allocated but consistently idle"
+      evidence_threshold: "GPU_UTIL < 5% for allocated GPU over 1 hour"
+      explanation: |
+        Allocated but idle GPUs represent significant waste. A single GPU
+        can cost $1-3/hour in cloud environments. Idle GPUs indicate
+        scheduling problems, crashed workloads, or misconfigured jobs.
+      remediation: "Investigate idle GPU workloads, implement GPU time-slicing or sharing"
+
+    - id: "GPU-CRIT-002"
+      signal: "GPU out-of-memory errors causing job failures"
+      evidence_threshold: "CUDA OOM errors in logs"
+      explanation: |
+        GPU OOM errors terminate workloads immediately, losing compute
+        progress and requiring restart. This wastes expensive GPU time
+        and delays training/inference completion.
+      remediation: "Reduce batch size, implement gradient checkpointing, or use larger GPU"
+
+  high:
+    - id: "GPU-HIGH-001"
+      signal: "Low GPU utilization during active training"
+      evidence_threshold: "GPU_UTIL < 50% during training jobs"
+      explanation: |
+        Low GPU utilization during training indicates bottlenecks elsewhere -
+        typically CPU preprocessing, data loading, or I/O. The expensive GPU
+        sits idle while waiting for data.
+      remediation: "Profile data pipeline, implement prefetching, use GPU-accelerated preprocessing"
+
+    - id: "GPU-HIGH-002"
+      signal: "Fractional GPU needs allocated whole GPUs"
+      evidence_threshold: "Workloads needing <50% GPU allocated full GPU"
+      explanation: |
+        When workloads that only need partial GPU resources are allocated
+        whole GPUs, the remaining capacity is wasted. This is common with
+        inference workloads that have lower compute requirements.
+      remediation: "Implement GPU sharing (MIG, time-slicing) for smaller workloads"
+
+  medium:
+    - id: "GPU-MED-001"
+      signal: "GPU memory utilization significantly below allocation"
+      evidence_threshold: "GPU memory used < 50% of total"
+      remediation: "Consider smaller GPU type or enable GPU sharing"
+
+    - id: "GPU-MED-002"
+      signal: "Suboptimal GPU type for workload"
+      evidence_pattern: "Training on inference GPUs or vice versa"
+      remediation: "Match GPU type to workload (A100 for training, T4 for inference)"
+
+  low:
+    - id: "GPU-LOW-001"
+      signal: "Missing GPU metrics collection"
+
+  positive:
+    - id: "GPU-POS-001"
+      signal: "High GPU utilization (>80%) during active workloads"
+    - id: "GPU-POS-002"
+      signal: "Efficient GPU scheduling with minimal idle time"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory GPU resources"
+      description: |
+        Collect GPU node configurations, device plugins, and current
+        allocation state across the cluster.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "List nodes with GPUs"
+          command: |
+            kubectl get nodes -o json | jq -r '.items[] | select(.status.capacity["nvidia.com/gpu"]) | "\(.metadata.name): \(.status.capacity["nvidia.com/gpu"]) GPUs"'
+        - purpose: "Check GPU allocations per pod"
+          command: |
+            kubectl get pods -A -o json | jq -r '.items[] | select(.spec.containers[].resources.requests["nvidia.com/gpu"]) | "\(.metadata.namespace)/\(.metadata.name): \(.spec.containers[].resources.requests["nvidia.com/gpu"]) GPU(s)"'
+      expected_findings:
+        - "GPU inventory per node"
+        - "Current GPU allocations"
+
+    - id: "2"
+      name: "Analyze GPU utilization"
+      description: |
+        Query GPU metrics to understand compute and memory utilization
+        patterns across workloads.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Current GPU utilization"
+          command: "nvidia-smi --query-gpu=index,utilization.gpu,utilization.memory,memory.used,memory.total --format=csv,noheader"
+        - purpose: "Historical GPU utilization (Prometheus)"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=avg(DCGM_FI_DEV_GPU_UTIL)by(pod,namespace)' | jq '.data.result'
+      expected_findings:
+        - "GPU utilization per workload"
+        - "Memory consumption patterns"
+
+    - id: "3"
+      name: "Identify idle or underutilized GPUs"
+      description: |
+        Find GPUs that are allocated but not being effectively used,
+        representing waste of expensive resources.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find idle GPUs"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=DCGM_FI_DEV_GPU_UTIL<10' | jq '.data.result'
+        - purpose: "Compare allocated vs utilized"
+          command: |
+            kubectl get pods -A -o json | jq -r '.items[] | select(.spec.containers[].resources.requests["nvidia.com/gpu"]) | "\(.metadata.namespace)/\(.metadata.name)"' > /tmp/gpu_pods.txt && nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv
+      expected_findings:
+        - "List of underutilized GPUs"
+        - "Allocation vs utilization gaps"
+
+    - id: "4"
+      name: "Review GPU workload configurations"
+      description: |
+        Examine workload configurations to identify optimization
+        opportunities such as GPU sharing or right-sizing.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check for GPU sharing configuration"
+          command: "kubectl get configmap -n gpu-operator nvidia-device-plugin-config -o yaml 2>/dev/null || echo 'No GPU sharing configured'"
+        - purpose: "Review training job configurations"
+          command: |
+            kubectl get jobs -A -o json | jq '.items[] | select(.spec.template.spec.containers[].resources.requests["nvidia.com/gpu"]) | {name: .metadata.name, namespace: .metadata.namespace, gpus: .spec.template.spec.containers[].resources.requests["nvidia.com/gpu"]}'
+      expected_findings:
+        - "GPU sharing configuration status"
+        - "Workload GPU requirements"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "GPU Inventory Analysis"
+        - "Utilization Findings"
+        - "Cost Impact Assessment"
+        - "Optimization Recommendations"
+
+  confidence_guidance:
+    high: "Direct DCGM/nvidia-smi metrics over extended period"
+    medium: "Point-in-time metrics observation"
+    low: "Configuration analysis without runtime metrics"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "k8s-gpu"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime GPU metrics"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "gpu-001"
+    item: "No allocated GPUs with sustained <10% utilization"
+    level: "CRITICAL"
+    verification: |
+      curl -s 'http://prometheus:9090/api/v1/query?query=count(avg_over_time(DCGM_FI_DEV_GPU_UTIL[1h])<10)' | jq '.data.result[0].value[1] | tonumber == 0'
+    expected: "true"
+
+  - id: "gpu-002"
+    item: "GPU OOM errors < 1 per day"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Check application logs for CUDA OOM errors"
+    expected: "Confirmed by reviewer"
+
+  - id: "gpu-003"
+    item: "GPU sharing enabled for inference workloads"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify time-slicing or MIG configured for small workloads"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["ml-platform", "data-intensive"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.resource-utilization.cpu-utilization"
+    - "performance-efficiency.resource-utilization.memory-utilization"

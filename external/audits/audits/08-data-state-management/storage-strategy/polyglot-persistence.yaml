@@ -1,0 +1,399 @@
+# ============================================================
+# AUDIT: Polyglot Persistence
+# ============================================================
+
+audit:
+  id: "data-state-management.storage-strategy.polyglot-persistence"
+  name: "Polyglot Persistence Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "storage-strategy"
+
+  tier: "phd"
+  estimated_duration: "120 minutes"
+
+  completeness: "requires_discovery"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "architecture"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the implementation of polyglot persistence - using multiple
+    database technologies optimized for different data access patterns.
+    Analyzes synchronization strategies, consistency models across stores,
+    data ownership boundaries, and operational complexity tradeoffs.
+
+  why_it_matters: |
+    Polyglot persistence enables optimal performance for diverse workloads
+    but introduces complexity in data synchronization, consistency, and
+    operations. Poor implementation leads to data drift between stores,
+    complex debugging, and increased operational burden. Well-implemented
+    polyglot persistence balances benefits against complexity costs.
+
+  when_to_run:
+    - "Architecture reviews"
+    - "When adding new data stores"
+    - "Debugging cross-store inconsistencies"
+    - "Operational complexity assessments"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application code with multiple data store integrations"
+    - type: "architecture_docs"
+      description: "System architecture showing data stores and flows"
+
+  access_requirements:
+    - "Read access to application source code"
+    - "Access to data store configurations"
+    - "Understanding of data synchronization patterns"
+
+discovery:
+  code_patterns:
+    - pattern: "from.*repository.*import|Repository|DataStore"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect data access abstractions"
+
+    - pattern: "sync.*event|replicate|propagate|publish.*change"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect synchronization patterns"
+
+    - pattern: "cache.*invalidate|refresh.*index|rebuild.*search"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect cross-store maintenance"
+
+  file_patterns:
+    - glob: "**/repositories/**"
+      purpose: "Data access repositories"
+    - glob: "**/sync/**"
+      purpose: "Synchronization modules"
+    - glob: "**/events/**"
+      purpose: "Event-driven sync"
+
+knowledge_sources:
+  learning_resources:
+    - id: "polyglot-persistence"
+      title: "Polyglot Persistence Pattern"
+      type: "article"
+      reference: "Martin Fowler - PolyglotPersistence"
+
+    - id: "ddia"
+      title: "Designing Data-Intensive Applications"
+      type: "book"
+      reference: "Martin Kleppmann, ISBN: 978-1449373320"
+
+  guides:
+    - id: "cqrs-event-sourcing"
+      name: "CQRS and Event Sourcing"
+      url: "https://docs.microsoft.com/en-us/azure/architecture/patterns/cqrs"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "architecture-analyzer"
+      purpose: "Map data flows across stores"
+      offline_capable: true
+
+  scripts:
+    - id: "polyglot-scan"
+      language: "bash"
+      purpose: "Identify multiple data stores and sync patterns"
+      source: "inline"
+      code: |
+        echo "=== Polyglot Persistence Analysis ==="
+        echo "--- Database clients in use ---"
+        grep -rn "import.*pg\|import.*mongo\|import.*redis\|import.*elastic" \
+          --include="*.ts" --include="*.js" --include="*.py" --include="*.java" . 2>/dev/null | \
+          grep -v node_modules | head -30
+
+        echo "--- Synchronization patterns ---"
+        grep -rn "sync\|replicate\|propagate\|invalidate" \
+          --include="*.ts" --include="*.js" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+
+        echo "--- Event-based updates ---"
+        grep -rn "publish\|emit\|dispatch.*event" \
+          --include="*.ts" --include="*.js" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+
+signals:
+  critical:
+    - id: "PP-CRIT-001"
+      signal: "No synchronization strategy between stores"
+      evidence_pattern: "Data written to primary store without propagation to secondary"
+      explanation: |
+        When data exists in multiple stores without synchronization, data
+        drift occurs. Users see different data depending on which store
+        is queried, leading to confusion and incorrect decisions.
+      remediation: "Implement event-driven or transactional synchronization"
+
+    - id: "PP-CRIT-002"
+      signal: "Distributed transactions across heterogeneous stores"
+      evidence_pattern: "Two-phase commit spanning SQL and NoSQL databases"
+      explanation: |
+        Distributed transactions across different database technologies
+        are brittle and often impossible. Failures leave data in
+        inconsistent states that require manual reconciliation.
+      remediation: "Use eventual consistency with compensation or sagas"
+
+  high:
+    - id: "PP-HIGH-001"
+      signal: "Same data duplicated without clear ownership"
+      evidence_pattern: "Customer data in both SQL and MongoDB without primary"
+      explanation: |
+        Without clear data ownership, both stores can be updated
+        independently, causing conflict. One store must be the source
+        of truth with others as derived views.
+      remediation: "Establish single source of truth per data entity"
+
+    - id: "PP-HIGH-002"
+      signal: "Manual index rebuilding required"
+      evidence_pattern: "Search index out of sync, requires periodic full rebuild"
+      explanation: |
+        If secondary stores (search indices, caches) fall out of sync and
+        require manual rebuilding, data will be stale between rebuilds
+        and rebuilding causes performance impacts.
+      remediation: "Implement real-time incremental synchronization"
+
+    - id: "PP-HIGH-003"
+      signal: "No monitoring for cross-store consistency"
+      evidence_pattern: "No alerts when stores diverge"
+      explanation: |
+        Without consistency monitoring, stores can silently drift apart.
+        Issues are discovered only when users report problems, by which
+        point data quality has degraded significantly.
+      remediation: "Implement cross-store consistency checks and alerting"
+
+  medium:
+    - id: "PP-MED-001"
+      signal: "Synchronization latency not measured or SLA'd"
+      evidence_pattern: "Unknown delay between primary write and secondary update"
+      remediation: "Measure and document synchronization latency"
+
+    - id: "PP-MED-002"
+      signal: "Inconsistent read patterns across stores"
+      evidence_pattern: "Some code reads SQL, some reads search index for same data"
+      remediation: "Establish clear read patterns per data type"
+
+    - id: "PP-MED-003"
+      signal: "Complex synchronization logic scattered across codebase"
+      evidence_pattern: "Sync code in multiple services without central coordination"
+      remediation: "Centralize synchronization in dedicated service or library"
+
+  low:
+    - id: "PP-LOW-001"
+      signal: "Polyglot architecture not documented"
+      evidence_pattern: "No diagram showing data stores and flows"
+      remediation: "Document data store topology and ownership"
+
+    - id: "PP-LOW-002"
+      signal: "No data recovery procedures for sync failures"
+      evidence_pattern: "Missing runbook for resynchronization"
+      remediation: "Document recovery procedures for each sync failure mode"
+
+  positive:
+    - id: "PP-POS-001"
+      signal: "Clear data ownership per store"
+      evidence_pattern: "Each entity has single source of truth documented"
+
+    - id: "PP-POS-002"
+      signal: "Event-driven synchronization with dead-letter queues"
+      evidence_pattern: "Failed sync events captured for replay"
+
+    - id: "PP-POS-003"
+      signal: "Cross-store consistency monitoring"
+      evidence_pattern: "Alerts when stores diverge beyond threshold"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map Data Store Topology"
+      description: |
+        Identify all data stores and their purposes.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find database connections"
+          command: |
+            grep -rn "DATABASE_URL\|MONGODB_URI\|REDIS_URL\|ELASTIC" \
+              --include="*.env*" --include="*.yaml" . 2>/dev/null | head -20
+        - purpose: "Find data store clients"
+          command: |
+            grep -rn "createClient\|connect\|Pool\|Client" \
+              --include="*.ts" --include="*.js" --include="*.py" . 2>/dev/null | \
+              grep -i "postgres\|mongo\|redis\|elastic" | grep -v node_modules | head -30
+
+      expected_findings:
+        - "Data store inventory"
+        - "Purpose of each store"
+
+    - id: "2"
+      name: "Identify Data Ownership"
+      description: |
+        Determine which store owns which data entities.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find entity definitions"
+          command: |
+            grep -rn "class.*Model\|class.*Entity\|@Entity\|Schema(" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -40
+
+      expected_findings:
+        - "Entity ownership mapping"
+        - "Duplicate entity definitions"
+
+    - id: "3"
+      name: "Analyze Synchronization Patterns"
+      description: |
+        Review how data is synchronized between stores.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find sync mechanisms"
+          command: |
+            grep -rn "sync\|replicate\|propagate\|index\|invalidate" \
+              --include="*.ts" --include="*.js" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | grep -v test | head -40
+        - purpose: "Find event publishers"
+          command: |
+            grep -rn "publish\|emit\|dispatch" \
+              --include="*.ts" --include="*.js" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Synchronization mechanisms"
+        - "Event-driven patterns"
+
+    - id: "4"
+      name: "Assess Consistency Guarantees"
+      description: |
+        Evaluate consistency models and failure handling.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find transaction boundaries"
+          command: |
+            grep -rn "transaction\|atomic\|saga\|compensate" \
+              --include="*.ts" --include="*.js" --include="*.py" --include="*.java" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Consistency model"
+        - "Failure handling"
+
+    - id: "5"
+      name: "Review Operational Complexity"
+      description: |
+        Assess operational burden of polyglot architecture.
+      duration_estimate: "15 min"
+      questions:
+        - "How many different database technologies must be operated?"
+        - "What is the team's expertise in each technology?"
+        - "Are there automated runbooks for sync failures?"
+      expected_findings:
+        - "Operational complexity assessment"
+        - "Expertise gaps"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "store_topology"
+        - "ownership_mapping"
+        - "sync_assessment"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Store Topology"
+        - "Ownership Analysis"
+        - "Synchronization Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear synchronization gap or ownership conflict"
+    medium: "Synchronization exists but may have edge case issues"
+    low: "Requires production observation to confirm consistency"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "ddia"
+        priority: "required"
+      - source_id: "cqrs-event-sourcing"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires deep architectural analysis"
+    full:
+      included: true
+      priority: 1
+    architecture:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "pp-001"
+    item: "All data stores identified and documented"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "DATABASE\|MONGO\|REDIS\|ELASTIC" --include="*.env*" . 2>/dev/null | \
+        wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "pp-002"
+    item: "Data ownership clearly defined"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify single source of truth for each entity type"
+    expected: "Confirmed by reviewer"
+
+  - id: "pp-003"
+    item: "Synchronization mechanism exists between stores"
+    level: "BLOCKING"
+    verification: |
+      grep -rn "sync\|publish\|emit\|replicate" --include="*.ts" --include="*.js" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["microservices", "data-intensive"]
+
+  compliance_frameworks:
+    - framework: "ISO 27001"
+      controls: ["A.14.1.1"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.storage-strategy.database-technology-choice"
+    - "data-state-management.data-access-patterns.caching-strategy"
+    - "reliability-resilience.data-integrity.eventual-consistency-handling"

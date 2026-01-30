@@ -1,0 +1,434 @@
+audit:
+  id: accessibility-inclusion.assistive-technology.switch-device-compatibility
+  name: Switch Device Compatibility
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: accessibility-inclusion
+  category_number: 15
+  subcategory: assistive-technology
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: manual
+  severity: high
+  scope: runtime
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: false
+description:
+  what: |
+    This audit evaluates application compatibility with switch access devices
+    and scanning software used by people with severe motor impairments who
+    cannot use standard keyboards, mice, or even voice control.
+
+    Switch devices include:
+    - Single-switch devices (one button, typically for selection)
+    - Two-switch devices (one for scanning, one for selection)
+    - Sip-and-puff devices
+    - Head movement switches
+    - Eye blink switches
+
+    Switch users navigate through scanning:
+    1. Software highlights elements sequentially (auto-scan or manual)
+    2. User activates switch when desired element is highlighted
+    3. Process repeats for sub-menus or actions
+
+    The audit verifies:
+    - All interactive elements receive keyboard focus
+    - Focus order is logical and efficient
+    - No focus traps exist
+    - Timing is adjustable or non-critical
+    - Target sizes are adequate (WCAG 2.5.5)
+    - Skip navigation reduces scanning time
+  why_it_matters: |
+    Switch users may have only one or two input actions available. Navigation
+    that is merely "possible" via keyboard may be practically impossible
+    via switch due to:
+    - Too many elements to scan through
+    - Focus traps that cannot be escaped with limited input
+    - Time limits that don't account for slow scanning
+    - Small targets that cause mis-selections
+
+    Optimizing for switch access benefits all keyboard users and creates
+    the most inclusive interface possible.
+  when_to_run:
+  - During comprehensive accessibility audits
+  - When motor accessibility is a priority
+  - After significant navigation changes
+  - When deploying to healthcare or disability services
+prerequisites:
+  required_artifacts:
+  - type: running_application
+    description: Application available for switch testing
+  access_requirements:
+  - Switch control software (iOS/macOS Switch Control, Windows scanning)
+  - Or simulation via keyboard-only navigation
+  - Access to all application features
+discovery:
+  code_patterns:
+  - pattern: tabindex=['"](-1|[1-9])['"]
+    type: regex
+    scope: source
+    purpose: Find elements affecting focus order
+  - pattern: setTimeout|setInterval
+    type: regex
+    scope: source
+    purpose: Find timing-dependent functionality
+  - pattern: onkeydown.*e\.preventDefault\(\)
+    type: regex
+    scope: source
+    purpose: Find potential keyboard traps
+  file_patterns:
+  - glob: '**/*.{js,jsx,ts,tsx}'
+    purpose: JavaScript components
+  - glob: '**/*.vue'
+    purpose: Vue components
+  - glob: '**/*.css'
+    purpose: CSS for target sizes
+knowledge_sources:
+  specifications:
+  - id: wcag-2.1.1
+    name: 'WCAG 2.2 SC 2.1.1: Keyboard'
+    url: https://www.w3.org/WAI/WCAG22/Understanding/keyboard.html
+    offline_cache: true
+    priority: required
+  - id: wcag-2.1.2
+    name: 'WCAG 2.2 SC 2.1.2: No Keyboard Trap'
+    url: https://www.w3.org/WAI/WCAG22/Understanding/no-keyboard-trap.html
+    offline_cache: true
+    priority: required
+  - id: wcag-2.5.5
+    name: 'WCAG 2.2 SC 2.5.5: Target Size (Enhanced)'
+    url: https://www.w3.org/WAI/WCAG22/Understanding/target-size-enhanced.html
+    offline_cache: true
+    priority: recommended
+  - id: wcag-2.2.1
+    name: 'WCAG 2.2 SC 2.2.1: Timing Adjustable'
+    url: https://www.w3.org/WAI/WCAG22/Understanding/timing-adjustable.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: apple-switch-control
+    name: Apple Switch Control Guide
+    url: https://support.apple.com/guide/switch-control
+    offline_cache: true
+  - id: w3c-mobile-a11y
+    name: W3C Mobile Accessibility
+    url: https://www.w3.org/WAI/standards-guidelines/mobile/
+    offline_cache: true
+tooling:
+  assessment_tools:
+  - tool: iOS/macOS Switch Control
+    purpose: Native Apple switch access testing
+  - tool: Windows On-Screen Keyboard scanning mode
+    purpose: Windows scanning simulation
+  - tool: Keyboard-only testing
+    purpose: Simulate switch navigation via Tab/Enter
+  scripts:
+  - id: focus-trap-finder
+    language: bash
+    purpose: Find potential focus traps
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Potential Keyboard Event Handlers ==="
+      grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+        'onKeyDown\|onkeydown' . | grep -v "Tab\|Escape" | head -20
+
+      echo ""
+      echo "=== Elements with tabindex ==="
+      grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+        'tabindex\|tabIndex' . | head -20
+
+      echo ""
+      echo "=== Modal/Dialog implementations ==="
+      grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+        -i 'modal\|dialog' . | head -20
+signals:
+  critical:
+  - id: A11Y-SWITCH-CRIT-001
+    signal: Focus trap with no escape
+    evidence_indicators:
+    - Modal dialogs trap focus without close mechanism
+    - Custom widgets prevent Tab from moving focus out
+    - Focus cycles infinitely within component
+    explanation: |
+      Switch users typically have only forward navigation (equivalent to
+      Tab). A focus trap with no escape mechanism means they cannot
+      continue using the application without assistance.
+    remediation: |
+      Ensure all focus-trapping components (modals, menus) can be exited:
+      - Close buttons must be focusable and reachable
+      - Escape key should close, but also provide clickable close
+      - Focus should return to trigger element on close
+  - id: A11Y-SWITCH-CRIT-002
+    signal: Interactive elements not keyboard focusable
+    evidence_indicators:
+    - Custom buttons/links without tabindex
+    - Interactive divs/spans without proper roles
+    - Click handlers on non-focusable elements
+    explanation: |
+      Switch scanning only highlights focusable elements. Non-focusable
+      interactive elements are completely invisible to switch users.
+    remediation: |
+      All interactive elements must be keyboard focusable:
+      - Use native <button> and <a href> elements
+      - Add tabindex="0" to custom interactive elements
+      - Ensure role and keyboard handlers are added
+  high:
+  - id: A11Y-SWITCH-HIGH-001
+    signal: Excessive focusable elements on page
+    evidence_indicators:
+    - More than 100 focusable elements before main content
+    - No skip links to bypass navigation
+    - Each item in long lists individually focusable
+    explanation: |
+      Switch users must scan through every focusable element. Pages with
+      many elements before main content become practically unusable as
+      users may need to wait through dozens of scans.
+    remediation: |
+      Reduce tab stops where possible:
+      - Add skip links to bypass navigation
+      - Use roving tabindex for complex widgets (one tab stop into group)
+      - Consider pagination or virtualization for long lists
+      - Group related actions
+  - id: A11Y-SWITCH-HIGH-002
+    signal: Time limits not adjustable
+    evidence_indicators:
+    - Session timeouts with no extension option
+    - Timed quizzes or interactions
+    - Auto-advancing content
+    explanation: |
+      Switch users operate much more slowly than keyboard or mouse users.
+      Fixed time limits may expire before they can complete actions.
+    remediation: |
+      Per WCAG 2.2.1:
+      - Allow users to turn off time limits
+      - Allow extension (at least 10x)
+      - Warn before timeout and allow extension
+      - Make 20+ hour timeout the default
+  - id: A11Y-SWITCH-HIGH-003
+    signal: Focus order does not match visual order
+    evidence_indicators:
+    - Positive tabindex values change natural order
+    - CSS reordering creates different visual flow
+    - Focus jumps unexpectedly
+    explanation: |
+      Switch users cannot skip elements or go backward. If focus order
+      doesn't match visual expectation, they may pass the desired element
+      without realizing it.
+    remediation: |
+      Ensure focus order matches visual reading order:
+      - Don't use positive tabindex values
+      - Ensure DOM order matches visual order
+      - Test by tabbing through entire page
+  medium:
+  - id: A11Y-SWITCH-MED-001
+    signal: Small click targets
+    evidence_indicators:
+    - Target size less than 44x44 CSS pixels
+    - Close-together targets without spacing
+    - Icon-only buttons without adequate size
+    explanation: |
+      Switch users may have difficulty with precise selection. Small
+      targets increase the chance of selecting wrong element.
+    remediation: |
+      Per WCAG 2.5.5, target size should be at least 44x44 CSS pixels.
+      At minimum, ensure 24x24 with spacing (WCAG 2.5.8).
+  - id: A11Y-SWITCH-MED-002
+    signal: No visible focus indicator
+    evidence_indicators:
+    - 'CSS outline: none without replacement'
+    - Focus styles too subtle
+    - Focus not visible against background
+    explanation: |
+      Switch users need to see which element is currently selected/scanned.
+      Without visible focus, they cannot effectively use scanning.
+    remediation: |
+      Ensure all focusable elements have visible focus indicators:
+      - Minimum 2px solid border or equivalent
+      - Sufficient contrast against background
+      - Don't remove outline without replacement
+  low:
+  - id: A11Y-SWITCH-LOW-001
+    signal: Suboptimal but functional focus order
+    evidence_indicators:
+    - Some redundant tab stops
+    - Order could be more efficient
+    explanation: |
+      Navigation works but could be optimized to reduce scanning time.
+    remediation: |
+      Optimize based on user feedback and common task analysis.
+  positive:
+  - id: A11Y-SWITCH-POS-001
+    signal: Efficient switch-friendly navigation
+    evidence_indicators:
+    - Skip links present and functional
+    - Logical focus order
+    - Minimal redundant tab stops
+  - id: A11Y-SWITCH-POS-002
+    signal: No focus traps and adequate timing
+    evidence_indicators:
+    - All components escapable
+    - Time limits adjustable or disabled
+    - Large, well-spaced targets
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: tester
+  steps:
+  - id: '1'
+    name: Count focusable elements
+    description: |
+      Assess the number of focusable elements on key pages to understand
+      scanning burden.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Count interactive elements
+      command: |
+        # Run in browser console on live page:
+        # document.querySelectorAll('a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])').length
+    questions:
+    - How many tab stops exist before main content?
+    - Is skip navigation provided?
+    - Are there pages with excessive tab stops?
+    expected_findings:
+    - Tab stop counts for key pages
+    - Skip link assessment
+  - id: '2'
+    name: Test keyboard navigation
+    description: |
+      Navigate entire application using only Tab and Enter to simulate
+      single-switch scanning.
+    duration_estimate: 45 min
+    questions:
+    - Can you reach all interactive elements via Tab?
+    - Can you escape from all components (modals, menus)?
+    - Is focus order logical and predictable?
+    - Are focus indicators visible throughout?
+    expected_findings:
+    - Focus navigation issues
+    - Any focus traps found
+  - id: '3'
+    name: Test with switch control software
+    description: |
+      If available, test with iOS/macOS Switch Control or similar
+      scanning software.
+    duration_estimate: 45 min
+    questions:
+    - Does scanning highlight all needed elements?
+    - Can primary tasks be completed via scanning?
+    - Is scanning speed adequate?
+    - Are there any elements switch users cannot reach?
+    expected_findings:
+    - Switch control compatibility assessment
+  - id: '4'
+    name: Verify timing flexibility
+    description: |
+      Identify any time-limited interactions and verify they can be
+      adjusted or extended.
+    duration_estimate: 20 min
+    questions:
+    - Are there session timeouts?
+    - Can timeouts be extended?
+    - Are there time-limited interactions?
+    - Can auto-advancing content be paused?
+    expected_findings:
+    - Timing flexibility assessment
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Focusable Element Analysis
+    - Navigation Efficiency
+    - Focus Trap Assessment
+    - Timing Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Tested with actual switch control software
+    medium: Keyboard-only testing as switch simulation
+    low: Code analysis without navigation testing
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: wcag-2.1.1
+      priority: required
+    - source_id: wcag-2.1.2
+      priority: required
+    - source_id: wcag-2.2.1
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed navigation testing
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: switch-001
+  item: All interactive elements keyboard focusable
+  level: CRITICAL
+  verification: manual
+  verification_notes: Tab through entire application, verify all controls reachable
+  expected: Confirmed by reviewer
+- id: switch-002
+  item: No focus traps exist
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify escape from all modals and complex widgets
+  expected: Confirmed by reviewer
+- id: switch-003
+  item: Skip links provided for navigation bypass
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify skip link is first focusable element
+  expected: Confirmed by reviewer
+- id: switch-004
+  item: Time limits adjustable
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify session timeouts can be extended
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - web-application
+    - spa
+    - website
+    - healthcare
+    - government
+  compliance_frameworks:
+  - framework: WCAG 2.2
+    controls:
+    - 2.1.1
+    - 2.1.2
+    - 2.2.1
+    - 2.5.5
+  - framework: Section 508
+    controls:
+    - '1194.22'
+  - framework: EN 301 549
+    controls:
+    - 9.2.1.1
+    - 9.2.1.2
+    - 9.2.2.1
+relationships:
+  commonly_combined:
+  - accessibility-inclusion.assistive-technology.voice-control-compatibility
+  - accessibility-inclusion.robust-compatibility.assistive-tech-compatibility
+  - accessibility-inclusion.cognitive-accessibility.distraction-minimization

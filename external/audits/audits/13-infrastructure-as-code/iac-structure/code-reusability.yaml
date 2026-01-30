@@ -1,0 +1,367 @@
+audit:
+  id: infrastructure-as-code.iac-structure.code-reusability
+  name: IaC Code Reusability
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: iac-structure
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: infrastructure
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates the reusability of Infrastructure as Code across the
+    organization. It examines patterns for sharing infrastructure components,
+    module composition strategies, parameterization approaches, and the use
+    of shared module registries.
+
+    Key areas examined:
+    - DRY (Don't Repeat Yourself) principle adherence
+    - Module parameterization and flexibility
+    - Shared module registry utilization
+    - Template and generator usage
+    - Cross-team infrastructure sharing patterns
+    - Inheritance vs composition approaches
+  why_it_matters: |
+    Reusable IaC provides significant organizational benefits:
+    - Reduced development time through pattern reuse
+    - Consistent infrastructure standards across teams
+    - Easier maintenance through centralized updates
+    - Lower risk of configuration drift between environments
+    - Improved security through vetted, shared components
+    - Cost optimization through standardized resource configurations
+
+    Without reusability, organizations suffer from duplicated effort,
+    inconsistent configurations, and difficulty maintaining standards.
+  when_to_run:
+  - During IaC platform maturity assessment
+  - When evaluating infrastructure standardization
+  - Before establishing shared module libraries
+  - During team scaling and onboarding
+prerequisites:
+  required_artifacts:
+  - type: iac_repositories
+    description: Access to all IaC repositories across teams
+  - type: module_registry
+    description: Access to shared module registry (if exists)
+  access_requirements:
+  - Read access to all IaC repositories
+  - Access to shared module registry
+  - Understanding of team structure and ownership
+discovery:
+  code_patterns:
+  - pattern: source\s*=\s*"\.\./
+    type: regex
+    scope: config
+    purpose: Identify local module references (potential for sharing)
+  - pattern: 'source\s*=\s*"git::'
+    type: regex
+    scope: config
+    purpose: Detect Git-based module sharing
+  - pattern: source\s*=\s*"(registry\.terraform\.io|app\.terraform\.io)
+    type: regex
+    scope: config
+    purpose: Identify registry-based module consumption
+  - pattern: for_each|count
+    type: regex
+    scope: config
+    purpose: Detect iteration patterns for dynamic resource creation
+  - pattern: dynamic\s+"[^"]+"
+    type: regex
+    scope: config
+    purpose: Identify dynamic block usage for flexible configuration
+  file_patterns:
+  - glob: '**/modules/**/*.tf'
+    purpose: Locate reusable module definitions
+  - glob: '**/templates/**'
+    purpose: Find template files for generation
+  - glob: '**/*.tfvars'
+    purpose: Identify variable files for parameterization
+  - glob: '**/terragrunt.hcl'
+    purpose: Detect Terragrunt for DRY configurations
+knowledge_sources:
+  guides:
+  - id: terraform-modules-guide
+    name: Creating Modules - HashiCorp Learn
+    url: https://developer.hashicorp.com/terraform/tutorials/modules
+    offline_cache: true
+  - id: terragrunt-dry
+    name: Terragrunt DRY Configurations
+    url: https://terragrunt.gruntwork.io/docs/features/keep-your-terraform-code-dry/
+    offline_cache: true
+  - id: pulumi-components
+    name: Pulumi Component Resources
+    url: https://www.pulumi.com/docs/concepts/resources/components/
+    offline_cache: true
+  learning_resources:
+  - id: terraform-up-running
+    title: 'Terraform: Up & Running'
+    type: book
+    reference: O'Reilly Media, Yevgeniy Brikman
+tooling:
+  static_analysis:
+  - tool: tflint
+    purpose: Identify duplicate code patterns
+    offline_capable: true
+  - tool: checkov
+    purpose: Detect hardcoded values that should be parameterized
+    offline_capable: true
+  infrastructure_tools:
+  - tool: terraform-docs
+    purpose: Document reusable modules
+    command: terraform-docs markdown table ./module
+  - tool: tf-summarize
+    purpose: Analyze resource patterns across configurations
+    command: tf-summarize plan.json
+  scripts:
+  - id: duplication-detector
+    language: bash
+    purpose: Find potential code duplication across modules
+    source: inline
+    code: |
+      #!/bin/bash
+      # Find similar resource configurations across directories
+      for resource_type in $(grep -rh '^resource' --include='*.tf' | awk '{print $2}' | sort -u); do
+        echo "=== $resource_type ==="
+        grep -rn "^resource $resource_type" --include='*.tf' | head -20
+      done
+signals:
+  critical:
+  - id: IAC-REUSE-CRIT-001
+    signal: Identical resource configurations duplicated across repositories
+    evidence_indicators:
+    - Same resource blocks copy-pasted in multiple locations
+    - Identical provider configurations repeated
+    explanation: |
+      Duplicated infrastructure code leads to inconsistent configurations,
+      difficult maintenance, and increased risk of security vulnerabilities
+      being present in multiple places.
+    remediation: Extract common patterns into shared modules in a central registry
+  high:
+  - id: IAC-REUSE-HIGH-001
+    signal: Hardcoded values that should be parameterized
+    evidence_pattern: (ami-[a-z0-9]+|i-[a-z0-9]+|subnet-[a-z0-9]+|vpc-[a-z0-9]+|sg-[a-z0-9]+)
+    explanation: |
+      Hardcoded AWS resource IDs, AMIs, and other identifiers prevent
+      module reuse across environments and accounts.
+    remediation: Use variables and data sources for all environment-specific values
+  - id: IAC-REUSE-HIGH-002
+    signal: No shared module registry in use
+    evidence_indicators:
+    - All modules sourced from local paths
+    - No private registry configured
+    explanation: |
+      Without a shared registry, teams cannot easily share and version
+      infrastructure components, leading to duplication and inconsistency.
+    remediation: Establish a private module registry (Terraform Cloud, Artifactory, or S3-based)
+  - id: IAC-REUSE-HIGH-003
+    signal: Copy-paste module customization pattern
+    evidence_indicators:
+    - Forked modules with minor modifications
+    - Multiple versions of similar modules
+    explanation: |
+      Copying and modifying modules instead of parameterizing them leads
+      to maintenance burden and divergent configurations.
+    remediation: Add parameters to original modules to support customization
+  medium:
+  - id: IAC-REUSE-MED-001
+    signal: Environment-specific code in modules
+    evidence_pattern: (prod|staging|dev|production|development)
+    remediation: Use variables for environment differentiation, not conditionals
+  - id: IAC-REUSE-MED-002
+    signal: Insufficient variable defaults
+    evidence_indicators:
+    - Many required variables without defaults
+    - Complex variable requirements for simple use cases
+    remediation: Provide sensible defaults for optional configurations
+  - id: IAC-REUSE-MED-003
+    signal: No variable validation rules
+    evidence_indicators:
+    - Variables accept any value without constraints
+    - No type specifications on complex variables
+    remediation: Add validation rules to enforce correct module usage
+  low:
+  - id: IAC-REUSE-LOW-001
+    signal: Inconsistent parameterization patterns across modules
+    evidence_indicators:
+    - Different naming for similar concepts
+    - Inconsistent variable structures
+    remediation: Establish organization-wide conventions for module interfaces
+  positive:
+  - id: IAC-REUSE-POS-001
+    signal: Comprehensive shared module library
+    evidence_indicators:
+    - Private registry with versioned modules
+    - High module reuse across teams
+  - id: IAC-REUSE-POS-002
+    signal: Effective use of for_each and dynamic blocks
+    evidence_pattern: for_each\s*=|dynamic\s+"
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Code Duplication Analysis
+    description: |
+      Identify duplicated infrastructure patterns across the codebase
+      that could be consolidated into shared modules.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find duplicate resource configurations
+      command: grep -rh '^resource' --include='*.tf' | sort | uniq -c | sort -rn | head -20
+    - purpose: Identify repeated provider configurations
+      command: grep -rh 'provider\s*"' --include='*.tf' | sort | uniq -c | sort -rn
+    - purpose: Find hardcoded IDs
+      command: grep -rEn '(ami-|i-|subnet-|vpc-|sg-)[a-z0-9]+' --include='*.tf'
+    expected_findings:
+    - Frequently duplicated resource patterns
+    - Hardcoded environment-specific values
+    - Opportunities for module extraction
+  - id: '2'
+    name: Module Registry Assessment
+    description: |
+      Evaluate the usage and maturity of shared module registries
+      and cross-team infrastructure sharing.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Analyze module sources
+      command: grep -rh 'source\s*=' --include='*.tf' | sort | uniq -c | sort -rn
+    - purpose: Check for registry modules
+      command: grep -rn 'app\.terraform\.io\|registry\.terraform\.io' --include='*.tf'
+    - purpose: Find local-only modules
+      command: grep -rn 'source\s*=\s*"\.\./' --include='*.tf'
+    expected_findings:
+    - Module source distribution (local vs registry)
+    - Private registry utilization
+    - Candidates for registry publication
+  - id: '3'
+    name: Parameterization Review
+    description: |
+      Assess the quality of module parameterization including
+      variable design, validation, and flexibility.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Analyze variable structures
+      command: grep -rn 'variable\s*"' --include='*.tf' | wc -l
+    - purpose: Find variables without defaults
+      command: grep -rA10 'variable\s*"' --include='variables.tf' | grep -B10 -v 'default\s*='
+    - purpose: Check for validation blocks
+      command: grep -rn 'validation\s*{' --include='*.tf'
+    expected_findings:
+    - Variable design patterns
+    - Validation coverage
+    - Default value usage
+  - id: '4'
+    name: Dynamic Configuration Assessment
+    description: |
+      Evaluate the use of dynamic blocks, for_each, and count
+      for flexible resource configuration.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find for_each usage
+      command: grep -rn 'for_each\s*=' --include='*.tf' | head -30
+    - purpose: Find dynamic blocks
+      command: grep -rn 'dynamic\s*"' --include='*.tf' | head -30
+    - purpose: Find count usage
+      command: grep -rn 'count\s*=' --include='*.tf' | head -30
+    expected_findings:
+    - Dynamic configuration patterns
+    - Iteration strategy effectiveness
+    - Opportunities for more dynamic code
+  - id: '5'
+    name: Cross-Team Sharing Analysis
+    description: |
+      Assess how infrastructure patterns are shared across teams
+      and identify barriers to reuse.
+    duration_estimate: 20 min
+    questions:
+    - How do teams discover available shared modules?
+    - What is the process for contributing new shared modules?
+    - How are shared module updates communicated?
+    - What documentation exists for shared infrastructure patterns?
+    expected_findings:
+    - Module sharing mechanisms
+    - Discovery and documentation gaps
+    - Contribution process maturity
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Duplication Analysis
+    - Registry Maturity Assessment
+    - Parameterization Quality
+    - Recommendations for Improved Reusability
+  confidence_guidance:
+    high: Direct code analysis with clear duplication evidence
+    medium: Pattern identification requiring contextual interpretation
+    low: Inferred based on naming or structure
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-modules-guide
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Comprehensive reusability analysis requires thorough examination
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: reuse-001
+  item: No significant code duplication across repositories
+  level: BLOCKING
+  verification: manual
+  verification_notes: Review duplication analysis results for patterns appearing more than 3 times
+  expected: Confirmed by reviewer
+- id: reuse-002
+  item: Shared module registry exists and is used
+  level: BLOCKING
+  verification: grep -rn 'app\.terraform\.io\|registry\.terraform\.io\|private-registry' --include='*.tf'
+    | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: reuse-003
+  item: No hardcoded environment-specific values in modules
+  level: WARNING
+  verification: grep -rE '(ami-[a-z0-9]{8,}|i-[a-z0-9]{8,})' --include='*.tf' modules/ 2>/dev/null | wc
+    -l | xargs -I{} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: reuse-004
+  item: Module variables have validation rules
+  level: WARNING
+  verification: validation_count=$(grep -rc 'validation\s*{' --include='*.tf' modules/ 2>/dev/null | grep
+    -v ':0' | wc -l); module_count=$(find modules -name 'variables.tf' 2>/dev/null | wc -l); test $validation_count
+    -ge $((module_count / 2)) && echo PASS || echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: Internal Standards
+    controls:
+    - Infrastructure consistency
+    - Code quality
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.iac-structure.module-organization
+  - infrastructure-as-code.iac-structure.variable-organization

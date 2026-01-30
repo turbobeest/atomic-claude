@@ -1,0 +1,485 @@
+audit:
+  id: configuration-management.configuration-control.access-control
+  name: Configuration Access Control Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: configuration-management
+  category_number: 30
+  subcategory: configuration-control
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines access controls applied to configuration items
+    to ensure appropriate authorization. It evaluates:
+    - Read access restrictions for sensitive configurations
+    - Write access restrictions for configuration modification
+    - Role-based access control (RBAC) for configurations
+    - Service account access management
+    - Access audit logging
+    - Principle of least privilege application
+    - Access review processes
+  why_it_matters: |
+    Configuration access control protects system integrity:
+    - CMMI CM requires controlling access to configuration items
+    - SOC 2 CC6.1 requires logical access controls
+    - Unauthorized configuration access enables attacks
+    - Write access to configs enables privilege escalation
+    - Overly permissive access increases blast radius
+    - Least privilege limits damage from compromised accounts
+    - Access logging enables forensic investigation
+  when_to_run:
+  - When implementing configuration management
+  - During security assessments
+  - After access-related incidents
+  - During compliance audits
+  - Quarterly access reviews
+prerequisites:
+  required_artifacts:
+  - type: access_policies
+    description: Access control policies and configurations
+  - type: rbac_config
+    description: Role-based access control definitions
+  access_requirements:
+  - Access to IAM and RBAC configurations
+  - Access to repository permission settings
+  - Access to secret management systems
+discovery:
+  code_patterns:
+  - pattern: (role|permission|policy)[-_](binding|assignment)
+    type: regex
+    scope: config
+    purpose: Detect RBAC configurations
+  - pattern: (ClusterRole|Role|RoleBinding|ServiceAccount)
+    type: regex
+    scope: config
+    purpose: Detect Kubernetes RBAC
+  - pattern: (iam_role|iam_policy|aws_iam)
+    type: regex
+    scope: config
+    purpose: Detect AWS IAM configurations
+  - pattern: (principal|action|resource|effect)
+    type: regex
+    scope: config
+    purpose: Detect policy statements
+  file_patterns:
+  - glob: '**/iam/**'
+    purpose: IAM configurations
+  - glob: '**/rbac/**'
+    purpose: RBAC configurations
+  - glob: '**/policies/**'
+    purpose: Policy definitions
+  - glob: '**/*role*'
+    purpose: Role definitions
+knowledge_sources:
+  specifications:
+  - id: cmmi-cm-access
+    name: CMMI CM Access Control
+    url: https://cmmiinstitute.com/cmmi
+    offline_cache: true
+    priority: required
+  - id: soc2-cc61
+    name: SOC 2 CC6.1 - Logical Access
+    url: https://www.aicpa.org/soc
+    offline_cache: true
+    priority: required
+  - id: nist-ac
+    name: NIST 800-53 Access Control
+    url: https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: k8s-rbac
+    name: Kubernetes RBAC
+    url: https://kubernetes.io/docs/reference/access-authn-authz/rbac/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: checkov
+    purpose: IAM policy analysis
+    offline_capable: true
+  - tool: kube-score
+    purpose: Kubernetes RBAC analysis
+    offline_capable: true
+  scripts:
+  - id: access-control-audit
+    language: bash
+    purpose: Audit configuration access controls
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Configuration Access Control Audit ==="
+      echo ""
+      echo "=== IAM/RBAC Files ==="
+      find . -type f \( -name "*iam*" -o -name "*rbac*" -o -name "*role*" \
+        -o -name "*policy*" \) -not -path "*/node_modules/*" 2>/dev/null | head -30
+      echo ""
+      echo "=== Kubernetes RBAC Resources ==="
+      grep -rn "kind: Role\|kind: ClusterRole\|kind: RoleBinding" \
+        --include="*.yaml" . 2>/dev/null | head -20
+      echo ""
+      echo "=== Service Accounts ==="
+      grep -rn "ServiceAccount\|serviceAccountName" \
+        --include="*.yaml" . 2>/dev/null | head -20
+signals:
+  critical:
+  - id: CACC-CRIT-001
+    signal: Wildcard permissions on configuration access
+    evidence_pattern: (\*|admin|root).*config
+    evidence_indicators:
+    - 'Resources: [''*''] in policies'
+    - 'Actions: [''*''] for config access'
+    - ClusterRoleBinding to cluster-admin
+    explanation: |
+      Wildcard permissions violate least privilege and enable
+      broad access to configurations. Compromised accounts with
+      wildcard access can modify any configuration.
+    remediation: |
+      - Replace wildcard with specific permissions
+      - Grant minimum required access
+      - Use resource-specific policies
+      - Audit existing wildcard grants
+    cwe: CWE-250
+  - id: CACC-CRIT-002
+    signal: Configuration write access not restricted
+    evidence_indicators:
+    - All team members can modify production configs
+    - No write access restrictions
+    - Service accounts have unnecessary write access
+    explanation: |
+      Unrestricted write access enables unauthorized modifications.
+      Production configuration changes should require elevated
+      privileges and follow change control processes.
+    remediation: |
+      - Implement write access restrictions
+      - Separate production config access
+      - Require elevated privileges for changes
+      - Audit write access regularly
+  - id: CACC-CRIT-003
+    signal: Sensitive configurations readable by all
+    evidence_indicators:
+    - Secrets readable without restrictions
+    - No classification-based access control
+    - Sensitive configs in public repositories
+    explanation: |
+      Sensitive configurations should have restricted read access.
+      Broad read access exposes secrets and enables reconnaissance
+      for attacks.
+    remediation: |
+      - Restrict read access to sensitive configs
+      - Implement classification-based access
+      - Move secrets to secret management
+      - Audit sensitive config access
+  high:
+  - id: CACC-HIGH-001
+    signal: Service accounts overprivileged
+    evidence_indicators:
+    - Service accounts with admin roles
+    - Shared service accounts across services
+    - No role segregation for automation
+    explanation: |
+      Overprivileged service accounts create attack vectors.
+      Compromised services can access configurations beyond
+      their operational needs.
+    remediation: |
+      - Apply least privilege to service accounts
+      - Create dedicated accounts per service
+      - Limit scope to required resources
+      - Regular privilege review
+  - id: CACC-HIGH-002
+    signal: No access logging for configuration changes
+    evidence_indicators:
+    - Config access not audited
+    - No logs of who accessed configs
+    - Modification events not recorded
+    explanation: |
+      Access logging enables detection and investigation.
+      Without logging, unauthorized access or modifications
+      cannot be detected or attributed.
+    remediation: |
+      - Enable access logging for configs
+      - Log read and write access
+      - Retain logs per retention policy
+      - Monitor for suspicious access
+  - id: CACC-HIGH-003
+    signal: Access not revoked for departed users
+    evidence_indicators:
+    - Former employees in access lists
+    - No offboarding process for config access
+    - Stale accounts with config access
+    explanation: |
+      Unrevoked access enables unauthorized access by former
+      personnel. Access should be promptly revoked upon
+      departure or role change.
+    remediation: |
+      - Implement offboarding for config access
+      - Regular access review
+      - Automate access revocation
+      - Integrate with HR systems
+  medium:
+  - id: CACC-MED-001
+    signal: No periodic access review
+    evidence_indicators:
+    - Access never reviewed
+    - No access recertification process
+    - Permissions accumulate over time
+    explanation: |
+      Periodic access review ensures appropriateness. Without
+      review, access accumulates beyond what is needed,
+      violating least privilege.
+    remediation: |
+      - Establish quarterly access review
+      - Require access recertification
+      - Remove unused access
+      - Document review results
+  - id: CACC-MED-002
+    signal: Shared accounts for configuration access
+    evidence_indicators:
+    - Multiple users share account
+    - Generic accounts for config access
+    - No individual accountability
+    explanation: |
+      Shared accounts prevent individual accountability.
+      Changes cannot be attributed to specific individuals,
+      complicating incident investigation.
+    remediation: |
+      - Eliminate shared accounts
+      - Create individual accounts
+      - Use group-based access for sharing
+      - Maintain accountability
+  - id: CACC-MED-003
+    signal: Production and development access not separated
+    evidence_indicators:
+    - Same credentials for all environments
+    - No environment-based access control
+    - Developers have production config access
+    explanation: |
+      Environment separation reduces risk. Development access
+      to production configurations enables accidental or
+      intentional unauthorized changes.
+    remediation: |
+      - Separate access by environment
+      - Restrict production access
+      - Use different credentials per environment
+      - Implement just-in-time access for production
+  low:
+  - id: CACC-LOW-001
+    signal: Access control documentation incomplete
+    evidence_indicators:
+    - Access policies not documented
+    - Role definitions unclear
+    - No access control architecture diagram
+    explanation: |
+      Documentation enables understanding and audit. Without
+      documentation, access control is difficult to verify
+      and maintain consistently.
+    remediation: |
+      - Document access control policies
+      - Define roles and permissions
+      - Create access architecture diagram
+      - Keep documentation current
+  positive:
+  - id: CACC-POS-001
+    signal: Least privilege implemented for configurations
+    evidence_indicators:
+    - Minimal permissions granted
+    - Role-based access control
+    - Regular access review
+  - id: CACC-POS-002
+    signal: Comprehensive access logging enabled
+    evidence_indicators:
+    - All config access logged
+    - Audit trail complete
+    - Monitoring and alerting active
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Access Policy Review
+    description: |
+      Review access control policies for configurations.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find IAM/RBAC configurations
+      command: |
+        find . -type f \( -name "*iam*" -o -name "*rbac*" -o -name "*policy*" \) \
+          -not -path "*/node_modules/*" 2>/dev/null | head -30
+    - purpose: Check for wildcard permissions
+      command: |
+        grep -rn '"\*"' --include="*.yaml" --include="*.json" \
+          --include="*.tf" . 2>/dev/null | \
+          grep -iE "(action|resource|permission)" | head -20
+    - purpose: Find role definitions
+      command: |
+        grep -rn "kind: Role\|kind: ClusterRole" \
+          --include="*.yaml" . 2>/dev/null | head -20
+    expected_findings:
+    - Access policy inventory
+    - Wildcard usage
+    - Role definitions
+  - id: '2'
+    name: Service Account Analysis
+    description: |
+      Analyze service account access to configurations.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find service account definitions
+      command: |
+        grep -rn "ServiceAccount\|service[-_]account" \
+          --include="*.yaml" --include="*.tf" . 2>/dev/null | head -30
+    - purpose: Check service account bindings
+      command: |
+        grep -rn "RoleBinding\|ClusterRoleBinding" \
+          --include="*.yaml" . 2>/dev/null | head -20
+    - purpose: Look for overprivileged accounts
+      command: |
+        grep -rn "cluster-admin\|admin" \
+          --include="*.yaml" --include="*.tf" . 2>/dev/null | \
+          grep -iE "(role|binding)" | head -20
+    expected_findings:
+    - Service account inventory
+    - Role bindings
+    - Privilege levels
+  - id: '3'
+    name: Access Logging Assessment
+    description: |
+      Assess access logging for configuration changes.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find audit logging configuration
+      command: |
+        grep -rn "audit\|logging" --include="*.yaml" --include="*.tf" \
+          . 2>/dev/null | head -30
+    - purpose: Check for CloudTrail/audit log setup
+      command: |
+        find . -type f \( -name "*cloudtrail*" -o -name "*audit*log*" \) \
+          -not -path "*/node_modules/*" 2>/dev/null | head -10
+    expected_findings:
+    - Audit logging configuration
+    - Log coverage
+    - Retention settings
+  - id: '4'
+    name: Environment Access Separation
+    description: |
+      Verify access separation between environments.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check for environment-specific policies
+      command: |
+        find . -type f \( -path "*prod*" -o -path "*production*" \) \
+          \( -name "*iam*" -o -name "*rbac*" -o -name "*policy*" \) \
+          -not -path "*/node_modules/*" 2>/dev/null | head -10
+    - purpose: Find environment references in policies
+      command: |
+        grep -rn "environment\|env:\|stage:" \
+          --include="*policy*" --include="*rbac*" --include="*iam*" \
+          . 2>/dev/null | head -20
+    expected_findings:
+    - Environment-specific access
+    - Production access controls
+    - Separation evidence
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Access Policy Assessment
+    - Service Account Analysis
+    - Recommendations
+  - type: access_matrix
+    format: table
+    description: Access permissions by role and configuration type
+  confidence_guidance:
+    high: Access policies directly examined
+    medium: Access patterns inferred from configurations
+    low: Access status requires runtime verification
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: cmmi-cm-access
+      priority: required
+    - source_id: soc2-cc61
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Access control audit requires thorough review
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: cacc-001
+  item: No wildcard permissions on configurations
+  level: CRITICAL
+  verification: |
+    grep -rn '"\*"' --include="*.yaml" --include="*.tf" . 2>/dev/null | \
+      grep -iE "(action|resource)" | wc -l | \
+      xargs -I{} test {} -eq 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: cacc-002
+  item: Access logging enabled
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify audit logging for config access
+  expected: Confirmed by reviewer
+- id: cacc-003
+  item: Periodic access review established
+  level: WARNING
+  verification: manual
+  verification_notes: Verify access review schedule exists
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CMMI
+    controls:
+    - CM SP 2.2
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.2
+    - CC6.3
+  - framework: ISO 27001
+    controls:
+    - A.5.15
+    - A.5.18
+    - A.8.3
+  - framework: NIST 800-53
+    controls:
+    - AC-2
+    - AC-3
+    - AC-6
+relationships:
+  commonly_combined:
+  - configuration-management.secret-management.vault-integration
+  - configuration-management.configuration-control.change-control
+  - security-trust.authorization.access-control

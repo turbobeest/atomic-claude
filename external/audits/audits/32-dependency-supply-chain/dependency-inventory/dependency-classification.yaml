@@ -1,0 +1,245 @@
+audit:
+  id: dependency-supply-chain.dependency-inventory.dependency-classification
+  name: Dependency Classification Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: dependency-supply-chain
+  category_number: 32
+  subcategory: dependency-inventory
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: dependencies
+  default_profiles:
+  - full
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit classifies dependencies by their purpose, criticality, and
+    risk profile. It categorizes packages as production vs development,
+    identifies critical dependencies that the application cannot function
+    without, and assesses the security sensitivity of each dependency.
+  why_it_matters: |
+    Not all dependencies carry equal risk. A vulnerability in a critical
+    production dependency requires immediate action, while the same issue
+    in an optional dev tool may be lower priority. Classification enables
+    proper risk prioritization and resource allocation for dependency
+    management efforts.
+  when_to_run:
+  - During initial project assessment
+  - When prioritizing vulnerability remediation
+  - Before security audits
+  - When establishing dependency policies
+prerequisites:
+  required_artifacts:
+  - type: dependency_manifest
+    description: package.json, requirements.txt, etc.
+  - type: source_code
+    description: To understand dependency usage patterns
+  access_requirements:
+  - Read access to source code and manifests
+discovery:
+  file_patterns:
+  - glob: '**/package.json'
+    purpose: Find npm dependencies and their categories
+  - glob: '**/requirements*.txt'
+    purpose: Find Python requirements files
+  - glob: '**/pyproject.toml'
+    purpose: Find Python project dependencies
+  - glob: '**/go.mod'
+    purpose: Find Go dependencies
+  - glob: '**/Cargo.toml'
+    purpose: Find Rust dependencies
+knowledge_sources:
+  guides:
+  - id: dependency-risk-assessment
+    name: Dependency Risk Assessment Guide
+    url: https://owasp.org/www-community/Component_Analysis
+  standards:
+  - id: cvss
+    name: CVSS Scoring System
+    relevance: Understanding vulnerability severity
+tooling:
+  analysis_tools:
+  - tool: npm ls
+    purpose: List dependencies with their types
+  - tool: webpack-bundle-analyzer
+    purpose: Analyze production bundle contents
+  - tool: source-map-explorer
+    purpose: Identify dependencies in production builds
+signals:
+  critical:
+  - id: DEP-CLASS-CRIT-001
+    signal: Critical dependencies lack any security assessment
+    evidence_indicators:
+    - Core frameworks never evaluated for security
+    - Authentication libraries not classified
+    explanation: |
+      Dependencies handling authentication, encryption, or core business
+      logic are high-value targets. Without classification, these may
+      not receive appropriate security scrutiny.
+    remediation: Identify and document all critical dependencies; prioritize security reviews
+  high:
+  - id: DEP-CLASS-HIGH-001
+    signal: Security-sensitive dependencies in unmonitored category
+    evidence_indicators:
+    - Cryptography library marked as optional
+    - Auth library in devDependencies
+    remediation: Reclassify security-sensitive dependencies appropriately
+  - id: DEP-CLASS-HIGH-002
+    signal: No distinction between required and optional dependencies
+    evidence_indicators:
+    - All dependencies marked required
+    - Missing optionalDependencies or peerDependencies
+    remediation: Properly categorize optional vs required dependencies
+  medium:
+  - id: DEP-CLASS-MED-001
+    signal: Build tools included in production dependencies
+    evidence_indicators:
+    - webpack in dependencies instead of devDependencies
+    - TypeScript compiler in production bundle
+    remediation: Move build tools to devDependencies
+  - id: DEP-CLASS-MED-002
+    signal: Test frameworks accessible in production
+    evidence_indicators:
+    - jest, mocha in production dependencies
+    - Test utilities shipped to users
+    remediation: Ensure test dependencies are dev-only
+  low:
+  - id: DEP-CLASS-LOW-001
+    signal: Dependency categorization not documented
+    evidence_indicators:
+    - No documentation of dependency purposes
+    - Team unclear on dependency roles
+    remediation: Document purpose and criticality of each dependency
+  positive:
+  - id: DEP-CLASS-POS-001
+    signal: Dependencies properly classified by criticality and purpose
+  - id: DEP-CLASS-POS-002
+    signal: Security-sensitive dependencies identified and monitored
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Extract Dependency Categories
+    description: Identify how dependencies are currently categorized
+    commands:
+    - purpose: List npm dependency categories
+      command: 'cat package.json 2>/dev/null | jq ''{dependencies: (.dependencies | keys), devDependencies:
+        (.devDependencies | keys), optionalDependencies: (.optionalDependencies | keys), peerDependencies:
+        (.peerDependencies | keys)}'' || echo ''package.json not found'''
+  - id: '2'
+    name: Identify Production Dependencies
+    description: Determine which dependencies are actually in production
+    commands:
+    - purpose: Check what ships in production npm
+      command: npm ls --production --depth=0 2>/dev/null || echo 'npm not applicable'
+  - id: '3'
+    name: Identify Security-Sensitive Dependencies
+    description: Flag dependencies handling sensitive operations
+    commands:
+    - purpose: Find crypto-related packages
+      command: cat package.json 2>/dev/null | jq -r '.dependencies + .devDependencies | keys[]' | grep
+        -iE '(crypto|auth|jwt|oauth|session|password|bcrypt|argon|encrypt)' || echo 'No obvious security
+        packages found'
+    - purpose: Find network/API packages
+      command: cat package.json 2>/dev/null | jq -r '.dependencies + .devDependencies | keys[]' | grep
+        -iE '(axios|fetch|request|http|api|graphql|grpc)' || echo 'No obvious network packages found'
+  - id: '4'
+    name: Identify Critical Infrastructure Dependencies
+    description: Flag core framework and runtime dependencies
+    commands:
+    - purpose: Find framework packages
+      command: cat package.json 2>/dev/null | jq -r '.dependencies | keys[]' | grep -iE '(react|vue|angular|express|fastify|next|nuxt|django|flask|rails|spring)'
+        || echo 'No obvious framework packages found'
+  - id: '5'
+    name: Analyze Bundle Contents
+    description: Verify what actually ships to users
+    commands:
+    - purpose: Check for source-map-explorer
+      command: 'npx source-map-explorer --help 2>/dev/null && echo ''Run: npx source-map-explorer dist/*.js
+        to analyze'' || echo ''source-map-explorer not available'''
+  - id: '6'
+    name: Create Classification Matrix
+    description: Document dependency classifications
+    commands:
+    - purpose: Generate classification report skeleton
+      command: |-
+        echo 'Dependency Classification Matrix
+        ================================
+
+        Critical (Application cannot function):
+        - [List frameworks, core libraries]
+
+        Security-Sensitive (Handle auth, crypto, data):
+        - [List security-related packages]
+
+        Production (Ship to users):
+        - [List from npm ls --production]
+
+        Development (Build/test only):
+        - [List from devDependencies]
+
+        Optional (Enhanced functionality):
+        - [List from optionalDependencies]'
+output:
+  deliverables:
+  - type: classification_matrix
+    format: structured
+    description: Dependencies categorized by type and criticality
+  - type: critical_dependency_list
+    format: list
+    description: High-priority dependencies requiring extra scrutiny
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Classification Methodology
+    - Critical Dependencies
+    - Security-Sensitive Dependencies
+    - Recommendations
+closeout_checklist:
+- id: dep-class-001
+  item: All dependencies classified by purpose
+  level: REQUIRED
+  verification: Classification matrix complete
+- id: dep-class-002
+  item: Critical dependencies identified
+  level: REQUIRED
+  verification: Critical list documented
+- id: dep-class-003
+  item: Security-sensitive dependencies flagged
+  level: CRITICAL
+  verification: Security packages documented
+- id: dep-class-004
+  item: Dev dependencies not in production
+  level: REQUIRED
+  verification: npm ls --production vs devDependencies
+governance:
+  applicable_to:
+    archetypes:
+    - all-software-projects
+  compliance_mappings:
+  - framework: SOC 2
+    control: CC6.1
+    description: Asset classification
+  - framework: ISO 27001
+    control: A.8.2
+    description: Information classification
+relationships:
+  commonly_combined:
+  - dependency-supply-chain.vulnerability-scanning.vulnerability-prioritization
+  depends_on:
+  - dependency-supply-chain.dependency-inventory.dependency-enumeration
+  feeds_into:
+  - security-trust.risk-assessment

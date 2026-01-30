@@ -1,0 +1,328 @@
+# ============================================================
+# AUDIT: Soft Delete vs Hard Delete
+# ============================================================
+# Evaluates the appropriateness of soft delete vs hard delete
+# patterns and their consistent implementation.
+# ============================================================
+
+audit:
+  id: "data-state-management.data-lifecycle.soft-delete-vs-hard-delete"
+
+  name: "Soft Delete vs Hard Delete"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "data-lifecycle"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates the use of soft delete vs hard delete patterns
+    across the codebase. It examines whether the chosen approach is
+    appropriate for different data types, consistently implemented,
+    and properly handled in queries. The audit identifies issues with
+    soft delete leakage or inappropriate hard delete of recoverable data.
+
+  why_it_matters: |
+    The choice between soft delete and hard delete has significant
+    implications. Soft delete preserves data for recovery and auditing
+    but requires careful query filtering. Hard delete permanently removes
+    data, which is sometimes required for compliance. Inconsistent
+    application of either pattern causes data visibility issues and
+    compliance gaps.
+
+  when_to_run:
+    - "When designing deletion strategy"
+    - "After data visibility bugs"
+    - "During data lifecycle review"
+    - "When implementing recovery features"
+
+prerequisites:
+  required_artifacts:
+    - type: "database-schema"
+      description: "Schema showing soft delete columns"
+    - type: "application-code"
+      description: "Code implementing delete operations"
+
+  access_requirements:
+    - "Read access to database schema"
+    - "Access to application deletion code"
+    - "Query patterns for deleted data filtering"
+
+discovery:
+  code_patterns:
+    - pattern: "deleted_at|deletedAt|is_deleted|isDeleted|soft.*delete"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify soft delete columns"
+    - pattern: "paranoid|softDelete|withTrashed|includeDeleted"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify soft delete ORM patterns"
+    - pattern: "DELETE FROM|destroy\\(|hardDelete"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify hard delete operations"
+
+  file_patterns:
+    - glob: "**/models/**/*"
+      purpose: "Model definitions with soft delete"
+    - glob: "**/entities/**/*"
+      purpose: "Entity definitions"
+    - glob: "**/migrations/**/*.sql"
+      purpose: "Schema with soft delete columns"
+
+knowledge_sources:
+  guides:
+    - id: "soft-delete-patterns"
+      name: "Soft Delete Design Patterns"
+      url: "https://www.prisma.io/docs/concepts/components/prisma-client/crud#soft-deletes"
+      offline_cache: true
+
+    - id: "hibernate-soft-delete"
+      name: "Hibernate Soft Delete"
+      url: "https://vladmihalcea.com/soft-delete-postgresql/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "query-analyzer"
+      purpose: "Detect queries missing soft delete filter"
+      offline_capable: true
+
+  scripts:
+    - id: "find-soft-delete"
+      language: "bash"
+      purpose: "Find soft delete patterns"
+      source: "inline"
+      code: |
+        grep -riE '(deleted_at|deletedAt|is_deleted|isDeleted)' \
+          --include='*.ts' --include='*.py' --include='*.sql' . 2>/dev/null
+
+signals:
+  critical:
+    - id: "SOFTDEL-CRIT-001"
+      signal: "Soft deleted records visible in normal queries"
+      evidence_pattern: "Queries without deleted_at IS NULL filter"
+      explanation: |
+        Soft deleted records appearing in normal queries exposes data
+        that should be hidden. Users see "deleted" content, exports
+        include deleted data, and analytics count deleted records.
+      remediation: "Add global query filters for soft delete; use ORM scopes; audit all queries"
+
+    - id: "SOFTDEL-CRIT-002"
+      signal: "Hard delete used where soft delete is required"
+      evidence_pattern: "DELETE FROM on tables requiring audit trail or recovery"
+      explanation: |
+        Hard deleting data that requires audit trails or recovery removes
+        it permanently. Compliance audits may require historical data.
+        Support may need to recover accidentally deleted data.
+      remediation: "Implement soft delete for recoverable data; hard delete only after retention period"
+
+  high:
+    - id: "SOFTDEL-HIGH-001"
+      signal: "Inconsistent soft delete implementation across entities"
+      evidence_pattern: "Some entities use soft delete, similar entities use hard delete"
+      explanation: |
+        Inconsistent deletion patterns confuse developers and cause
+        unexpected behavior. Similar entities should behave similarly
+        for predictable data lifecycle.
+      remediation: "Standardize deletion strategy by data type; document when each is appropriate"
+
+    - id: "SOFTDEL-HIGH-002"
+      signal: "Soft delete without eventual hard delete"
+      evidence_pattern: "Soft deleted records accumulate without cleanup"
+      explanation: |
+        Soft deleted records that are never purged accumulate indefinitely,
+        growing database size and potentially violating retention policies.
+        Soft delete should be a temporary state before hard delete.
+      remediation: "Implement scheduled hard delete after retention period; track soft delete age"
+
+  medium:
+    - id: "SOFTDEL-MED-001"
+      signal: "Soft delete cascade not properly handled"
+      evidence_pattern: "Parent soft deleted but children still visible"
+      remediation: "Implement cascading soft delete for related entities"
+
+    - id: "SOFTDEL-MED-002"
+      signal: "No way to restore soft deleted records"
+      evidence_pattern: "Soft delete without restore functionality"
+      remediation: "Implement restore/undelete functionality for soft deleted records"
+
+  low:
+    - id: "SOFTDEL-LOW-001"
+      signal: "Soft delete column not indexed"
+
+  positive:
+    - id: "SOFTDEL-POS-001"
+      signal: "Consistent soft delete with proper query filtering"
+    - id: "SOFTDEL-POS-002"
+      signal: "Clear lifecycle from soft delete to hard delete"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Soft Delete Pattern Discovery"
+      description: |
+        Identify all entities using soft delete patterns
+        and their implementation approach.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find soft delete columns in schema"
+          command: "grep -riE 'deleted_at|deletedAt|is_deleted|isDeleted|deleted\\s+BOOLEAN' --include='*.sql' --include='*.prisma' --include='*.ts' . 2>/dev/null | head -40"
+        - purpose: "Find soft delete ORM configuration"
+          command: "grep -riE 'paranoid|softDelete|@SoftDelete|DeleteDateColumn' --include='*.ts' --include='*.py' --include='*.java' . 2>/dev/null | head -30"
+        - purpose: "Find hard delete operations"
+          command: 'grep -riE ''DELETE FROM(?!.*deleted)|\.destroy\(.*force|hardDelete|forceDelete'' --include=''*.sql'' --include=''*.ts'' --include=''*.py'' . 2>/dev/null | head -30'
+
+      expected_findings:
+        - "Entities with soft delete"
+        - "Entities with hard delete"
+
+    - id: "2"
+      name: "Query Filter Analysis"
+      description: |
+        Verify queries properly filter soft deleted records
+        when they should be hidden.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find queries with soft delete filter"
+          command: "grep -riE 'deleted_at IS NULL|deletedAt.*null|is_deleted.*false|where.*deleted' --include='*.ts' --include='*.py' --include='*.sql' . 2>/dev/null | head -40"
+        - purpose: "Find queries potentially missing filter"
+          command: "grep -riE 'SELECT.*FROM|findMany|findAll' --include='*.ts' --include='*.py' --include='*.sql' . 2>/dev/null | grep -v 'deleted' | head -30"
+        - purpose: "Find withDeleted/includeDeleted patterns"
+          command: "grep -riE 'withTrashed|withDeleted|includeDeleted|showDeleted' --include='*.ts' --include='*.py' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Soft delete filter coverage"
+        - "Queries potentially exposing deleted data"
+
+    - id: "3"
+      name: "Cascade Behavior Analysis"
+      description: |
+        Evaluate how soft delete cascades to related entities.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find soft delete cascade implementation"
+          command: "grep -riE 'cascade.*soft|soft.*cascade|delete.*children|children.*delete' --include='*.ts' --include='*.py' . 2>/dev/null | head -20"
+        - purpose: "Find orphan handling"
+          command: "grep -riE 'orphan|dangling|parent.*deleted' --include='*.ts' --include='*.py' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Cascade soft delete implementation"
+        - "Orphan handling"
+
+    - id: "4"
+      name: "Retention and Cleanup Analysis"
+      description: |
+        Verify soft deleted records are eventually hard deleted
+        per retention policy.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find cleanup/purge jobs for soft deleted"
+          command: "grep -riE 'purge.*deleted|cleanup.*soft|hard.*delete.*old|DELETE.*deleted_at.*<' --include='*.ts' --include='*.py' --include='*.sql' . 2>/dev/null | head -20"
+        - purpose: "Find retention for soft deleted"
+          command: "grep -riE 'retention.*soft|soft.*retention|deleted.*days' --include='*.ts' --include='*.py' --include='*.yml' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Soft delete cleanup jobs"
+        - "Retention policy enforcement"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Delete Pattern Inventory"
+        - "Query Filter Analysis"
+        - "Cascade Behavior"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear evidence of exposed deleted data or missing cleanup"
+    medium: "Patterns suggest issues, verification needed"
+    low: "Implementation appears correct but edge cases uncertain"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "soft-delete-patterns"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed query and pattern analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "softdel-001"
+    item: "Soft delete patterns consistently applied"
+    level: "CRITICAL"
+    verification: "grep -riE 'deleted_at|is_deleted' --include='*.sql' --include='*.prisma' . 2>/dev/null | wc -l | xargs -I{} echo PASS"
+    expected: "PASS"
+
+  - id: "softdel-002"
+    item: "Queries properly filter soft deleted records"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify critical queries filter deleted records"
+    expected: "Confirmed by reviewer"
+
+  - id: "softdel-003"
+    item: "Soft deleted records eventually hard deleted"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify cleanup job exists for soft deleted"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Data Governance"
+      controls: ["DG-003", "DG-004"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.data-lifecycle.data-deletion-implementation"
+    - "data-state-management.data-lifecycle.data-retention-policy"

@@ -1,0 +1,363 @@
+# ============================================================
+# AUDIT: Test Independence
+# ============================================================
+
+audit:
+  id: "code-quality.test-code-quality.test-independence"
+  name: "Test Independence Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "code-quality"
+  category_number: 6
+  subcategory: "test-code-quality"
+
+  tier: "expert"
+  estimated_duration: "60 minutes"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "testing"
+
+  default_profiles:
+    - "full"
+    - "quality"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates whether tests are truly independent and can run in any order
+    without affecting each other. This includes checking for shared mutable
+    state, order-dependent assertions, hidden dependencies through globals,
+    and improper setup/teardown that creates coupling between tests.
+
+  why_it_matters: |
+    Dependent tests are unreliable - they may pass individually but fail when
+    run together, or pass when run in one order but fail in another. This
+    makes failures hard to reproduce and debug. Dependent tests also prevent
+    parallel execution, slowing down CI/CD pipelines.
+
+  when_to_run:
+    - "When tests fail intermittently"
+    - "Before enabling parallel test execution"
+    - "CI/CD pipeline optimization"
+    - "Test suite maintenance"
+
+prerequisites:
+  required_artifacts:
+    - type: "test_code"
+      description: "Test files"
+    - type: "test_execution"
+      description: "Ability to run tests"
+
+  access_requirements:
+    - "Read access to test directories"
+    - "Ability to execute tests in different orders"
+
+discovery:
+  code_patterns:
+    - pattern: "global\\s+\\w+|self\\.\\w+\\s*=(?!.*def)"
+      type: "regex"
+      scope: "testing"
+      purpose: "Detect shared mutable state"
+
+    - pattern: "beforeAll|@classmethod.*setUpClass|module_.*setup"
+      type: "regex"
+      scope: "testing"
+      purpose: "Detect class/module level setup"
+
+    - pattern: "describe.*describe(?!.*beforeEach)"
+      type: "regex"
+      scope: "testing"
+      purpose: "Detect nested describes without proper isolation"
+
+  file_patterns:
+    - glob: "**/*.test.{js,ts,jsx,tsx}"
+      purpose: "Jest/Vitest test files"
+    - glob: "**/test_*.py"
+      purpose: "Python test files"
+    - glob: "**/*_test.go"
+      purpose: "Go test files"
+
+knowledge_sources:
+  guides:
+    - id: "pytest-isolation"
+      name: "pytest - Isolation Best Practices"
+      url: "https://docs.pytest.org/en/stable/how-to/fixtures.html"
+      offline_cache: true
+
+    - id: "xunit-patterns"
+      name: "xUnit Test Patterns: Refactoring Test Code"
+      url: "https://www.amazon.com/xUnit-Test-Patterns-Refactoring-Code/dp/0131495054"
+      offline_cache: false
+
+    - id: "working-effectively-legacy"
+      name: "Working Effectively with Legacy Code"
+      url: "https://www.oreilly.com/library/view/working-effectively-with/0131177052/"
+      offline_cache: false
+
+  learning_resources:
+    - id: "xunit-patterns"
+      title: "xUnit Test Patterns"
+      type: "book"
+      reference: "Gerard Meszaros, Chapter on Test Independence"
+
+tooling:
+  static_analysis:
+    - tool: "eslint-plugin-jest"
+      purpose: "Jest isolation rule checking"
+      offline_capable: true
+
+  scripts:
+    - id: "test-independence-scan"
+      language: "bash"
+      purpose: "Detect test coupling indicators"
+      source: "inline"
+      code: |
+        echo "=== Shared State Detection ==="
+        echo "--- Class-level state ---"
+        grep -rn "static\s\|classmethod\|@classmethod\|setUpClass" \
+          --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | head -20
+
+        echo "--- Global state ---"
+        grep -rn "global\s\+\w\+\|process\.env\s*=" \
+          --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | head -20
+
+        echo "--- beforeAll/afterAll (potential coupling) ---"
+        grep -rn "beforeAll\|afterAll\|setUpModule\|tearDownModule" \
+          --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | head -20
+
+signals:
+  critical:
+    - id: "TIND-CRIT-001"
+      signal: "Tests modify shared global state"
+      evidence_pattern: "global\\s+\\w+.*=|process\\.env\\s*\\["
+      explanation: |
+        Tests that modify global state affect other tests unpredictably.
+        This is a primary cause of flaky tests and false positives/negatives.
+      remediation: "Use per-test fixtures, mock globals, or reset state in beforeEach/afterEach"
+
+    - id: "TIND-CRIT-002"
+      signal: "Tests depend on execution order"
+      evidence_pattern: "Tests fail when run in isolation or different order"
+      explanation: |
+        Order-dependent tests indicate hidden shared state or missing setup.
+        They prevent parallel execution and randomized ordering.
+      remediation: "Make each test self-contained with complete setup"
+
+  high:
+    - id: "TIND-HIGH-001"
+      signal: "Database state not reset between tests"
+      evidence_pattern: "beforeAll.*insert|setUpClass.*create.*model"
+      explanation: |
+        Tests sharing database state can interfere. Inserts in one test
+        can cause unique constraint violations or incorrect counts in another.
+      remediation: "Use transactions that rollback, or reset database in beforeEach"
+
+    - id: "TIND-HIGH-002"
+      signal: "File system state shared between tests"
+      evidence_pattern: "writeFileSync|fs\\.write.*beforeAll"
+      explanation: |
+        Tests creating files without cleanup can affect other tests or
+        fail when run in parallel.
+      remediation: "Use temporary directories, clean up in afterEach"
+
+    - id: "TIND-HIGH-003"
+      signal: "beforeAll doing work that should be in beforeEach"
+      evidence_pattern: "beforeAll.*mock|beforeAll.*spy"
+      explanation: |
+        Mocks/spies set up in beforeAll persist across tests, potentially
+        affecting subsequent tests unexpectedly.
+      remediation: "Set up mocks in beforeEach, restore in afterEach"
+
+  medium:
+    - id: "TIND-MED-001"
+      signal: "Instance variables shared across tests"
+      evidence_pattern: "this\\.\\w+\\s*=.*beforeAll|self\\.\\w+\\s*=.*setUpClass"
+      remediation: "Move setup to beforeEach/setUp"
+
+    - id: "TIND-MED-002"
+      signal: "Missing afterEach/tearDown cleanup"
+      evidence_pattern: "beforeEach without corresponding afterEach"
+      remediation: "Add cleanup in afterEach to restore state"
+
+    - id: "TIND-MED-003"
+      signal: "Singleton patterns in test setup"
+      evidence_pattern: "getInstance|Singleton"
+      remediation: "Reset singleton state between tests or avoid singletons"
+
+  low:
+    - id: "TIND-LOW-001"
+      signal: "Tests reference other test functions"
+      evidence_pattern: "import.*test_|require.*\\.test\\."
+      remediation: "Extract shared code to fixtures or helpers, not other tests"
+
+  positive:
+    - id: "TIND-POS-001"
+      signal: "Each test has isolated setup/teardown"
+      evidence_pattern: "beforeEach/afterEach for all state modification"
+
+    - id: "TIND-POS-002"
+      signal: "Tests pass with --runInBand and in parallel"
+      evidence_pattern: "Consistent results regardless of execution mode"
+
+    - id: "TIND-POS-003"
+      signal: "Tests pass in randomized order"
+      evidence_pattern: "--randomize flag shows consistent passes"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Analyze Setup/Teardown Patterns"
+      description: |
+        Examine how tests set up and clean up their environment.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find beforeAll/setUpClass usage"
+          command: |
+            grep -rn "beforeAll\|afterAll\|setUpClass\|tearDownClass\|setUpModule" \
+              --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | head -30
+        - purpose: "Compare beforeEach to beforeAll ratio"
+          command: |
+            echo "beforeAll count:" && grep -rn "beforeAll\|setUpClass" --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | wc -l
+            echo "beforeEach count:" && grep -rn "beforeEach\|setUp\b" --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | wc -l
+
+      expected_findings:
+        - "Setup pattern distribution"
+        - "Potential coupling locations"
+
+    - id: "2"
+      name: "Detect Shared State"
+      description: |
+        Search for patterns that indicate shared mutable state.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find global modifications"
+          command: |
+            grep -rn "global\s\+\w\+\|process\.env\[" \
+              --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | head -30
+        - purpose: "Find static/class variables"
+          command: |
+            grep -rn "static\s\+\w\+\s*=\|cls\.\w\+\s*=" \
+              --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | head -20
+
+      expected_findings:
+        - "Shared state locations"
+        - "Risk assessment"
+
+    - id: "3"
+      name: "Run Order Independence Test"
+      description: |
+        Run tests in different orders to detect order dependencies.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Run tests in random order (Jest)"
+          command: |
+            npx jest --randomize 2>&1 | tail -30 || echo "Jest not available"
+        - purpose: "Run tests in random order (pytest)"
+          command: |
+            python -m pytest --random-order 2>&1 | tail -30 || echo "pytest-random-order not installed"
+
+      expected_findings:
+        - "Order-dependent test failures"
+        - "Flaky test identification"
+
+    - id: "4"
+      name: "Run Isolation Test"
+      description: |
+        Run individual tests in isolation to verify they pass alone.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Run a sample of tests individually"
+          command: |
+            echo "Run individual tests to verify they pass in isolation"
+
+      expected_findings:
+        - "Tests that fail in isolation"
+        - "Hidden dependencies"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "coupling_violations"
+        - "shared_state_locations"
+        - "order_dependent_tests"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Independence Analysis"
+        - "Remediation Roadmap"
+        - "Parallel Execution Readiness"
+
+  confidence_guidance:
+    high: "Verified through execution in different orders"
+    medium: "Static analysis indicates potential coupling"
+    low: "Requires runtime verification"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "xunit-patterns"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime execution"
+    full:
+      included: true
+      priority: 1
+    quality:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "tind-001"
+    item: "No global state modification in tests"
+    level: "CRITICAL"
+    verification: "grep -rn 'global\\s' --include='test_*.py'"
+    expected: "Zero matches"
+
+  - id: "tind-002"
+    item: "Tests pass in randomized order"
+    level: "CRITICAL"
+    verification: "Run tests with --randomize flag"
+    expected: "All tests pass"
+
+  - id: "tind-003"
+    item: "beforeAll usage reviewed"
+    level: "WARNING"
+    verification: "All beforeAll usage justified"
+    expected: "Documentation for each use"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Testability", "Reliability"]
+
+relationships:
+  commonly_combined:
+    - "code-quality.test-code-quality.flaky-test-detection"
+    - "code-quality.test-code-quality.test-data-management"

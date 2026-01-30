@@ -1,0 +1,426 @@
+audit:
+  id: security-trust.application-security.security-headers
+  name: Security Headers Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: application-security
+  tier: expert
+  estimated_duration: 1 hour
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  - quick
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines HTTP security headers that protect against common
+    web vulnerabilities. It covers Strict-Transport-Security (HSTS),
+    Content-Security-Policy (CSP), X-Content-Type-Options, X-Frame-Options,
+    Referrer-Policy, Permissions-Policy, and Cross-Origin headers. The audit
+    verifies headers are present, correctly configured, and consistently
+    applied.
+  why_it_matters: |
+    Security headers provide browser-enforced protection against XSS,
+    clickjacking, MIME-sniffing, and other attacks. They are the first
+    line of defense for web applications. Mozilla HTTP Observatory and
+    OWASP Secure Headers Project identify missing headers as common
+    vulnerabilities. Proper headers can prevent attacks even when
+    application code has vulnerabilities.
+  when_to_run:
+  - New application deployment
+  - Security assessment
+  - After server configuration changes
+  - Continuous monitoring
+  - Compliance audits
+prerequisites:
+  required_artifacts:
+  - type: endpoint_list
+    description: List of application URLs to test
+  access_requirements:
+  - HTTP access to application endpoints
+  - Server configuration access for remediation
+discovery:
+  code_patterns:
+  - pattern: Strict-Transport-Security|HSTS
+    type: regex
+    scope: config
+    purpose: Identify HSTS configuration
+  - pattern: Content-Security-Policy|CSP
+    type: regex
+    scope: config
+    purpose: Identify CSP configuration
+  - pattern: X-Content-Type-Options|X-Frame-Options|Referrer-Policy
+    type: regex
+    scope: config
+    purpose: Identify other security headers
+  file_patterns:
+  - glob: '**/nginx.conf'
+    purpose: Nginx security header configuration
+  - glob: '**/httpd.conf'
+    purpose: Apache security header configuration
+  - glob: '**/security-headers*.js'
+    purpose: Application-level header configuration
+knowledge_sources:
+  specifications:
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-secure-headers
+    name: OWASP Secure Headers Project
+    url: https://owasp.org/www-project-secure-headers/
+    offline_cache: true
+  - id: owasp-http-headers
+    name: OWASP HTTP Headers Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html
+    offline_cache: true
+  - id: mozilla-observatory
+    name: Mozilla HTTP Observatory
+    url: https://developer.mozilla.org/en-US/observatory
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: curl
+    purpose: Retrieve response headers
+    command: curl -sI https://target
+  - tool: securityheaders.com
+    purpose: Online header analysis
+    command: Visit https://securityheaders.com/?q=target
+  - tool: nmap
+    purpose: HTTP header enumeration
+    command: nmap --script http-headers -p 443 target
+  scripts:
+  - id: header-check
+    language: bash
+    purpose: Check all security headers
+    source: inline
+    code: |
+      #!/bin/bash
+      URL=$1
+      HEADERS=$(curl -sI "$URL")
+      for h in "Strict-Transport-Security" "Content-Security-Policy" "X-Content-Type-Options" \
+               "X-Frame-Options" "Referrer-Policy" "Permissions-Policy"; do
+        echo "$HEADERS" | grep -qi "$h" && echo "$h: PRESENT" || echo "$h: MISSING"
+      done
+signals:
+  critical:
+  - id: HEADER-CRIT-001
+    signal: Missing Strict-Transport-Security (HSTS)
+    cwe_id: CWE-319
+    evidence_pattern: Strict-Transport-Security.*not found
+    explanation: |
+      Without HSTS, users are vulnerable to SSL stripping attacks where
+      attackers downgrade connections to HTTP. HSTS ensures browsers
+      always use HTTPS for the domain.
+    remediation: 'Add Strict-Transport-Security: max-age=31536000; includeSubDomains'
+  - id: HEADER-CRIT-002
+    signal: Missing Content-Security-Policy
+    cwe_id: CWE-79
+    evidence_pattern: Content-Security-Policy.*not found
+    explanation: |
+      CSP provides essential XSS protection by controlling what resources
+      can be loaded and executed. Without CSP, XSS attacks have no
+      browser-level mitigation.
+    remediation: Implement Content-Security-Policy header with restrictive default-src
+  - id: HEADER-CRIT-003
+    signal: Missing X-Content-Type-Options
+    cwe_id: CWE-16
+    evidence_pattern: X-Content-Type-Options.*not found
+    explanation: |
+      Without X-Content-Type-Options: nosniff, browsers may interpret
+      files differently than intended, enabling MIME-sniffing attacks
+      that can execute malicious scripts.
+    remediation: 'Add X-Content-Type-Options: nosniff'
+  high:
+  - id: HEADER-HIGH-001
+    signal: HSTS max-age too short
+    cwe_id: CWE-319
+    evidence_pattern: max-age=(?:[0-9]{1,6})[^0-9]
+    explanation: |
+      HSTS max-age under 1 year provides limited protection. Users who
+      visit infrequently may not be protected. HSTS preload requires
+      at least 1 year (31536000 seconds).
+    remediation: Set max-age to at least 31536000 (1 year)
+  - id: HEADER-HIGH-002
+    signal: Missing X-Frame-Options
+    cwe_id: CWE-1021
+    evidence_pattern: X-Frame-Options.*not found
+    explanation: |
+      X-Frame-Options prevents clickjacking by controlling whether the
+      page can be embedded in frames. While CSP frame-ancestors is
+      preferred, X-Frame-Options provides fallback protection.
+    remediation: 'Add X-Frame-Options: DENY or SAMEORIGIN'
+  - id: HEADER-HIGH-003
+    signal: Weak CSP with unsafe-inline or unsafe-eval
+    cwe_id: CWE-79
+    evidence_pattern: unsafe-inline|unsafe-eval
+    explanation: |
+      CSP with unsafe-inline allows inline scripts, negating most XSS
+      protection. unsafe-eval allows dynamic code execution. Both
+      significantly weaken CSP's effectiveness.
+    remediation: Remove unsafe-inline and unsafe-eval; use nonces or hashes
+  - id: HEADER-HIGH-004
+    signal: Missing Referrer-Policy
+    cwe_id: CWE-200
+    evidence_pattern: Referrer-Policy.*not found
+    explanation: |
+      Without Referrer-Policy, full URLs including query parameters may
+      leak to external sites via the Referer header, potentially exposing
+      sensitive data or tokens.
+    remediation: 'Add Referrer-Policy: strict-origin-when-cross-origin or no-referrer'
+  medium:
+  - id: HEADER-MED-001
+    signal: HSTS missing includeSubDomains
+    cwe_id: CWE-319
+    evidence_pattern: Strict-Transport-Security(?!.*includeSubDomains)
+    explanation: |
+      Without includeSubDomains, subdomains may be accessed over HTTP,
+      enabling attacks via subdomain takeover or insecure subdomains.
+    remediation: Add includeSubDomains to HSTS header
+  - id: HEADER-MED-002
+    signal: Missing Permissions-Policy
+    cwe_id: CWE-16
+    evidence_pattern: Permissions-Policy.*not found
+    explanation: |
+      Permissions-Policy controls browser features like camera, microphone,
+      and geolocation. Without it, embedded content may access these
+      features unexpectedly.
+    remediation: Add Permissions-Policy to disable unused browser features
+  - id: HEADER-MED-003
+    signal: Missing Cross-Origin headers
+    cwe_id: CWE-16
+    evidence_indicators:
+    - No Cross-Origin-Embedder-Policy
+    - No Cross-Origin-Opener-Policy
+    - No Cross-Origin-Resource-Policy
+    explanation: |
+      Cross-Origin headers provide protection against speculative execution
+      attacks (Spectre) and cross-origin information leakage.
+    remediation: Add COEP, COOP, and CORP headers as appropriate
+  - id: HEADER-MED-004
+    signal: X-XSS-Protection header present (deprecated)
+    cwe_id: CWE-16
+    evidence_pattern: X-XSS-Protection.*1
+    explanation: |
+      X-XSS-Protection is deprecated and can introduce vulnerabilities
+      in some browsers. Modern protection should use CSP instead.
+    remediation: Remove X-XSS-Protection; rely on CSP for XSS protection
+  low:
+  - id: HEADER-LOW-001
+    signal: HSTS not preloaded
+    evidence_pattern: Strict-Transport-Security(?!.*preload)
+    explanation: |
+      HSTS preloading embeds the HSTS policy in browser source code,
+      providing protection on first visit before receiving the header.
+    remediation: Add preload directive and submit to HSTS preload list
+  positive:
+  - id: HEADER-POS-001
+    signal: All recommended security headers present
+    explanation: Comprehensive header-based protection implemented
+  - id: HEADER-POS-002
+    signal: HSTS preloaded with long max-age
+    explanation: Maximum HSTS protection including first-visit security
+  - id: HEADER-POS-003
+    signal: Strict CSP without unsafe directives
+    explanation: Strong XSS protection via Content Security Policy
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Retrieve Response Headers
+    description: |
+      Fetch HTTP response headers from application endpoints to
+      analyze security header presence and values.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Get all response headers
+      command: curl -sI https://target
+    - purpose: Check multiple endpoints
+      command: for path in / /login /api; do echo "=== $path ==="; curl -sI "https://target$path" | grep
+        -iE 'strict|security|x-content|x-frame|referrer|permission'; done
+    expected_findings:
+    - Security header presence
+    - Header values
+    - Consistency across endpoints
+  - id: '2'
+    name: Analyze HSTS Configuration
+    description: |
+      Examine HSTS header for max-age, includeSubDomains, and preload
+      directives.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Check HSTS header
+      command: curl -sI https://target | grep -i 'strict-transport-security'
+    - purpose: Verify preload status
+      command: curl -s 'https://hstspreload.org/api/v2/status?domain=target' | jq
+    expected_findings:
+    - HSTS max-age value
+    - includeSubDomains presence
+    - Preload status
+  - id: '3'
+    name: Analyze CSP Configuration
+    description: |
+      Examine Content-Security-Policy for directives, sources, and
+      potential weaknesses.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Get CSP header
+      command: curl -sI https://target | grep -i 'content-security-policy'
+    - purpose: Check for unsafe directives
+      command: curl -sI https://target | grep -i 'content-security-policy' | grep -oE 'unsafe-[a-z]+'
+    - purpose: Analyze CSP report-uri
+      command: curl -sI https://target | grep -i 'content-security-policy' | grep -o 'report-uri[^;]*'
+    expected_findings:
+    - CSP directives
+    - Source restrictions
+    - Unsafe directive usage
+  - id: '4'
+    name: Check Other Security Headers
+    description: |
+      Verify presence and configuration of remaining security headers.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check all security headers
+      command: curl -sI https://target | grep -iE 'x-content-type|x-frame|referrer-policy|permissions-policy|cross-origin'
+    - purpose: Check for deprecated headers
+      command: curl -sI https://target | grep -iE 'x-xss-protection|x-webkit'
+    expected_findings:
+    - X-Content-Type-Options value
+    - X-Frame-Options value
+    - Referrer-Policy value
+    - Cross-Origin headers
+  - id: '5'
+    name: Review Server Configuration
+    description: |
+      Examine server configuration to ensure headers are set globally
+      and correctly.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Check nginx headers
+      command: grep -rn 'add_header' /etc/nginx/
+    - purpose: Check Apache headers
+      command: grep -rn 'Header.*set' /etc/apache2/ /etc/httpd/
+    expected_findings:
+    - Header configuration location
+    - Global vs per-location settings
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Header Analysis
+    - Configuration Review
+    - Recommendations
+  confidence_guidance:
+    high: Headers directly observed in responses, configuration reviewed
+    medium: Headers observed but configuration not reviewed
+    low: Based on partial header observation
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-secure-headers
+      priority: required
+    - source_id: owasp-http-headers
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 1
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: header-001
+  item: HSTS header present with adequate max-age
+  level: CRITICAL
+  verification: curl -sI https://$HOST 2>/dev/null | grep -qi 'strict-transport-security' && echo 'PASS'
+    || echo 'FAIL'
+  expected: PASS
+- id: header-002
+  item: Content-Security-Policy header present
+  level: CRITICAL
+  verification: curl -sI https://$HOST 2>/dev/null | grep -qi 'content-security-policy' && echo 'PASS'
+    || echo 'FAIL'
+  expected: PASS
+- id: header-003
+  item: 'X-Content-Type-Options: nosniff'
+  level: CRITICAL
+  verification: curl -sI https://$HOST 2>/dev/null | grep -qi 'x-content-type-options.*nosniff' && echo
+    'PASS' || echo 'FAIL'
+  expected: PASS
+- id: header-004
+  item: X-Frame-Options present
+  level: BLOCKING
+  verification: curl -sI https://$HOST 2>/dev/null | grep -qi 'x-frame-options' && echo 'PASS' || echo
+    'FAIL'
+  expected: PASS
+- id: header-005
+  item: Referrer-Policy header present
+  level: BLOCKING
+  verification: curl -sI https://$HOST 2>/dev/null | grep -qi 'referrer-policy' && echo 'PASS' || echo
+    'FAIL'
+  expected: PASS
+- id: header-006
+  item: No unsafe-inline or unsafe-eval in CSP
+  level: WARNING
+  verification: curl -sI https://$HOST 2>/dev/null | grep -i 'content-security-policy' | grep -qi 'unsafe-'
+    && echo 'FAIL' || echo 'PASS'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP-ASVS
+    controls:
+    - 14.4.1
+    - 14.4.3
+    - 14.4.5
+  - framework: PCI-DSS
+    controls:
+    - 6.5.10
+  - framework: NIST-CSF
+    controls:
+    - PR.DS-5
+relationships:
+  commonly_combined:
+  - security-trust.application-security.content-security-policy
+  - security-trust.application-security.clickjacking-protection
+  - security-trust.network-security.tls-configuration

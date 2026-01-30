@@ -1,0 +1,363 @@
+audit:
+  id: cloud-infrastructure.serverless.cold-start-optimization
+  name: Cold Start Optimization
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: serverless
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates Lambda cold start performance including initialization time,
+    package size impact, VPC configuration effects, and provisioned
+    concurrency usage. Identifies opportunities to reduce cold start
+    latency for improved user experience.
+  why_it_matters: |
+    Cold starts add significant latency (100ms to several seconds) to
+    serverless function invocations. For user-facing APIs, cold starts
+    can cause timeout failures and poor user experience. VPC-connected
+    functions historically had even longer cold starts. Optimization
+    strategies can reduce cold starts by 80%+ or eliminate them entirely.
+  when_to_run:
+  - Performance optimization projects
+  - After deploying new functions
+  - When adding VPC connectivity
+  - User experience improvement initiatives
+prerequisites:
+  required_artifacts:
+  - type: cloud_access
+    description: Read access to Lambda configurations
+  - type: metrics_access
+    description: Access to Lambda initialization metrics
+  access_requirements:
+  - Lambda function configuration access
+  - CloudWatch metrics and logs access
+  - X-Ray traces if available
+discovery:
+  metrics_queries:
+  - system: CloudWatch
+    query: |
+      SELECT AVG(InitDuration), MAX(InitDuration)
+      FROM Lambda
+      WHERE FunctionName = '{function}'
+    purpose: Measure cold start initialization time
+    threshold: InitDuration > 500ms warrants optimization
+  - system: CloudWatch Logs Insights
+    query: |
+      filter @type = "REPORT"
+      | stats avg(@initDuration) as avg_init,
+              max(@initDuration) as max_init,
+              count(*) as cold_starts
+      by bin(1d)
+    purpose: Analyze cold start frequency and duration
+    threshold: Cold start ratio > 5% of invocations is high
+  file_patterns:
+  - glob: '**/serverless.yml'
+    purpose: Find Serverless Framework configurations
+  - glob: '**/terraform/**/*lambda*.tf'
+    purpose: Find Terraform Lambda configurations
+  - glob: '**/package.json'
+    purpose: Find Node.js dependencies
+  - glob: '**/requirements.txt'
+    purpose: Find Python dependencies
+knowledge_sources:
+  specifications:
+  - id: aws-lambda-performance
+    name: AWS Lambda Performance
+    url: https://docs.aws.amazon.com/lambda/latest/operatorguide/perf-optimize.html
+    offline_cache: true
+    priority: required
+  - id: aws-lambda-vpc
+    name: Lambda VPC Networking
+    url: https://docs.aws.amazon.com/lambda/latest/dg/configuration-vpc.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: lambda-cold-start-guide
+    name: Understanding Lambda Cold Starts
+    url: https://docs.aws.amazon.com/lambda/latest/operatorguide/cold-starts.html
+    offline_cache: true
+  - id: provisioned-concurrency
+    name: Provisioned Concurrency
+    url: https://docs.aws.amazon.com/lambda/latest/dg/provisioned-concurrency.html
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS CLI
+    purpose: Check provisioned concurrency
+    command: aws lambda list-provisioned-concurrency-configs --function-name {function_name}
+  - tool: AWS CLI
+    purpose: Get function configuration
+    command: aws lambda get-function --function-name {function_name}
+  - tool: CloudWatch Logs Insights
+    purpose: Analyze cold start patterns
+    command: aws logs start-query --log-group-name /aws/lambda/{function} --query-string 'filter @type="REPORT"
+      | stats avg(@initDuration) as avg_init'
+  scripts:
+  - id: cold-start-analyzer
+    language: bash
+    purpose: Analyze cold start performance
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Cold Start Analysis ==="
+
+      # Functions with VPC configuration (historically slower cold starts)
+      echo "Functions with VPC Configuration:"
+      aws lambda list-functions \
+        --query 'Functions[?VpcConfig.VpcId!=`null`].{Name:FunctionName,VPC:VpcConfig.VpcId,Subnets:length(VpcConfig.SubnetIds)}' \
+        --output table
+
+      # Functions with provisioned concurrency
+      echo ""
+      echo "Functions with Provisioned Concurrency:"
+      for func in $(aws lambda list-functions --query 'Functions[].FunctionName' --output text); do
+        pc=$(aws lambda list-provisioned-concurrency-configs --function-name $func --query 'length(ProvisionedConcurrencyConfigs)' --output text 2>/dev/null)
+        [ "$pc" -gt 0 ] && echo "$func: $pc configs"
+      done
+
+      # Package sizes (larger = slower cold start)
+      echo ""
+      echo "Functions by Package Size:"
+      aws lambda list-functions \
+        --query 'Functions | sort_by(@, &CodeSize) | reverse(@) | [0:10].{Name:FunctionName,Size:CodeSize}' \
+        --output table
+
+      # Runtimes (some have faster cold starts)
+      echo ""
+      echo "Functions by Runtime:"
+      aws lambda list-functions \
+        --query 'Functions[].Runtime' --output text | tr '\t' '\n' | sort | uniq -c | sort -rn
+signals:
+  critical:
+  - id: COLDSTART-CRIT-001
+    signal: User-facing API with cold starts causing timeouts
+    evidence_indicators:
+    - API Gateway integration timeout failures
+    - Cold start duration > API timeout
+    explanation: |
+      Cold starts exceeding API timeout cause complete request failures,
+      resulting in user-facing errors and poor experience.
+    remediation: Implement provisioned concurrency or reduce cold start time
+  - id: COLDSTART-CRIT-002
+    signal: Synchronous workflow blocked by cold starts
+    evidence_indicators:
+    - Step Function timeouts on Lambda steps
+    - Cold starts causing workflow failures
+    explanation: |
+      Cold starts in synchronous workflows can cause cascading failures
+      and timeout issues across the entire workflow.
+    remediation: Use provisioned concurrency for workflow-critical functions
+  high:
+  - id: COLDSTART-HIGH-001
+    signal: Cold start duration exceeds 1 second
+    evidence_threshold: InitDuration > 1000ms
+    explanation: |
+      Cold starts over 1 second significantly impact user experience
+      and may cause integration timeouts.
+    remediation: Optimize package size, use compiled runtimes, or provision concurrency
+  - id: COLDSTART-HIGH-002
+    signal: Large deployment package increasing cold start
+    evidence_threshold: Package size > 50MB
+    explanation: |
+      Large packages take longer to load, increasing cold start time.
+      Often includes unnecessary dependencies.
+    remediation: Tree-shake dependencies, use Lambda layers, or split functions
+  - id: COLDSTART-HIGH-003
+    signal: Interpreted runtime with heavy initialization
+    evidence_indicators:
+    - Python/Node.js with many imports
+    - Init duration > 500ms for interpreted runtimes
+    explanation: |
+      Interpreted runtimes with heavy imports have longer initialization.
+      Compiled runtimes like Go or Rust have much faster cold starts.
+    remediation: Lazy load imports, consider compiled runtime for critical functions
+  medium:
+  - id: COLDSTART-MED-001
+    signal: VPC-connected function without optimization
+    remediation: Ensure Hyperplane ENI is being used (automatic for new functions)
+  - id: COLDSTART-MED-002
+    signal: No provisioned concurrency for latency-sensitive functions
+    remediation: Evaluate provisioned concurrency for consistent latency
+  - id: COLDSTART-MED-003
+    signal: Cold start patterns not monitored
+    remediation: Set up cold start monitoring and alerting
+  low:
+  - id: COLDSTART-LOW-001
+    signal: SnapStart not used for Java functions
+    remediation: Enable SnapStart for Java functions to reduce cold starts
+  positive:
+  - id: COLDSTART-POS-001
+    signal: Provisioned concurrency for user-facing APIs
+  - id: COLDSTART-POS-002
+    signal: Optimized package size under 10MB
+  - id: COLDSTART-POS-003
+    signal: SnapStart enabled for Java functions
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Function Configuration Review
+    description: |
+      Review function configurations that impact cold start including
+      package size, runtime, VPC, and provisioned concurrency.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List functions with sizes and runtimes
+      command: aws lambda list-functions --query 'Functions[].{Name:FunctionName,Runtime:Runtime,Size:CodeSize,VPC:VpcConfig.VpcId,Arch:Architectures[0]}'
+        --output table
+    - purpose: Check provisioned concurrency
+      command: 'for func in $(aws lambda list-functions --query ''Functions[].FunctionName'' --output
+        text | head -20); do pc=$(aws lambda list-provisioned-concurrency-configs --function-name $func
+        2>/dev/null | jq ''.ProvisionedConcurrencyConfigs | length''); [ "$pc" -gt 0 ] && echo "$func:
+        $pc provisioned"; done'
+    expected_findings:
+    - Package sizes
+    - Runtime distribution
+    - VPC attachments
+  - id: '2'
+    name: Cold Start Metrics Analysis
+    description: |
+      Analyze cold start frequency and duration from
+      CloudWatch metrics and logs.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Query init duration from logs
+      command: aws logs start-query --log-group-name '/aws/lambda/{function}' --start-time $(date -d '7
+        days ago' +%s) --end-time $(date +%s) --query-string 'filter @type="REPORT" | stats avg(@initDuration)
+        as avg_init, max(@initDuration) as max_init, count(@initDuration) as cold_starts by bin(1d)'
+    expected_findings:
+    - Average cold start duration
+    - Cold start frequency
+  - id: '3'
+    name: Latency-Sensitive Function Identification
+    description: |
+      Identify functions where cold start latency is
+      critical for user experience or workflow timing.
+    duration_estimate: 30 min
+    questions:
+    - Which functions are user-facing API handlers?
+    - Which functions are in synchronous workflows?
+    - What are the latency SLOs for these functions?
+    expected_findings:
+    - Critical latency functions
+    - Current cold start impact
+  - id: '4'
+    name: Optimization Opportunity Analysis
+    description: |
+      Identify optimization opportunities including package
+      optimization, runtime changes, and provisioned concurrency.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check for large packages
+      command: aws lambda list-functions --query 'Functions[?CodeSize>`50000000`].{Name:FunctionName,Size:CodeSize}'
+        --output table
+    - purpose: Check for Java without SnapStart
+      command: aws lambda list-functions --query 'Functions[?starts_with(Runtime,`java`)].{Name:FunctionName,Runtime:Runtime,SnapStart:SnapStart}'
+        --output yaml
+    expected_findings:
+    - Package optimization candidates
+    - SnapStart opportunities
+  - id: '5'
+    name: Recommendations Development
+    description: |
+      Generate specific optimization recommendations with
+      expected latency improvements.
+    duration_estimate: 30 min
+    expected_findings:
+    - Prioritized optimization actions
+    - Expected latency improvements
+    - Cost implications
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Cold Start Analysis
+    - Latency-Sensitive Functions
+    - Optimization Opportunities
+    - Recommendations
+  confidence_guidance:
+    high: 7+ days of init metrics, X-Ray traces available
+    medium: Limited metrics or partial function coverage
+    low: Metrics unavailable
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-lambda-performance
+      priority: required
+    - source_id: provisioned-concurrency
+      priority: required
+  limitations:
+  - Cannot access live metrics offline
+  - Cold start analysis requires runtime data
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires metrics analysis
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: coldstart-001
+  item: Cold start metrics collected
+  level: CRITICAL
+  verification: manual
+  verification_notes: Confirm init duration data for high-traffic functions
+  expected: Confirmed by reviewer
+- id: coldstart-002
+  item: Latency-sensitive functions identified
+  level: BLOCKING
+  verification: manual
+  verification_notes: Document functions with cold start sensitivity
+  expected: Confirmed by reviewer
+- id: coldstart-003
+  item: Package sizes reviewed
+  level: BLOCKING
+  verification: manual
+  verification_notes: Identify functions with large packages for optimization
+  expected: Confirmed by reviewer
+- id: coldstart-004
+  item: Provisioned concurrency evaluated
+  level: WARNING
+  verification: manual
+  verification_notes: Document PC recommendations for critical functions
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SRE
+    controls:
+    - Latency SLOs
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.serverless.function-sizing
+  - cloud-infrastructure.serverless.serverless-monitoring
+  - performance.latency-optimization

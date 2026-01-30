@@ -1,0 +1,353 @@
+audit:
+  id: infrastructure-as-code.testing-validation.cost-estimation
+  name: Cost Estimation
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: testing-validation
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: process
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the integration of cost estimation into Infrastructure
+    as Code workflows, evaluating:
+
+    - Pre-deployment cost estimation with tools like Infracost
+    - Cost impact visibility in pull requests
+    - Budget guardrails and cost policies
+    - Cost comparison between baseline and proposed changes
+    - Integration with FinOps practices and cost allocation
+
+    The focus is on "shifting left" cost awareness so engineers see the
+    financial impact of infrastructure changes before deployment.
+  why_it_matters: |
+    Without cost estimation integrated into IaC workflows:
+
+    - Engineers deploy expensive resources unknowingly
+    - Cost overruns are discovered in monthly bills (too late)
+    - No visibility into cost impact during code review
+    - FinOps practices remain disconnected from development
+    - Budget surprises derail projects and teams
+
+    Cost estimation enables proactive cost management rather than reactive
+    bill analysis, allowing teams to make informed decisions before
+    committing to infrastructure changes.
+  when_to_run:
+  - When establishing FinOps practices
+  - After unexpected cloud cost increases
+  - During DevOps maturity assessment
+  - When implementing cost governance
+prerequisites:
+  required_artifacts:
+  - type: terraform_configuration
+    description: Terraform configurations to estimate costs for
+  - type: cicd_configuration
+    description: CI/CD pipeline configurations
+  access_requirements:
+  - Access to Terraform configuration repository
+  - Access to CI/CD system
+  - Infracost API key (free tier available)
+discovery:
+  code_patterns:
+  - pattern: infracost
+    type: keyword
+    scope: config
+    purpose: Find Infracost integration
+  - pattern: INFRACOST_API_KEY
+    type: keyword
+    scope: config
+    purpose: Detect Infracost API configuration
+  - pattern: cost.*estimate|estimate.*cost
+    type: regex
+    scope: config
+    purpose: Find cost estimation references
+  - pattern: budget|spending
+    type: keyword
+    scope: config
+    purpose: Identify budget-related policies
+  file_patterns:
+  - glob: '**/infracost*.yml'
+    purpose: Infracost configuration files
+  - glob: '**/.github/workflows/*.yml'
+    purpose: GitHub Actions for cost estimation
+  - glob: '**/policy*.rego'
+    purpose: OPA policies for cost guardrails
+  - glob: '**/infracost-usage.yml'
+    purpose: Infracost usage files for accurate estimation
+knowledge_sources:
+  specifications:
+  - id: infracost-docs
+    name: Infracost Documentation
+    url: https://www.infracost.io/docs/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: finops-foundation
+    name: FinOps Foundation Principles
+    url: https://www.finops.org/framework/
+    offline_cache: true
+  - id: infracost-ci-cd
+    name: Infracost CI/CD Integration
+    url: https://www.infracost.io/docs/integrations/cicd/
+    offline_cache: true
+  - id: infracost-policies
+    name: Infracost FinOps Policies
+    url: https://www.infracost.io/docs/features/cost_policies/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: infracost
+    purpose: Cloud cost estimates for Terraform
+    command: infracost breakdown --path .
+  - tool: infracost diff
+    purpose: Compare cost changes between configurations
+    command: infracost diff --path . --compare-to baseline.json
+  - tool: infracost comment
+    purpose: Post cost estimates to pull requests
+    command: infracost comment github --behavior update
+  scripts:
+  - id: cost-check-pipeline
+    language: yaml
+    purpose: GitHub Actions workflow for cost estimation
+    source: inline
+    code: |
+      name: Infracost
+      on: [pull_request]
+      jobs:
+        infracost:
+          runs-on: ubuntu-latest
+          steps:
+            - uses: actions/checkout@v4
+            - name: Setup Infracost
+              uses: infracost/actions/setup@v3
+              with:
+                api-key: ${{ secrets.INFRACOST_API_KEY }}
+            - name: Run Infracost
+              run: |
+                infracost breakdown --path=. --format=json --out-file=/tmp/infracost.json
+            - name: Post PR comment
+              uses: infracost/actions/comment@v1
+              with:
+                path: /tmp/infracost.json
+                behavior: update
+signals:
+  critical:
+  - id: IAC-COST-CRIT-001
+    signal: No cost estimation in infrastructure change workflow
+    evidence_pattern: Absence of infracost in CI/CD pipelines
+    explanation: |
+      Without cost estimation, engineers have no visibility into the
+      financial impact of infrastructure changes until the monthly bill
+      arrives. This leads to budget overruns, surprise costs, and
+      inability to make informed decisions during development.
+    remediation: |
+      Integrate Infracost into CI/CD:
+      1. Register for free Infracost API key
+      2. Add infracost breakdown to pipeline
+      3. Configure PR comments for visibility
+      4. Set up cost policies for guardrails
+  high:
+  - id: IAC-COST-HIGH-001
+    signal: Cost estimation runs but not visible in pull requests
+    evidence_pattern: infracost without comment step
+    explanation: |
+      Cost estimates that aren't surfaced during code review are often
+      ignored. PR comments ensure reviewers see cost impact alongside
+      code changes.
+    remediation: |
+      Add Infracost PR comments:
+      infracost comment github --path infracost.json --behavior update
+  - id: IAC-COST-HIGH-002
+    signal: No cost policies or budget guardrails
+    evidence_pattern: Absence of cost policy files or thresholds
+    explanation: |
+      Without policies, any cost increase is allowed. Budget guardrails
+      can block or warn on changes that exceed thresholds.
+    remediation: |
+      Implement cost policies:
+      - Use Infracost policies for cost thresholds
+      - Block PRs exceeding monthly budget impact
+      - Require additional approval for high-cost changes
+  medium:
+  - id: IAC-COST-MED-001
+    signal: No usage file for accurate estimation
+    evidence_pattern: Absence of infracost-usage.yml
+    remediation: |
+      Create infracost-usage.yml to improve accuracy:
+      version: 0.1
+      resource_usage:
+        aws_lambda_function.api:
+          monthly_requests: 1000000
+          average_request_duration: 250
+  - id: IAC-COST-MED-002
+    signal: Cost estimates not compared to baseline
+    remediation: |
+      Use infracost diff for change comparison:
+      infracost diff --path . --compare-to main-branch.json
+  low:
+  - id: IAC-COST-LOW-001
+    signal: Cost estimation only runs on demand, not automatically
+    remediation: Configure cost estimation on every PR
+  positive:
+  - id: IAC-COST-POS-001
+    signal: Infracost integrated with PR comments showing cost impact
+  - id: IAC-COST-POS-002
+    signal: Cost policies block expensive changes without approval
+  - id: IAC-COST-POS-003
+    signal: Usage files provide accurate cost estimation
+  - id: IAC-COST-POS-004
+    signal: Cost tags align with FinOps cost allocation strategy
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Check for cost estimation tooling
+    description: |
+      Identify whether cost estimation tools are integrated into the
+      IaC workflow.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find Infracost configuration
+      command: find . -name 'infracost*.yml' -o -name '.infracost*' | head -10
+    - purpose: Check CI/CD for Infracost
+      command: grep -r 'infracost' .github/ .gitlab-ci.yml 2>/dev/null | head -20
+    - purpose: Check for Infracost API key in secrets
+      command: grep -r 'INFRACOST' .github/ 2>/dev/null | head -10
+    expected_findings:
+    - Cost estimation tool presence
+    - CI/CD integration status
+  - id: '2'
+    name: Evaluate PR comment integration
+    description: |
+      Check whether cost estimates are posted to pull requests for
+      visibility during code review.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check for comment action
+      command: grep -r 'infracost.*comment\|comment.*infracost' .github/ 2>/dev/null | head -10
+    - purpose: Review a sample PR for cost comments
+      command: gh pr list --state merged --limit 5 --json number,title
+    expected_findings:
+    - PR comment configuration
+    - Evidence of cost comments in PRs
+  - id: '3'
+    name: Review cost policies and guardrails
+    description: |
+      Check for budget thresholds and policies that enforce cost governance.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find policy files
+      command: find . -name '*policy*' -type f | head -20
+    - purpose: Check for cost thresholds
+      command: grep -r 'threshold\|budget\|max_cost' . --include='*.yml' --include='*.yaml' --include='*.rego'
+        2>/dev/null | head -20
+    expected_findings:
+    - Cost policy implementation
+    - Budget guardrails
+  - id: '4'
+    name: Run cost estimation
+    description: |
+      Execute Infracost to see current cost estimation capabilities.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Run Infracost breakdown
+      command: infracost breakdown --path . --format table 2>&1 | head -50
+    expected_findings:
+    - Cost estimation output
+    - Resource cost breakdown
+  - id: '5'
+    name: Assess accuracy and usage configuration
+    description: |
+      Check for usage files that improve cost estimation accuracy.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check for usage file
+      command: cat infracost-usage.yml 2>/dev/null | head -30
+    - purpose: List resources needing usage data
+      command: infracost breakdown --path . --format json 2>/dev/null | jq '.projects[].breakdown.resources[]
+        | select(.usageBased) | .name' | head -20
+    expected_findings:
+    - Usage file configuration
+    - Usage-based resources identified
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Cost Estimation Integration Review
+    - PR Visibility Assessment
+    - Cost Governance Policies
+    - Recommendations
+  confidence_guidance:
+    high: Cost estimation executed and PR comments verified
+    medium: Configuration reviewed but not executed
+    low: Only tool presence confirmed
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: infracost-docs
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires API access and execution
+    full:
+      included: true
+      priority: 3
+closeout_checklist:
+- id: cost-001
+  item: Cost estimation tool integrated in CI/CD
+  level: BLOCKING
+  verification: grep -r 'infracost' .github/ | wc -l
+  expected: '>0'
+- id: cost-002
+  item: Cost estimates visible in pull requests
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify PR comments show cost impact
+  expected: Confirmed by reviewer
+- id: cost-003
+  item: Cost policies enforce budget guardrails
+  level: WARNING
+  verification: manual
+  verification_notes: Check for cost threshold policies
+  expected: Confirmed by reviewer
+- id: cost-004
+  item: Usage files configured for usage-based resources
+  level: WARNING
+  verification: test -f infracost-usage.yml && echo PASS || echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: FinOps Framework
+    controls:
+    - Inform
+    - Optimize
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.testing-validation.plan-review-process
+  - infrastructure-as-code.iac-operations.resource-tagging
+  - infrastructure-as-code.cicd-integration.iac-pipeline

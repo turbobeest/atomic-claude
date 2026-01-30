@@ -1,0 +1,388 @@
+audit:
+  id: security-trust.cryptography.encryption-at-rest
+  name: Encryption at Rest Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: cryptography
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    Examines the implementation of encryption for data at rest, including
+    database encryption, file storage encryption, backup encryption, and
+    configuration of encryption parameters. Verifies use of approved
+    algorithms (AES-256), proper key management, and NIST-compliant
+    encryption modes.
+  why_it_matters: |
+    Data at rest is vulnerable to theft through physical access, backup
+    exposure, or unauthorized database access. NIST, HIPAA, PCI-DSS, and
+    GDPR require encryption of sensitive data at rest. AES-256 is the
+    approved standard, but weak modes (ECB), short keys, or improper
+    implementation negate protection.
+  when_to_run:
+  - Initial security assessment
+  - Compliance audits (HIPAA, PCI-DSS, SOC 2)
+  - After changes to data storage
+  - After key rotation
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application with data storage
+  - type: configuration
+    description: Encryption configuration files
+  - type: infrastructure
+    description: Database and storage configuration
+  access_requirements:
+  - Read access to source code
+  - Access to database configuration
+  - Access to storage configuration
+discovery:
+  code_patterns:
+  - pattern: (AES|aes|Aes)(128|192|256)?|ENCRYPT|DECRYPT
+    type: regex
+    scope: source
+    purpose: Find AES encryption usage
+  - pattern: (encrypt|decrypt).*file|file.*(encrypt|decrypt)
+    type: regex
+    scope: source
+    purpose: Locate file encryption
+  - pattern: (column|field|data).*(encrypt|cipher)
+    type: regex
+    scope: source
+    purpose: Find column-level encryption
+  - pattern: (ECB|CBC|GCM|CTR).*mode|mode.*(ECB|CBC|GCM|CTR)
+    type: regex
+    scope: source
+    purpose: Identify encryption modes
+  - pattern: transparent.*data.*encryption|TDE|at.?rest
+    type: regex
+    scope: source
+    purpose: Find TDE configurations
+  file_patterns:
+  - glob: '**/crypto/**'
+    purpose: Cryptography modules
+  - glob: '**/encryption/**'
+    purpose: Encryption implementation
+  - glob: '**/config/*database*'
+    purpose: Database configuration
+  - glob: '**/storage/**'
+    purpose: Storage configuration
+knowledge_sources:
+  specifications:
+  - id: nist-sp-800-111
+    name: 'NIST SP 800-111: Storage Encryption Technologies'
+    url: https://csrc.nist.gov/publications/detail/sp/800-111/final
+    offline_cache: true
+    priority: required
+  - id: fips-197
+    name: 'FIPS 197: Advanced Encryption Standard (AES)'
+    url: https://csrc.nist.gov/publications/detail/fips/197/final
+    offline_cache: true
+    priority: required
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-crypto
+    name: OWASP Cryptographic Storage Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-top10-a02
+    name: OWASP Top 10 A02:2021 Cryptographic Failures
+    url: https://owasp.org/Top10/2021/A02_2021-Cryptographic_Failures/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect weak encryption patterns
+    offline_capable: true
+  - tool: Cryptosense Analyzer
+    purpose: Analyze cryptographic implementations
+    offline_capable: false
+  scripts:
+  - id: encryption-search
+    language: bash
+    purpose: Find encryption patterns
+    source: inline
+    code: |
+      # Search for encryption-related patterns
+      grep -rn --include="*.{js,ts,py,java,go,rb,cs}" \
+        -E "(AES|aes|encrypt|decrypt|cipher)" .
+signals:
+  critical:
+  - id: EAR-CRIT-001
+    signal: Sensitive data stored unencrypted
+    evidence_pattern: (ssn|password|creditCard|secret).*save|store.*(?!encrypt)
+    cwe: CWE-311
+    explanation: |
+      Sensitive data (PII, credentials, payment data) is stored without
+      encryption. Database theft exposes all sensitive data in plaintext.
+    remediation: Encrypt sensitive columns with AES-256-GCM or enable TDE
+  - id: EAR-CRIT-002
+    signal: ECB mode used for encryption
+    evidence_pattern: ECB|mode.*['"]ECB['"]|AES\/ECB
+    cwe: CWE-327
+    explanation: |
+      ECB mode is deterministic and reveals patterns in encrypted data.
+      Identical plaintext blocks produce identical ciphertext blocks,
+      compromising confidentiality.
+    remediation: Use GCM, CTR, or CBC mode instead of ECB
+  - id: EAR-CRIT-003
+    signal: Weak key size (less than 128 bits)
+    evidence_pattern: AES.*(40|56|64)|keySize.*(40|56|64)
+    cwe: CWE-326
+    explanation: |
+      Encryption with keys shorter than 128 bits is vulnerable to
+      brute force attacks with modern computing resources.
+    remediation: Use AES-256 (or minimum AES-128) for all encryption
+  high:
+  - id: EAR-HIGH-001
+    signal: Hardcoded encryption key
+    evidence_pattern: (key|KEY|Key)\s*[=:]\s*['"][A-Za-z0-9+/=]{16,}['"]
+    cwe: CWE-321
+    explanation: |
+      Encryption keys are hardcoded in source code, making them
+      accessible to anyone with code access and impossible to rotate.
+    remediation: Store keys in secure key management system (KMS, HSM, Vault)
+  - id: EAR-HIGH-002
+    signal: Static IV or nonce used
+    evidence_pattern: (iv|IV|nonce)\s*[=:]\s*['"][^'"]+['"]
+    cwe: CWE-329
+    explanation: |
+      Using a static IV/nonce breaks semantic security. Same plaintext
+      encrypted with same IV produces same ciphertext, enabling attacks.
+    remediation: Generate unique IV for each encryption operation
+  - id: EAR-HIGH-003
+    signal: Deprecated algorithm (DES, 3DES, RC4)
+    evidence_pattern: \b(DES|3DES|TripleDES|RC4|RC2|Blowfish)\b
+    cwe: CWE-327
+    explanation: |
+      Deprecated encryption algorithms have known vulnerabilities and
+      are not approved for protecting sensitive data.
+    remediation: Migrate to AES-256-GCM
+  medium:
+  - id: EAR-MED-001
+    signal: Encryption key in configuration file
+    evidence_pattern: (encryption|crypto).*key.*=.*[A-Za-z0-9]
+    cwe: CWE-260
+    remediation: Use environment variables or external key management
+  - id: EAR-MED-002
+    signal: Missing key rotation capability
+    evidence_pattern: encrypt(?!.*rotate|.*version|.*keyId)
+    cwe: CWE-324
+    remediation: Implement key versioning and rotation mechanism
+  low:
+  - id: EAR-LOW-001
+    signal: Encryption configuration not logged
+    evidence_pattern: encrypt.*(?!log|audit)
+    remediation: Log encryption operations (without keys) for audit
+  positive:
+  - id: EAR-POS-001
+    signal: AES-256 with GCM mode used
+    evidence_pattern: AES.*(256|GCM)|AES-256-GCM
+  - id: EAR-POS-002
+    signal: Key management service integration
+    evidence_pattern: (KMS|HSM|Vault|KeyVault).*key|key.*(KMS|HSM|Vault)
+  - id: EAR-POS-003
+    signal: Transparent data encryption enabled
+    evidence_pattern: (TDE|transparent.*encryption).*enable
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Sensitive Data Storage
+    description: |
+      Map all locations where sensitive data is stored
+      (databases, files, caches).
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find data model with sensitive fields
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(ssn|password|creditCard|secret|token|key).*:.*string" .
+    - purpose: Find database storage
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(save|persist|insert|store)\\(" .
+    expected_findings:
+    - Sensitive data storage locations
+    - Data classification
+  - id: '2'
+    name: Analyze Encryption Implementation
+    description: |
+      Examine encryption algorithms, modes, and key sizes
+      for compliance with standards.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find encryption algorithms
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(AES|DES|RSA|cipher|Cipher)" .
+    - purpose: Find encryption modes
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(ECB|CBC|GCM|CTR|CFB|OFB)" .
+    expected_findings:
+    - AES-256 or AES-128 in use
+    - GCM or CTR mode (authenticated encryption)
+  - id: '3'
+    name: Review Key Management
+    description: |
+      Verify that encryption keys are properly managed,
+      not hardcoded, and support rotation.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find key retrieval
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(getKey|loadKey|keyStore|KMS|HSM|Vault)" .
+    - purpose: Check for hardcoded keys
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(key|KEY)\\s*[=:]\\s*['\"][A-Za-z0-9+/=]{16,}['\"]" .
+    expected_findings:
+    - Keys from secure storage (KMS, HSM)
+    - No hardcoded keys
+  - id: '4'
+    name: Check IV/Nonce Generation
+    description: |
+      Verify that IVs and nonces are generated securely
+      and uniquely for each encryption.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find IV generation
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(iv|IV|nonce).*(random|generate|SecureRandom)" .
+    - purpose: Check for static IV
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(iv|IV|nonce)\\s*[=:]\\s*['\"][^'\"]+['\"]" .
+    expected_findings:
+    - Random IV generation
+    - No static IVs
+  - id: '5'
+    name: Verify Database/Storage Encryption
+    description: |
+      Check that database and storage services have
+      encryption at rest enabled.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find TDE configuration
+      command: |
+        grep -rn --include="*.{json,yaml,yml,conf,tf}" -E \
+          "(encryption|encrypt).*true|storageEncrypted|kmsKeyId" .
+    - purpose: Check storage encryption settings
+      command: |
+        grep -rn --include="*.{json,yaml,yml,conf,tf}" -E \
+          "(SSE|serverSideEncryption|encryptionAtRest)" .
+    expected_findings:
+    - TDE or storage encryption enabled
+    - Customer-managed keys configured
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Encryption Coverage
+    - Algorithm Analysis
+    - Key Management Assessment
+    - Recommendations
+  confidence_guidance:
+    high: AES-256-GCM with proper key management verified
+    medium: Encryption present but algorithm or mode concerns
+    low: Encryption patterns found but implementation unclear
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: nist-sp-800-111
+      priority: required
+    - source_id: owasp-crypto
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Encryption audit requires thorough analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: ear-001
+  item: Sensitive data encrypted at rest
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "(encrypt.*save|store.*encrypt)" . | wc -l
+  expected: Greater than 0 for apps with sensitive data
+- id: ear-002
+  item: No ECB mode usage
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" -E "ECB|mode.*ECB" . | wc -l
+  expected: '0'
+- id: ear-003
+  item: No hardcoded encryption keys
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" -E "key\\s*[=:]\\s*['\"][A-Za-z0-9+/=]{16,}['\"]" . | wc -l
+  expected: '0'
+- id: ear-004
+  item: Random IV generation for each encryption
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "(iv|nonce).*random" . | wc -l
+  expected: Greater than 0 if encryption used
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: NIST SP 800-111
+    controls:
+    - Storage Encryption
+  - framework: HIPAA
+    controls:
+    - 164.312(a)(2)(iv)
+  - framework: PCI-DSS
+    controls:
+    - '3.4'
+    - '3.5'
+  - framework: GDPR
+    controls:
+    - Article 32
+relationships:
+  commonly_combined:
+  - security-trust.cryptography.key-management
+  - security-trust.cryptography.encryption-in-transit
+  - security-trust.data-protection.sensitive-data-handling

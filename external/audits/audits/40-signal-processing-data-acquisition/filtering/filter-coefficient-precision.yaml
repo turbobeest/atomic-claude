@@ -1,0 +1,304 @@
+audit:
+  id: signal-processing-data-acquisition.filtering.filter-coefficient-precision
+  name: Filter Coefficient Precision Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: filtering
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates the effects of finite precision coefficients
+    on filter performance. It examines:
+    - Coefficient word length and format
+    - Quantization effects on frequency response
+    - Impact on stopband attenuation
+    - Pole/zero displacement in IIR filters
+    - Coefficient sensitivity analysis
+    - Fixed-point scaling strategies
+  why_it_matters: |
+    Coefficient precision affects filter behavior:
+    - Quantization distorts the frequency response
+    - IIR pole locations shift, affecting stability and response
+    - Stopband attenuation may be reduced
+    - Passband ripple may increase
+    - Narrow-band filters are more sensitive
+    - Insufficient precision can make filters unusable
+
+    Fixed-point implementations must carefully manage coefficient
+    precision to maintain filter performance.
+  when_to_run:
+  - Fixed-point filter implementation
+  - Filter port from floating to fixed point
+  - Embedded system optimization
+  - Filter specification verification
+  - Performance troubleshooting
+prerequisites:
+  required_artifacts:
+  - type: filter_coefficients
+    description: Ideal and quantized coefficient values
+  - type: source_code
+    description: Filter implementation
+  - type: format_specification
+    description: Fixed-point format definition
+  access_requirements:
+  - Access to coefficient values
+  - Fixed-point format documentation
+  - Filter analysis tools
+discovery:
+  code_patterns:
+  - pattern: (q15|q31|q1_15|q1_31|fix|fract)
+    type: regex
+    scope: source
+    purpose: Detect fixed-point formats
+  - pattern: (coeff|coefficient).*\[|#define.*COEFF
+    type: regex
+    scope: source
+    purpose: Detect coefficient definitions
+  - pattern: (shift|scale|gain).*coeff
+    type: regex
+    scope: source
+    purpose: Detect coefficient scaling
+  file_patterns:
+  - glob: '**/coeff*.{h,c,json}'
+    purpose: Coefficient files
+  - glob: '**/filter*.{c,h,cpp}'
+    purpose: Filter implementation files
+  - glob: '**/fixed*.{c,h,cpp}'
+    purpose: Fixed-point files
+knowledge_sources:
+  specifications:
+  - id: oppenheim-quantization
+    name: Discrete-Time Signal Processing - Quantization
+    url: https://www.pearson.com/store/p/discrete-time-signal-processing/P100000298298
+    offline_cache: true
+    priority: required
+  guides:
+  - id: ti-fixed-point
+    name: Texas Instruments Fixed-Point Filter Guide
+    url: https://www.ti.com/lit/an/spra669/spra669.pdf
+    offline_cache: true
+  - id: arm-cmsis-dsp
+    name: ARM CMSIS-DSP Fixed-Point Formats
+    url: https://arm-software.github.io/CMSIS_5/DSP/html/group__groupFilters.html
+    offline_cache: true
+signals:
+  critical:
+  - id: PREC-CRIT-001
+    signal: Coefficient precision insufficient for filter requirements
+    evidence_indicators:
+    - Quantized response significantly differs from ideal
+    - Stopband attenuation degraded below requirement
+    - IIR stability affected by quantization
+    explanation: |
+      Insufficient coefficient precision degrades filter performance
+      below requirements. Narrow-band and high-order filters are
+      particularly sensitive to coefficient quantization.
+    remediation: |
+      - Increase coefficient word length
+      - Use cascaded second-order sections for IIR
+      - Accept wider passband/stopband transition
+      - Verify quantized response meets requirements
+    cwe: CWE-682
+  - id: PREC-CRIT-002
+    signal: IIR pole displacement causing instability
+    evidence_indicators:
+    - Quantized poles outside unit circle
+    - Filter unstable after coefficient quantization
+    - Narrow-band filter with marginal stability
+    explanation: |
+      IIR coefficient quantization shifts pole locations. For
+      poles near the unit circle, small quantization can push
+      them outside, causing instability.
+    remediation: |
+      - Increase coefficient word length
+      - Use second-order sections with local optimization
+      - Design with larger stability margin
+      - Verify pole locations with quantized coefficients
+  high:
+  - id: PREC-HIGH-001
+    signal: Stopband attenuation reduced by quantization
+    evidence_indicators:
+    - Quantized stopband > ideal + 6dB
+    - Interference not adequately attenuated
+    - FIR coefficient symmetry broken
+    explanation: |
+      Coefficient quantization typically degrades stopband
+      attenuation. A 16-bit coefficient limits attenuation to
+      roughly 96dB regardless of ideal filter design.
+    remediation: |
+      - Increase coefficient word length
+      - Accept reduced attenuation if tolerable
+      - Use second-order sections for high attenuation
+      - Optimize coefficients for quantized format
+  - id: PREC-HIGH-002
+    signal: Passband response distorted by quantization
+    evidence_indicators:
+    - Passband ripple increased
+    - Passband gain varies from ideal
+    - Frequency response shape changed
+    explanation: |
+      Coefficient quantization can increase passband ripple and
+      change the frequency response shape. This may cause signal
+      distortion in the passband.
+    remediation: |
+      - Increase coefficient precision
+      - Optimize coefficients for quantized response
+      - Accept minor ripple increase if tolerable
+      - Verify passband meets flatness requirements
+  medium:
+  - id: PREC-MED-001
+    signal: Coefficient scaling not optimized
+    evidence_indicators:
+    - Coefficients not using full dynamic range
+    - Unnecessary precision loss from poor scaling
+    - Sub-optimal coefficient representation
+    explanation: |
+      Fixed-point coefficients should be scaled to use the full
+      representable range. Poor scaling wastes available precision
+      and degrades filter performance.
+    remediation: |
+      - Scale coefficients to maximize range usage
+      - Use appropriate fixed-point format
+      - Implement block floating point if needed
+      - Document scaling strategy
+  - id: PREC-MED-002
+    signal: Coefficient format not documented
+    evidence_indicators:
+    - Fixed-point format not specified
+    - Scaling factors not recorded
+    - Coefficient origin unclear
+    explanation: |
+      Undocumented coefficient format makes verification and
+      maintenance difficult. Changes or regeneration of coefficients
+      may use incorrect format.
+    remediation: |
+      - Document fixed-point format (Q-format)
+      - Record scaling factors
+      - Include coefficient generation method
+      - Maintain coefficient generation scripts
+  low:
+  - id: PREC-LOW-001
+    signal: No quantization analysis performed
+    evidence_indicators:
+    - Quantized response not compared to ideal
+    - Coefficient precision chosen arbitrarily
+    - Effects of quantization unknown
+    explanation: |
+      Without quantization analysis, the impact of finite precision
+      on filter performance is unknown. Performance may be degraded
+      without detection.
+    remediation: |
+      - Compare quantized vs. ideal response
+      - Verify requirements are met after quantization
+      - Document quantization effects
+      - Add to design verification process
+  positive:
+  - id: PREC-POS-001
+    signal: Well-analyzed coefficient precision
+    evidence_indicators:
+    - Quantization analysis documented
+    - Precision adequate for requirements
+    - Scaling optimized
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: dsp-engineer
+  steps:
+  - id: '1'
+    name: Coefficient Format Analysis
+    description: |
+      Review coefficient format and precision.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find coefficient definitions
+      command: |
+        grep -rniE "(coeff|q15|q31|fix)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -30
+    expected_findings:
+    - Coefficient format
+    - Word length
+    - Scaling factors
+  - id: '2'
+    name: Quantization Effect Analysis
+    description: |
+      Analyze effect of quantization on filter response.
+    duration_estimate: 45 min
+    manual_verification: true
+    expected_findings:
+    - Response comparison
+    - Stopband attenuation change
+    - Stability verification
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Precision Analysis
+    - Quantization Effects
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 3
+    signal-processing:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: prec-001
+  item: Coefficient precision adequate for requirements
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify quantized response meets specifications
+  expected: Confirmed by reviewer
+- id: prec-002
+  item: IIR stable with quantized coefficients
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify all poles inside unit circle after quantization
+  expected: Confirmed by reviewer
+- id: prec-003
+  item: Coefficient format documented
+  level: WARNING
+  verification: |
+    grep -rniE "(q15|q31|format|scale)" \
+      --include="*.h" --include="*.md" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - embedded-systems
+    - signal-processing
+    - audio-systems
+relationships:
+  commonly_combined:
+  - signal-processing.filtering.filter-stability
+  - signal-processing.filtering.filter-design
+  - signal-processing.algorithm-verification.numerical-precision
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

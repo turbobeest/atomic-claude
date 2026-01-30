@@ -1,0 +1,356 @@
+audit:
+  id: data-state-management.data-access-patterns.caching-strategy
+  name: Caching Strategy Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: data-state-management
+  category_number: 8
+  subcategory: data-access-patterns
+  tier: phd
+  estimated_duration: 120 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - performance
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates the application's caching strategy including cache placement
+    (local, distributed, CDN), cache invalidation approaches, TTL policies,
+    cache-aside vs write-through patterns, and cache warming strategies.
+    Analyzes whether caching is used effectively to improve performance
+    without causing stale data issues.
+  why_it_matters: |
+    Caching is the most effective technique for improving read performance
+    and reducing database load. But caching introduces complexity around
+    consistency - when is cached data stale? How is it invalidated?
+    Poor caching leads to stale data bugs or cache stampedes that
+    overwhelm the database.
+  when_to_run:
+  - Performance optimization
+  - Before high-traffic events
+  - After stale data incidents
+  - Cache infrastructure changes
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application code with caching logic
+  - type: configuration
+    description: Cache configuration (Redis, Memcached, etc.)
+  access_requirements:
+  - Read access to application source code
+  - Access to cache configuration
+discovery:
+  code_patterns:
+  - pattern: cache|Cache|redis|Redis|memcache
+    type: regex
+    scope: source
+    purpose: Detect cache usage
+  - pattern: ttl|TTL|expire|expiration|maxAge
+    type: regex
+    scope: source
+    purpose: Detect TTL configuration
+  - pattern: invalidate|evict|delete.*cache|clear.*cache
+    type: regex
+    scope: source
+    purpose: Detect cache invalidation
+  - pattern: '@Cacheable|@CacheEvict|@Cached|cache.*decorator'
+    type: regex
+    scope: source
+    purpose: Detect cache annotations/decorators
+  file_patterns:
+  - glob: '**/cache/**'
+    purpose: Cache modules
+  - glob: '**/redis/**'
+    purpose: Redis configuration
+  - glob: '**/*cache*.ts'
+    purpose: Cache implementations
+knowledge_sources:
+  guides:
+  - id: caching-patterns
+    name: Caching Patterns
+    url: https://docs.microsoft.com/en-us/azure/architecture/patterns/cache-aside
+    offline_cache: true
+  - id: redis-patterns
+    name: Redis Caching Patterns
+    url: https://redis.io/docs/manual/patterns/
+    offline_cache: true
+  learning_resources:
+  - id: caching-best-practices
+    title: Caching Best Practices
+    type: article
+    reference: AWS Architecture Blog
+tooling:
+  static_analysis:
+  - tool: cache-analyzer
+    purpose: Detect caching patterns and issues
+    offline_capable: true
+  infrastructure_tools:
+  - tool: redis-cli
+    purpose: Analyze Redis cache
+    command: redis-cli INFO stats
+  scripts:
+  - id: caching-scan
+    language: bash
+    purpose: Analyze caching patterns
+    source: inline
+    code: |
+      echo "=== Caching Strategy Analysis ==="
+      echo "--- Cache client usage ---"
+      grep -rn "redis\|Redis\|cache\|Cache\|memcache" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -30
+
+      echo "--- TTL configuration ---"
+      grep -rn "ttl\|TTL\|expire\|expiration\|maxAge\|EX\s" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+
+      echo "--- Cache invalidation ---"
+      grep -rn "invalidate\|evict\|del\|delete.*cache\|clear.*cache" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+signals:
+  critical:
+  - id: CS-CRIT-001
+    signal: Cached data never expires or invalidates
+    evidence_pattern: Cache set without TTL and no invalidation logic
+    explanation: |
+      Cache entries without expiration or invalidation become permanently
+      stale. Users see outdated data indefinitely, and the only fix is
+      manual cache clearing.
+    remediation: Set appropriate TTL on all cached data; implement invalidation
+  - id: CS-CRIT-002
+    signal: Cache stampede vulnerability
+    evidence_pattern: Multiple requests can trigger cache rebuild simultaneously
+    explanation: |
+      When cached data expires, all concurrent requests try to rebuild it
+      simultaneously, overwhelming the database. This is especially
+      dangerous for expensive queries or popular resources.
+    remediation: Implement cache locking, early refresh, or staggered TTLs
+  high:
+  - id: CS-HIGH-001
+    signal: No cache invalidation on data updates
+    evidence_pattern: Data updated in database but cache not cleared
+    explanation: |
+      When underlying data changes but cache isn't invalidated, users
+      see stale data until TTL expires. For critical data, this can
+      cause serious business problems.
+    remediation: Invalidate or update cache on data modification
+  - id: CS-HIGH-002
+    signal: Caching user-specific data without isolation
+    evidence_pattern: User data cached with generic key
+    explanation: |
+      Caching user-specific data without user-specific keys can leak
+      private data between users. This is a serious privacy and
+      security vulnerability.
+    remediation: Include user identifier in cache keys for user-specific data
+  - id: CS-HIGH-003
+    signal: Inconsistent TTLs for related data
+    evidence_pattern: Parent entity cached 1 hour, child entity cached 24 hours
+    explanation: |
+      When related data has different TTLs, they can become inconsistent.
+      A parent entity might be refreshed while children remain stale,
+      causing data integrity issues in the view.
+    remediation: Align TTLs for related data or invalidate together
+  medium:
+  - id: CS-MED-001
+    signal: No cache metrics or monitoring
+    evidence_pattern: Cache hit/miss rates not tracked
+    remediation: Implement cache hit rate monitoring and alerting
+  - id: CS-MED-002
+    signal: Local caching in distributed system
+    evidence_pattern: In-memory cache in multi-instance deployment
+    remediation: Use distributed cache for multi-instance deployments
+  - id: CS-MED-003
+    signal: No cache warming strategy
+    evidence_pattern: Cold start after deployment with no preloading
+    remediation: Implement cache warming for frequently accessed data
+  low:
+  - id: CS-LOW-001
+    signal: Caching strategy not documented
+    evidence_pattern: No documentation of what is cached and why
+    remediation: Document caching decisions including TTLs and invalidation
+  - id: CS-LOW-002
+    signal: No cache key namespacing
+    evidence_pattern: Cache keys without prefix or namespace
+    remediation: Use namespaced keys to prevent collisions
+  positive:
+  - id: CS-POS-001
+    signal: Cache-aside pattern properly implemented
+    evidence_pattern: Check cache, return if hit, fetch and cache on miss
+  - id: CS-POS-002
+    signal: Invalidation on write operations
+    evidence_pattern: Cache eviction in update/delete handlers
+  - id: CS-POS-003
+    signal: Cache metrics monitored
+    evidence_pattern: Hit rate, miss rate, and eviction metrics tracked
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Cache Usage
+    description: |
+      Identify all caching in the application.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find cache client initialization
+      command: |
+        grep -rn "redis\.\|Redis\(\|createClient\|CacheManager" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    - purpose: Find cache decorators/annotations
+      command: |
+        grep -rn "@Cacheable\|@CacheEvict\|@Cached\|cache.*=" \
+          --include="*.ts" --include="*.java" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Cache infrastructure
+    - Cache usage points
+  - id: '2'
+    name: Analyze TTL Configuration
+    description: |
+      Review cache expiration policies.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find TTL settings
+      command: |
+        grep -rn "ttl\|TTL\|expire\|EX \|maxAge" \
+          --include="*.ts" --include="*.java" --include="*.py" --include="*.yaml" . 2>/dev/null | \
+          grep -v node_modules | head -40
+    expected_findings:
+    - TTL configuration
+    - Expiration policies
+  - id: '3'
+    name: Review Invalidation Strategy
+    description: |
+      Check how cache invalidation is handled.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find invalidation code
+      command: |
+        grep -rn "invalidate\|evict\|del\|delete\|remove" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -i "cache" | grep -v node_modules | head -30
+    - purpose: Find cache clearing
+      command: |
+        grep -rn "clear\|flush\|purge" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -i "cache" | grep -v node_modules | head -20
+    expected_findings:
+    - Invalidation patterns
+    - Event-driven invalidation
+  - id: '4'
+    name: Check Cache Key Design
+    description: |
+      Analyze cache key construction.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find cache key patterns
+      command: |
+        grep -rn "key.*=\|cacheKey\|getCacheKey" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -i "cache" | grep -v node_modules | head -30
+    expected_findings:
+    - Key design patterns
+    - Namespace usage
+  - id: '5'
+    name: Assess Cache Consistency
+    description: |
+      Verify cache stays consistent with data.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find update operations
+      command: |
+        grep -rn "update\|save\|delete\|remove" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | grep -v test | head -30
+    expected_findings:
+    - Update-to-invalidation correlation
+    - Consistency gaps
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - cache_inventory
+    - ttl_analysis
+    - invalidation_coverage
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Cache Infrastructure
+    - TTL Analysis
+    - Invalidation Strategy
+    - Recommendations
+  confidence_guidance:
+    high: Clear missing invalidation or infinite TTL
+    medium: Caching exists but may have edge cases
+    low: Requires runtime testing to confirm issues
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: caching-patterns
+      priority: required
+    - source_id: redis-patterns
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    performance:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: cs-001
+  item: All cached data has TTL
+  level: CRITICAL
+  verification: |
+    grep -rn "set\|SET\|cache" --include="*.ts" --include="*.java" . 2>/dev/null | \
+      grep -i "redis\|cache" | grep -v "ttl\|TTL\|expire\|EX" | grep -v node_modules | \
+      wc -l | xargs -I {} test {} -lt 5 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: cs-002
+  item: Cache invalidated on data updates
+  level: CRITICAL
+  verification: |
+    grep -rn "invalidate\|evict\|del\|delete" --include="*.ts" --include="*.java" . 2>/dev/null | \
+      grep -i "cache" | grep -v node_modules | wc -l | \
+      xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: cs-003
+  item: Cache hit metrics available
+  level: WARNING
+  verification: |
+    grep -rn "hit\|miss\|cache.*metric" --include="*.ts" --include="*.java" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Performance Efficiency
+relationships:
+  commonly_combined:
+  - data-state-management.data-access-patterns.read-write-separation
+  - performance-efficiency.caching.cache-effectiveness
+  - reliability-resilience.data-integrity.cache-consistency

@@ -1,0 +1,321 @@
+# ============================================================
+# AUDIT: Data Transformation
+# ============================================================
+# Evaluates data transformation during migrations including data
+# migration safety, transformation logic, and validation practices.
+# ============================================================
+
+audit:
+  id: "data-state-management.schema-evolution.data-transformation"
+
+  name: "Data Transformation"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "schema-evolution"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates data transformation practices during schema migrations.
+    It examines how existing data is modified, validated, and preserved during
+    schema changes. The audit identifies unsafe transformations, missing
+    validation, and potential data loss scenarios.
+
+  why_it_matters: |
+    Data transformations during migrations are high-risk operations. Incorrect
+    transformations can corrupt data permanently, lose information through
+    truncation or type conversion, or leave data in inconsistent states.
+    Proper transformation practices ensure data integrity is maintained
+    through schema evolution.
+
+  when_to_run:
+    - "Before deploying data-modifying migrations"
+    - "When restructuring data models"
+    - "After data corruption incidents"
+    - "During migration review"
+
+prerequisites:
+  required_artifacts:
+    - type: "migration-files"
+      description: "Migrations containing data transformations"
+    - type: "data-samples"
+      description: "Sample data for transformation testing"
+
+  access_requirements:
+    - "Read access to migration files"
+    - "Access to test data"
+    - "Pre/post transformation validation access"
+
+discovery:
+  code_patterns:
+    - pattern: "UPDATE.*SET|INSERT INTO.*SELECT"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify data transformation statements"
+    - pattern: "CAST|CONVERT|::.*TYPE"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify type conversions"
+    - pattern: "CONCAT|SUBSTRING|SPLIT|COALESCE"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify string/value transformations"
+
+  file_patterns:
+    - glob: "**/migrations/**/*.sql"
+      purpose: "SQL migration files"
+    - glob: "**/migrations/**/*.ts"
+      purpose: "TypeScript migration files"
+    - glob: "**/data/**/*.sql"
+      purpose: "Data migration scripts"
+
+knowledge_sources:
+  guides:
+    - id: "data-migration-patterns"
+      name: "Data Migration Patterns and Best Practices"
+      url: "https://martinfowler.com/articles/evodb.html"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "sql-analyzer"
+      purpose: "Analyze data transformation statements"
+      offline_capable: true
+
+  scripts:
+    - id: "find-transformations"
+      language: "bash"
+      purpose: "Identify data transformation operations"
+      source: "inline"
+      code: |
+        grep -riE '(UPDATE.*SET|INSERT INTO.*SELECT|CAST|CONVERT)' \
+          --include='*.sql' migrations/ 2>/dev/null
+
+signals:
+  critical:
+    - id: "DATATX-CRIT-001"
+      signal: "Type conversion that could truncate or lose data"
+      evidence_pattern: "CAST to smaller type, VARCHAR(255) to VARCHAR(50)"
+      explanation: |
+        Type conversions to smaller types can truncate data without warning.
+        Converting text to shorter varchar loses characters, converting
+        bigint to int can overflow. This data loss is permanent.
+      remediation: "Validate data fits in target type before conversion; fail migration if data would be lost"
+
+    - id: "DATATX-CRIT-002"
+      signal: "Data transformation without backup or reversibility"
+      evidence_pattern: "UPDATE that modifies source data without preserving original"
+      explanation: |
+        Transformations that modify data in-place without preserving the
+        original make recovery impossible if the transformation is wrong.
+        Once applied, the original data is gone forever.
+      remediation: "Copy data to backup column before transformation; drop backup only after validation"
+
+  high:
+    - id: "DATATX-HIGH-001"
+      signal: "Missing data validation before transformation"
+      evidence_pattern: "UPDATE/INSERT without preceding SELECT/COUNT verification"
+      explanation: |
+        Transformations without pre-validation may encounter unexpected data
+        that causes failures or incorrect results. Edge cases in production
+        data often differ from test data.
+      remediation: "Add validation queries before transformation; verify row counts and data patterns"
+
+    - id: "DATATX-HIGH-002"
+      signal: "Missing data validation after transformation"
+      evidence_pattern: "No verification that transformation produced correct results"
+      explanation: |
+        Without post-transformation validation, incorrect results go undetected
+        until they cause application errors or user complaints. By then,
+        the damage is done and rollback may be difficult.
+      remediation: "Add assertions after transformation; verify expected row counts, null patterns, value ranges"
+
+  medium:
+    - id: "DATATX-MED-001"
+      signal: "Large data transformation in single transaction"
+      evidence_pattern: "UPDATE affecting millions of rows in one statement"
+      remediation: "Batch large transformations; commit periodically to avoid lock issues"
+
+    - id: "DATATX-MED-002"
+      signal: "Transformation logic duplicated in application and migration"
+      evidence_pattern: "Same transformation rules in both places"
+      remediation: "Centralize transformation logic; ensure consistency between migration and application"
+
+  low:
+    - id: "DATATX-LOW-001"
+      signal: "Missing documentation of transformation logic"
+
+  positive:
+    - id: "DATATX-POS-001"
+      signal: "Comprehensive pre/post validation with rollback capability"
+    - id: "DATATX-POS-002"
+      signal: "Batched transformations with progress tracking"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Transformation Discovery"
+      description: |
+        Identify all data transformations in migrations including
+        updates, type conversions, and data restructuring.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find UPDATE statements"
+          command: "grep -riE 'UPDATE\\s+\\w+\\s+SET' --include='*.sql' --include='*.ts' -path '*/migrations/*' . 2>/dev/null | head -40"
+        - purpose: "Find INSERT...SELECT statements"
+          command: "grep -riE 'INSERT INTO.*SELECT' --include='*.sql' --include='*.ts' . 2>/dev/null | head -30"
+        - purpose: "Find type conversions"
+          command: "grep -riE 'CAST\\(|CONVERT\\(|::[a-z]+' --include='*.sql' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Data transformation inventory"
+        - "Transformation types and complexity"
+
+    - id: "2"
+      name: "Data Safety Analysis"
+      description: |
+        Evaluate whether transformations preserve data and
+        handle edge cases safely.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find potentially lossy conversions"
+          command: "grep -riE 'VARCHAR\\([0-9]+\\)|CAST.*INT|TRUNCATE|SUBSTRING' --include='*.sql' . 2>/dev/null | head -30"
+        - purpose: "Find backup patterns"
+          command: "grep -riE '_backup|_old|_original|RENAME.*TO.*_bak' --include='*.sql' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Potential data loss scenarios"
+        - "Backup/preservation patterns"
+
+    - id: "3"
+      name: "Validation Analysis"
+      description: |
+        Identify pre and post transformation validation
+        to ensure data integrity.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find validation queries"
+          command: "grep -riE 'SELECT COUNT|SELECT SUM|ASSERT|RAISE|IF.*THEN.*RAISE' --include='*.sql' --include='*.ts' -path '*/migrations/*' . 2>/dev/null | head -30"
+        - purpose: "Find constraint validation"
+          command: "grep -riE 'CHECK|VALIDATE|verify|assert' --include='*.sql' --include='*.ts' -path '*/migrations/*' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Validation coverage"
+        - "Pre/post check patterns"
+
+    - id: "4"
+      name: "Reversibility Analysis"
+      description: |
+        Evaluate whether data transformations can be reversed
+        if needed.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find down migration data handling"
+          command: "grep -riE 'down|rollback|revert' --include='*.sql' --include='*.ts' -A10 -path '*/migrations/*' . 2>/dev/null | grep -iE 'UPDATE|INSERT|SELECT' | head -20"
+        - purpose: "Find data restoration patterns"
+          command: "grep -riE 'restore|_backup|_old' --include='*.sql' --include='*.ts' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Reversibility assessment"
+        - "Data restoration patterns"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Transformation Inventory"
+        - "Safety Assessment"
+        - "Validation Coverage"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear evidence of unsafe transformation without safeguards"
+    medium: "Transformation exists with partial validation"
+    low: "Transformation appears safe but edge cases uncertain"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "data-migration-patterns"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed transformation analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "datatx-001"
+    item: "All data transformations identified"
+    level: "CRITICAL"
+    verification: "grep -riE 'UPDATE.*SET|INSERT INTO.*SELECT' --include='*.sql' -path '*/migrations/*' . 2>/dev/null | wc -l | xargs -I{} echo PASS"
+    expected: "PASS"
+
+  - id: "datatx-002"
+    item: "Type conversions reviewed for data loss potential"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify no lossy type conversions exist"
+    expected: "Confirmed by reviewer"
+
+  - id: "datatx-003"
+    item: "Pre/post transformation validation exists"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify transformations have validation"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Data Integrity Standards"
+      controls: ["DI-005", "DI-006"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.schema-evolution.migration-safety"
+    - "data-state-management.schema-evolution.migration-rollback-capability"

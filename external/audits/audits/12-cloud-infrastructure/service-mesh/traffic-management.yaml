@@ -1,0 +1,374 @@
+# ============================================================
+# AUDIT FILE: Traffic Management
+# ============================================================
+
+audit:
+  id: "cloud-infrastructure.service-mesh.traffic-management"
+  name: "Traffic Management"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "cloud-infrastructure"
+  category_number: 12
+  subcategory: "service-mesh"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates service mesh traffic management configurations including load
+    balancing strategies, traffic routing rules, circuit breakers, retries,
+    timeouts, fault injection, traffic mirroring, and canary deployments.
+    Examines VirtualServices, DestinationRules, and traffic policies for
+    proper configuration and reliability patterns.
+
+  why_it_matters: |
+    Traffic management is critical for application reliability and deployment
+    safety. Misconfigured routing can cause outages, while missing circuit
+    breakers can cascade failures across services. Proper traffic management
+    enables safe deployments through canaries, provides resilience through
+    retries and timeouts, and prevents cascade failures.
+
+  when_to_run:
+    - "Before implementing new traffic routing rules"
+    - "After deployment-related incidents"
+    - "During reliability engineering reviews"
+    - "When setting up canary or blue-green deployments"
+
+prerequisites:
+  required_artifacts:
+    - type: "service-mesh"
+      description: "Running service mesh with traffic management capabilities"
+    - type: "traffic-configs"
+      description: "VirtualServices, DestinationRules, traffic policies"
+
+  access_requirements:
+    - "kubectl access to mesh namespace"
+    - "istioctl or equivalent mesh CLI access"
+    - "Access to service mesh dashboards"
+
+discovery:
+  file_patterns:
+    - glob: "**/virtualservice*.yaml"
+      purpose: "Istio VirtualService definitions"
+    - glob: "**/destinationrule*.yaml"
+      purpose: "Istio DestinationRule definitions"
+    - glob: "**/gateway*.yaml"
+      purpose: "Gateway configurations"
+    - glob: "**/serviceentry*.yaml"
+      purpose: "External service definitions"
+    - glob: "**/trafficsplit*.yaml"
+      purpose: "SMI TrafficSplit resources"
+
+  code_patterns:
+    - pattern: "timeout:\\s*\\d+"
+      type: "regex"
+      scope: "config"
+      purpose: "Identify timeout configurations"
+    - pattern: "retries:"
+      type: "keyword"
+      scope: "config"
+      purpose: "Identify retry configurations"
+    - pattern: "outlierDetection:"
+      type: "keyword"
+      scope: "config"
+      purpose: "Identify circuit breaker settings"
+    - pattern: "trafficPolicy:"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find traffic policy definitions"
+
+knowledge_sources:
+  specifications:
+    - id: "istio-traffic"
+      name: "Istio Traffic Management"
+      url: "https://istio.io/latest/docs/concepts/traffic-management/"
+      offline_cache: true
+      priority: "required"
+    - id: "nist-800-207"
+      name: "NIST SP 800-207: Zero Trust Architecture"
+      url: "https://csrc.nist.gov/publications/detail/sp/800-207/final"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "istio-routing"
+      name: "Istio Request Routing"
+      url: "https://istio.io/latest/docs/tasks/traffic-management/request-routing/"
+      offline_cache: true
+    - id: "circuit-breaker"
+      name: "Circuit Breaker Pattern"
+      url: "https://istio.io/latest/docs/tasks/traffic-management/circuit-breaking/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "istioctl"
+      purpose: "Analyze traffic configuration"
+      command: "istioctl analyze --all-namespaces"
+    - tool: "kiali"
+      purpose: "Visualize traffic flows"
+      command: "kubectl port-forward svc/kiali -n istio-system 20001"
+
+  scripts:
+    - id: "traffic-audit"
+      language: "bash"
+      purpose: "Audit traffic management configuration"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== VirtualServices ==="
+        kubectl get virtualservices -A
+        echo "=== DestinationRules ==="
+        kubectl get destinationrules -A
+        echo "=== Services without traffic config ==="
+        kubectl get svc -A --no-headers | while read ns name rest; do
+          vs=$(kubectl get virtualservice -n $ns -o json 2>/dev/null | jq ".items[] | select(.spec.hosts[] | contains(\"$name\"))" | wc -l)
+          if [ "$vs" -eq 0 ]; then
+            echo "  $ns/$name: No VirtualService"
+          fi
+        done
+
+signals:
+  critical:
+    - id: "TRAFFIC-CRIT-001"
+      signal: "No circuit breakers for external dependencies"
+      evidence_pattern: "Missing outlierDetection in DestinationRules"
+      explanation: |
+        Without circuit breakers, failures in external services can
+        cascade to all dependent services, causing widespread outages.
+      remediation: "Configure outlierDetection for all external dependencies"
+    - id: "TRAFFIC-CRIT-002"
+      signal: "Missing timeouts on critical paths"
+      evidence_pattern: "No timeout configuration in VirtualServices"
+      explanation: |
+        Without timeouts, slow or hung services can exhaust connection
+        pools and thread pools in calling services.
+      remediation: "Configure appropriate timeouts for all service calls"
+
+  high:
+    - id: "TRAFFIC-HIGH-001"
+      signal: "No retry configuration for idempotent operations"
+      evidence_pattern: "Missing retries in VirtualService"
+      explanation: |
+        Transient failures are common in distributed systems. Without
+        retries, temporary issues cause user-visible errors.
+      remediation: "Configure retries with appropriate backoff for idempotent ops"
+    - id: "TRAFFIC-HIGH-002"
+      signal: "Aggressive retry settings"
+      evidence_pattern: "High retry attempts without backoff"
+      explanation: |
+        Aggressive retries can amplify load during failures, potentially
+        causing cascading failures or prolonging outages.
+      remediation: "Use exponential backoff and reasonable retry limits"
+    - id: "TRAFFIC-HIGH-003"
+      signal: "No connection pool limits"
+      evidence_pattern: "Missing connectionPool in DestinationRule"
+      explanation: |
+        Unbounded connection pools can exhaust resources during traffic
+        spikes or when downstream services are slow.
+      remediation: "Configure connection pool limits appropriate for the service"
+
+  medium:
+    - id: "TRAFFIC-MED-001"
+      signal: "Inconsistent load balancing across services"
+      evidence_pattern: "Different load balancing strategies without justification"
+      remediation: "Standardize load balancing unless specific needs require variation"
+    - id: "TRAFFIC-MED-002"
+      signal: "No traffic mirroring for testing"
+      evidence_pattern: "Missing mirror configuration"
+      remediation: "Consider traffic mirroring for testing new versions"
+    - id: "TRAFFIC-MED-003"
+      signal: "Canary deployments without proper routing"
+      evidence_pattern: "Multiple versions without traffic splitting"
+      remediation: "Configure proper traffic splitting for canary deployments"
+
+  low:
+    - id: "TRAFFIC-LOW-001"
+      signal: "Default load balancing used everywhere"
+      remediation: "Review if specific services would benefit from other strategies"
+    - id: "TRAFFIC-LOW-002"
+      signal: "No fault injection testing"
+      remediation: "Use fault injection to test resilience patterns"
+
+  positive:
+    - id: "TRAFFIC-POS-001"
+      signal: "Circuit breakers configured for all external dependencies"
+    - id: "TRAFFIC-POS-002"
+      signal: "Appropriate timeouts configured throughout"
+    - id: "TRAFFIC-POS-003"
+      signal: "Canary deployment infrastructure in place"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory traffic configurations"
+      description: |
+        Collect all traffic management resources and identify services
+        without explicit configuration.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "List VirtualServices"
+          command: "kubectl get virtualservices -A -o yaml"
+        - purpose: "List DestinationRules"
+          command: "kubectl get destinationrules -A -o yaml"
+      expected_findings:
+        - "Traffic configuration inventory"
+        - "Services without explicit traffic config"
+
+    - id: "2"
+      name: "Analyze timeout configurations"
+      description: |
+        Review timeout settings across services for appropriateness
+        and consistency.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Extract timeout configs"
+          command: "kubectl get virtualservices -A -o json | jq '.items[] | {name: .metadata.name, namespace: .metadata.namespace, timeout: .spec.http[].timeout}'"
+      expected_findings:
+        - "Timeout configuration map"
+        - "Missing or inappropriate timeouts"
+
+    - id: "3"
+      name: "Review circuit breaker settings"
+      description: |
+        Examine circuit breaker configurations including outlier detection
+        and connection pool settings.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Extract circuit breaker configs"
+          command: "kubectl get destinationrules -A -o json | jq '.items[] | {name: .metadata.name, outlierDetection: .spec.trafficPolicy.outlierDetection, connectionPool: .spec.trafficPolicy.connectionPool}'"
+      expected_findings:
+        - "Circuit breaker coverage"
+        - "Connection pool configurations"
+
+    - id: "4"
+      name: "Evaluate retry configurations"
+      description: |
+        Review retry settings for appropriateness and potential
+        amplification risks.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Extract retry configs"
+          command: "kubectl get virtualservices -A -o json | jq '.items[] | {name: .metadata.name, retries: .spec.http[].retries}'"
+      expected_findings:
+        - "Retry configuration assessment"
+        - "Aggressive retry patterns"
+
+    - id: "5"
+      name: "Assess traffic splitting and routing"
+      description: |
+        Review traffic routing rules and splitting configurations for
+        canary and blue-green deployments.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check traffic weights"
+          command: "kubectl get virtualservices -A -o json | jq '.items[] | {name: .metadata.name, routes: [.spec.http[].route[] | {destination: .destination, weight: .weight}]}'"
+      expected_findings:
+        - "Traffic splitting configuration"
+        - "Routing rule assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Resilience Configuration Analysis"
+        - "Traffic Routing Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct configuration analysis, kubectl query results"
+    medium: "Inferred from patterns and coverage"
+    low: "Based on absence of configurations"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "istio-traffic"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires live mesh analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "traffic-management-001"
+    item: "Timeouts configured for all services"
+    level: "CRITICAL"
+    verification: "kubectl get virtualservices -A -o json | jq '[.items[] | select(.spec.http[].timeout == null)] | length' | awk '{print ($1==0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "traffic-management-002"
+    item: "Circuit breakers for external dependencies"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify DestinationRules for external services have outlierDetection"
+    expected: "Confirmed by reviewer"
+  - id: "traffic-management-003"
+    item: "Connection pool limits configured"
+    level: "BLOCKING"
+    verification: "kubectl get destinationrules -A -o json | jq '[.items[] | select(.spec.trafficPolicy.connectionPool == null)] | length' | awk '{print ($1==0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "traffic-management-004"
+    item: "Retry settings appropriate"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Review retry configurations for backoff and limits"
+    expected: "Confirmed by reviewer"
+  - id: "traffic-management-005"
+    item: "Canary infrastructure in place"
+    level: "WARNING"
+    verification: "kubectl get virtualservices -A -o json | jq '[.items[] | select(.spec.http[].route | length > 1)] | length' | awk '{print ($1>0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["A1.1", "A1.2"]
+    - framework: "ISO27001"
+      controls: ["A.17.1.1", "A.17.2.1"]
+
+relationships:
+  commonly_combined:
+    - "cloud-infrastructure.service-mesh.service-mesh-security"
+    - "cloud-infrastructure.service-mesh.observability-integration"
+    - "cloud-infrastructure.containers.container-health-checks"

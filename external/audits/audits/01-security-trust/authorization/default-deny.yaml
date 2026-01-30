@@ -1,0 +1,385 @@
+audit:
+  id: security-trust.authorization.default-deny
+  name: Default Deny Verification Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: authorization
+  tier: phd
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    Verifies that the application implements a default-deny access control
+    pattern where all access is denied unless explicitly permitted. Examines
+    authorization configurations, route protection, and access control logic
+    to ensure that missing or incomplete authorization rules result in denied
+    access rather than permitted access.
+  why_it_matters: |
+    Default-allow configurations are a leading cause of broken access control
+    (OWASP Top 10 #1). CWE-276 (Incorrect Default Permissions) describes how
+    overly permissive defaults create security vulnerabilities. OWASP and NIST
+    mandate "deny by default" as a fundamental access control principle.
+    Failure to implement this leads to unauthorized access to new endpoints
+    or resources that lack explicit rules.
+  when_to_run:
+  - Initial security assessment
+  - Before adding new endpoints
+  - After framework upgrades
+  - During security architecture review
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application with access control configuration
+  - type: configuration
+    description: Security framework configuration files
+  access_requirements:
+  - Read access to source code repository
+  - Access to security configuration
+discovery:
+  code_patterns:
+  - pattern: (permitAll|allowAll|public|anonymous)\(
+    type: regex
+    scope: source
+    purpose: Find overly permissive access rules
+  - pattern: (denyAll|authenticated|requireAuth)\(
+    type: regex
+    scope: source
+    purpose: Locate restrictive access patterns
+  - pattern: default.*(allow|permit|true)|fallback.*(true|allow)
+    type: regex
+    scope: source
+    purpose: Identify default-allow configurations
+  - pattern: '@(Anonymous|Public|AllowAnonymous)'
+    type: regex
+    scope: source
+    purpose: Find public endpoint annotations
+  - pattern: (anyRequest|otherwise|else)\s*\.\s*(permit|allow)
+    type: regex
+    scope: source
+    purpose: Detect catch-all permit rules
+  file_patterns:
+  - glob: '**/security*.{java,ts,js,py,go}'
+    purpose: Security configuration files
+  - glob: '**/auth*.{java,ts,js,py,go}'
+    purpose: Authentication configuration
+  - glob: '**/config/security/**'
+    purpose: Security configuration directory
+  - glob: '**/middleware/auth*'
+    purpose: Authentication middleware
+knowledge_sources:
+  specifications:
+  - id: cwe-276
+    name: 'CWE-276: Incorrect Default Permissions'
+    url: https://cwe.mitre.org/data/definitions/276.html
+    offline_cache: true
+    priority: required
+  - id: cwe-862
+    name: 'CWE-862: Missing Authorization'
+    url: https://cwe.mitre.org/data/definitions/862.html
+    offline_cache: true
+    priority: required
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: NIST SP 800-207 Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-authz
+    name: OWASP Authorization Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-top10-a01
+    name: OWASP Top 10 A01:2021 Broken Access Control
+    url: https://owasp.org/Top10/2021/A01_2021-Broken_Access_Control/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect default-allow patterns
+    offline_capable: true
+  scripts:
+  - id: default-deny-check
+    language: bash
+    purpose: Find access control patterns
+    source: inline
+    code: |
+      # Search for default access patterns
+      grep -rn --include="*.{js,ts,py,java,go,rb,cs}" \
+        -E "(permitAll|allowAll|denyAll|anyRequest)" .
+signals:
+  critical:
+  - id: DENY-CRIT-001
+    signal: Default access set to allow/permit
+    evidence_pattern: (default|fallback).*(allow|permit|true)|anyRequest\(\)\.permitAll
+    cwe: CWE-276
+    explanation: |
+      The default access control setting allows access when no explicit
+      rule matches. This means new endpoints or resources are automatically
+      accessible without authorization.
+    remediation: Configure default to denyAll(); add explicit permits for authorized paths
+  - id: DENY-CRIT-002
+    signal: Catch-all permit rule at end of chain
+    evidence_pattern: \.anyRequest\(\)\s*\.\s*permitAll|otherwise\s*=>\s*true
+    cwe: CWE-862
+    explanation: |
+      A catch-all permit rule ensures any request not matching earlier
+      rules is allowed, negating the purpose of access control.
+    remediation: Replace catch-all permit with authenticated() or denyAll()
+  - id: DENY-CRIT-003
+    signal: Authorization disabled or bypassed globally
+    evidence_pattern: (disable|bypass|skip).*auth|auth.*(disable|false|off)
+    cwe: CWE-862
+    explanation: |
+      Authorization checks are globally disabled, allowing unrestricted
+      access to all resources.
+    remediation: Enable authorization; use targeted exceptions only for truly public endpoints
+  high:
+  - id: DENY-HIGH-001
+    signal: Excessive public endpoints
+    evidence_pattern: '@(Anonymous|Public|AllowAnonymous)'
+    cwe: CWE-276
+    explanation: |
+      Many endpoints are marked as public, reducing the security posture.
+      Each public endpoint expands the attack surface.
+    remediation: Audit public endpoints; require authentication for sensitive operations
+  - id: DENY-HIGH-002
+    signal: Missing authorization on route registration
+    evidence_pattern: router\.(get|post|put|delete)\(['"][^'"]+['"]\s*,\s*[a-z]
+    cwe: CWE-862
+    explanation: |
+      Routes are registered without authorization middleware, relying
+      on handler-level checks that may be inconsistent.
+    remediation: Apply authorization middleware at route registration level
+  - id: DENY-HIGH-003
+    signal: Authorization check in wrong order
+    evidence_pattern: authorization.*after|filter.*order.*auth
+    cwe: CWE-285
+    explanation: |
+      Authorization filter is not in the correct position in the
+      filter chain, allowing bypass through earlier filters.
+    remediation: Ensure authorization filter runs early in the request pipeline
+  medium:
+  - id: DENY-MED-001
+    signal: Implicit public access for static resources
+    evidence_pattern: static|public|assets|resources.*permitAll
+    cwe: CWE-276
+    remediation: Limit static resource access to necessary files only
+  - id: DENY-MED-002
+    signal: Missing authorization in error handlers
+    evidence_pattern: (errorHandler|exceptionHandler)(?!.*auth)
+    cwe: CWE-200
+    remediation: Ensure error handlers don't leak information to unauthorized users
+  low:
+  - id: DENY-LOW-001
+    signal: Authorization configuration not centralized
+    evidence_pattern: '@PreAuthorize|@Authorized'
+    remediation: Centralize authorization rules for easier audit
+  positive:
+  - id: DENY-POS-001
+    signal: Default deny configuration present
+    evidence_pattern: (denyAll|anyRequest.*authenticated|default.*deny)
+  - id: DENY-POS-002
+    signal: Explicit whitelist for public endpoints
+    evidence_pattern: (publicPaths|whitelist|allowList)\s*=\s*\[
+  - id: DENY-POS-003
+    signal: Authorization middleware applied globally
+    evidence_pattern: app\.use\(.*auth|global.*filter.*auth
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Locate Security Configuration
+    description: |
+      Find the main security configuration files that define
+      access control defaults and rules.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find security configuration files
+      command: |
+        find . -type f \( -name "*security*.java" -o -name "*security*.ts" -o -name "*security*.py" -o -name "*auth*.config*" \) 2>/dev/null
+    - purpose: Find access control configuration
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(authorizeRequests|http\\.authorizeHttpRequests|securityPolicy)" .
+    expected_findings:
+    - Main security configuration file
+    - Access control rule definitions
+  - id: '2'
+    name: Analyze Default Access Behavior
+    description: |
+      Determine what happens when a request doesn't match any
+      explicit access control rule.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find default/catch-all rules
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(anyRequest|otherwise|default|fallback).*(permit|allow|deny|authenticated)" .
+    - purpose: Check for permitAll patterns
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "\\.permitAll\\(|allowAll|public\\s*:\\s*true" .
+    expected_findings:
+    - Default behavior is deny
+    - No catch-all permit rules
+  - id: '3'
+    name: Audit Public Endpoints
+    description: |
+      Identify all endpoints configured as public and verify
+      they should truly be unauthenticated.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find public endpoint configurations
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "@(Anonymous|Public|AllowAnonymous)|permitAll\\(\\)" .
+    - purpose: List explicit public paths
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(publicPaths|whitelist|allowList|unauthenticated)" .
+    expected_findings:
+    - Limited, intentional public endpoints
+    - Public paths are documented
+  - id: '4'
+    name: Verify Middleware/Filter Order
+    description: |
+      Ensure authorization filters are correctly positioned
+      in the request processing pipeline.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find filter/middleware registration
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(addFilter|use|middleware|interceptor).*auth" .
+    - purpose: Check filter order
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(order|priority|before|after).*auth" .
+    expected_findings:
+    - Authorization runs early in pipeline
+    - Proper filter ordering
+  - id: '5'
+    name: Validate No Authorization Bypass
+    description: |
+      Check for configurations that disable or bypass
+      authorization.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find bypass configurations
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(disable|skip|bypass).*(auth|security)|security.*false" .
+    expected_findings:
+    - No global authorization bypass
+    - No disabled security configurations
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Default Access Analysis
+    - Public Endpoint Audit
+    - Recommendations
+  confidence_guidance:
+    high: Clear default-deny with explicit whitelist
+    medium: Default-deny present but exceptions may be excessive
+    low: Access control patterns found but defaults unclear
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-276
+      priority: required
+    - source_id: owasp-top10-a01
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: deny-001
+  item: Default access is deny
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" -E "denyAll|anyRequest.*authenticated" . | wc -l
+  expected: Greater than 0
+- id: deny-002
+  item: No catch-all permit rules
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "anyRequest.*permitAll\|otherwise.*allow" . | wc -l
+  expected: '0'
+- id: deny-003
+  item: Public endpoints are intentional and documented
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "@Anonymous\|@Public\|permitAll" . | wc -l
+  expected: Count is minimal and justified
+- id: deny-004
+  item: Authorization not globally disabled
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "(disable|bypass).*auth\|security.*false" . | wc -l
+  expected: '0'
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-276
+    - CWE-862
+  - framework: OWASP Top 10 2021
+    controls:
+    - A01:2021
+  - framework: NIST SP 800-53
+    controls:
+    - AC-3
+    - AC-6
+relationships:
+  commonly_combined:
+  - security-trust.authorization.rbac-implementation
+  - security-trust.authorization.privilege-escalation
+  - security-trust.authentication.authentication-enforcement

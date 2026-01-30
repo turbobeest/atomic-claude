@@ -1,0 +1,358 @@
+audit:
+  id: observability-instrumentation.observability-operations.data-pipeline-reliability
+  name: Data Pipeline Reliability Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: observability-operations
+  tier: phd
+  estimated_duration: 3-5 hours  # median: 4h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates the reliability, durability, and resilience of observability data
+    pipelines including metrics collection, log shipping, and trace ingestion.
+    Examines buffering strategies, backpressure handling, data loss scenarios,
+    and pipeline monitoring to ensure observability data reaches its destination.
+  why_it_matters: |
+    Observability data is only valuable if it arrives reliably. During incidents,
+    when observability is most critical, pipelines often experience their highest
+    load. Pipeline failures during incidents create blind spots precisely when
+    visibility is most needed, extending incident duration and impact.
+  when_to_run:
+  - After observability infrastructure changes
+  - During incident post-mortems involving data gaps
+  - Quarterly reliability reviews
+  - Before major traffic events or launches
+  - When scaling observability infrastructure
+prerequisites:
+  required_artifacts:
+  - type: pipeline_architecture
+    description: Documentation of observability data flow from source to destination
+  - type: collector_configs
+    description: Configuration files for agents, collectors, and forwarders
+  - type: pipeline_metrics
+    description: Metrics about pipeline health (drop rates, latency, buffer usage)
+  access_requirements:
+  - Read access to collector/agent configurations
+  - Access to pipeline health dashboards
+  - Read access to queue/buffer systems
+  - Access to historical data loss incidents
+discovery:
+  code_patterns:
+  - pattern: retry_on_failure|retry_max|max_retries
+    type: regex
+    scope: config
+    purpose: Identify retry configurations in pipelines
+  - pattern: queue|buffer|batch
+    type: keyword
+    scope: config
+    purpose: Find buffering and batching configurations
+  - pattern: drop_on|overflow|backpressure
+    type: regex
+    scope: config
+    purpose: Identify data loss behavior configurations
+  file_patterns:
+  - glob: '**/otel-collector*.yaml'
+    purpose: OpenTelemetry Collector configurations
+  - glob: '**/fluent*.conf'
+    purpose: Fluentd/Fluent Bit configurations
+  - glob: '**/vector*.toml'
+    purpose: Vector pipeline configurations
+  - glob: '**/filebeat*.yml'
+    purpose: Filebeat configurations
+  - glob: '**/promtail*.yaml'
+    purpose: Promtail configurations
+  metrics_queries:
+  - system: Prometheus
+    query: rate(otelcol_exporter_send_failed_spans_total[5m])
+    purpose: Track failed span exports
+    threshold: Should be 0 or near-zero in healthy state
+  - system: Prometheus
+    query: otelcol_processor_batch_batch_send_size_bucket
+    purpose: Monitor batch sizes for optimal throughput
+    threshold: Should show consistent batch sizes
+  - system: Prometheus
+    query: rate(fluentd_output_status_retry_count[5m])
+    purpose: Track log shipping retries
+    threshold: High retry rates indicate delivery issues
+knowledge_sources:
+  specifications:
+  - id: otel-collector
+    name: OpenTelemetry Collector Documentation
+    url: https://opentelemetry.io/docs/collector/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: reliable-telemetry
+    name: Building Reliable Telemetry Pipelines
+    url: https://opentelemetry.io/docs/collector/deployment/
+    offline_cache: true
+  - id: vector-reliability
+    name: Vector Reliability Features
+    url: https://vector.dev/docs/about/under-the-hood/reliability/
+    offline_cache: true
+  learning_resources:
+  - id: pipeline-patterns
+    title: Observability Pipeline Design Patterns
+    type: article
+    reference: Industry best practices for reliable data pipelines
+tooling:
+  infrastructure_tools:
+  - tool: otelcol
+    purpose: Validate OpenTelemetry Collector configurations
+    command: otelcol validate --config=config.yaml
+  - tool: vector
+    purpose: Validate Vector pipeline configurations
+    command: vector validate --config-yaml vector.yaml
+  - tool: fluent-bit
+    purpose: Test Fluent Bit configurations
+    command: fluent-bit --dry-run --config fluent-bit.conf
+  monitoring_queries:
+  - system: Prometheus
+    query: sum(rate(otelcol_receiver_accepted_spans_total[5m])) by (receiver)
+    purpose: Track span ingestion rate by receiver
+  - system: Prometheus
+    query: otelcol_exporter_queue_size / otelcol_exporter_queue_capacity
+    purpose: Monitor queue utilization
+  - system: Prometheus
+    query: histogram_quantile(0.99, rate(otelcol_exporter_send_latency_bucket[5m]))
+    purpose: Track export latency P99
+  scripts:
+  - id: pipeline-health-check
+    language: bash
+    purpose: Check pipeline health metrics
+    source: inline
+    code: |
+      #!/bin/bash
+      # Check key pipeline health metrics
+      echo "=== Pipeline Health Check ==="
+
+      # Check for dropped data
+      curl -s "${PROM_URL}/api/v1/query" \
+        --data-urlencode 'query=sum(rate(otelcol_exporter_send_failed_spans_total[5m]))' \
+        | jq '.data.result[0].value[1]'
+
+      # Check queue utilization
+      curl -s "${PROM_URL}/api/v1/query" \
+        --data-urlencode 'query=max(otelcol_exporter_queue_size/otelcol_exporter_queue_capacity)' \
+        | jq '.data.result[0].value[1]'
+signals:
+  critical:
+  - id: PIPE-REL-CRIT-001
+    signal: Data loss occurring in production pipeline
+    evidence_threshold: Drop rate > 0.1% of ingested data
+    explanation: |
+      Active data loss means observability gaps exist. During incidents,
+      this could mean missing the critical signals needed for diagnosis.
+    remediation: Investigate and resolve drops immediately; increase buffering capacity
+  - id: PIPE-REL-CRIT-002
+    signal: No persistent buffering configured for pipeline
+    evidence_indicators:
+    - memory-only queue configurations
+    - no disk buffer or WAL configured
+    explanation: |
+      Without persistent buffering, collector restarts or crashes result
+      in complete data loss of buffered data.
+    remediation: Enable persistent queue or disk buffer with appropriate sizing
+  high:
+  - id: PIPE-REL-HIGH-001
+    signal: Pipeline lacks retry configuration
+    explanation: Transient failures will result in permanent data loss
+    remediation: Configure exponential backoff retry with reasonable limits
+  - id: PIPE-REL-HIGH-002
+    signal: No monitoring of pipeline health
+    explanation: Pipeline failures go undetected until data gaps are discovered
+    remediation: Implement pipeline metrics and alerting on drop rates and latency
+  - id: PIPE-REL-HIGH-003
+    signal: Single point of failure in pipeline architecture
+    explanation: Collector failure causes complete data loss for served sources
+    remediation: Implement redundant collectors or load-balanced architecture
+  medium:
+  - id: PIPE-REL-MED-001
+    signal: Buffer sizes not tuned for expected load
+    remediation: Size buffers based on expected burst capacity and downstream latency
+  - id: PIPE-REL-MED-002
+    signal: No backpressure signaling to sources
+    remediation: Implement backpressure mechanisms to slow sources when overwhelmed
+  low:
+  - id: PIPE-REL-LOW-001
+    signal: Pipeline documentation is incomplete or outdated
+  positive:
+  - id: PIPE-REL-POS-001
+    signal: End-to-end pipeline monitoring with SLOs
+  - id: PIPE-REL-POS-002
+    signal: Persistent buffering with adequate capacity
+  - id: PIPE-REL-POS-003
+    signal: Redundant collector architecture implemented
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Map pipeline architecture
+    description: |
+      Document the complete data flow from sources through collectors
+      to destinations. Identify all components in the pipeline.
+    duration_estimate: 30 min
+    questions:
+    - What are all the data sources (applications, infrastructure)?
+    - What collectors/agents are used at each stage?
+    - What are the destination systems for each data type?
+    expected_findings:
+    - Complete pipeline topology diagram
+    - Identification of all pipeline components
+  - id: '2'
+    name: Audit buffering and persistence
+    description: |
+      Review buffering configurations at each pipeline stage. Verify
+      persistent buffering is enabled where data loss is unacceptable.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Check OTel Collector queue config
+      command: grep -A 10 'sending_queue:' otel-collector.yaml
+    - purpose: Check Vector buffer config
+      command: grep -A 5 'buffer' vector.toml
+    expected_findings:
+    - Buffer configurations for each pipeline stage
+    - Identification of memory-only vs persistent buffers
+  - id: '3'
+    name: Review retry and backpressure handling
+    description: |
+      Examine retry configurations and backpressure handling at each
+      stage. Verify appropriate behavior when destinations are unavailable.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check retry configuration
+      command: grep -r 'retry' /etc/otel/ /etc/fluent*/ 2>/dev/null
+    expected_findings:
+    - Retry policies for each pipeline stage
+    - Backpressure handling configuration
+  - id: '4'
+    name: Analyze pipeline health metrics
+    description: |
+      Review current pipeline health metrics. Identify any ongoing
+      data loss or reliability issues.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Query drop rates
+      command: curl -s $PROM_URL/api/v1/query --data-urlencode 'query=sum(rate(otelcol_exporter_send_failed_spans_total[24h]))'
+    expected_findings:
+    - Current drop rates and error rates
+    - Queue utilization trends
+    - Export latency patterns
+  - id: '5'
+    name: Test failure scenarios
+    description: |
+      If safe to do so, test pipeline behavior during destination
+      unavailability. Verify data is buffered and eventually delivered.
+    duration_estimate: 30 min
+    questions:
+    - What happens when the destination is temporarily unavailable?
+    - How long can the pipeline buffer data during an outage?
+    - Is there alerting for pipeline failures?
+    expected_findings:
+    - Verified buffering behavior during failures
+    - Maximum buffering duration calculated
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: architecture_diagram
+    format: visual
+    sections:
+    - Pipeline Topology
+    - Buffer Locations
+    - Failure Points
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Pipeline Architecture Overview
+    - Reliability Assessment
+    - Key Findings
+    - Recommendations
+  confidence_guidance:
+    high: Verified through configuration review and metrics analysis
+    medium: Based on configuration review without runtime validation
+    low: Inferred from partial information or documentation
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: otel-collector
+      priority: required
+    - source_id: reliable-telemetry
+      priority: recommended
+  offline_notes: |
+    Configuration review can be done offline. Runtime health analysis
+    and failure testing require access to live systems.
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Pipeline analysis requires comprehensive review
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: data-pipeline-reliability-001
+  item: Pipeline architecture documented
+  level: CRITICAL
+  verification: manual
+  verification_notes: Complete data flow from sources to destinations is documented
+  expected: Confirmed by reviewer
+- id: data-pipeline-reliability-002
+  item: Buffering strategy reviewed for each stage
+  level: CRITICAL
+  verification: manual
+  verification_notes: Buffer type, size, and persistence verified for all pipeline stages
+  expected: Confirmed by reviewer
+- id: data-pipeline-reliability-003
+  item: Current drop rates analyzed
+  level: BLOCKING
+  verification: manual
+  verification_notes: Drop rates retrieved and evaluated against thresholds
+  expected: Confirmed by reviewer
+- id: data-pipeline-reliability-004
+  item: Retry configurations verified
+  level: BLOCKING
+  verification: manual
+  verification_notes: Retry policies documented for all pipeline stages
+  expected: Confirmed by reviewer
+- id: data-pipeline-reliability-005
+  item: Pipeline monitoring and alerting assessed
+  level: WARNING
+  verification: manual
+  verification_notes: Alerting exists for pipeline failures and data loss
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.2
+    - CC7.3
+relationships:
+  commonly_combined:
+  - observability-instrumentation.observability-operations.observability-cost
+  - observability-instrumentation.observability-operations.opentelemetry-adoption

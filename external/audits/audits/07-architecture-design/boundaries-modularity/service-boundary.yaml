@@ -1,0 +1,348 @@
+audit:
+  id: architecture-design.boundaries-modularity.service-boundary
+  name: Service Boundary Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: architecture-design
+  category_number: 7
+  subcategory: boundaries-modularity
+  tier: phd
+  estimated_duration: 120 minutes
+  completeness: requires_discovery
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: architecture
+  default_profiles:
+  - full
+  - architecture
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates the boundaries between services in distributed systems or
+    microservices architectures. This includes analyzing API contracts,
+    data ownership, coupling between services, and whether services
+    represent cohesive business capabilities with clear responsibilities.
+  why_it_matters: |
+    Poor service boundaries lead to distributed monoliths - all the complexity
+    of microservices with none of the benefits. Tightly coupled services
+    require synchronized deployments, create cascading failures, and make
+    the system harder to understand and evolve than a monolith would be.
+  when_to_run:
+  - Architecture reviews
+  - Service decomposition planning
+  - When adding new services
+  - Performance/reliability issues
+prerequisites:
+  required_artifacts:
+  - type: service_definitions
+    description: Service manifests, docker-compose, k8s configs
+  - type: api_specs
+    description: OpenAPI, gRPC definitions, GraphQL schemas
+  - type: source_code
+    description: Service implementation code
+  access_requirements:
+  - Read access to all service repositories
+  - Access to API documentation
+  - Service discovery/registry access
+discovery:
+  code_patterns:
+  - pattern: fetch\(['"]https?://.*-service|axios\.get\(['"].*-service
+    type: regex
+    scope: source
+    purpose: Detect inter-service HTTP calls
+  - pattern: grpc\.call|grpcClient\.|stub\.
+    type: regex
+    scope: source
+    purpose: Detect gRPC service calls
+  - pattern: '@Service|@Microservice|@RestController'
+    type: regex
+    scope: source
+    purpose: Detect service definitions
+  file_patterns:
+  - glob: '**/openapi.{yaml,yml,json}'
+    purpose: OpenAPI specifications
+  - glob: '**/*.proto'
+    purpose: gRPC protocol definitions
+  - glob: '**/docker-compose*.yml'
+    purpose: Docker service definitions
+  - glob: '**/k8s/**/*.yaml'
+    purpose: Kubernetes manifests
+knowledge_sources:
+  learning_resources:
+  - id: building-microservices
+    title: Building Microservices
+    type: book
+    reference: 'Sam Newman, ISBN: 978-1492034025'
+  - id: microservices-patterns
+    title: Microservices Patterns
+    type: book
+    reference: 'Chris Richardson, ISBN: 978-1617294549'
+  guides:
+  - id: ms-azure-services
+    name: Microsoft - Microservices Architecture
+    url: https://docs.microsoft.com/en-us/azure/architecture/microservices/
+    offline_cache: true
+  - id: ddd-evans
+    name: Domain-Driven Design Reference
+    url: https://www.domainlanguage.com/ddd/reference/
+    offline_cache: true
+  - id: clean-architecture
+    name: Clean Architecture
+    url: https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html
+    offline_cache: true
+  - id: pragmatic-programmer
+    name: Pragmatic Programmer Tips
+    url: https://pragprog.com/tips/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: openapi-lint
+    purpose: API specification quality
+    offline_capable: true
+  - tool: spectral
+    purpose: OpenAPI/AsyncAPI linting
+    offline_capable: true
+  infrastructure_tools:
+  - tool: docker
+    purpose: Container inspection
+    command: docker-compose config
+  - tool: kubectl
+    purpose: Kubernetes service discovery
+    command: kubectl get services
+  scripts:
+  - id: service-boundary-scan
+    language: bash
+    purpose: Analyze service boundaries
+    source: inline
+    code: |
+      echo "=== Service Boundary Analysis ==="
+      echo "--- Docker services ---"
+      find . -name "docker-compose*.yml" -exec cat {} \; 2>/dev/null | grep -E "^\s+\w+:$" | head -20
+
+      echo "--- API specifications ---"
+      find . -name "openapi*.yaml" -o -name "openapi*.yml" -o -name "*.proto" | head -20
+
+      echo "--- Inter-service calls ---"
+      grep -rn "http://.*-service\|https://.*-service\|grpc://.*-service" \
+        --include="*.js" --include="*.ts" --include="*.py" --include="*.java" . 2>/dev/null | head -30
+signals:
+  critical:
+  - id: SBND-CRIT-001
+    signal: Services share database tables directly
+    evidence_pattern: Multiple services with same DB connection string and table access
+    explanation: |
+      Shared databases create tight coupling. Changes to schema require
+      coordinated releases. Data integrity becomes a cross-team problem.
+    remediation: Each service owns its data; communicate via APIs or events
+  - id: SBND-CRIT-002
+    signal: Synchronous chains >3 services deep
+    evidence_pattern: A calls B calls C calls D synchronously
+    explanation: |
+      Long synchronous chains multiply latency and failure risk.
+      One slow/failed service blocks the entire chain.
+    remediation: Use async patterns, caching, or consider merging services
+  high:
+  - id: SBND-HIGH-001
+    signal: Distributed transactions across services
+    evidence_pattern: 2PC|saga.*rollback.*multiple.*services|XA transaction
+    explanation: |
+      Distributed transactions are complex, slow, and often unreliable.
+      They indicate services that should be merged or differently bounded.
+    remediation: Use saga pattern with compensation, or reconsider boundaries
+  - id: SBND-HIGH-002
+    signal: Services with overlapping responsibilities
+    evidence_pattern: user-service and account-service both manage user profile
+    explanation: |
+      Overlapping responsibilities create confusion about ownership,
+      lead to data inconsistencies, and require cross-service coordination.
+    remediation: Clarify ownership, merge overlapping services, or define clear boundaries
+  - id: SBND-HIGH-003
+    signal: Chatty inter-service communication
+    evidence_pattern: '>5 API calls between services for single operation'
+    explanation: |
+      Excessive inter-service calls indicate wrong boundaries or
+      missing aggregate data. Each call adds latency and failure risk.
+    remediation: Consider coarser APIs, BFF pattern, or service consolidation
+  medium:
+  - id: SBND-MED-001
+    signal: No API versioning strategy
+    evidence_pattern: APIs without version in path or header
+    remediation: Implement API versioning (path, header, or content negotiation)
+  - id: SBND-MED-002
+    signal: Missing API contracts/specifications
+    evidence_pattern: No OpenAPI/Swagger/Proto definitions
+    remediation: Create formal API specifications for all services
+  - id: SBND-MED-003
+    signal: Hardcoded service URLs
+    evidence_pattern: http://user-service:8080|hardcoded host/port
+    remediation: Use service discovery, environment variables, or configuration
+  low:
+  - id: SBND-LOW-001
+    signal: Inconsistent API styles across services
+    evidence_pattern: Mix of REST, RPC, GraphQL without clear patterns
+    remediation: Standardize on common patterns with documented exceptions
+  - id: SBND-LOW-002
+    signal: Missing health check endpoints
+    evidence_pattern: No /health or /ready endpoint
+    remediation: Add standard health/readiness endpoints for orchestration
+  positive:
+  - id: SBND-POS-001
+    signal: Services own their data exclusively
+    evidence_pattern: Each service has dedicated database/schema
+  - id: SBND-POS-002
+    signal: Event-driven communication for cross-service workflows
+    evidence_pattern: Message queues, event sourcing for coordination
+  - id: SBND-POS-003
+    signal: API gateway/BFF pattern for client aggregation
+    evidence_pattern: Aggregation at edge, not service-to-service
+procedure:
+  context:
+    cognitive_mode: architectural
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Services
+    description: |
+      Create a complete list of services and their responsibilities.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find service definitions
+      command: |
+        find . -name "docker-compose*.yml" -exec cat {} \; 2>/dev/null | \
+          grep -E "^\s{2,4}\w+:" | head -30
+    - purpose: Find Kubernetes services
+      command: |
+        find . -name "*.yaml" -path "*/k8s/*" -exec grep -l "kind: Service" {} \; 2>/dev/null | head -20
+    expected_findings:
+    - Service inventory
+    - Service responsibilities
+  - id: '2'
+    name: Analyze API Contracts
+    description: |
+      Review API specifications for contract completeness and quality.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find API specifications
+      command: |
+        find . -name "openapi*.yaml" -o -name "swagger*.yaml" -o -name "*.proto" | head -30
+    - purpose: Check API versioning
+      command: |
+        grep -rn "v1\|v2\|version" --include="openapi*.yaml" . 2>/dev/null | head -20
+    expected_findings:
+    - API specification coverage
+    - Versioning patterns
+  - id: '3'
+    name: Map Service Dependencies
+    description: |
+      Identify how services communicate and depend on each other.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find HTTP calls to other services
+      command: |
+        grep -rn "http://.*-service\|https://.*-service" \
+          --include="*.js" --include="*.ts" --include="*.py" --include="*.java" . 2>/dev/null | head -40
+    - purpose: Find message queue usage
+      command: |
+        grep -rn "publish\|subscribe\|queue\|kafka\|rabbitmq\|sqs" \
+          --include="*.js" --include="*.ts" --include="*.py" --include="*.java" . 2>/dev/null | head -30
+    expected_findings:
+    - Dependency map
+    - Communication patterns
+  - id: '4'
+    name: Analyze Data Ownership
+    description: |
+      Determine how data is owned and shared across services.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find database configurations
+      command: |
+        grep -rn "DATABASE_URL\|connection.*string\|jdbc:" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    - purpose: Check for shared databases
+      command: |
+        grep -rn "CREATE TABLE\|db\.collection\|model\." \
+          --include="*.sql" --include="*.js" --include="*.ts" --include="*.py" . 2>/dev/null | head -30
+    expected_findings:
+    - Data ownership map
+    - Shared data concerns
+  - id: '5'
+    name: Generate Service Boundary Report
+    description: |
+      Compile findings into service boundary assessment.
+    duration_estimate: 25 min
+    expected_findings:
+    - Service dependency graph
+    - Boundary violation inventory
+    - Recommendations
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - service_inventory
+    - boundary_violations
+    - coupling_analysis
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Service Map
+    - Boundary Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Clear architectural violation detected
+    medium: Pattern suggests potential issue
+    low: Requires deeper architectural review
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: building-microservices
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive architectural analysis
+    full:
+      included: true
+      priority: 1
+    architecture:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: sbnd-001
+  item: No shared databases across services
+  level: CRITICAL
+  verification: Each service has isolated data store
+  expected: Data ownership documented
+- id: sbnd-002
+  item: API contracts exist for all services
+  level: HIGH
+  verification: OpenAPI/Proto files for each service
+  expected: 100% contract coverage
+- id: sbnd-003
+  item: No sync chains >3 deep
+  level: HIGH
+  verification: Dependency analysis completed
+  expected: No long sync chains
+governance:
+  applicable_to:
+    archetypes:
+    - microservices
+    - distributed
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Modularity
+    - Interoperability
+relationships:
+  commonly_combined:
+  - architecture-design.boundaries-modularity.bounded-context
+  - architecture-design.boundaries-modularity.layer-separation
+  - infrastructure.observability.distributed-tracing

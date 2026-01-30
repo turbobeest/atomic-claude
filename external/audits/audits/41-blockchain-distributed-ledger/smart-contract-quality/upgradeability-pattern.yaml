@@ -1,0 +1,277 @@
+audit:
+  id: blockchain-distributed-ledger.smart-contract-quality.upgradeability-pattern
+  name: Upgradeability Pattern Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: blockchain-distributed-ledger
+  category_number: 41
+  subcategory: smart-contract-quality
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: software
+  default_profiles:
+  - full
+  - blockchain
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates smart contract upgradeability patterns
+    for security and correctness. It examines:
+    - Proxy pattern implementation (Transparent, UUPS, Beacon)
+    - Storage collision prevention
+    - Initialization security
+    - Upgrade authorization
+    - Storage layout compatibility
+    - Upgrade testing procedures
+  why_it_matters: |
+    Upgradeability introduces significant risks:
+    - Storage collisions corrupt contract state
+    - Improper initialization enables attacks
+    - Upgrade authority is high-value target
+    - Function selector clashes cause issues
+    - Immutability guarantees are lost
+
+    Secure upgradeability requires careful implementation.
+  when_to_run:
+  - Proxy contract development
+  - Upgrade preparation
+  - Pre-deployment audit
+  - Post-upgrade verification
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Proxy and implementation contracts
+  - type: documentation
+    description: Upgrade process documentation
+  access_requirements:
+  - Access to all contract versions
+  - Storage layout documentation
+discovery:
+  code_patterns:
+  - pattern: (Proxy|Upgradeable|delegatecall)
+    type: regex
+    scope: source
+    purpose: Detect proxy patterns
+  - pattern: (initializer|initialize\()
+    type: regex
+    scope: source
+    purpose: Detect initialization
+  - pattern: (ERC1967|TransparentProxy|UUPSUpgradeable)
+    type: regex
+    scope: source
+    purpose: Detect standard patterns
+  file_patterns:
+  - glob: '**/*.sol'
+    purpose: Solidity contracts
+  - glob: '**/proxy/**/*.sol'
+    purpose: Proxy contracts
+knowledge_sources:
+  specifications:
+  - id: eip-1967
+    name: 'EIP-1967: Standard Proxy Storage Slots'
+    url: https://eips.ethereum.org/EIPS/eip-1967
+    offline_cache: true
+    priority: required
+  - id: eip-1822
+    name: 'EIP-1822: Universal Upgradeable Proxy Standard (UUPS)'
+    url: https://eips.ethereum.org/EIPS/eip-1822
+    offline_cache: true
+signals:
+  critical:
+  - id: UPGRADE-CRIT-001
+    signal: Storage collision vulnerability
+    evidence_indicators:
+    - Implementation storage overlaps proxy
+    - Storage gaps not used
+    - Inherited contract storage collision
+    explanation: |
+      Storage collisions occur when proxy and implementation use
+      the same storage slots. This corrupts state and can be
+      exploited.
+    remediation: |
+      - Use EIP-1967 storage slots for proxy
+      - Add storage gaps in base contracts
+      - Verify storage layout compatibility
+      - Use OpenZeppelin storage tools
+    cwe: CWE-119
+  - id: UPGRADE-CRIT-002
+    signal: Unprotected initializer
+    evidence_indicators:
+    - initialize() callable multiple times
+    - No initializer modifier
+    - Constructor used instead of initializer
+    explanation: |
+      Unprotected initializers can be called by attackers to
+      take ownership or corrupt state. Initializers must be
+      callable only once.
+    remediation: |
+      - Use initializer modifier
+      - Verify initialization state
+      - Disable initializers in implementation
+      - Test initialization protection
+    cwe: CWE-665
+  high:
+  - id: UPGRADE-HIGH-001
+    signal: Upgrade authority not secured
+    evidence_indicators:
+    - Single EOA can upgrade
+    - No timelock on upgrades
+    - Upgrade without governance
+    explanation: |
+      Upgrade authority controls the entire contract. Compromising
+      this authority enables complete takeover.
+    remediation: |
+      - Use multisig for upgrades
+      - Implement timelock delays
+      - Add governance approval
+      - Consider upgrade guardian
+  - id: UPGRADE-HIGH-002
+    signal: Function selector collision
+    evidence_indicators:
+    - Proxy and impl share selector
+    - Admin function selector clash
+    - Unexpected function routing
+    explanation: |
+      Function selector collisions cause calls to route incorrectly
+      between proxy and implementation.
+    remediation: |
+      - Use transparent proxy pattern
+      - Verify no selector collisions
+      - Separate admin and user interfaces
+      - Test all function selectors
+  medium:
+  - id: UPGRADE-MED-001
+    signal: Storage layout not documented
+    evidence_indicators:
+    - No storage layout file
+    - Gaps not sized
+    - Layout changes undocumented
+    explanation: |
+      Undocumented storage layouts make safe upgrades difficult.
+      Layout changes between versions can corrupt state.
+    remediation: |
+      - Generate and store layout files
+      - Document storage gaps
+      - Compare layouts before upgrade
+      - Automate layout verification
+  - id: UPGRADE-MED-002
+    signal: UUPS without upgrade function protection
+    evidence_indicators:
+    - No _authorizeUpgrade check
+    - Upgrade function unprotected
+    - Implementation can be bricked
+    explanation: |
+      UUPS implementations must protect the upgrade function.
+      Missing protection allows unauthorized upgrades or
+      implementation bricking.
+    remediation: |
+      - Implement _authorizeUpgrade
+      - Add access control
+      - Test upgrade authorization
+      - Verify implementation integrity
+  low:
+  - id: UPGRADE-LOW-001
+    signal: Upgrade testing incomplete
+    evidence_indicators:
+    - No upgrade test scripts
+    - Storage migration untested
+    - Rollback not tested
+    explanation: |
+      Untested upgrades may fail or corrupt state. Testing
+      should cover full upgrade flow.
+    remediation: |
+      - Add upgrade test scripts
+      - Test storage compatibility
+      - Test upgrade authorization
+      - Document upgrade procedures
+  positive:
+  - id: UPGRADE-POS-001
+    signal: Secure upgradeability implementation
+    evidence_indicators:
+    - Standard pattern used correctly
+    - Storage layout managed
+    - Upgrade tests comprehensive
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: security-auditor
+  steps:
+  - id: '1'
+    name: Upgradeability Analysis
+    description: |
+      Analyze proxy and upgradeability patterns.
+    duration_estimate: 60 min
+    commands:
+    - purpose: Find proxy patterns
+      command: |
+        grep -rniE "(Proxy|Upgradeable|delegatecall)" \
+          --include="*.sol" . 2>/dev/null | head -30
+    - purpose: Find initialization
+      command: |
+        grep -rniE "(initializer|initialize\s*\()" \
+          --include="*.sol" . 2>/dev/null | head -20
+    expected_findings:
+    - Proxy implementation
+    - Initialization pattern
+    - Upgrade authorization
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Upgradeability Analysis
+    - Security Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 2
+    blockchain:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: upgrade-001
+  item: No storage collisions
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify storage layout is safe
+  expected: Confirmed by reviewer
+- id: upgrade-002
+  item: Initializer protected
+  level: BLOCKING
+  verification: |
+    grep -rniE "initializer\s+modifier" \
+      --include="*.sol" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "CHECK"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - blockchain
+    - defi
+    - enterprise
+    - upgradeable
+relationships:
+  commonly_combined:
+  - blockchain.smart-contract-security.access-control
+  - blockchain.governance.admin-key-risk
+  - blockchain.governance.timelock
+
+# Glossary of domain-specific terms:
+glossary:
+  "timelock": "Governance mechanism requiring delay between proposal and execution"
+  "reentrancy": "Vulnerability where external call allows re-entering function before completion"
+  "oracle": "External data feed providing off-chain information to smart contracts"

@@ -1,0 +1,391 @@
+# ============================================================
+# AUDIT: Histogram vs Summary
+# ============================================================
+# Category: 05 - Observability & Instrumentation
+# Subcategory: Metrics
+# ============================================================
+
+audit:
+  id: "observability-instrumentation.metrics.histogram-vs-summary"
+  name: "Histogram vs Summary Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "observability-instrumentation"
+  category_number: 5
+  subcategory: "metrics"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "metrics"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the appropriate use of histogram vs summary metric types for
+    latency and distribution measurements. This audit examines whether the
+    chosen metric type matches the use case requirements for aggregation,
+    percentile calculation, and cardinality. It validates histogram bucket
+    boundaries, summary quantile configurations, and identifies misuse
+    patterns that lead to incorrect or inefficient monitoring.
+
+  why_it_matters: |
+    The choice between histograms and summaries has profound implications
+    for data aggregation, accuracy, and cost. Summaries cannot be aggregated
+    across instances, making them unsuitable for distributed systems.
+    Histograms with poor bucket boundaries produce misleading percentiles.
+    Wrong choices lead to incorrect SLO calculations, misleading dashboards,
+    and expensive rework. This is one of the most common instrumentation
+    mistakes.
+
+  when_to_run:
+    - "New latency metric instrumentation"
+    - "SLO implementation requiring percentiles"
+    - "Investigating inconsistent latency reporting"
+    - "Metrics optimization review"
+
+prerequisites:
+  required_artifacts:
+    - type: "source-code"
+      description: "Metric definition code"
+    - type: "metrics-system"
+      description: "Running metrics to validate behavior"
+
+  access_requirements:
+    - "Source code with metric definitions"
+    - "Metrics platform for runtime analysis"
+
+discovery:
+  code_patterns:
+    - pattern: "NewHistogram|Histogram\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find histogram definitions"
+    - pattern: "NewSummary|Summary\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find summary definitions"
+    - pattern: "Buckets:|buckets=|bucket_boundaries"
+      type: "regex"
+      scope: "source"
+      purpose: "Find bucket configurations"
+    - pattern: "Objectives:|quantiles=|objectives"
+      type: "regex"
+      scope: "source"
+      purpose: "Find summary quantile configurations"
+
+  file_patterns:
+    - glob: "**/metrics.go"
+      purpose: "Go metrics definitions"
+    - glob: "**/metrics.py"
+      purpose: "Python metrics definitions"
+
+  metrics_queries:
+    - system: "Prometheus"
+      query: "count by (__name__) ({__name__=~\".*_bucket\"})"
+      purpose: "Find histogram metrics"
+      threshold: "Review bucket distributions"
+    - system: "Prometheus"
+      query: "count by (__name__) ({__name__=~\".*\", quantile=~\".+\"})"
+      purpose: "Find summary metrics"
+      threshold: "Verify aggregation requirements"
+
+knowledge_sources:
+  specifications:
+    - id: "prometheus-histograms"
+      name: "Prometheus Histograms and Summaries"
+      url: "https://prometheus.io/docs/practices/histograms/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "histogram-guide"
+      name: "Choosing Between Histograms and Summaries"
+      url: "https://prometheus.io/docs/practices/histograms/#histograms-and-summaries"
+      offline_cache: true
+    - id: "bucket-design"
+      name: "Histogram Bucket Design"
+      url: "https://www.robustperception.io/how-does-a-prometheus-histogram-work"
+      offline_cache: true
+
+  papers:
+    - id: "hdr-histogram"
+      title: "HDR Histogram: A High Dynamic Range Histogram"
+      url: "http://hdrhistogram.org/"
+
+tooling:
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        # Check histogram bucket distribution
+        histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+      purpose: "Validate p99 calculation accuracy"
+    - system: "Prometheus"
+      query: |
+        # Check for bucket boundary issues
+        http_request_duration_seconds_bucket{le="+Inf"} - ignoring(le) http_request_duration_seconds_bucket{le="10"}
+      purpose: "Find requests exceeding top bucket"
+    - system: "Prometheus"
+      query: |
+        # Summary aggregation check (should not work well)
+        avg(http_request_duration_seconds{quantile="0.99"})
+      purpose: "Demonstrate summary aggregation limitation"
+
+  scripts:
+    - id: "bucket-analyzer"
+      language: "python"
+      purpose: "Analyze histogram bucket distribution"
+      source: "inline"
+      code: |
+        import numpy as np
+
+        def analyze_buckets(buckets, p50_target, p99_target):
+            """
+            Evaluate if bucket boundaries provide good percentile resolution
+            """
+            issues = []
+
+            # Check if buckets cover SLO targets
+            if max(buckets) < p99_target * 1.5:
+                issues.append(f"Top bucket {max(buckets)} too low for p99 target {p99_target}")
+
+            # Check for bucket density around SLO boundaries
+            slo_buckets = [b for b in buckets if p50_target * 0.5 < b < p99_target * 1.5]
+            if len(slo_buckets) < 5:
+                issues.append("Insufficient bucket resolution around SLO boundaries")
+
+            # Check for exponential distribution
+            ratios = [buckets[i+1]/buckets[i] for i in range(len(buckets)-1) if buckets[i] > 0]
+            if max(ratios) / min(ratios) > 3:
+                issues.append("Bucket spacing is inconsistent")
+
+            return issues
+
+signals:
+  critical:
+    - id: "HIST-CRIT-001"
+      signal: "Summary used where aggregation is required"
+      evidence_pattern: "Summary metric for latency in multi-instance service"
+      explanation: |
+        Summaries calculate percentiles client-side and cannot be aggregated
+        across instances. Using a summary for a service with multiple pods
+        means you cannot calculate fleet-wide percentiles, only per-instance.
+        This leads to incorrect SLO calculations and misleading dashboards.
+      remediation: "Replace with histogram for aggregatable percentile calculation"
+
+    - id: "HIST-CRIT-002"
+      signal: "Histogram buckets don't cover SLO range"
+      evidence_pattern: "All requests fall in +Inf bucket or single bucket"
+      explanation: |
+        If histogram buckets don't cover the actual latency distribution,
+        percentile calculations will be highly inaccurate. SLO compliance
+        cannot be measured correctly.
+      remediation: "Redesign buckets to cover expected latency range with resolution around SLO boundaries"
+
+  high:
+    - id: "HIST-HIGH-001"
+      signal: "Default buckets used without customization"
+      evidence_pattern: "DefBuckets or default bucket configuration"
+      explanation: |
+        Default histogram buckets rarely match actual service latency
+        distributions. They often provide poor resolution where it matters
+        (around SLO boundaries) leading to inaccurate percentile estimates.
+      remediation: "Configure custom buckets based on observed latency distribution"
+
+    - id: "HIST-HIGH-002"
+      signal: "Too few histogram buckets"
+      evidence_pattern: "Less than 8 buckets defined"
+      explanation: |
+        Insufficient bucket count reduces percentile accuracy. More buckets
+        provide better resolution at the cost of cardinality.
+      remediation: "Add buckets with geometric spacing covering full latency range"
+
+  medium:
+    - id: "HIST-MED-001"
+      signal: "Inconsistent bucket boundaries across services"
+      evidence_pattern: "Different bucket configs for similar latency metrics"
+      remediation: "Standardize bucket boundaries for comparable metrics"
+
+    - id: "HIST-MED-002"
+      signal: "Summary with low sample size"
+      evidence_pattern: "Summary max_age too long for request rate"
+      remediation: "Adjust summary parameters or switch to histogram"
+
+  low:
+    - id: "HIST-LOW-001"
+      signal: "Excessive histogram buckets creating cardinality"
+      remediation: "Balance bucket count against cardinality cost"
+
+  positive:
+    - id: "HIST-POS-001"
+      signal: "Custom buckets aligned with SLO boundaries"
+    - id: "HIST-POS-002"
+      signal: "Consistent use of histograms for aggregatable metrics"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory distribution metrics"
+      description: |
+        Find all histogram and summary metrics in the codebase and
+        document their purpose and aggregation requirements.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find histogram definitions"
+          command: "grep -rn 'NewHistogram\\|Histogram(' --include='*.go' /path/to/services"
+        - purpose: "Find summary definitions"
+          command: "grep -rn 'NewSummary\\|Summary(' --include='*.go' /path/to/services"
+      expected_findings:
+        - "List of all histograms and summaries"
+        - "Purpose of each metric"
+
+    - id: "2"
+      name: "Evaluate type appropriateness"
+      description: |
+        For each distribution metric, determine if histogram or summary
+        is the appropriate choice based on aggregation needs.
+      duration_estimate: "45 min"
+      questions:
+        - "Does this metric need to be aggregated across instances?"
+        - "Are fleet-wide percentiles required?"
+        - "Is the service scaled horizontally?"
+      expected_findings:
+        - "Metrics using wrong type"
+        - "Migration candidates"
+
+    - id: "3"
+      name: "Analyze histogram bucket configuration"
+      description: |
+        For each histogram, evaluate if bucket boundaries provide
+        adequate resolution for the use case.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Check bucket distribution"
+          command: "curl -s 'http://prometheus:9090/api/v1/query?query=http_request_duration_seconds_bucket' | jq '.data.result[0].metric'"
+      expected_findings:
+        - "Buckets with poor resolution"
+        - "Buckets not covering actual distribution"
+
+    - id: "4"
+      name: "Validate percentile accuracy"
+      description: |
+        Compare histogram-calculated percentiles with actual data to
+        assess accuracy of bucket configuration.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Calculate p99 from histogram"
+          command: "curl -s 'http://prometheus:9090/api/v1/query?query=histogram_quantile(0.99,sum(rate(http_request_duration_seconds_bucket[5m]))by(le))'"
+      expected_findings:
+        - "Percentile accuracy assessment"
+        - "Bucket boundary recommendations"
+
+    - id: "5"
+      name: "Check aggregation behavior"
+      description: |
+        Verify that metrics requiring aggregation are using histograms
+        and producing correct fleet-wide percentiles.
+      duration_estimate: "30 min"
+      questions:
+        - "Do dashboards show fleet-wide or per-instance percentiles?"
+        - "Are SLOs calculated correctly across all instances?"
+      expected_findings:
+        - "Aggregation correctness"
+        - "SLO calculation accuracy"
+
+output:
+  deliverables:
+    - type: "metric_type_analysis"
+      format: "structured"
+      description: "Analysis of histogram vs summary appropriateness"
+
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Type Appropriateness Analysis"
+        - "Bucket Configuration Review"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Runtime validation of percentile accuracy"
+    medium: "Code review with bucket analysis"
+    low: "Code review only without runtime data"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "prometheus-histograms"
+        priority: "required"
+      - source_id: "bucket-design"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed analysis of metric configurations"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "hist-001"
+    item: "No summaries used where aggregation is required"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Confirm multi-instance services use histograms"
+    expected: "Confirmed by reviewer"
+
+  - id: "hist-002"
+    item: "Histogram buckets cover SLO boundaries"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Check buckets provide resolution around p50/p99 targets"
+    expected: "Confirmed by reviewer"
+
+  - id: "hist-003"
+    item: "Custom buckets configured for latency metrics"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify no default bucket configurations"
+    expected: "Confirmed by reviewer"
+
+  - id: "hist-004"
+    item: "Percentile calculations validated for accuracy"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Compare histogram percentiles with actual distribution"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "observability-instrumentation.metrics.four-golden-signals"
+    - "observability-instrumentation.metrics.sli-definition"
+    - "observability-instrumentation.metrics.metric-cardinality"

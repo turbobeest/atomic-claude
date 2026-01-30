@@ -1,0 +1,363 @@
+audit:
+  id: cloud-infrastructure.storage.storage-lifecycle
+  name: Storage Lifecycle
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: storage
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates storage lifecycle management policies including automatic
+    transitions between storage tiers, expiration policies, version
+    cleanup, and incomplete upload management. Examines alignment between
+    lifecycle rules and data retention requirements.
+  why_it_matters: |
+    Without lifecycle policies, storage costs grow unbounded as data
+    accumulates in expensive tiers. Organizations commonly have 30-50%
+    of storage eligible for archival or deletion but lacking automation.
+    Lifecycle policies automate cost optimization and help meet retention
+    compliance requirements by ensuring data is kept for required periods
+    and deleted when no longer needed.
+  when_to_run:
+  - Cost optimization reviews
+  - Compliance assessments
+  - After data classification changes
+  - Quarterly storage reviews
+prerequisites:
+  required_artifacts:
+  - type: cloud_access
+    description: Read access to storage lifecycle configurations
+  - type: retention_policy
+    description: Data retention requirements documentation
+  access_requirements:
+  - S3 lifecycle configuration access
+  - Storage analytics access
+  - Compliance/legal retention requirements
+discovery:
+  metrics_queries:
+  - system: S3 Storage Lens
+    query: |
+      SELECT bucket_name, storage_class, object_count, total_size
+      FROM storage_lens_metrics
+      WHERE last_modified_date < DATE_SUB(NOW(), INTERVAL 90 DAY)
+    purpose: Identify stale data eligible for lifecycle transitions
+    threshold: Data older than 90 days in Standard may need tiering
+  file_patterns:
+  - glob: '**/terraform/**/*lifecycle*.tf'
+    purpose: Find Terraform lifecycle configurations
+  - glob: '**/terraform/**/*s3*.tf'
+    purpose: Find S3 bucket configurations
+  - glob: '**/docs/**/*retention*.md'
+    purpose: Find retention policy documentation
+knowledge_sources:
+  specifications:
+  - id: aws-s3-lifecycle
+    name: AWS S3 Lifecycle Configuration
+    url: https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lifecycle-mgmt.html
+    offline_cache: true
+    priority: required
+  - id: gcp-storage-lifecycle
+    name: GCP Cloud Storage Lifecycle
+    url: https://cloud.google.com/storage/docs/lifecycle
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-lifecycle-best-practices
+    name: S3 Lifecycle Best Practices
+    url: https://docs.aws.amazon.com/AmazonS3/latest/userguide/lifecycle-transition-general-considerations.html
+    offline_cache: true
+  - id: data-retention-guide
+    name: Data Retention Best Practices
+    url: https://docs.aws.amazon.com/prescriptive-guidance/latest/backup-recovery/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS CLI
+    purpose: Get lifecycle configurations
+    command: aws s3api get-bucket-lifecycle-configuration --bucket {bucket_name}
+  - tool: AWS CLI
+    purpose: List object versions for cleanup analysis
+    command: aws s3api list-object-versions --bucket {bucket_name} --max-items 1000
+  - tool: S3 Storage Lens
+    purpose: Analyze storage age distribution
+    command: aws s3control get-storage-lens-configuration --account-id {account_id} --config-id default-account-dashboard
+  scripts:
+  - id: lifecycle-analyzer
+    language: bash
+    purpose: Analyze lifecycle policy coverage
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Storage Lifecycle Analysis ==="
+
+      # Check lifecycle policies for all buckets
+      echo "Bucket Lifecycle Policy Status:"
+      for bucket in $(aws s3api list-buckets --query 'Buckets[].Name' --output text); do
+        lifecycle=$(aws s3api get-bucket-lifecycle-configuration --bucket "$bucket" 2>&1)
+        if echo "$lifecycle" | grep -q "NoSuchLifecycleConfiguration"; then
+          echo "NO POLICY: $bucket"
+        else
+          rule_count=$(echo "$lifecycle" | jq '.Rules | length')
+          echo "HAS POLICY ($rule_count rules): $bucket"
+        fi
+      done
+
+      # Check for incomplete multipart uploads
+      echo ""
+      echo "Checking for incomplete multipart uploads..."
+      for bucket in $(aws s3api list-buckets --query 'Buckets[].Name' --output text); do
+        uploads=$(aws s3api list-multipart-uploads --bucket "$bucket" 2>/dev/null | jq '.Uploads | length // 0')
+        if [ "$uploads" -gt 0 ]; then
+          echo "INCOMPLETE UPLOADS ($uploads): $bucket"
+        fi
+      done
+
+      # Check for old noncurrent versions
+      echo ""
+      echo "Buckets with versioning (may have noncurrent version cleanup needs):"
+      for bucket in $(aws s3api list-buckets --query 'Buckets[].Name' --output text); do
+        versioning=$(aws s3api get-bucket-versioning --bucket "$bucket" --query 'Status' --output text 2>/dev/null)
+        if [ "$versioning" == "Enabled" ]; then
+          echo "VERSIONED: $bucket"
+        fi
+      done
+signals:
+  critical:
+  - id: LIFECYCLE-CRIT-001
+    signal: No lifecycle policy on buckets with compliance retention requirements
+    evidence_indicators:
+    - Buckets with sensitive data lacking expiration rules
+    - No automated deletion for data past retention period
+    explanation: |
+      Without lifecycle expiration, data may be retained beyond legal
+      requirements, creating liability. Conversely, manual deletion
+      may occur before retention requirements are met.
+    remediation: Implement lifecycle expiration aligned with retention requirements
+  - id: LIFECYCLE-CRIT-002
+    signal: Terabytes of data without any lifecycle management
+    evidence_threshold: Buckets > 1TB without lifecycle configuration
+    explanation: |
+      Large buckets without lifecycle policies accumulate cost
+      indefinitely. At scale, this represents significant waste
+      and missed optimization opportunities.
+    remediation: Implement lifecycle policies for all buckets > 100GB
+  high:
+  - id: LIFECYCLE-HIGH-001
+    signal: Incomplete multipart uploads accumulating
+    evidence_threshold: Incomplete uploads > 100 or > 7 days old
+    explanation: |
+      Incomplete multipart uploads are billed as stored objects
+      but provide no value. Without cleanup rules, they accumulate
+      indefinitely.
+    remediation: Add lifecycle rule to abort incomplete uploads after 7 days
+  - id: LIFECYCLE-HIGH-002
+    signal: Noncurrent object versions not managed
+    evidence_indicators:
+    - Versioned bucket without NoncurrentVersionExpiration
+    - Noncurrent versions exceeding 30 days without policy
+    explanation: |
+      Versioned buckets can accumulate unlimited noncurrent versions,
+      multiplying storage costs. Most use cases only need recent versions.
+    remediation: Configure NoncurrentVersionExpiration or NoncurrentVersionTransition
+  - id: LIFECYCLE-HIGH-003
+    signal: Lifecycle transitions create unnecessary retrieval costs
+    evidence_indicators:
+    - Glacier transition for frequently accessed data
+    - Transitions without considering access patterns
+    explanation: |
+      Aggressive archival of accessed data leads to high retrieval
+      costs that may exceed storage savings.
+    remediation: Align lifecycle transitions with actual access patterns
+  medium:
+  - id: LIFECYCLE-MED-001
+    signal: Delete markers accumulating without cleanup
+    remediation: Add lifecycle rule to expire delete markers
+  - id: LIFECYCLE-MED-002
+    signal: Lifecycle policies not aligned with data classification
+    remediation: Map data classifications to lifecycle policies
+  - id: LIFECYCLE-MED-003
+    signal: No lifecycle policy testing or validation
+    remediation: Test lifecycle policies in non-production environment
+  low:
+  - id: LIFECYCLE-LOW-001
+    signal: Lifecycle policy documentation incomplete
+    remediation: Document purpose and expected behavior of each rule
+  positive:
+  - id: LIFECYCLE-POS-001
+    signal: Comprehensive lifecycle policies aligned with retention requirements
+  - id: LIFECYCLE-POS-002
+    signal: Incomplete upload cleanup automated
+  - id: LIFECYCLE-POS-003
+    signal: Regular lifecycle policy review and optimization
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Lifecycle Policy Inventory
+    description: |
+      Collect all lifecycle configurations across storage resources
+      and document current rules.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get lifecycle configs for all buckets
+      command: for bucket in $(aws s3api list-buckets --query 'Buckets[].Name' --output text); do echo
+        "=== $bucket ==="; aws s3api get-bucket-lifecycle-configuration --bucket $bucket 2>&1 | head -50;
+        done
+    expected_findings:
+    - Complete lifecycle policy inventory
+    - Buckets without lifecycle policies
+  - id: '2'
+    name: Retention Requirements Review
+    description: |
+      Review data retention requirements from compliance,
+      legal, and business perspectives.
+    duration_estimate: 30 min
+    questions:
+    - What are the legal retention requirements for different data types?
+    - What are the compliance framework requirements?
+    - What are the business data retention preferences?
+    expected_findings:
+    - Retention requirements by data classification
+    - Minimum and maximum retention periods
+  - id: '3'
+    name: Policy-Requirement Alignment
+    description: |
+      Compare existing lifecycle policies against documented
+      retention requirements.
+    duration_estimate: 30 min
+    questions:
+    - Do expiration rules match retention requirements?
+    - Are all required data types covered?
+    - Are transitions appropriate for access patterns?
+    expected_findings:
+    - Gap analysis between policies and requirements
+    - Misaligned policies
+  - id: '4'
+    name: Cleanup Opportunity Analysis
+    description: |
+      Identify opportunities for incomplete upload cleanup,
+      version management, and delete marker expiration.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check for incomplete uploads
+      command: 'for bucket in $(aws s3api list-buckets --query ''Buckets[].Name'' --output text | head
+        -20); do count=$(aws s3api list-multipart-uploads --bucket $bucket 2>/dev/null | jq ''.Uploads
+        | length // 0''); [ "$count" -gt 0 ] && echo "$bucket: $count incomplete uploads"; done'
+    - purpose: Check versioning status
+      command: 'for bucket in $(aws s3api list-buckets --query ''Buckets[].Name'' --output text); do status=$(aws
+        s3api get-bucket-versioning --bucket $bucket --query ''Status'' --output text 2>/dev/null); echo
+        "$bucket: $status"; done'
+    expected_findings:
+    - Incomplete upload accumulation
+    - Version management needs
+  - id: '5'
+    name: Recommendations Development
+    description: |
+      Generate specific lifecycle policy recommendations
+      aligned with requirements and cost optimization.
+    duration_estimate: 30 min
+    expected_findings:
+    - New lifecycle policies needed
+    - Policy modifications
+    - Expected cost savings
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Current Policy Review
+    - Retention Alignment Analysis
+    - Cost Optimization Opportunities
+    - Recommendations
+  confidence_guidance:
+    high: Full config access, documented retention requirements, storage analytics
+    medium: Config access with partial requirements
+    low: Limited access or undocumented requirements
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-s3-lifecycle
+      priority: required
+    - source_id: aws-lifecycle-best-practices
+      priority: required
+  limitations:
+  - Cannot access live configurations offline
+  - Storage analytics require runtime access
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed policy analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: lifecycle-001
+  item: All large buckets have lifecycle policies
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify buckets > 100GB have lifecycle configurations
+  expected: Confirmed by reviewer
+- id: lifecycle-002
+  item: Retention requirements documented
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm retention requirements exist for data types
+  expected: Confirmed by reviewer
+- id: lifecycle-003
+  item: Incomplete upload cleanup configured
+  level: WARNING
+  verification: manual
+  verification_notes: Verify AbortIncompleteMultipartUpload rules exist
+  expected: Confirmed by reviewer
+- id: lifecycle-004
+  item: Versioned buckets have version cleanup
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm NoncurrentVersionExpiration for versioned buckets
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: GDPR
+    controls:
+    - Article 17
+    - Article 5(1)(e)
+  - framework: SOC 2
+    controls:
+    - CC6.5
+  - framework: HIPAA
+    controls:
+    - 164.530(j)
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.storage.storage-tiering
+  - cloud-infrastructure.storage.storage-cost-optimization
+  - compliance.data-retention

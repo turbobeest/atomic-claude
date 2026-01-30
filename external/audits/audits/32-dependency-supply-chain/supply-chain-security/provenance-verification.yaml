@@ -1,0 +1,273 @@
+# ============================================================
+# AUDIT: Provenance Verification
+# Category: 32 - Dependency & Supply Chain
+# Subcategory: supply-chain-security
+# ============================================================
+
+audit:
+  id: "dependency-supply-chain.supply-chain-security.provenance-verification"
+  name: "Provenance Verification Audit"
+  version: "1.0.0"
+  last_updated: "2025-01-22"
+  status: "active"
+
+  category: "dependency-supply-chain"
+  category_number: 32
+  subcategory: "supply-chain-security"
+
+  tier: "expert"
+  estimated_duration: "2-4 hours"  # median: 3h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "dependencies"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates provenance verification for software artifacts,
+    ensuring that dependencies and releases can be traced back to their
+    source code and build systems. It assesses SLSA compliance and
+    ability to verify artifact origins.
+
+  why_it_matters: |
+    Provenance establishes the chain of custody for software, proving
+    where it came from and how it was built. Without provenance, there's
+    no way to verify if an artifact was built from claimed source code
+    or if it was tampered with during build or distribution.
+
+  when_to_run:
+    - "When consuming critical dependencies"
+    - "During security assessments"
+    - "When implementing SLSA compliance"
+    - "For high-security environments"
+
+prerequisites:
+  required_artifacts:
+    - type: "provenance_data"
+      description: "SLSA provenance attestations"
+    - type: "build_config"
+      description: "Build system configuration"
+
+  access_requirements:
+    - "Access to provenance attestations"
+    - "Access to build systems"
+
+discovery:
+  file_patterns:
+    - glob: "**/*.intoto.jsonl"
+      purpose: "Find in-toto provenance"
+    - glob: "**/.attestations/**"
+      purpose: "Find attestation files"
+    - glob: "**/.github/workflows/*.yml"
+      purpose: "Find build workflows"
+
+knowledge_sources:
+  guides:
+    - id: "slsa"
+      name: "SLSA Framework"
+      url: "https://slsa.dev/"
+
+    - id: "in-toto"
+      name: "in-toto Framework"
+      url: "https://in-toto.io/"
+
+  standards:
+    - id: "slsa-levels"
+      name: "SLSA Security Levels"
+      relevance: "Supply chain integrity levels"
+
+tooling:
+  analysis_tools:
+    - tool: "slsa-verifier"
+      purpose: "Verify SLSA provenance"
+    - tool: "cosign"
+      purpose: "Verify signed attestations"
+    - tool: "in-toto"
+      purpose: "Verify in-toto layouts"
+    - tool: "npm"
+      purpose: "npm provenance verification"
+
+signals:
+  critical:
+    - id: "DEP-PROV-CRIT-001"
+      signal: "Critical dependencies lack provenance"
+      evidence_indicators:
+        - "Key dependencies without attestations"
+        - "Cannot verify build origin"
+      explanation: |
+        Without provenance, there's no proof dependencies were built
+        from claimed source code. Attackers could substitute malicious
+        builds without detection.
+      remediation: "Prioritize dependencies with provenance; generate for own builds"
+
+    - id: "DEP-PROV-CRIT-002"
+      signal: "Provenance attestation verification failing"
+      evidence_indicators:
+        - "Signature invalid"
+        - "Provenance doesn't match artifact"
+      remediation: "Investigate immediately; possible tampering"
+
+  high:
+    - id: "DEP-PROV-HIGH-001"
+      signal: "Own builds don't generate provenance"
+      evidence_indicators:
+        - "No attestations for releases"
+        - "Build system not producing provenance"
+      remediation: "Configure build to generate SLSA provenance"
+
+    - id: "DEP-PROV-HIGH-002"
+      signal: "Provenance verification not enforced"
+      evidence_indicators:
+        - "Provenance available but not checked"
+        - "No verification in supply chain"
+      remediation: "Implement mandatory provenance verification"
+
+  medium:
+    - id: "DEP-PROV-MED-001"
+      signal: "Low SLSA level provenance"
+      evidence_indicators:
+        - "SLSA L1 or L2 only"
+        - "Non-hermetic builds"
+      remediation: "Work toward higher SLSA levels"
+
+    - id: "DEP-PROV-MED-002"
+      signal: "Provenance not published"
+      evidence_indicators:
+        - "Generated but not distributed"
+        - "Consumers can't verify"
+      remediation: "Publish provenance with artifacts"
+
+  low:
+    - id: "DEP-PROV-LOW-001"
+      signal: "Limited provenance adoption in dependencies"
+      evidence_indicators:
+        - "Few dependencies have provenance"
+        - "Ecosystem doesn't support provenance"
+      remediation: "Track provenance adoption; prefer provenance-enabled packages"
+
+  positive:
+    - id: "DEP-PROV-POS-001"
+      signal: "SLSA provenance generated and verified"
+
+    - id: "DEP-PROV-POS-002"
+      signal: "Critical dependencies have verified provenance"
+
+procedure:
+  context:
+    cognitive_mode: "analytical"
+    ensemble_role: "security-auditor"
+
+  steps:
+    - id: "1"
+      name: "Check npm Provenance"
+      description: "Verify npm packages have provenance"
+      commands:
+        - purpose: "Check for npm provenance"
+          command: "npm audit signatures 2>/dev/null || echo 'npm signature audit not available'"
+
+    - id: "2"
+      name: "Verify SLSA Provenance"
+      description: "Check SLSA attestations for artifacts"
+      commands:
+        - purpose: "Verify with slsa-verifier"
+          command: "slsa-verifier verify-artifact artifact.tar.gz --provenance-path provenance.intoto.jsonl --source-uri github.com/org/repo 2>/dev/null || echo 'slsa-verifier not available or no provenance'"
+
+    - id: "3"
+      name: "Check Container Provenance"
+      description: "Verify container image provenance"
+      commands:
+        - purpose: "Check cosign attestations"
+          command: "cosign verify-attestation --type slsaprovenance myimage:latest 2>/dev/null || echo 'Container provenance verification not available'"
+
+    - id: "4"
+      name: "Review Build System"
+      description: "Check if build generates provenance"
+      commands:
+        - purpose: "Check GitHub Actions for provenance"
+          command: "grep -rE '(slsa-github-generator|provenance|attestation)' .github/workflows/ 2>/dev/null || echo 'No provenance generation in GitHub Actions'"
+
+    - id: "5"
+      name: "Assess SLSA Level"
+      description: "Determine current SLSA compliance level"
+      commands:
+        - purpose: "Generate SLSA assessment"
+          command: "echo 'SLSA Level Assessment:\n\nLevel 1:\n[ ] Provenance generated\n[ ] Provenance format correct\n\nLevel 2:\n[ ] Hosted build platform\n[ ] Authenticated provenance\n\nLevel 3:\n[ ] Hardened build platform\n[ ] Unforgeable provenance\n[ ] Isolated builds'"
+
+    - id: "6"
+      name: "Check Dependency Provenance Coverage"
+      description: "Assess provenance availability in dependencies"
+      commands:
+        - purpose: "Document provenance coverage"
+          command: "echo 'Check provenance availability:\n\nnpm: npm.io shows provenance badge\nGitHub: Check repository for attestations\nPyPI: Check package metadata for provenance\nContainer: cosign verify-attestation'"
+
+output:
+  deliverables:
+    - type: "provenance_assessment"
+      format: "structured"
+      description: "Evaluation of provenance practices"
+
+    - type: "slsa_compliance"
+      format: "structured"
+      description: "SLSA level assessment"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Provenance Generation"
+        - "Provenance Verification"
+        - "SLSA Compliance"
+        - "Recommendations"
+
+closeout_checklist:
+  - id: "dep-prov-001"
+    item: "Build generates SLSA provenance"
+    level: "CRITICAL"
+    verification: "Provenance attestation produced"
+
+  - id: "dep-prov-002"
+    item: "Provenance published with artifacts"
+    level: "REQUIRED"
+    verification: "Provenance accessible to consumers"
+
+  - id: "dep-prov-003"
+    item: "Critical deps have provenance"
+    level: "REQUIRED"
+    verification: "Provenance verified for key deps"
+
+  - id: "dep-prov-004"
+    item: "SLSA level documented"
+    level: "RECOMMENDED"
+    verification: "SLSA self-assessment complete"
+
+governance:
+  applicable_to:
+    archetypes: ["software-distribution-projects"]
+
+  compliance_mappings:
+    - framework: "SLSA"
+      control: "Build L2+"
+      description: "Provenance requirements"
+    - framework: "EO 14028"
+      control: "Section 4"
+      description: "Supply chain security"
+
+relationships:
+  commonly_combined:
+    - "dependency-supply-chain.supply-chain-security.artifact-signing"
+  depends_on:
+    - "dependency-supply-chain.supply-chain-security.artifact-signing"
+  feeds_into:
+    - "compliance-legal.supply-chain-compliance"

@@ -1,0 +1,249 @@
+audit:
+  id: code-quality.testing.test-execution-time
+  name: Test Execution Time
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: testing
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: medium
+  scope: testing
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Analyzes test suite execution time including total duration,
+    slowest tests, parallelization effectiveness, and time
+    distribution across test types. Identifies opportunities for
+    test performance optimization.
+  why_it_matters: |
+    Slow tests reduce developer productivity, discourage test runs,
+    and increase CI/CD costs. Long feedback loops lead to batched
+    changes that are harder to debug. Fast tests enable rapid
+    iteration and continuous testing practices.
+  when_to_run:
+  - When test suite becomes noticeably slower
+  - After adding significant new tests
+  - Periodic performance review
+  - Before scaling CI resources
+prerequisites:
+  required_artifacts:
+  - type: test_suite
+    description: Complete test suite
+  access_requirements:
+  - Ability to run test suite
+  - Access to CI/CD execution logs
+discovery:
+  file_patterns:
+  - glob: '**/jest.config.*'
+    purpose: Jest configuration for timing settings
+  - glob: '**/pytest.ini'
+    purpose: Pytest configuration
+  - glob: '**/.github/workflows/*'
+    purpose: CI workflow timing data
+knowledge_sources:
+  guides:
+  - id: jest-performance
+    name: Jest Performance Tips
+    url: https://jestjs.io/docs/troubleshooting#tests-are-extremely-slow-on-docker-andor-continuous-integration-ci-server
+    offline_cache: true
+  - id: xunit-patterns
+    name: 'xUnit Test Patterns: Refactoring Test Code'
+    url: https://www.amazon.com/xUnit-Test-Patterns-Refactoring-Code/dp/0131495054
+    offline_cache: false
+  - id: working-effectively-legacy
+    name: Working Effectively with Legacy Code
+    url: https://www.oreilly.com/library/view/working-effectively-with/0131177052/
+    offline_cache: false
+tooling:
+  static_analysis:
+  - tool: jest --verbose
+    purpose: Test timing output
+    offline_capable: true
+  - tool: pytest --durations
+    purpose: Python test timing
+    offline_capable: true
+  scripts:
+  - id: test-timing
+    language: bash
+    purpose: Measure test execution time
+    source: inline
+    code: |
+      #!/bin/bash
+      time npm test 2>&1 | tail -20
+signals:
+  critical:
+  - id: TEXEC-CRIT-001
+    signal: Test suite takes more than 30 minutes
+    evidence_pattern: Total execution time > 30 min
+    explanation: |
+      Extremely long test suites severely impact development
+      velocity and CI costs.
+    remediation: Implement parallelization; identify and optimize slow tests
+  high:
+  - id: TEXEC-HIGH-001
+    signal: Unit tests take more than 5 minutes
+    evidence_pattern: Unit test suite > 5 min
+    explanation: |
+      Unit tests should be fast for rapid feedback. Slow unit
+      tests indicate design or implementation issues.
+    remediation: Review slow tests for I/O, sleep, or excessive setup
+  - id: TEXEC-HIGH-002
+    signal: Individual tests taking more than 10 seconds
+    evidence_pattern: Single test > 10s execution time
+    explanation: |
+      Very slow individual tests may indicate they are not
+      true unit tests or have inefficient implementations.
+    remediation: Split or optimize slow tests
+  medium:
+  - id: TEXEC-MED-001
+    signal: Test parallelization not configured
+    remediation: Enable parallel test execution
+  - id: TEXEC-MED-002
+    signal: Test execution time growing over time
+    remediation: Establish time budget; monitor trends
+  low:
+  - id: TEXEC-LOW-001
+    signal: Some tests have unnecessary delays
+  positive:
+  - id: TEXEC-POS-001
+    signal: Unit tests complete in under 2 minutes
+  - id: TEXEC-POS-002
+    signal: Tests run in parallel efficiently
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Measure total test execution time
+    description: |
+      Run the complete test suite and measure total execution
+      time.
+    duration_estimate: Variable
+    commands:
+    - purpose: Time test suite execution
+      command: time npm test 2>&1 | tail -10
+    expected_findings:
+    - Total execution time
+    - Test count
+  - id: '2'
+    name: Identify slowest tests
+    description: |
+      Use test framework reporting to identify the slowest
+      individual tests.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Get slowest Jest tests
+      command: npx jest --verbose 2>&1 | grep -E '\([0-9]+ (m)?s\)' | sort -t'(' -k2 -rn | head -20
+    - purpose: Get slowest pytest tests
+      command: pytest --durations=20 2>&1 | tail -30
+    expected_findings:
+    - Top 10-20 slowest tests
+    - Time per test
+  - id: '3'
+    name: Analyze time distribution
+    description: |
+      Break down execution time by test type and module.
+    duration_estimate: 20 min
+    expected_findings:
+    - Time per test type (unit/integration/e2e)
+    - Modules with slowest tests
+  - id: '4'
+    name: Evaluate parallelization
+    description: |
+      Check if tests are configured to run in parallel and
+      measure effectiveness.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check Jest parallel config
+      command: grep -n 'maxWorkers\|runInBand' jest.config.* package.json 2>/dev/null
+    expected_findings:
+    - Parallelization configuration
+    - Worker utilization
+  - id: '5'
+    name: Compare with CI times
+    description: |
+      Compare local execution times with CI/CD execution
+      to identify environment differences.
+    duration_estimate: 15 min
+    expected_findings:
+    - CI execution times
+    - Local vs CI differences
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Timing Analysis
+    - Slowest Tests
+    - Optimization Recommendations
+  - type: metrics
+    format: table
+    fields:
+    - total_execution_time
+    - unit_test_time
+    - integration_test_time
+    - slowest_test_time
+  confidence_guidance:
+    high: Tests executed with timing data collected
+    medium: Partial timing data from CI logs
+    low: Estimated from test count
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: jest-performance
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires running full test suite
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: test-execution-001
+  item: Unit tests complete in under 5 minutes
+  level: BLOCKING
+  verification: manual
+  verification_notes: Time unit test execution
+  expected: Confirmed by reviewer
+- id: test-execution-002
+  item: No individual test exceeds 10 seconds
+  level: WARNING
+  verification: manual
+  verification_notes: Review slowest test times
+  expected: Confirmed by reviewer
+- id: test-execution-003
+  item: Test parallelization configured
+  level: WARNING
+  verification: grep -q 'maxWorkers\|parallel' jest.config.* package.json 2>/dev/null && echo PASS ||
+    echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Performance Efficiency
+relationships:
+  commonly_combined:
+  - code-quality.testing.unit-test-coverage
+  - code-quality.testing.test-isolation

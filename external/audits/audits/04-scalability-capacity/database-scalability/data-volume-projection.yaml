@@ -1,0 +1,342 @@
+audit:
+  id: scalability-capacity.database-scalability.data-volume-projection
+  name: Data Volume Projection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: scalability-capacity
+  category_number: 4
+  subcategory: database-scalability
+  tier: phd
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: data
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines data growth patterns, storage utilization trends,
+    and capacity projections across multiple time horizons (6 months,
+    1 year, 3 years). It evaluates whether current architecture can
+    accommodate projected growth and identifies capacity thresholds
+    that require architectural changes.
+  why_it_matters: |
+    Database capacity problems cannot be solved overnight. Running out
+    of storage causes immediate outages. Hitting row limits or query
+    performance thresholds degrades user experience gradually then
+    suddenly. Planning for data growth allows proactive architecture
+    evolution rather than reactive emergency measures.
+  when_to_run:
+  - Quarterly capacity planning reviews
+  - Before major feature launches that increase data volume
+  - When storage utilization exceeds 60%
+  - After significant changes in user growth rate
+  - During annual architecture reviews
+prerequisites:
+  required_artifacts:
+  - type: monitoring-data
+    description: Historical storage and row count metrics
+  - type: business-data
+    description: User growth projections and feature roadmap
+  - type: database-schema
+    description: Table structures and data retention policies
+  access_requirements:
+  - Database storage metrics over 6+ months
+  - Table-level size statistics
+  - Business growth projections
+  - Feature roadmap with data impact estimates
+discovery:
+  code_patterns:
+  - pattern: retention[_-]?policy|ttl|expir
+    type: regex
+    scope: config
+    purpose: Find data retention configurations
+  - pattern: archive|purge|delete.*older
+    type: regex
+    scope: source
+    purpose: Identify data lifecycle management
+  file_patterns:
+  - glob: '**/retention*.{yaml,yml,json}'
+    purpose: Retention policy configurations
+  - glob: '**/migration*/**'
+    purpose: Schema migrations indicating data model changes
+  metrics_queries:
+  - system: Database Monitoring
+    query: pg_database_size_bytes
+    purpose: Track database size over time
+    threshold: Growth rate sustainable for 12+ months
+  - system: Database Monitoring
+    query: pg_stat_user_tables_n_live_tup by relname
+    purpose: Row counts per table
+    threshold: No table approaching system limits
+knowledge_sources:
+  guides:
+  - id: postgres-limits
+    name: PostgreSQL System Limits
+    url: https://www.postgresql.org/docs/current/limits.html
+    offline_cache: true
+  - id: capacity-planning
+    name: Database Capacity Planning Guide
+    url: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_Storage.html
+    offline_cache: true
+  learning_resources:
+  - id: data-modeling
+    title: Database Design for Growth
+    type: article
+    reference: Martin Kleppmann - Designing Data-Intensive Applications, Chapter 3
+tooling:
+  infrastructure_tools:
+  - tool: pg_total_relation_size
+    purpose: Get total size including indexes
+    command: SELECT relname, pg_size_pretty(pg_total_relation_size(relid)) FROM pg_stat_user_tables ORDER
+      BY pg_total_relation_size(relid) DESC
+  - tool: pg_stat_user_tables
+    purpose: Row counts and table statistics
+    command: SELECT relname, n_live_tup, n_dead_tup FROM pg_stat_user_tables ORDER BY n_live_tup DESC
+  monitoring_queries:
+  - system: Prometheus
+    query: predict_linear(pg_database_size_bytes[90d], 365*24*3600)
+    purpose: Project database size 1 year out
+  - system: Prometheus
+    query: rate(pg_stat_user_tables_n_live_tup[30d])
+    purpose: Row insertion rate per table
+  scripts:
+  - id: growth-projector
+    language: python
+    purpose: Project data growth and identify capacity thresholds
+    source: inline
+    code: |
+      #!/usr/bin/env python3
+      """Project data growth and calculate capacity thresholds."""
+      import numpy as np
+      from datetime import datetime, timedelta
+
+      def project_growth(historical_sizes: list, days_ahead: int) -> dict:
+          """
+          Project storage growth using linear regression.
+
+          Args:
+              historical_sizes: List of (timestamp, bytes) tuples
+              days_ahead: Number of days to project
+
+          Returns:
+              Projection results with confidence intervals
+          """
+          times = np.array([t.timestamp() for t, _ in historical_sizes])
+          sizes = np.array([s for _, s in historical_sizes])
+
+          # Linear regression
+          coeffs = np.polyfit(times, sizes, 1)
+          growth_rate = coeffs[0] * 86400  # bytes per day
+
+          # Project future
+          future_time = datetime.now().timestamp() + (days_ahead * 86400)
+          projected_size = np.polyval(coeffs, future_time)
+
+          return {
+              'current_size_gb': sizes[-1] / 1e9,
+              'daily_growth_gb': growth_rate / 1e9,
+              'projected_size_gb': projected_size / 1e9,
+              'days_to_1tb': (1e12 - sizes[-1]) / growth_rate if growth_rate > 0 else float('inf'),
+              'days_to_10tb': (1e13 - sizes[-1]) / growth_rate if growth_rate > 0 else float('inf')
+          }
+signals:
+  critical:
+  - id: VOLUME-CRIT-001
+    signal: Storage will exceed capacity within 90 days at current growth
+    evidence_threshold: projected_90d_size > available_storage * 0.9
+    explanation: |
+      Running out of storage causes immediate database unavailability.
+      90 days is the minimum lead time for major infrastructure changes.
+      This requires immediate capacity expansion or data reduction.
+    remediation: Expand storage immediately; implement data archival; evaluate sharding
+  - id: VOLUME-CRIT-002
+    signal: Table approaching PostgreSQL row limit (32TB/table)
+    evidence_indicators:
+    - Table size > 10TB
+    - Table row count > 1 billion without partitioning
+    - Query performance degrading on large table
+    explanation: |
+      While PostgreSQL has a high theoretical limit, practical limits
+      are much lower due to query performance, vacuum overhead, and
+      maintenance windows. Tables over 10TB require partitioning.
+    remediation: Implement table partitioning; consider horizontal sharding
+  high:
+  - id: VOLUME-HIGH-001
+    signal: No data retention policy for high-growth tables
+    explanation: Without retention, data grows unbounded
+    remediation: Define and implement retention policies; archive old data
+  - id: VOLUME-HIGH-002
+    signal: Storage utilization > 70% with no expansion plan
+    explanation: Limited headroom for growth or unexpected spikes
+    remediation: Create storage expansion plan; implement monitoring alerts
+  medium:
+  - id: VOLUME-MED-001
+    signal: Data growth projections not documented
+    remediation: Create capacity planning documentation with growth models
+  - id: VOLUME-MED-002
+    signal: Index size exceeds table data size
+    remediation: Review index necessity; remove unused indexes
+  low:
+  - id: VOLUME-LOW-001
+    signal: Bloat percentage > 20% on large tables
+  positive:
+  - id: VOLUME-POS-001
+    signal: Automated data archival implemented
+  - id: VOLUME-POS-002
+    signal: Capacity planning reviewed quarterly
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Measure Current Data Volumes
+    description: |
+      Establish baseline measurements for database size, table sizes,
+      and row counts across all significant tables.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get total database size
+      command: SELECT pg_size_pretty(pg_database_size(current_database()))
+    - purpose: Get table sizes ranked
+      command: SELECT relname, pg_size_pretty(pg_total_relation_size(relid)), n_live_tup FROM pg_stat_user_tables
+        ORDER BY pg_total_relation_size(relid) DESC LIMIT 20
+    expected_findings:
+    - Total database size
+    - Top 20 tables by size
+    - Row counts for major tables
+  - id: '2'
+    name: Analyze Historical Growth Trends
+    description: |
+      Review historical data to establish growth rates and
+      identify accelerating or decelerating trends.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Query historical size metrics
+      command: prometheus_query 'pg_database_size_bytes[90d]'
+    - purpose: Calculate growth rate
+      command: prometheus_query 'deriv(pg_database_size_bytes[30d])'
+    expected_findings:
+    - Daily/weekly/monthly growth rates
+    - Growth trend (linear, exponential, etc.)
+    - Seasonal patterns if any
+  - id: '3'
+    name: Project Future Data Volumes
+    description: |
+      Create projections for 6 months, 1 year, and 3 years
+      based on growth trends and business projections.
+    duration_estimate: 60 min
+    questions:
+    - What is the projected user growth rate?
+    - Are there planned features that significantly impact data volume?
+    - What retention policies exist or are planned?
+    - Are there seasonal factors affecting data volume?
+    expected_findings:
+    - 6-month storage projection
+    - 1-year storage projection
+    - 3-year storage projection
+    - Confidence intervals for projections
+  - id: '4'
+    name: Identify Capacity Thresholds
+    description: |
+      Determine at what data volumes the current architecture
+      will require changes (partitioning, sharding, archival).
+    duration_estimate: 45 min
+    questions:
+    - At what size do queries begin to degrade?
+    - What are the storage limits of current infrastructure?
+    - When will backup windows become untenable?
+    - What are the cost implications of growth?
+    expected_findings:
+    - Performance threshold estimates
+    - Infrastructure capacity limits
+    - Recommended action timelines
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Current State Analysis
+    - Growth Trend Analysis
+    - Capacity Projections
+    - Threshold Analysis
+    - Recommendations and Timeline
+  - type: projections_table
+    format: tabular
+    contents:
+    - 6-month projections
+    - 1-year projections
+    - 3-year projections
+  confidence_guidance:
+    high: Projections based on 12+ months historical data with stable growth
+    medium: Projections based on 3-12 months data or variable growth rates
+    low: Projections based on <3 months data or significant unknowns
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: postgres-limits
+      priority: required
+  limitations:
+  - Cannot measure current volumes without database access
+  - Historical trends require monitoring system access
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires historical data analysis
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: data-volume-projection-001
+  item: Storage utilization under 70%
+  level: CRITICAL
+  verification: test $(df --output=pcent /db | tail -1 | tr -d ' %') -lt 70 && echo PASS || echo FAIL
+  expected: PASS
+- id: data-volume-projection-002
+  item: Growth projections documented for 1 year
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify capacity planning document exists with 12-month projections
+  expected: Confirmed by reviewer
+- id: data-volume-projection-003
+  item: Retention policies defined for high-growth tables
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify top 10 tables by growth have documented retention policies
+  expected: Confirmed by reviewer
+- id: data-volume-projection-004
+  item: Storage alerts configured for 80% threshold
+  level: WARNING
+  verification: grep -q 'storage.*80\|disk.*0.8' alerts/*.yaml && echo PASS || echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - A1.2
+    - CC6.1
+relationships:
+  commonly_combined:
+  - scalability-capacity.database-scalability.partition-strategy
+  - scalability-capacity.database-scalability.sharding-strategy
+  - operations.capacity-planning.storage-capacity

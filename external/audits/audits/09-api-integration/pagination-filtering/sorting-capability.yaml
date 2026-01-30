@@ -1,0 +1,373 @@
+# ============================================================
+# AUDIT: Sorting Capability
+# ============================================================
+
+audit:
+  id: "api-integration.pagination-filtering.sorting-capability"
+  name: "Sorting Capability Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "api-integration"
+  category_number: 9
+  subcategory: "pagination-filtering"
+
+  tier: "expert"
+  estimated_duration: "60 minutes"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "api"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates API sorting capabilities including sort field validation,
+    sort direction handling, multi-field sorting, default sort behavior,
+    and index optimization. Analyzes whether sorting is secure,
+    performant, and consistent.
+
+  why_it_matters: |
+    Sorting vulnerabilities can expose sensitive data through ORDER BY
+    injection, cause performance degradation with unindexed sorts, or
+    create inconsistent pagination when sort order is unstable.
+    Proper sorting implementation is essential for API reliability.
+
+  when_to_run:
+    - "API design or review"
+    - "Performance optimization"
+    - "Security assessments"
+    - "Pagination stability issues"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "API endpoint implementations"
+    - type: "configuration"
+      description: "Database schema and indexes"
+
+  access_requirements:
+    - "Read access to API source code"
+    - "Access to database schema"
+
+discovery:
+  code_patterns:
+    - pattern: "sort|order|orderBy|ORDER BY"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect sorting implementations"
+
+    - pattern: "asc|desc|ASC|DESC"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect sort direction handling"
+
+    - pattern: "sortableFields|allowedSorts|sortWhitelist"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect sort field validation"
+
+  file_patterns:
+    - glob: "**/api/**"
+      purpose: "API implementations"
+    - glob: "**/controllers/**"
+      purpose: "Controller implementations"
+
+knowledge_sources:
+  guides:
+    - id: "rest-sorting"
+      name: "REST API Sorting Best Practices"
+      url: "https://www.moesif.com/blog/technical/api-design/REST-API-Design-Filtering-Sorting-and-Pagination/"
+      offline_cache: true
+
+    - id: "graphql-sorting"
+      name: "GraphQL Sorting Patterns"
+      url: "https://graphql.org/learn/queries/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "database-indexing"
+      title: "Database Indexing for Sort Operations"
+      type: "article"
+      reference: "Use The Index, Luke"
+
+tooling:
+  static_analysis:
+    - tool: "semgrep"
+      purpose: "Detect ORDER BY injection patterns"
+      offline_capable: true
+
+  scripts:
+    - id: "sorting-scan"
+      language: "bash"
+      purpose: "Analyze sorting patterns"
+      source: "inline"
+      code: |
+        echo "=== Sorting Capability Analysis ==="
+        echo "--- Sort parameter handling ---"
+        grep -rn "sort\|order\|orderBy" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+
+        echo "--- Sort field validation ---"
+        grep -rn "sortableFields\|allowedSorts\|validSort" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+
+        echo "--- Default sort configuration ---"
+        grep -rn "defaultSort\|DEFAULT_SORT\|defaultOrder" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+
+signals:
+  critical:
+    - id: "SC-CRIT-001"
+      signal: "Sort field directly interpolated into ORDER BY clause"
+      evidence_pattern: "ORDER BY ${sortField} or similar string concatenation"
+      explanation: |
+        Direct interpolation of sort fields enables ORDER BY injection,
+        allowing attackers to extract data through timing attacks or
+        error-based extraction. This is a SQL injection variant.
+      remediation: "Validate sort fields against whitelist before query"
+
+    - id: "SC-CRIT-002"
+      signal: "No sort field whitelist allowing arbitrary columns"
+      evidence_pattern: "Sort by any field in request without validation"
+      explanation: |
+        Allowing sorting by arbitrary fields can expose sensitive data
+        through inference attacks (e.g., sorting by password_hash
+        reveals relative ordering of passwords).
+      remediation: "Implement explicit whitelist of sortable fields"
+
+  high:
+    - id: "SC-HIGH-001"
+      signal: "Sorting on unindexed columns in large tables"
+      evidence_pattern: "ORDER BY on columns without indexes"
+      explanation: |
+        Sorting unindexed columns requires full table scan and in-memory
+        sort, severely degrading performance. On large tables, this can
+        exhaust memory or timeout.
+      remediation: "Add indexes for sortable columns or restrict sorting"
+
+    - id: "SC-HIGH-002"
+      signal: "Multi-field sort without composite index"
+      evidence_pattern: "ORDER BY field1, field2 without matching index"
+      explanation: |
+        Multi-field sorting requires composite indexes in the exact order
+        of sort fields. Without them, the database cannot use indexes
+        efficiently.
+      remediation: "Create composite indexes matching common sort combinations"
+
+    - id: "SC-HIGH-003"
+      signal: "Sort direction not validated"
+      evidence_pattern: "Direction from user input without asc/desc validation"
+      explanation: |
+        Invalid sort directions can cause query errors or be exploited
+        for injection if not properly validated and sanitized.
+      remediation: "Validate sort direction is exactly 'asc' or 'desc'"
+
+  medium:
+    - id: "SC-MED-001"
+      signal: "No default sort order defined"
+      evidence_pattern: "List endpoints without default ORDER BY"
+      remediation: "Define default sort order for all list endpoints"
+
+    - id: "SC-MED-002"
+      signal: "Unstable sort order for pagination"
+      evidence_pattern: "Sort by non-unique field without tiebreaker"
+      remediation: "Add unique ID as secondary sort for stable pagination"
+
+    - id: "SC-MED-003"
+      signal: "Case-sensitive sorting not documented"
+      evidence_pattern: "Text sorting behavior varies by database collation"
+      remediation: "Document sorting behavior and consider COLLATE options"
+
+  low:
+    - id: "SC-LOW-001"
+      signal: "Sort options not documented in API"
+      evidence_pattern: "No documentation of sortable fields"
+      remediation: "Document available sort fields and default behavior"
+
+  positive:
+    - id: "SC-POS-001"
+      signal: "Sort field whitelist enforced"
+      evidence_pattern: "Explicit validation of sort fields"
+
+    - id: "SC-POS-002"
+      signal: "Indexes cover sort columns"
+      evidence_pattern: "Indexes match sortable field definitions"
+
+    - id: "SC-POS-003"
+      signal: "Stable sort with unique tiebreaker"
+      evidence_pattern: "ID included as secondary sort field"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Sort Entry Points"
+      description: |
+        Find all endpoints that accept sort parameters.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find sort parameters"
+          command: |
+            grep -rn "sort\|order\|orderBy" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | grep -v test | head -40
+
+      expected_findings:
+        - "Sort entry points"
+        - "Parameter formats"
+
+    - id: "2"
+      name: "Analyze Sort Field Validation"
+      description: |
+        Check if sort fields are validated against whitelist.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find sort validation"
+          command: |
+            grep -rn "sortableFields\|allowedSorts\|validSort\|SORTABLE" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -20
+        - purpose: "Find ORDER BY construction"
+          command: |
+            grep -rn "ORDER BY\|orderBy\|order_by" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Validation presence"
+        - "Query construction"
+
+    - id: "3"
+      name: "Review Index Coverage"
+      description: |
+        Verify indexes exist for sortable columns.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find index definitions"
+          command: |
+            grep -rn "CREATE INDEX\|@Index\|index:" \
+              --include="*.ts" --include="*.java" --include="*.sql" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Index coverage"
+        - "Composite indexes"
+
+    - id: "4"
+      name: "Check Sort Stability"
+      description: |
+        Verify sort includes unique tiebreaker for pagination.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find sort implementations"
+          command: |
+            grep -rn "ORDER BY\|sort\(" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Tiebreaker presence"
+        - "Sort stability"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "sort_entry_points"
+        - "validation_status"
+        - "index_coverage"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Security Analysis"
+        - "Performance Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct field interpolation or missing validation found"
+    medium: "Validation exists but coverage uncertain"
+    low: "Requires performance testing to confirm issues"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "rest-sorting"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed analysis"
+    full:
+      included: true
+      priority: 1
+    api:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "sc-001"
+    item: "Sort fields validated against whitelist"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "sortableFields\|allowedSorts\|validSort\|SORTABLE" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "sc-002"
+    item: "Sort direction validated"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "asc\|desc\|direction.*valid\|sortOrder" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "sc-003"
+    item: "Indexes exist for sort columns"
+    level: "WARNING"
+    verification: |
+      grep -rn "INDEX\|@Index" \
+        --include="*.ts" --include="*.java" --include="*.sql" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "OWASP"
+      controls: ["A03:2021-Injection"]
+
+relationships:
+  commonly_combined:
+    - "api-integration.pagination-filtering.pagination-strategy"
+    - "api-integration.pagination-filtering.filtering-capability"
+    - "performance-efficiency.query-optimization.query-performance"

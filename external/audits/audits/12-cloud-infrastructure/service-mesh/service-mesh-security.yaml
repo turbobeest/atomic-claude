@@ -1,0 +1,396 @@
+# ============================================================
+# AUDIT FILE: Service Mesh Security
+# ============================================================
+
+audit:
+  id: "cloud-infrastructure.service-mesh.service-mesh-security"
+  name: "Service Mesh Security"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "cloud-infrastructure"
+  category_number: 12
+  subcategory: "service-mesh"
+
+  tier: "expert"
+  estimated_duration: "3-4 hours"  # median: 3h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates service mesh security configurations including mutual TLS (mTLS)
+    enforcement, authorization policies, certificate management, security
+    policy enforcement, sidecar injection settings, and control plane security.
+    Examines Istio, Linkerd, or other service mesh implementations for proper
+    security posture.
+
+  why_it_matters: |
+    Service meshes provide critical security features including encryption,
+    authentication, and authorization between services. Misconfigured mesh
+    security can create false sense of security while leaving services
+    vulnerable. Proper mTLS prevents eavesdropping and spoofing, while
+    authorization policies enforce zero-trust principles.
+
+  when_to_run:
+    - "After service mesh installation or upgrades"
+    - "Before deploying new services to the mesh"
+    - "During security audits and compliance reviews"
+    - "After security incidents involving service communication"
+
+prerequisites:
+  required_artifacts:
+    - type: "service-mesh"
+      description: "Running service mesh (Istio, Linkerd, Consul Connect)"
+    - type: "mesh-configs"
+      description: "Service mesh configuration and policies"
+
+  access_requirements:
+    - "kubectl access to mesh namespace"
+    - "istioctl or equivalent mesh CLI access"
+    - "Access to mesh control plane configuration"
+
+discovery:
+  file_patterns:
+    - glob: "**/peerauthentication*.yaml"
+      purpose: "Istio mTLS policies"
+    - glob: "**/authorizationpolicy*.yaml"
+      purpose: "Istio authorization policies"
+    - glob: "**/destinationrule*.yaml"
+      purpose: "Istio destination rules"
+    - glob: "**/serviceprofile*.yaml"
+      purpose: "Linkerd service profiles"
+    - glob: "**/serverauthorization*.yaml"
+      purpose: "Linkerd authorization"
+
+  code_patterns:
+    - pattern: "mtls:\\s*mode:\\s*STRICT"
+      type: "regex"
+      scope: "config"
+      purpose: "Verify strict mTLS enforcement"
+    - pattern: "mtls:\\s*mode:\\s*PERMISSIVE"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect permissive mTLS mode"
+    - pattern: "sidecar.istio.io/inject.*false"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect sidecar injection bypass"
+
+knowledge_sources:
+  specifications:
+    - id: "istio-security"
+      name: "Istio Security Best Practices"
+      url: "https://istio.io/latest/docs/ops/best-practices/security/"
+      offline_cache: true
+      priority: "required"
+    - id: "linkerd-security"
+      name: "Linkerd Security Documentation"
+      url: "https://linkerd.io/2.14/features/automatic-mtls/"
+      offline_cache: true
+      priority: "recommended"
+    - id: "nist-800-207"
+      name: "NIST SP 800-207: Zero Trust Architecture"
+      url: "https://csrc.nist.gov/publications/detail/sp/800-207/final"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "zero-trust"
+      name: "Zero Trust Service Mesh"
+      url: "https://istio.io/latest/docs/concepts/security/"
+      offline_cache: true
+    - id: "nist-zero-trust"
+      name: "NIST Zero Trust Architecture"
+      url: "https://csrc.nist.gov/publications/detail/sp/800-207/final"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "istioctl"
+      purpose: "Istio mesh analysis"
+      command: "istioctl analyze --all-namespaces"
+    - tool: "istioctl-proxy-status"
+      purpose: "Check sidecar status"
+      command: "istioctl proxy-status"
+    - tool: "linkerd"
+      purpose: "Linkerd mesh analysis"
+      command: "linkerd check"
+
+  scripts:
+    - id: "mesh-security-audit"
+      language: "bash"
+      purpose: "Audit mesh security settings"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== mTLS Status ==="
+        istioctl experimental authz check
+        echo "=== PeerAuthentication Policies ==="
+        kubectl get peerauthentication -A
+        echo "=== Authorization Policies ==="
+        kubectl get authorizationpolicy -A
+        echo "=== Pods without Sidecar ==="
+        kubectl get pods -A -o json | jq -r '.items[] | select(.spec.containers | map(.name) | contains(["istio-proxy"]) | not) | "\(.metadata.namespace)/\(.metadata.name)"'
+
+signals:
+  critical:
+    - id: "MESH-SEC-CRIT-001"
+      signal: "mTLS not enforced in production"
+      evidence_pattern: "PeerAuthentication mode: PERMISSIVE or absent"
+      explanation: |
+        Without strict mTLS, service-to-service traffic can be
+        unencrypted, enabling eavesdropping and man-in-the-middle
+        attacks within the cluster.
+      remediation: "Enable STRICT mTLS mode for all production namespaces"
+    - id: "MESH-SEC-CRIT-002"
+      signal: "Control plane exposed without authentication"
+      evidence_pattern: "Mesh control plane endpoints accessible without auth"
+      explanation: |
+        Exposed control plane allows attackers to modify mesh
+        configuration, intercept traffic, or disable security features.
+      remediation: "Secure control plane with authentication and network policies"
+    - id: "MESH-SEC-CRIT-003"
+      signal: "Services bypassing sidecar injection"
+      evidence_pattern: "sidecar.istio.io/inject: false on production pods"
+      explanation: |
+        Services without sidecars are not protected by mesh security
+        features including mTLS, authorization, and observability.
+      remediation: "Enable sidecar injection for all production services"
+
+  high:
+    - id: "MESH-SEC-HIGH-001"
+      signal: "No authorization policies defined"
+      evidence_pattern: "Zero AuthorizationPolicy resources"
+      explanation: |
+        Without authorization policies, any authenticated service can
+        communicate with any other service, violating zero-trust.
+      remediation: "Implement authorization policies for service access control"
+    - id: "MESH-SEC-HIGH-002"
+      signal: "Overly permissive authorization policies"
+      evidence_pattern: "Allow-all authorization policy"
+      explanation: |
+        Permissive policies provide no access control and defeat the
+        purpose of authorization.
+      remediation: "Implement specific allow rules based on least privilege"
+    - id: "MESH-SEC-HIGH-003"
+      signal: "Certificate rotation not configured"
+      evidence_pattern: "Default or extended certificate lifetime"
+      explanation: |
+        Long-lived certificates increase exposure window if compromised.
+        Regular rotation limits the impact of certificate theft.
+      remediation: "Configure automatic certificate rotation with short lifetimes"
+
+  medium:
+    - id: "MESH-SEC-MED-001"
+      signal: "External services not in mesh"
+      evidence_pattern: "ServiceEntry for external services without TLS"
+      remediation: "Configure ServiceEntry with appropriate TLS settings"
+    - id: "MESH-SEC-MED-002"
+      signal: "Debug endpoints exposed"
+      evidence_pattern: "Mesh debug/admin endpoints accessible"
+      remediation: "Disable or restrict access to debug endpoints in production"
+    - id: "MESH-SEC-MED-003"
+      signal: "Inconsistent security policies across namespaces"
+      evidence_pattern: "Different mTLS modes in different namespaces"
+      remediation: "Standardize security policies across the mesh"
+
+  low:
+    - id: "MESH-SEC-LOW-001"
+      signal: "Audit logging not enabled for mesh"
+      remediation: "Enable access logging for security analysis"
+    - id: "MESH-SEC-LOW-002"
+      signal: "Using default mesh configuration"
+      remediation: "Review and customize default settings for production"
+
+  positive:
+    - id: "MESH-SEC-POS-001"
+      signal: "Strict mTLS enforced mesh-wide"
+    - id: "MESH-SEC-POS-002"
+      signal: "Authorization policies implement least-privilege"
+    - id: "MESH-SEC-POS-003"
+      signal: "Automatic certificate rotation configured"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Assess mTLS configuration"
+      description: |
+        Verify mutual TLS is properly configured and enforced across
+        the service mesh.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check mTLS status"
+          command: "istioctl x describe pod <pod-name>"
+        - purpose: "List PeerAuthentication policies"
+          command: "kubectl get peerauthentication -A -o yaml"
+        - purpose: "Check destination rules"
+          command: "kubectl get destinationrule -A -o yaml"
+      expected_findings:
+        - "mTLS enforcement status per namespace"
+        - "Gaps in mTLS coverage"
+
+    - id: "2"
+      name: "Review authorization policies"
+      description: |
+        Examine authorization policies for proper access control
+        between services.
+      duration_estimate: "40 min"
+      commands:
+        - purpose: "List authorization policies"
+          command: "kubectl get authorizationpolicy -A -o yaml"
+        - purpose: "Check for allow-all policies"
+          command: "kubectl get authorizationpolicy -A -o json | jq '.items[] | select(.spec.rules == null or .spec.rules == [])'"
+      expected_findings:
+        - "Authorization policy inventory"
+        - "Overly permissive policies"
+
+    - id: "3"
+      name: "Verify sidecar injection"
+      description: |
+        Confirm sidecar proxies are injected into all appropriate
+        workloads.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check proxy status"
+          command: "istioctl proxy-status"
+        - purpose: "Find pods without sidecar"
+          command: "kubectl get pods -A -o json | jq -r '.items[] | select(.spec.containers | map(.name) | contains([\"istio-proxy\"]) | not) | \"\\(.metadata.namespace)/\\(.metadata.name)\"'"
+      expected_findings:
+        - "Sidecar injection coverage"
+        - "Pods bypassing mesh"
+
+    - id: "4"
+      name: "Assess certificate management"
+      description: |
+        Review certificate configuration including root CA, intermediate
+        CAs, and rotation settings.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check certificate info"
+          command: "istioctl proxy-config secret <pod> -o json"
+        - purpose: "Check CA configuration"
+          command: "kubectl get secret -n istio-system istio-ca-secret -o yaml"
+      expected_findings:
+        - "Certificate lifetime configuration"
+        - "CA hierarchy assessment"
+
+    - id: "5"
+      name: "Control plane security review"
+      description: |
+        Examine control plane security including access controls and
+        network exposure.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check control plane services"
+          command: "kubectl get svc -n istio-system"
+        - purpose: "Analyze mesh configuration"
+          command: "istioctl analyze --all-namespaces"
+      expected_findings:
+        - "Control plane exposure assessment"
+        - "Configuration issues"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "mTLS Assessment"
+        - "Authorization Analysis"
+        - "Certificate Management"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct istioctl/kubectl verification, policy analysis"
+    medium: "Inferred from configuration review"
+    low: "Based on absence of expected configurations"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "istio-security"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires running service mesh analysis"
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "service-mesh-security-001"
+    item: "Strict mTLS enforced for production namespaces"
+    level: "CRITICAL"
+    verification: "kubectl get peerauthentication -n production -o json | jq '.items[] | select(.spec.mtls.mode==\"STRICT\")' | grep -q STRICT && echo PASS || echo FAIL"
+    expected: "PASS"
+  - id: "service-mesh-security-002"
+    item: "All production pods have sidecar"
+    level: "CRITICAL"
+    verification: "kubectl get pods -n production -o json | jq '[.items[] | select(.spec.containers | map(.name) | contains([\"istio-proxy\"]) | not)] | length' | awk '{print ($1==0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "service-mesh-security-003"
+    item: "Authorization policies defined"
+    level: "BLOCKING"
+    verification: "kubectl get authorizationpolicy -A | grep -q . && echo PASS || echo FAIL"
+    expected: "PASS"
+  - id: "service-mesh-security-004"
+    item: "No overly permissive authorization policies"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review authorization policies for allow-all rules"
+    expected: "Confirmed by reviewer"
+  - id: "service-mesh-security-005"
+    item: "Certificate rotation configured"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify certificate lifetime is appropriately short"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC6.1", "CC6.6", "CC6.7"]
+    - framework: "PCI-DSS"
+      controls: ["4.1", "7.1", "8.2"]
+    - framework: "NIST-CSF"
+      controls: ["PR.AC-5", "PR.DS-2", "PR.DS-5"]
+
+relationships:
+  commonly_combined:
+    - "cloud-infrastructure.service-mesh.traffic-management"
+    - "cloud-infrastructure.containers.container-networking"
+    - "cloud-infrastructure.cloud-security.encryption-in-transit"

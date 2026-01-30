@@ -1,0 +1,361 @@
+audit:
+  id: observability-instrumentation.debug-troubleshooting.replay-capability
+  name: Replay Capability Audit
+  version: 1.0.0
+  last_updated: '2025-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: debug-troubleshooting
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: infrastructure
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Assesses the ability to capture and replay requests, events,
+    or transactions for debugging and testing. Evaluates request
+    recording mechanisms, replay infrastructure, data sanitization
+    for replay, and the safety of replay operations in different
+    environments.
+  why_it_matters: |
+    Lack of replay capability causes:
+    - Inability to reproduce complex production issues
+    - Extensive effort to create test scenarios manually
+    - Risk of introducing bugs without realistic test data
+    - Extended debugging cycles for intermittent issues
+    - Difficulty validating fixes for production bugs
+    - Loss of valuable debugging context
+  when_to_run:
+  - When investigating hard-to-reproduce issues
+  - During test infrastructure evaluation
+  - When building debugging tooling
+  - After major architecture changes
+prerequisites:
+  required_artifacts:
+  - type: application_access
+    description: Access to applications for replay assessment
+  - type: event_system_access
+    description: Access to message queues or event stores
+  optional_artifacts:
+  - type: replay_tooling
+    description: Existing replay tools and configurations
+  - type: test_infrastructure
+    description: Test environment for safe replay
+  access_requirements:
+  - Application configuration access
+  - Event/message queue access
+  - Test environment access
+discovery:
+  code_patterns:
+  - pattern: (replay|playback|record.*request|capture.*traffic)
+    type: regex
+    scope: source
+    purpose: Find replay-related code
+  - pattern: (DLQ|dead.*letter|retry.*queue)
+    type: regex
+    scope: config
+    purpose: Find event replay mechanisms
+  file_patterns:
+  - glob: '**/replay/**'
+    purpose: Replay configuration and tools
+  - glob: '**/*record*.{yaml,yml,json}'
+    purpose: Recording configuration
+knowledge_sources:
+  guides:
+  - id: traffic-replay
+    name: Traffic Replay for Testing
+    url: https://github.com/buger/goreplay
+    offline_cache: true
+    priority: required
+  - id: event-sourcing
+    name: Event Sourcing Pattern
+    url: https://martinfowler.com/eaaDev/EventSourcing.html
+    offline_cache: true
+    priority: recommended
+  learning_resources:
+  - id: chaos-engineering
+    title: Chaos Engineering
+    type: book
+    reference: Casey Rosenthal, ISBN 978-1492043867
+tooling:
+  infrastructure_tools:
+  - tool: GoReplay
+    purpose: Capture and replay HTTP traffic
+    command: gor --input-raw :8080 --output-file requests.gor
+  - tool: vcrpy
+    purpose: Record and replay HTTP interactions for Python
+  - tool: WireMock
+    purpose: Mock HTTP services with recording capability
+  - tool: Kafka
+    purpose: Event replay from topics
+    command: kafka-consumer-groups --reset-offsets --to-earliest
+  scripts:
+  - id: replay-capability-check
+    language: bash
+    purpose: Check replay capabilities
+    source: inline
+    code: |
+      #!/bin/bash
+      # Check replay capabilities
+
+      echo "=== Replay Capability Check ==="
+
+      # Check for traffic capture tools
+      echo ""
+      echo "Traffic capture tools:"
+      for tool in gor tcpdump tcpreplay; do
+        if command -v $tool &> /dev/null; then
+          echo "  [OK] $tool available"
+        else
+          echo "  [MISSING] $tool"
+        fi
+      done
+
+      # Check for dead letter queues
+      echo ""
+      echo "Checking for Dead Letter Queues:"
+      kubectl get queues -A 2>/dev/null | grep -i dlq || echo "  No DLQ resources found"
+
+      # Check for event sourcing
+      echo ""
+      echo "Checking for event store:"
+      kubectl get services -A | grep -iE 'event.*store|kafka|pulsar' || echo "  No event store detected"
+
+      # Check for replay endpoints
+      echo ""
+      echo "Checking for replay endpoints:"
+      curl -s "$APP_URL/api/replay/status" 2>/dev/null && echo "  [OK] Replay endpoint available" || echo "  [MISSING] No replay endpoint"
+signals:
+  critical:
+  - id: REPLAY-CRIT-001
+    signal: No ability to replay failed events/messages
+    evidence_indicators:
+    - No dead letter queue configured
+    - Failed messages lost permanently
+    - No event retention for replay
+    explanation: |
+      Without replay capability, failed events are lost forever.
+      This prevents both debugging the failure cause and recovering
+      by reprocessing after fixes are deployed.
+    remediation: |
+      Implement event replay capability:
+      - Configure dead letter queues with retention
+      - Store events in replayable format
+      - Build replay tooling for failed events
+  - id: REPLAY-CRIT-002
+    signal: Cannot reproduce production issues in test
+    evidence_indicators:
+    - No request recording capability
+    - No traffic capture mechanism
+    - Test data does not represent production
+    explanation: |
+      If production traffic cannot be captured and replayed in
+      test environments, reproducing complex issues requires
+      manual effort and guesswork.
+    remediation: |
+      Implement traffic recording and replay:
+      - Use tools like GoReplay for HTTP
+      - Capture and sanitize production traffic
+      - Enable controlled replay in test environments
+  high:
+  - id: REPLAY-HIGH-001
+    signal: No data sanitization for replay
+    explanation: |
+      Replaying production traffic without sanitization risks
+      exposing PII and causing unintended side effects.
+    remediation: |
+      Implement data sanitization pipeline:
+      - Remove/mask PII fields
+      - Replace identifiers with test values
+      - Disable external integrations during replay
+  - id: REPLAY-HIGH-002
+    signal: Replay can trigger production side effects
+    explanation: |
+      Unsafe replay can send duplicate transactions, trigger
+      external APIs, or cause data corruption.
+    remediation: |
+      Isolate replay environment:
+      - Use separate databases
+      - Mock external services
+      - Add replay-mode flags to skip side effects
+  medium:
+  - id: REPLAY-MED-001
+    signal: Limited event retention for replay
+    remediation: |
+      Configure adequate retention periods for events.
+      Balance storage costs with debugging needs.
+  - id: REPLAY-MED-002
+    signal: No selective replay capability
+    remediation: |
+      Implement filtering for replay:
+      - By time range
+      - By user/tenant
+      - By error type
+  - id: REPLAY-MED-003
+    signal: Replay speed not controllable
+    remediation: |
+      Allow replay at various speeds:
+      - Real-time for behavior verification
+      - Accelerated for load testing
+      - Single-stepped for debugging
+  low:
+  - id: REPLAY-LOW-001
+    signal: No replay documentation
+    remediation: |
+      Document replay procedures and capabilities
+      for each service type.
+  positive:
+  - id: REPLAY-POS-001
+    signal: Traffic capture and replay infrastructure in place
+  - id: REPLAY-POS-002
+    signal: Dead letter queue with replay tooling
+  - id: REPLAY-POS-003
+    signal: Sanitized production traffic available for testing
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Event Replay Assessment
+    description: |
+      Evaluate ability to replay events and messages.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check for dead letter queues
+      command: kubectl get all -A | grep -i dlq
+    - purpose: Check event retention
+      command: kafka-configs --describe --topic $TOPIC | grep retention
+    expected_findings:
+    - DLQ presence
+    - Event retention policies
+  - id: '2'
+    name: Traffic Replay Assessment
+    description: |
+      Evaluate HTTP traffic recording and replay capability.
+    duration_estimate: 30 min
+    questions:
+    - Is traffic recording available?
+    - Can recorded traffic be replayed safely?
+    - Is data sanitization implemented?
+    expected_findings:
+    - Traffic capture capability
+    - Sanitization status
+  - id: '3'
+    name: Safety Controls Review
+    description: |
+      Verify replay operations are safe and isolated.
+    duration_estimate: 30 min
+    questions:
+    - Can replay trigger production side effects?
+    - Is test environment isolated?
+    - Are external integrations mocked?
+    expected_findings:
+    - Safety control status
+    - Isolation level
+  - id: '4'
+    name: Replay Tooling Assessment
+    description: |
+      Evaluate available tools for replay operations.
+    duration_estimate: 30 min
+    questions:
+    - What replay tools are available?
+    - Can replay be selective and controlled?
+    - Is replay usage documented?
+    expected_findings:
+    - Available tooling
+    - Documentation status
+output:
+  deliverables:
+  - type: replay_capability_assessment
+    format: structured
+    description: Analysis of replay capabilities
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Event Replay Capability
+    - Traffic Replay Capability
+    - Safety Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Direct capability testing
+    medium: Configuration analysis
+    low: Documentation review
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: traffic-replay
+      priority: required
+    - source_id: event-sourcing
+      priority: recommended
+  degradation:
+  - feature: Live replay testing
+    impact: Cannot verify actual capability
+    mitigation: Review configurations and documentation
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires infrastructure assessment
+    full:
+      included: true
+      priority: 18
+closeout_checklist:
+- id: replay-001
+  item: Failed events can be replayed
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify DLQ and replay mechanism exists
+  expected: Confirmed by reviewer
+- id: replay-002
+  item: Traffic capture available for debugging
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify ability to record and replay traffic
+  expected: Confirmed by reviewer
+- id: replay-003
+  item: Replay operations are isolated and safe
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify replay cannot affect production
+  expected: Confirmed by reviewer
+- id: replay-004
+  item: Data sanitization implemented for replay
+  level: WARNING
+  verification: manual
+  verification_notes: Verify PII is removed from replayed data
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - microservices
+    - event-driven
+    platforms:
+    - kubernetes
+    - cloud
+  compliance_frameworks:
+  - framework: GDPR
+    controls:
+    - Data Minimization
+  - framework: SOC2
+    controls:
+    - CC6.1
+relationships:
+  commonly_combined:
+  - observability-instrumentation.debug-troubleshooting.debug-logging
+  - testing.integration-testing.replay-testing
+  - data-management.event-processing.dead-letter-handling

@@ -1,0 +1,348 @@
+# ============================================================
+# AUDIT FILE: Budget Monitoring
+# ============================================================
+
+audit:
+  id: "cloud-infrastructure.cloud-cost.budget-monitoring"
+  name: "Budget Monitoring"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "cloud-infrastructure"
+  category_number: 12
+  subcategory: "cloud-cost"
+
+  tier: "expert"
+  estimated_duration: "1-2 hours"  # median: 1h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates cloud budget monitoring configuration including budget
+    definitions, threshold alerts, notification channels, budget
+    actions, forecasting integration, and budget-to-actual tracking.
+    Examines whether budgets are set appropriately and alerts are
+    actionable.
+
+  why_it_matters: |
+    Without budget monitoring, cloud costs can spiral out of control
+    before anyone notices. Budget alerts provide early warning to prevent
+    overruns. Proactive budget management enables informed decision-making
+    and prevents surprise bills that can impact business operations.
+
+  when_to_run:
+    - "During initial cloud setup"
+    - "At start of budget cycles"
+    - "After significant workload changes"
+    - "When experiencing cost overruns"
+
+prerequisites:
+  required_artifacts:
+    - type: "cloud-account"
+      description: "Access to cloud billing and budgets"
+    - type: "budget-definitions"
+      description: "Existing budget configurations"
+
+  access_requirements:
+    - "Budgets API access"
+    - "SNS/notification access"
+    - "Cost Explorer access"
+
+discovery:
+  file_patterns:
+    - glob: "**/budget*.yaml"
+      purpose: "Budget configurations"
+    - glob: "**/budget*.tf"
+      purpose: "Terraform budget definitions"
+
+  code_patterns:
+    - pattern: "aws_budgets_budget"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find AWS budget definitions"
+    - pattern: "BudgetType"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find budget type configurations"
+
+knowledge_sources:
+  specifications:
+    - id: "aws-budgets"
+      name: "AWS Budgets Documentation"
+      url: "https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-managing-costs.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "finops-budgets"
+      name: "FinOps Budget Practices"
+      url: "https://www.finops.org/framework/capabilities/budget-management/"
+      offline_cache: true
+    - id: "aws-cost-control"
+      name: "AWS Cost Control"
+      url: "https://docs.aws.amazon.com/whitepapers/latest/cost-optimization-laying-the-foundation/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws-cli"
+      purpose: "Query budget configurations"
+      command: "aws budgets describe-budgets --account-id <account-id>"
+    - tool: "cost-explorer"
+      purpose: "Budget vs actual analysis"
+      command: "aws ce get-cost-forecast --time-period Start=<start>,End=<end> --metric UNBLENDED_COST --granularity MONTHLY"
+
+  scripts:
+    - id: "budget-audit"
+      language: "bash"
+      purpose: "Audit budget configuration"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+        echo "=== Configured Budgets ==="
+        aws budgets describe-budgets --account-id $ACCOUNT --query 'Budgets[*].[BudgetName,BudgetType,BudgetLimit.Amount,BudgetLimit.Unit]' --output table
+        echo "=== Budget Notifications ==="
+        for budget in $(aws budgets describe-budgets --account-id $ACCOUNT --query 'Budgets[*].BudgetName' --output text); do
+          echo "Budget: $budget"
+          aws budgets describe-notifications-for-budget --account-id $ACCOUNT --budget-name "$budget" --query 'Notifications[*].[NotificationType,ComparisonOperator,Threshold]' --output table
+        done
+
+signals:
+  critical:
+    - id: "BUDGET-MON-CRIT-001"
+      signal: "No budgets configured"
+      evidence_pattern: "Zero budget definitions found"
+      explanation: |
+        Without budgets, there is no financial governance over cloud
+        spending. Costs can grow indefinitely without warning.
+      remediation: "Configure budgets for all accounts and major workloads"
+    - id: "BUDGET-MON-CRIT-002"
+      signal: "Budgets without notifications"
+      evidence_pattern: "Budgets with no alert thresholds"
+      explanation: |
+        Budgets without alerts provide no early warning. By the time
+        the overage is discovered manually, significant overrun may
+        have occurred.
+      remediation: "Add threshold notifications at 50%, 80%, 100%"
+
+  high:
+    - id: "BUDGET-MON-HIGH-001"
+      signal: "Current spend exceeds budget"
+      evidence_pattern: "Actual > budgeted amount"
+      explanation: |
+        Budget overruns indicate costs are not under control. Immediate
+        action may be needed to reduce spending.
+      remediation: "Investigate overage cause, adjust budget or reduce spend"
+    - id: "BUDGET-MON-HIGH-002"
+      signal: "Forecast exceeds budget"
+      evidence_pattern: "Forecasted spend > budget"
+      explanation: |
+        Forecasted overrun provides advance warning to take action
+        before actual overage occurs.
+      remediation: "Review forecast drivers, plan optimization or budget adjustment"
+    - id: "BUDGET-MON-HIGH-003"
+      signal: "Alert notifications not actionable"
+      evidence_pattern: "Alerts go to unmonitored channels"
+      explanation: |
+        Alerts that aren't seen or acted upon provide no value.
+        Notifications must reach people who can respond.
+      remediation: "Route alerts to active channels with clear ownership"
+
+  medium:
+    - id: "BUDGET-MON-MED-001"
+      signal: "Budgets not aligned with cost centers"
+      evidence_pattern: "Budget scope doesn't match organizational structure"
+      remediation: "Align budgets with teams/projects for accountability"
+    - id: "BUDGET-MON-MED-002"
+      signal: "No budget for development environments"
+      evidence_pattern: "Non-production environments unbudgeted"
+      remediation: "Set budgets for all environments to control sprawl"
+    - id: "BUDGET-MON-MED-003"
+      signal: "No automated budget actions"
+      evidence_pattern: "Missing budget actions for overages"
+      remediation: "Configure automated actions for severe overages"
+
+  low:
+    - id: "BUDGET-MON-LOW-001"
+      signal: "Budget review cadence not established"
+      remediation: "Establish regular budget review meetings"
+    - id: "BUDGET-MON-LOW-002"
+      signal: "Historical budget accuracy not tracked"
+      remediation: "Track budget vs actual for planning improvement"
+
+  positive:
+    - id: "BUDGET-MON-POS-001"
+      signal: "Budgets configured for all accounts"
+    - id: "BUDGET-MON-POS-002"
+      signal: "Multi-threshold alerts configured"
+    - id: "BUDGET-MON-POS-003"
+      signal: "Spend within budget"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory budgets"
+      description: |
+        Collect all budget definitions and their configurations.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "List all budgets"
+          command: "aws budgets describe-budgets --account-id <account-id> --query 'Budgets[*].[BudgetName,BudgetType,BudgetLimit,TimeUnit]'"
+      expected_findings:
+        - "Budget inventory"
+        - "Budget coverage assessment"
+
+    - id: "2"
+      name: "Review notification configuration"
+      description: |
+        Examine alert thresholds and notification channels.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "List notifications"
+          command: "aws budgets describe-notifications-for-budget --account-id <account-id> --budget-name <budget>"
+        - purpose: "Check notification subscribers"
+          command: "aws budgets describe-subscribers-for-notification --account-id <account-id> --budget-name <budget> --notification '{\"NotificationType\":\"ACTUAL\",\"ComparisonOperator\":\"GREATER_THAN\",\"Threshold\":80}'"
+      expected_findings:
+        - "Alert threshold configuration"
+        - "Notification routing"
+
+    - id: "3"
+      name: "Assess budget vs actual"
+      description: |
+        Compare current and forecasted spend against budgets.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Get current month costs"
+          command: "aws ce get-cost-and-usage --time-period Start=<start>,End=<end> --granularity MONTHLY --metrics UnblendedCost"
+        - purpose: "Get forecast"
+          command: "aws ce get-cost-forecast --time-period Start=<start>,End=<end> --metric UNBLENDED_COST --granularity MONTHLY"
+      expected_findings:
+        - "Budget vs actual comparison"
+        - "Forecast assessment"
+
+    - id: "4"
+      name: "Evaluate budget actions"
+      description: |
+        Review automated actions configured for budget thresholds.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "List budget actions"
+          command: "aws budgets describe-budget-actions-for-account --account-id <account-id>"
+      expected_findings:
+        - "Automated action inventory"
+        - "Action effectiveness"
+
+    - id: "5"
+      name: "Review budget governance"
+      description: |
+        Assess budget review processes and stakeholder involvement.
+      duration_estimate: "15 min"
+      questions:
+        - "How often are budgets reviewed?"
+        - "Who is responsible for budget management?"
+        - "How are budget adjustments approved?"
+      expected_findings:
+        - "Governance assessment"
+        - "Process gaps"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Budget Configuration Analysis"
+        - "Spend vs Budget Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct budget API queries"
+    medium: "Inferred from partial data"
+    low: "Based on process review"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-budgets"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires budget analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "budget-monitoring-001"
+    item: "Budgets configured for accounts"
+    level: "CRITICAL"
+    verification: "aws budgets describe-budgets --account-id $(aws sts get-caller-identity --query Account --output text) --query 'Budgets' | jq 'length' | awk '{print ($1>0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "budget-monitoring-002"
+    item: "Alert notifications configured"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify each budget has notification thresholds"
+    expected: "Confirmed by reviewer"
+  - id: "budget-monitoring-003"
+    item: "Current spend within budget"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Compare actual spend to budget limit"
+    expected: "Confirmed by reviewer"
+  - id: "budget-monitoring-004"
+    item: "Alerts routed to responsive channels"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify alert recipients are actively monitored"
+    expected: "Confirmed by reviewer"
+  - id: "budget-monitoring-005"
+    item: "Budget review cadence established"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify regular budget review meetings occur"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "FinOps"
+      controls: ["Budget Management", "Forecasting"]
+    - framework: "SOC2"
+      controls: ["CC6.1"]
+
+relationships:
+  commonly_combined:
+    - "cloud-infrastructure.cloud-cost.cost-allocation"
+    - "cloud-infrastructure.cloud-cost.cost-anomaly-detection"
+    - "cloud-infrastructure.cloud-cost.unused-resource-detection"

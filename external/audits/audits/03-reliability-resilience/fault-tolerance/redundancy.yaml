@@ -1,0 +1,375 @@
+audit:
+  id: reliability-resilience.fault-tolerance.redundancy
+  name: Redundancy Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: fault-tolerance
+  tier: phd
+  estimated_duration: 2.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates redundancy implementation across all system layers
+    including compute, storage, network, and application components. It examines
+    active-active vs active-passive configurations, replication strategies,
+    geographic distribution, and redundancy depth. The audit verifies that
+    redundancy is properly configured, tested, and maintained.
+  why_it_matters: |
+    Redundancy is the primary defense against component failure. Without proper
+    redundancy, single component failures cascade into system-wide outages.
+    Effective redundancy enables automatic failure recovery, maintenance without
+    downtime, and consistent performance during partial failures. Improper
+    redundancy configuration (e.g., untested failover, stale replicas) provides
+    false confidence while still exposing the system to outage risk.
+  when_to_run:
+  - During architecture design reviews
+  - Before production deployment
+  - After infrastructure scaling events
+  - During SLA/availability improvement initiatives
+  - Quarterly reliability assessments
+prerequisites:
+  required_artifacts:
+  - type: infrastructure-config
+    description: Infrastructure as Code configurations
+  - type: architecture-docs
+    description: System architecture documentation
+  access_requirements:
+  - Read access to cloud provider configurations
+  - Read access to Kubernetes cluster configurations
+  - Access to database replication settings
+  - Access to load balancer configurations
+discovery:
+  code_patterns:
+  - pattern: replicas:\s*[2-9]|replicas:\s*\d{2,}
+    type: regex
+    scope: config
+    purpose: Multi-replica deployments
+  - pattern: replication_factor|replica_count|num_replicas
+    type: regex
+    scope: config
+    purpose: Replication configuration settings
+  - pattern: multi_az\s*=\s*true|MultiAZ:\s*true
+    type: regex
+    scope: config
+    purpose: Multi-AZ deployments
+  - pattern: availability_zones\s*=|subnets.*count
+    type: regex
+    scope: config
+    purpose: Multi-zone resource distribution
+  - pattern: read_replica|ReadReplica|secondary
+    type: regex
+    scope: config
+    purpose: Read replica configurations
+  file_patterns:
+  - glob: '**/terraform/**/*.tf'
+    purpose: Terraform infrastructure definitions
+  - glob: '**/k8s/**/*.yaml'
+    purpose: Kubernetes manifests
+  - glob: '**/helm/**/*.yaml'
+    purpose: Helm chart values
+  - glob: '**/ansible/**/*.yaml'
+    purpose: Ansible playbooks
+  metrics_queries:
+  - system: Prometheus
+    query: kube_deployment_spec_replicas
+    purpose: Current replica configurations
+    threshold: '>= 2 for production workloads'
+  - system: CloudWatch
+    query: AWS/RDS ReplicaLag
+    purpose: Database replication health
+    threshold: < 1 second for synchronous, < 1 minute for async
+knowledge_sources:
+  specifications:
+  - id: aws-reliability
+    name: AWS Well-Architected Reliability Pillar
+    url: https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: k8s-ha
+    name: Kubernetes High Availability
+    url: https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/high-availability/
+    offline_cache: true
+  - id: postgres-replication
+    name: PostgreSQL Replication
+    url: https://www.postgresql.org/docs/current/high-availability.html
+    offline_cache: true
+  - id: redis-cluster
+    name: Redis Cluster Specification
+    url: https://redis.io/docs/reference/cluster-spec/
+    offline_cache: true
+  - id: release-it
+    name: Michael Nygard - Release It!
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+    offline_cache: true
+  - id: sre-book
+    name: Site Reliability Engineering
+    url: https://sre.google/sre-book/table-of-contents/
+    offline_cache: true
+  learning_resources:
+  - id: site-reliability
+    title: Site Reliability Engineering
+    type: book
+    reference: 'ISBN 978-1491929124 - Chapter 11: Being On-Call'
+tooling:
+  infrastructure_tools:
+  - tool: kubectl
+    purpose: Check deployment replica counts
+    command: kubectl get deployments -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,REPLICAS:.spec.replicas'
+  - tool: aws
+    purpose: List RDS read replicas
+    command: aws rds describe-db-instances --query 'DBInstances[*].{Name:DBInstanceIdentifier,ReadReplicas:ReadReplicaDBInstanceIdentifiers}'
+  - tool: aws
+    purpose: Check Auto Scaling group configurations
+    command: aws autoscaling describe-auto-scaling-groups --query 'AutoScalingGroups[*].{Name:AutoScalingGroupName,Min:MinSize,Max:MaxSize,Desired:DesiredCapacity}'
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      kube_deployment_status_replicas_available / kube_deployment_spec_replicas
+    purpose: Replica availability ratio
+  - system: CloudWatch
+    query: AWS/EC2 StatusCheckFailed_Instance
+    purpose: Instance health across redundant instances
+signals:
+  critical:
+  - id: REDUN-CRIT-001
+    signal: No redundancy for stateful services
+    evidence_pattern: 'database.*replicas: 1|storage.*single'
+    explanation: |
+      Stateful services without redundancy represent the highest risk.
+      A single database or storage failure causes both downtime and
+      potential data loss. Recovery requires restoring from backups,
+      which takes hours and loses recent data.
+    remediation: Implement synchronous replication with automatic failover for all stateful services
+  - id: REDUN-CRIT-002
+    signal: Replication configured but not verified working
+    evidence_pattern: replica_lag > threshold|replication_error
+    explanation: |
+      Configured but broken replication provides false confidence.
+      When primary fails, the replica may be hours behind or unable
+      to assume primary role. Regular failover testing is essential.
+    remediation: Implement continuous replication monitoring and regular failover testing
+  high:
+  - id: REDUN-HIGH-001
+    signal: Insufficient replica count for availability target
+    evidence_pattern: 'replicas: 2.*availability: 99.99'
+    explanation: |
+      Two replicas provide 99.9% availability at best. Higher availability
+      targets require more replicas: 99.99% typically needs 3+, 99.999%
+      needs 5+. The formula: availability = 1 - (failure_rate ^ replicas).
+    remediation: Increase replica count based on availability target calculations
+  - id: REDUN-HIGH-002
+    signal: Replicas co-located in same failure domain
+    evidence_pattern: podAntiAffinity.*missing|same availability_zone
+    explanation: |
+      Replicas in the same rack, host, or availability zone fail together.
+      True redundancy requires distribution across independent failure
+      domains. Without anti-affinity rules, schedulers may co-locate replicas.
+    remediation: Configure pod anti-affinity, spread constraints, or multi-AZ deployment
+  - id: REDUN-HIGH-003
+    signal: No geographic redundancy for critical services
+    evidence_pattern: region.*single|cross_region.*false
+    explanation: |
+      Single-region deployment exposes the system to region-level failures
+      (major cloud outages, natural disasters). Critical services should
+      have cross-region replication or multi-region active-active deployment.
+    remediation: Implement cross-region replication or multi-region active-active architecture
+  medium:
+  - id: REDUN-MED-001
+    signal: Read replicas not used for read traffic distribution
+    explanation: |
+      Read replicas provide redundancy but also capacity. Not routing
+      read traffic to replicas wastes this capacity and overloads primary.
+    remediation: Configure read routing to utilize read replicas
+  - id: REDUN-MED-002
+    signal: Asynchronous replication with high lag tolerance
+    explanation: |
+      Async replication improves performance but risks data loss during
+      failover. The replication lag represents potential data loss window.
+    remediation: Reduce lag tolerance or switch to synchronous replication for critical data
+  - id: REDUN-MED-003
+    signal: Hot standby not pre-warmed for failover
+    explanation: |
+      Cold standbys require spin-up time during failover. Hot standbys
+      should be pre-warmed with connections and cached data.
+    remediation: Implement connection pre-warming and cache synchronization for standbys
+  low:
+  - id: REDUN-LOW-001
+    signal: Redundancy configurations not documented
+    explanation: |
+      Undocumented redundancy configurations make troubleshooting difficult
+      and increase risk of accidental misconfiguration during changes.
+  positive:
+  - id: REDUN-POS-001
+    signal: N+1 or higher redundancy for all critical components
+  - id: REDUN-POS-002
+    signal: Replicas distributed across multiple availability zones
+  - id: REDUN-POS-003
+    signal: Regular failover testing documented and passing
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory redundancy configurations
+    description: |
+      Catalog all system components and their redundancy settings,
+      including replica counts, replication types, and distribution.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List all deployment replica counts
+      command: |
+        kubectl get deployments -A -o json | jq '.items[] | {namespace: .metadata.namespace, name: .metadata.name, replicas: .spec.replicas}'
+    - purpose: Check database replication status
+      command: |
+        aws rds describe-db-instances --query 'DBInstances[*].{Name:DBInstanceIdentifier,MultiAZ:MultiAZ,ReadReplicas:ReadReplicaDBInstanceIdentifiers}'
+    expected_findings:
+    - Complete redundancy inventory
+    - Components lacking redundancy
+  - id: '2'
+    name: Verify replica distribution
+    description: |
+      Confirm that replicas are distributed across independent failure
+      domains (hosts, racks, availability zones).
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check pod distribution across nodes
+      command: |
+        kubectl get pods -A -o wide --show-labels | grep -E "app=|zone="
+    - purpose: Check anti-affinity rules
+      command: |
+        kubectl get deployments -A -o json | jq '.items[] | select(.spec.template.spec.affinity) | {name: .metadata.name, affinity: .spec.template.spec.affinity}'
+    expected_findings:
+    - Replica distribution across zones
+    - Anti-affinity configuration status
+  - id: '3'
+    name: Assess replication health
+    description: |
+      Verify that replication is functioning correctly with acceptable
+      lag times and no errors.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check PostgreSQL replication lag
+      command: |
+        psql -c "SELECT client_addr, state, sent_lsn, write_lsn, flush_lsn, replay_lsn FROM pg_stat_replication"
+    - purpose: Check Redis replication status
+      command: |
+        redis-cli INFO replication
+    expected_findings:
+    - Replication lag measurements
+    - Replication error status
+  - id: '4'
+    name: Evaluate redundancy depth
+    description: |
+      Assess whether redundancy levels match availability requirements
+      using the availability formula.
+    duration_estimate: 20 min
+    questions:
+    - What is the target availability SLA?
+    - What is the expected component failure rate?
+    - How many replicas are needed to meet the target?
+    expected_findings:
+    - Redundancy depth assessment
+    - Gaps between current and required levels
+  - id: '5'
+    name: Review failover testing
+    description: |
+      Verify that redundancy is regularly tested through controlled
+      failover exercises.
+    duration_estimate: 20 min
+    questions:
+    - When was the last failover test conducted?
+    - Are failover tests automated or manual?
+    - What issues were discovered in recent tests?
+    expected_findings:
+    - Failover test frequency and results
+    - Testing gaps
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Redundancy Inventory
+    - Replication Health
+    - Distribution Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Direct infrastructure inspection with replication metrics
+    medium: Configuration review with limited runtime verification
+    low: Architecture documentation review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-reliability
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive infrastructure analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: redun-001
+  item: All stateful services have replication configured
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify databases, caches, and queues have replicas
+  expected: Confirmed by reviewer
+- id: redun-002
+  item: Replicas distributed across failure domains
+  level: CRITICAL
+  verification: |
+    kubectl get pods -A -o json | jq '[.items[] | .spec.nodeName] | unique | length > 1'
+  expected: 'true'
+- id: redun-003
+  item: Replication lag within acceptable thresholds
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify replication lag < defined threshold for each service
+  expected: Confirmed by reviewer
+- id: redun-004
+  item: Failover tested within last 90 days
+  level: WARNING
+  verification: manual
+  verification_notes: Check failover test logs and runbooks
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.1
+  - framework: ISO 27001
+    controls:
+    - A.17.1.1
+relationships:
+  commonly_combined:
+  - reliability-resilience.fault-tolerance.single-point-of-failure
+  - reliability-resilience.fault-tolerance.failover-mechanism
+  - reliability-resilience.high-availability.availability-sli

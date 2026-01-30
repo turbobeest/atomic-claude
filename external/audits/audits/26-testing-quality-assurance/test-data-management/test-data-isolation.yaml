@@ -1,0 +1,306 @@
+audit:
+  id: testing-quality-assurance.test-data-management.test-data-isolation
+  name: Test Data Isolation
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: testing-quality-assurance
+  category_number: 26
+  subcategory: test-data-management
+  tier: expert
+  estimated_duration: 30-45 min
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: high
+  scope: quality
+  default_profiles:
+  - full
+  - quality
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates test data isolation practices including cleanup between tests,
+    transaction management, unique data generation, and prevention of
+    cross-test data leakage. Ensures tests are independent and repeatable.
+  why_it_matters: |
+    Tests that share data become order-dependent and flaky. Data leakage
+    between tests causes mysterious failures that waste debugging time.
+    Proper isolation enables parallel execution and reliable test results.
+    Without isolation, test results are unreliable indicators of code quality.
+  when_to_run:
+  - Test flakiness investigation
+  - Parallel execution setup
+  - Test suite optimization
+  - Quality assessment
+prerequisites:
+  required_artifacts:
+  - type: test_files
+    description: Test code and configuration
+  access_requirements:
+  - Test source code access
+  - Test framework configuration access
+discovery:
+  file_patterns:
+  - glob: '**/*.test.{js,ts}'
+    purpose: Test files
+  - glob: '**/*.spec.{js,ts}'
+    purpose: Spec files
+  - glob: '**/conftest.py'
+    purpose: pytest configuration
+  code_patterns:
+  - pattern: beforeEach|afterEach|setUp|tearDown|cleanup
+    type: regex
+    scope: test
+    purpose: Test lifecycle hooks
+knowledge_sources:
+  guides:
+  - id: test-isolation
+    name: Test Isolation Best Practices
+    url: https://martinfowler.com/bliki/TestIsolation.html
+    offline_cache: true
+  - id: database-testing
+    name: Database Testing Patterns
+    url: https://www.testcontainers.org/
+    offline_cache: true
+  learning_resources:
+  - id: testing-patterns
+    title: xUnit Test Patterns
+    type: book
+    reference: ISBN 978-0131495050
+tooling:
+  static_analysis:
+  - tool: Custom analysis
+    purpose: Isolation pattern detection
+    offline_capable: true
+  scripts:
+  - id: isolation-check
+    language: bash
+    purpose: Analyze test isolation
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Test Data Isolation Analysis ==="
+
+      echo "Cleanup hooks (beforeEach/afterEach):"
+      grep -r -c 'beforeEach\|afterEach\|setUp\|tearDown' --include='*.test.*' --include='*.spec.*' . 2>/dev/null | grep -v ':0$' | head -10
+
+      echo ""
+      echo "Transaction patterns:"
+      grep -r -n 'transaction\|rollback\|BEGIN\|COMMIT' --include='*.test.*' --include='*.spec.*' . 2>/dev/null | head -10
+
+      echo ""
+      echo "Database reset patterns:"
+      grep -r -n 'truncate\|resetDatabase\|clearAll' --include='*.test.*' --include='*.spec.*' . 2>/dev/null | head -10
+
+      echo ""
+      echo "Unique ID generation:"
+      grep -r -c 'uuid\|nanoid\|unique\|randomId' --include='*.test.*' --include='*.spec.*' . 2>/dev/null | grep -v ':0$' | head -10
+
+      echo ""
+      echo "Shared state detection:"
+      grep -r -n 'global\.\|shared\.\|static ' --include='*.test.*' --include='*.spec.*' . 2>/dev/null | head -10
+signals:
+  critical:
+  - id: ISOLATION-CRIT-001
+    signal: Tests share mutable global state
+    evidence_pattern: Global variables modified by tests
+    explanation: |
+      Global mutable state causes tests to affect each other. Test order
+      becomes significant, parallel execution fails, and debugging is
+      extremely difficult. Tests must not share mutable state.
+    remediation: |
+      Eliminate shared state:
+      1. Identify all shared variables
+      2. Move state to test-scoped fixtures
+      3. Reset state in beforeEach
+      4. Use dependency injection
+      5. Add linting rules for global access
+  - id: ISOLATION-CRIT-002
+    signal: Database not cleaned between tests
+    evidence_pattern: Test data persists across tests
+    explanation: |
+      Persistent test data creates dependencies between tests. Later tests
+      fail when earlier tests don't run or run in different order. Database
+      state must reset between tests.
+    remediation: |
+      Implement database cleanup:
+      - Use transaction rollback per test
+      - Truncate tables in afterEach
+      - Use database fixtures with cleanup
+      - Consider in-memory databases for unit tests
+  high:
+  - id: ISOLATION-HIGH-001
+    signal: Tests depend on execution order
+    evidence_pattern: Tests fail when run individually or reordered
+    explanation: |
+      Order-dependent tests indicate shared state or missing setup.
+      Each test should be independently runnable. Order dependence
+      blocks parallel execution and random ordering.
+    remediation: |
+      Fix order dependencies:
+      - Run tests in random order to detect
+      - Move shared setup to beforeEach
+      - Ensure each test creates its own data
+      - Remove inter-test dependencies
+  - id: ISOLATION-HIGH-002
+    signal: No cleanup hooks present
+    evidence_pattern: afterEach/tearDown not used
+    explanation: |
+      Without cleanup hooks, test side effects persist. Even if tests
+      seem to work, they may interfere with each other in subtle ways.
+      Cleanup should be explicit and systematic.
+    remediation: |
+      Add cleanup hooks:
+      - Add afterEach to all test suites
+      - Clean up created resources
+      - Reset modified state
+      - Close connections and handles
+  medium:
+  - id: ISOLATION-MED-001
+    signal: Hardcoded identifiers cause collisions
+    evidence_pattern: Fixed IDs used across tests
+    remediation: Use unique IDs per test (UUID, nanoid, sequences)
+  - id: ISOLATION-MED-002
+    signal: File system not cleaned up
+    evidence_pattern: Test files persist after tests
+    remediation: Clean up temporary files in afterEach
+  low:
+  - id: ISOLATION-LOW-001
+    signal: No parallel execution testing
+    evidence_pattern: Tests only run sequentially
+  positive:
+  - id: ISOLATION-POS-001
+    signal: Transaction rollback per test
+    evidence_pattern: Database wrapped in transaction
+  - id: ISOLATION-POS-002
+    signal: Tests pass in any order
+    evidence_pattern: Random order execution successful
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Find cleanup patterns
+    description: |
+      Identify test lifecycle hooks and cleanup.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find cleanup hooks
+      command: grep -r -c 'beforeEach\|afterEach\|setUp\|tearDown' --include='*.test.*' --include='*.spec.*'
+        . 2>/dev/null | grep -v ':0$' | head -10
+    - purpose: Find transaction usage
+      command: grep -r 'transaction\|rollback' --include='*.test.*' . 2>/dev/null | head -10
+    expected_findings:
+    - Cleanup approach
+    - Transaction usage
+  - id: '2'
+    name: Detect shared state
+    description: |
+      Look for shared mutable state.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find global usage
+      command: grep -r 'global\.' --include='*.test.*' . 2>/dev/null | head -10
+    - purpose: Find static state
+      command: grep -r 'static ' --include='*.test.*' . 2>/dev/null | head -10
+    expected_findings:
+    - Shared state patterns
+    - Global access
+  - id: '3'
+    name: Check unique identifiers
+    description: |
+      Verify unique data generation.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find unique ID usage
+      command: grep -r -c 'uuid\|nanoid\|unique' --include='*.test.*' . 2>/dev/null | grep -v ':0$' |
+        head -10
+    expected_findings:
+    - ID generation strategy
+    - Collision risk
+  - id: '4'
+    name: Verify isolation
+    description: |
+      Test isolation effectiveness.
+    duration_estimate: 10 min
+    questions:
+    - Do tests pass when run individually?
+    - Can tests run in parallel?
+    - Does random ordering work?
+    expected_findings:
+    - Isolation effectiveness
+    - Order independence
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: isolation_report
+    format: table
+    sections:
+    - Cleanup Patterns
+    - Shared State
+    - Isolation Assessment
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Isolation Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Full isolation testing with parallel execution
+    medium: Pattern analysis and sampling
+    low: Hook detection only
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: test-isolation
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: Critical for test reliability
+    quality:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 3
+closeout_checklist:
+- id: isolation-001
+  item: Cleanup hooks present
+  level: CRITICAL
+  verification: grep -r -c 'afterEach\|tearDown' --include='*.test.*' . 2>/dev/null | grep -v ':0$' |
+    wc -l
+  expected: Count > 0
+- id: isolation-002
+  item: Shared state assessed
+  level: BLOCKING
+  verification: grep -r 'global\.' --include='*.test.*' . 2>/dev/null | wc -l
+  expected: Minimal or none
+- id: isolation-003
+  item: Order independence verified
+  level: WARNING
+  verification: manual
+  verification_notes: Run tests in random order
+  expected: All tests pass
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Maintainability
+    - Reliability
+relationships:
+  commonly_combined:
+  - testing-quality-assurance.test-data-management.test-data-strategy
+  - testing-quality-assurance.test-effectiveness.test-flakiness
+  - testing-quality-assurance.unit-testing.unit-test-isolation

@@ -1,0 +1,395 @@
+# ============================================================
+# AUDIT: Optimistic vs Pessimistic Locking Audit
+# ============================================================
+# Evaluates locking strategies for concurrent data access,
+# ensuring appropriate strategy selection and implementation.
+# ============================================================
+
+# ============================================================
+# SECTION 1: IDENTITY & METADATA
+# ============================================================
+
+audit:
+  id: "reliability-resilience.data-consistency.optimistic-vs-pessimistic-locking"
+
+  name: "Optimistic vs Pessimistic Locking Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "data-consistency"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+# ============================================================
+# SECTION 2: EXECUTION CLASSIFICATION
+# ============================================================
+
+execution:
+  automatable: "partial"
+
+  severity: "high"
+
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+# ============================================================
+# SECTION 3: DESCRIPTION & RATIONALE
+# ============================================================
+
+description:
+  what: |
+    Evaluates locking strategies (optimistic vs pessimistic) for
+    handling concurrent data access. Assesses version fields,
+    SELECT FOR UPDATE usage, lock escalation, and deadlock
+    prevention measures.
+
+  why_it_matters: |
+    Incorrect locking strategy causes either lost updates (no locking),
+    poor performance (excessive pessimistic locking), or deadlocks
+    (improper lock ordering). Choosing the right strategy based on
+    contention patterns is essential for both data integrity and
+    system performance.
+
+  when_to_run:
+    - "When designing data access patterns"
+    - "After lost update or deadlock incidents"
+    - "During performance optimization"
+    - "When changing concurrency patterns"
+
+# ============================================================
+# SECTION 4: PREREQUISITES
+# ============================================================
+
+prerequisites:
+  required_artifacts:
+    - type: "application_code"
+      description: "Data access layer code"
+    - type: "database_schema"
+      description: "Schema including version columns"
+    - type: "architecture_docs"
+      description: "Concurrency requirements documentation"
+
+  access_requirements:
+    - "Application code repository access"
+    - "Database schema access"
+    - "Performance monitoring access"
+
+# ============================================================
+# SECTION 5: DISCOVERY SPECIFICATION
+# ============================================================
+
+discovery:
+  code_patterns:
+    - pattern: "version|Version|@Version|optimistic"
+      type: "regex"
+      scope: "source"
+      purpose: "Find optimistic locking patterns"
+    - pattern: "FOR UPDATE|NOWAIT|SKIP LOCKED|pessimistic"
+      type: "regex"
+      scope: "source"
+      purpose: "Find pessimistic locking patterns"
+    - pattern: "LockMode|lock_mode|row_lock"
+      type: "regex"
+      scope: "source"
+      purpose: "Find ORM lock configurations"
+
+  file_patterns:
+    - glob: "**/repository/**/*.java"
+      purpose: "Repository layer with locking"
+    - glob: "**/models/**/*.py"
+      purpose: "Model definitions"
+
+  metrics_queries:
+    - system: "Database monitoring"
+      query: "deadlock_count"
+      purpose: "Monitor deadlock frequency"
+      threshold: "< 1 per day"
+
+# ============================================================
+# SECTION 6: EXTERNAL KNOWLEDGE SOURCES
+# ============================================================
+
+knowledge_sources:
+  guides:
+    - id: "postgresql-locking"
+      name: "PostgreSQL Explicit Locking"
+      url: "https://www.postgresql.org/docs/current/explicit-locking.html"
+      offline_cache: true
+    - id: "hibernate-locking"
+      name: "Hibernate Locking Strategies"
+      url: "https://docs.jboss.org/hibernate/orm/current/userguide/html_single/Hibernate_User_Guide.html#locking"
+      offline_cache: true
+
+  learning_resources:
+    - id: "database-internals"
+      title: "Database Internals"
+      type: "book"
+      reference: "ISBN 978-1492040347"
+
+# ============================================================
+# SECTION 7: TOOLING & AUTOMATION
+# ============================================================
+
+tooling:
+  infrastructure_tools:
+    - tool: "psql"
+      purpose: "Check for lock contention"
+      command: "psql -c \"SELECT * FROM pg_locks WHERE NOT granted;\""
+    - tool: "Database monitoring"
+      purpose: "Track deadlocks"
+      command: "psql -c \"SELECT deadlocks FROM pg_stat_database;\""
+
+  scripts:
+    - id: "find-locking-patterns"
+      language: "bash"
+      purpose: "Find locking implementations"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "Finding locking patterns..."
+        grep -r "FOR UPDATE\|@Version\|LockMode\|optimistic\|pessimistic" --include="*.java" --include="*.py" --include="*.sql"
+
+# ============================================================
+# SECTION 8: SIGNALS & FINDINGS TAXONOMY
+# ============================================================
+
+signals:
+  critical:
+    - id: "LOCK-CRIT-001"
+      signal: "Concurrent updates without any locking strategy"
+      evidence_indicators:
+        - "UPDATE without WHERE version check"
+        - "No SELECT FOR UPDATE"
+        - "No version column in schema"
+      explanation: |
+        Without locking, concurrent updates cause lost update anomaly
+        where one transaction's changes silently overwrite another's.
+      remediation: "Implement optimistic or pessimistic locking for concurrent access"
+
+    - id: "LOCK-CRIT-002"
+      signal: "Deadlocks occurring frequently in production"
+      evidence_threshold: "Deadlocks > 10 per day"
+      explanation: |
+        Frequent deadlocks indicate improper lock ordering or excessive
+        locking, causing transactions to fail and retry overhead.
+      remediation: "Establish consistent lock ordering or reduce lock scope"
+
+  high:
+    - id: "LOCK-HIGH-001"
+      signal: "Pessimistic locking on high-contention, read-heavy data"
+      explanation: "Pessimistic locks on read-heavy data cause unnecessary contention"
+      remediation: "Consider optimistic locking for read-heavy workloads"
+
+    - id: "LOCK-HIGH-002"
+      signal: "Optimistic locking without conflict handling"
+      explanation: "Optimistic lock failures must be handled by retrying or notifying user"
+      remediation: "Implement proper OptimisticLockException handling"
+
+  medium:
+    - id: "LOCK-MED-001"
+      signal: "Lock timeout not configured"
+      remediation: "Set appropriate lock timeouts to prevent indefinite waits"
+
+    - id: "LOCK-MED-002"
+      signal: "Version column not indexed for high-volume tables"
+      remediation: "Add index on version column for query performance"
+
+  low:
+    - id: "LOCK-LOW-001"
+      signal: "Locking strategy not documented"
+
+  positive:
+    - id: "LOCK-POS-001"
+      signal: "Appropriate locking strategy chosen based on access patterns"
+    - id: "LOCK-POS-002"
+      signal: "Lock conflicts properly handled with retry or user notification"
+
+# ============================================================
+# SECTION 9: EXECUTION PROCEDURE
+# ============================================================
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Concurrent Access Patterns"
+      description: |
+        Map out data that can be accessed concurrently and
+        understand the access patterns (read-heavy, write-heavy).
+      duration_estimate: "30 min"
+      questions:
+        - "What data is accessed concurrently?"
+        - "Is the access pattern read-heavy or write-heavy?"
+        - "What is the expected contention level?"
+      expected_findings:
+        - "Concurrency pattern mapping"
+        - "Contention assessment"
+
+    - id: "2"
+      name: "Assess Current Locking Strategy"
+      description: |
+        Identify what locking strategy is currently used for
+        each concurrent access scenario.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find version columns"
+          command: "grep -r '@Version\\|version_column\\|VersionField' --include='*.java' --include='*.py'"
+        - purpose: "Find pessimistic locks"
+          command: "grep -r 'FOR UPDATE\\|LockMode.PESSIMISTIC' --include='*.java' --include='*.py' --include='*.sql'"
+      expected_findings:
+        - "Locking strategy by entity"
+        - "Gaps in locking coverage"
+
+    - id: "3"
+      name: "Evaluate Strategy Appropriateness"
+      description: |
+        Assess whether the chosen locking strategy is appropriate
+        for the access patterns.
+      duration_estimate: "45 min"
+      questions:
+        - "Is optimistic locking used for read-heavy data?"
+        - "Is pessimistic locking used only where necessary?"
+        - "How are lock conflicts handled?"
+      expected_findings:
+        - "Strategy appropriateness assessment"
+        - "Performance implications"
+
+    - id: "4"
+      name: "Review Lock Conflict Handling"
+      description: |
+        Examine how lock conflicts (optimistic lock exceptions,
+        lock timeouts) are handled.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find exception handling"
+          command: "grep -r 'OptimisticLock\\|StaleObject\\|LockTimeout' --include='*.java' --include='*.py'"
+      expected_findings:
+        - "Conflict handling patterns"
+        - "User experience on conflicts"
+
+# ============================================================
+# SECTION 10: OUTPUT SPECIFICATION
+# ============================================================
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "locking_matrix"
+      format: "table"
+      columns:
+        - "Entity/Table"
+        - "Access Pattern"
+        - "Locking Strategy"
+        - "Conflict Handling"
+        - "Appropriateness"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Access Pattern Analysis"
+        - "Strategy Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Code reviewed with production deadlock/contention data"
+    medium: "Code reviewed without production data"
+    low: "Based on schema review only"
+
+# ============================================================
+# SECTION 11: OFFLINE SUPPORT
+# ============================================================
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "postgresql-locking"
+        priority: "recommended"
+
+# ============================================================
+# SECTION 12: PROFILES
+# ============================================================
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Locking analysis requires thorough review"
+    full:
+      included: true
+      priority: 1
+
+# ============================================================
+# SECTION 13: DETERMINISTIC VERIFICATION
+# ============================================================
+
+closeout_checklist:
+  - id: "lock-001"
+    item: "Concurrent write access protected by locking strategy"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review concurrent access scenarios for locking"
+    expected: "Confirmed by reviewer"
+
+  - id: "lock-002"
+    item: "Lock conflict exceptions properly handled"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review exception handling code"
+    expected: "Confirmed by reviewer"
+
+  - id: "lock-003"
+    item: "No frequent deadlocks in production"
+    level: "BLOCKING"
+    verification: "psql -c \"SELECT deadlocks FROM pg_stat_database;\" | awk 'NR>2 {sum+=$1} END {print (sum<10)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+
+  - id: "lock-004"
+    item: "Lock timeouts configured to prevent indefinite waits"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Review database lock timeout configuration"
+    expected: "Confirmed by reviewer"
+
+# ============================================================
+# SECTION 14: GOVERNANCE
+# ============================================================
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["CC6.1"]
+
+# ============================================================
+# SECTION 15: RELATIONSHIPS
+# ============================================================
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.data-consistency.acid-compliance"
+    - "reliability-resilience.data-consistency.conflict-resolution"
+    - "reliability-resilience.data-consistency.transaction-boundary"

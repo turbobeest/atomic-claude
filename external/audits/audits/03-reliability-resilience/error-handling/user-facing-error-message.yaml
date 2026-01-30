@@ -1,0 +1,290 @@
+audit:
+  id: reliability-resilience.error-handling.user-facing-error-message
+  name: User-Facing Error Message Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: error-handling
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Reviews error messages displayed to end users for clarity, helpfulness,
+    security, and consistency. Examines UI error handling, API error responses
+    intended for human consumption, validation messages, and error pages.
+    Ensures errors guide users toward resolution without exposing technical
+    details or system internals.
+  why_it_matters: |
+    Poor error messages frustrate users, increase support burden, and can
+    expose security vulnerabilities. Cryptic messages like "Error 500" or
+    overly technical stack traces create negative user experiences. Conversely,
+    well-crafted error messages help users self-serve, reduce support tickets,
+    and maintain user trust during failure scenarios.
+  when_to_run:
+  - UX reviews
+  - Before major releases
+  - Security audits
+  - Accessibility reviews
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Frontend and backend source code
+  - type: ui_components
+    description: Error handling UI components
+  access_requirements:
+  - Read access to frontend code
+  - Access to API response definitions
+  - 'Optional: access to localization files'
+discovery:
+  code_patterns:
+  - pattern: error.*message|errorMessage|error_message
+    type: regex
+    scope: source
+    purpose: Find error message definitions
+  - pattern: showError|displayError|setError|toast.*error
+    type: regex
+    scope: source
+    purpose: Find error display functions
+  - pattern: Something went wrong|An error occurred|Unknown error
+    type: keyword
+    scope: source
+    purpose: Find generic unhelpful messages
+  - pattern: Error:\s*\d+|Error code|error_code
+    type: regex
+    scope: source
+    purpose: Find technical error codes exposed to users
+  file_patterns:
+  - glob: '**/components/**/*[Ee]rror*.{tsx,jsx,vue}'
+    purpose: Error display components
+  - glob: '**/i18n/**/*.{json,yaml}'
+    purpose: Internationalized error messages
+  - glob: '**/locales/**/*.{json,yaml}'
+    purpose: Localized error messages
+  - glob: '**/errors/**/*.{html,tsx,jsx}'
+    purpose: Error pages
+  - glob: '**/messages*.{ts,js,json}'
+    purpose: Message definitions
+knowledge_sources:
+  guides:
+  - id: nngroup-errors
+    name: Nielsen Norman Group - Error Messages
+    url: https://www.nngroup.com/articles/error-message-guidelines/
+    offline_cache: true
+  - id: wcag-errors
+    name: WCAG Error Identification
+    url: https://www.w3.org/WAI/WCAG21/Understanding/error-identification.html
+    offline_cache: true
+  learning_resources:
+  - id: microcopy
+    title: 'Microcopy: The Complete Guide'
+    type: book
+    reference: 'ISBN: 978-9657669006'
+tooling:
+  static_analysis:
+  - tool: ESLint accessibility plugin
+    purpose: Check error message accessibility
+    offline_capable: true
+  scripts:
+  - id: find-error-messages
+    language: bash
+    purpose: Extract user-facing error messages
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Generic Error Messages ==="
+      grep -rni "something went wrong\|an error occurred\|unknown error\|error occurred" --include="*.tsx" --include="*.jsx" --include="*.json" --include="*.ts" . 2>/dev/null | head -20
+      echo ""
+      echo "=== Technical Error Codes Exposed ==="
+      grep -rn "Error:\\s*[0-9]\\|error_code\\|errorCode" --include="*.tsx" --include="*.jsx" --include="*.vue" . 2>/dev/null | head -20
+      echo ""
+      echo "=== Stack Traces in UI ==="
+      grep -rn "stack\\|stackTrace\\|stack_trace" --include="*.tsx" --include="*.jsx" --include="*.vue" . 2>/dev/null | head -20
+signals:
+  critical:
+  - id: USER-CRIT-001
+    signal: Stack traces or internal errors displayed to users
+    evidence_pattern: stackTrace|stack_trace|exception\.message
+    explanation: |
+      Exposing stack traces to users is a security vulnerability that
+      reveals internal system details attackers can exploit, and creates
+      a poor user experience.
+    remediation: Replace technical errors with user-friendly messages; log details server-side
+  - id: USER-CRIT-002
+    signal: Database or SQL errors shown to users
+    evidence_pattern: SQL|database|query error|constraint violation
+    explanation: |
+      Database errors expose schema information and can reveal SQL
+      injection vulnerabilities. These should never reach users.
+    remediation: Catch database errors and return generic 'please try again' messages
+  high:
+  - id: USER-HIGH-001
+    signal: Error messages contain file paths or system information
+    evidence_pattern: /home/|/var/|C:\\|\\Users\\
+    explanation: |
+      System paths in error messages reveal deployment details and
+      potential attack vectors.
+    remediation: Sanitize all error output to remove system paths
+  - id: USER-HIGH-002
+    signal: Generic unhelpful error messages
+    evidence_pattern: Something went wrong|Error occurred|Unknown error
+    explanation: |
+      Generic messages provide no guidance to users on how to resolve
+      issues, increasing frustration and support burden.
+    remediation: Provide specific, actionable error messages with recovery steps
+  medium:
+  - id: USER-MED-001
+    signal: Error messages not localized
+    remediation: Add all error messages to localization system
+  - id: USER-MED-002
+    signal: Inconsistent error message format or tone
+    remediation: Establish error message style guide and templates
+  - id: USER-MED-003
+    signal: Missing error recovery suggestions
+    remediation: Include actionable next steps in error messages
+  low:
+  - id: USER-LOW-001
+    signal: Error messages use technical jargon
+  - id: USER-LOW-002
+    signal: Inconsistent capitalization or punctuation
+  positive:
+  - id: USER-POS-001
+    signal: Clear, actionable error messages with recovery steps
+  - id: USER-POS-002
+    signal: Error messages are localized and accessible
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory error display mechanisms
+    description: |
+      Identify all components and functions that display errors to users
+      including toasts, modals, inline validation, and error pages.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find error display components
+      command: grep -rln 'error\|Error' --include='*.tsx' --include='*.jsx' --include='*.vue' . 2>/dev/null
+        | head -30
+    expected_findings:
+    - Error display components
+    - Error handling patterns in UI
+  - id: '2'
+    name: Review error message content
+    description: |
+      Examine the actual text of error messages for clarity, helpfulness,
+      and absence of technical details.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Extract error message text
+      command: grep -rn 'message.*["\x27]\|errorMessage\|error_message' --include='*.json' --include='*.tsx'
+        --include='*.ts' . 2>/dev/null | head -50
+    expected_findings:
+    - Error message quality issues
+    - Generic or unhelpful messages
+  - id: '3'
+    name: Check for information leakage
+    description: |
+      Search for patterns that might expose system internals, paths,
+      or technical details to end users.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find potential information leakage
+      command: grep -rni 'stack\|trace\|/home\|/var\|exception\|SQLException' --include='*.tsx' --include='*.jsx'
+        --include='*.vue' . 2>/dev/null
+    expected_findings:
+    - Information leakage risks
+    - Technical details exposed
+  - id: '4'
+    name: Verify localization and accessibility
+    description: |
+      Check that error messages are localized and meet accessibility
+      requirements including proper ARIA labels.
+    duration_estimate: 30 min
+    expected_findings:
+    - Localization coverage
+    - Accessibility compliance
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Security Findings
+    - UX Improvement Opportunities
+    - Recommendations
+  confidence_guidance:
+    high: Direct evidence of problematic messages in code
+    medium: Pattern suggests potential issues
+    low: Requires runtime verification to confirm user visibility
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: nngroup-errors
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed message review
+    full:
+      included: true
+      priority: 3
+closeout_checklist:
+- id: user-facing-error-message-001
+  item: No stack traces exposed in UI components
+  level: CRITICAL
+  verification: grep -rni 'stackTrace\|stack_trace\|\.stack' --include='*.tsx' --include='*.jsx' --include='*.vue'
+    src/ 2>/dev/null | grep -v 'test\|spec' | wc -l | xargs -I{} sh -c 'if [ {} -eq 0 ]; then echo PASS;
+    else echo FAIL; fi'
+  expected: PASS
+- id: user-facing-error-message-002
+  item: No file system paths in error messages
+  level: CRITICAL
+  verification: grep -rni '/home/\|/var/\|/usr/\|C:\\' --include='*.tsx' --include='*.jsx' --include='*.json'
+    src/ 2>/dev/null | wc -l | xargs -I{} sh -c 'if [ {} -eq 0 ]; then echo PASS; else echo FAIL; fi'
+  expected: PASS
+- id: user-facing-error-message-003
+  item: Error messages provide recovery guidance
+  level: BLOCKING
+  verification: manual
+  verification_notes: Review sample of error messages for actionable recovery steps
+  expected: Confirmed by reviewer
+- id: user-facing-error-message-004
+  item: Error messages are localized
+  level: WARNING
+  verification: manual
+  verification_notes: Verify error messages exist in localization files
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: WCAG
+    controls:
+    - 3.3.1 Error Identification
+    - 3.3.3 Error Suggestion
+  - framework: OWASP
+    controls:
+    - A01:2021-Broken Access Control
+relationships:
+  commonly_combined:
+  - reliability-resilience.error-handling.error-propagation
+  - reliability-resilience.error-handling.exception-handling

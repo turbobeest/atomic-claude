@@ -1,0 +1,288 @@
+# ============================================================
+# AUDIT FILE: Sticky Session Impact Audit
+# ============================================================
+
+audit:
+  id: "scalability-capacity.load-distribution.sticky-session-impact"
+  name: "Sticky Session Impact Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "load-distribution"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes the impact of sticky sessions (session affinity) on load
+    distribution, scalability, and resilience. Evaluates where session
+    affinity is configured, its necessity, duration settings, and the
+    resulting effects on traffic distribution and failure handling.
+
+  why_it_matters: |
+    Sticky sessions can create uneven load distribution as some instances
+    accumulate more long-running sessions. They complicate scaling operations,
+    increase the blast radius of instance failures, and may mask underlying
+    architecture issues. Understanding their impact enables better decisions
+    about stateless design versus affinity requirements.
+
+  when_to_run:
+    - "During architecture reviews for stateless design"
+    - "When load imbalance is observed"
+    - "Before implementing auto-scaling"
+    - "When instance failures cause disproportionate user impact"
+
+prerequisites:
+  required_artifacts:
+    - type: "configuration"
+      description: "Load balancer session affinity configurations"
+    - type: "metrics"
+      description: "Session distribution and duration metrics"
+
+  access_requirements:
+    - "Load balancer configuration access"
+    - "Application session metrics access"
+    - "Traffic distribution metrics"
+
+discovery:
+  code_patterns:
+    - pattern: "(sticky|affinity|session.?persistence|JSESSIONID)"
+      type: "regex"
+      scope: "config"
+      purpose: "Find session affinity configurations"
+    - pattern: "(cookie|client.?ip|source.?ip).*affinity"
+      type: "regex"
+      scope: "config"
+      purpose: "Identify affinity method settings"
+
+  file_patterns:
+    - glob: "**/ingress*.yaml"
+      purpose: "Kubernetes ingress configurations"
+    - glob: "**/service*.yaml"
+      purpose: "Service affinity settings"
+    - glob: "**/haproxy*.cfg"
+      purpose: "HAProxy sticky session configs"
+
+  metrics_queries:
+    - system: "Prometheus"
+      query: "histogram_quantile(0.95, rate(session_duration_seconds_bucket[1h]))"
+      purpose: "Measure session duration distribution"
+    - system: "Prometheus"
+      query: "stddev(sum(active_sessions) by (instance)) / avg(sum(active_sessions) by (instance))"
+      purpose: "Calculate session distribution variance"
+
+knowledge_sources:
+  guides:
+    - id: "aws-sticky-sessions"
+      name: "AWS ALB Sticky Sessions"
+      url: "https://docs.aws.amazon.com/elasticloadbalancing/latest/application/sticky-sessions.html"
+      offline_cache: true
+    - id: "nginx-session-persistence"
+      name: "NGINX Session Persistence"
+      url: "https://docs.nginx.com/nginx/admin-guide/load-balancer/http-load-balancer/#enabling-session-persistence"
+      offline_cache: true
+
+  papers:
+    - id: "stateless-arch"
+      title: "Designing Stateless Applications"
+      url: "https://12factor.net/processes"
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws-cli"
+      purpose: "Check ALB stickiness settings"
+      command: "aws elbv2 describe-target-group-attributes --target-group-arn ARN"
+    - tool: "kubectl"
+      purpose: "Check service session affinity"
+      command: "kubectl get service -o jsonpath='{.spec.sessionAffinity}'"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "count(active_sessions) by (instance)"
+      purpose: "Monitor session distribution across instances"
+    - system: "Custom"
+      query: "Session rebalance rate during scaling events"
+      purpose: "Track session migration impact"
+
+signals:
+  critical:
+    - id: "SCALE-SS-CRIT-001"
+      signal: "Sticky sessions causing severe load imbalance"
+      evidence_threshold: "Instance session variance coefficient > 0.5"
+      explanation: |
+        Extreme session concentration on specific instances undermines
+        load balancing effectiveness and creates hotspots that degrade
+        user experience and increase failure impact.
+      remediation: "Implement session externalization; reduce stickiness duration; consider stateless design"
+
+  high:
+    - id: "SCALE-SS-HIGH-001"
+      signal: "Instance failure affects disproportionate users"
+      explanation: "Sticky sessions cause all affected users to experience errors simultaneously"
+      remediation: "Implement session replication or externalized session store"
+    - id: "SCALE-SS-HIGH-002"
+      signal: "Sticky sessions prevent effective auto-scaling"
+      explanation: "New instances receive minimal traffic due to session affinity"
+      remediation: "Implement session rebalancing; reduce stickiness duration"
+
+  medium:
+    - id: "SCALE-SS-MED-001"
+      signal: "Unnecessarily long stickiness duration"
+      remediation: "Reduce cookie TTL to minimum required duration"
+    - id: "SCALE-SS-MED-002"
+      signal: "Sticky sessions used where not required"
+      remediation: "Review necessity; migrate to stateless design if possible"
+
+  low:
+    - id: "SCALE-SS-LOW-001"
+      signal: "Stickiness configuration not documented"
+
+  positive:
+    - id: "SCALE-SS-POS-001"
+      signal: "Stateless design with no session affinity requirements"
+    - id: "SCALE-SS-POS-002"
+      signal: "Session externalization enabling affinity-free operation"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Sticky Session Configurations"
+      description: |
+        Identify all services and load balancers with session affinity
+        enabled and document their configuration.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find Kubernetes services with session affinity"
+          command: "kubectl get services -A -o json | jq '.items[] | select(.spec.sessionAffinity != \"None\") | .metadata.name'"
+      expected_findings:
+        - "List of services with sticky sessions"
+        - "Stickiness method and duration"
+
+    - id: "2"
+      name: "Analyze Session Distribution"
+      description: |
+        Collect metrics showing how sessions are distributed across
+        backend instances over time.
+      duration_estimate: "45 min"
+      expected_findings:
+        - "Session count variance across instances"
+        - "Distribution patterns over time"
+
+    - id: "3"
+      name: "Assess Business Necessity"
+      description: |
+        Evaluate whether sticky sessions are actually required for
+        each service, or if stateless alternatives exist.
+      duration_estimate: "45 min"
+      questions:
+        - "What state requires session affinity?"
+        - "Can state be externalized to Redis/database?"
+        - "What is the minimum required stickiness duration?"
+      expected_findings:
+        - "Business justification for each sticky session"
+        - "Stateless migration opportunities"
+
+    - id: "4"
+      name: "Evaluate Failure Impact"
+      description: |
+        Analyze the impact of instance failures on users with sticky
+        sessions to that instance.
+      duration_estimate: "45 min"
+      expected_findings:
+        - "User impact during instance failures"
+        - "Session recovery behavior"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Sticky Session Inventory"
+        - "Distribution Impact Analysis"
+        - "Stateless Migration Opportunities"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Configuration review with session metrics and failure testing"
+    medium: "Configuration review with session metrics"
+    low: "Configuration review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-sticky-sessions"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires session metrics analysis"
+    full:
+      included: true
+      priority: 4
+
+closeout_checklist:
+  - id: "sticky-session-impact-001"
+    item: "Sticky session configurations inventoried"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Confirm all affinity configurations documented"
+    expected: "Confirmed by reviewer"
+
+  - id: "sticky-session-impact-002"
+    item: "Distribution impact analyzed"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify session distribution metrics collected"
+    expected: "Confirmed by reviewer"
+
+  - id: "sticky-session-impact-003"
+    item: "Business necessity assessed"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Confirm justification documented for each sticky session"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["web-application", "legacy-system", "session-based"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.1"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.load-distribution.load-balancing-algorithm"
+    - "scalability-capacity.load-distribution.hot-spot-detection"

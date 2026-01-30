@@ -1,0 +1,305 @@
+audit:
+  id: code-quality.type-safety.type-coverage
+  name: Type Coverage Analysis Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: type-safety
+  tier: expert
+  estimated_duration: 30 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - quality
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Measures the percentage of code that has explicit type annotations
+    and evaluates the quality of type coverage. Analyzes function signatures,
+    variable declarations, return types, and class attributes for proper
+    typing. Identifies areas with missing or incomplete type information.
+  why_it_matters: |
+    Type annotations enable static analysis tools to catch bugs before
+    runtime. Studies show that typed codebases have 15-20% fewer bugs and
+    that type checking catches 15% of bugs that would otherwise reach
+    production. High type coverage improves IDE support, documentation,
+    and makes refactoring safer.
+  when_to_run:
+  - Before major releases
+  - During code quality assessments
+  - When adopting gradual typing
+  - CI pipeline checks
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  access_requirements:
+  - Read access to source code
+discovery:
+  code_patterns:
+  - pattern: 'def [a-z_]+\([^)]*\)\s*:'
+    type: regex
+    scope: source
+    purpose: Functions without return type annotations
+  - pattern: def [a-z_]+\([^)]*\)\s*->\s*[A-Za-z]
+    type: regex
+    scope: source
+    purpose: Functions with return type annotations
+  - pattern: :\s*Any\b
+    type: regex
+    scope: source
+    purpose: Use of Any type
+  - pattern: '#\s*type:\s*ignore'
+    type: regex
+    scope: source
+    purpose: Type ignore comments
+  file_patterns:
+  - glob: '**/*.py'
+    purpose: Python source files
+  - glob: '**/*.ts'
+    purpose: TypeScript source files
+  - glob: '**/*.tsx'
+    purpose: TypeScript React files
+knowledge_sources:
+  specifications:
+  - id: pep484
+    name: PEP 484 - Type Hints
+    url: https://peps.python.org/pep-0484/
+    offline_cache: true
+    priority: required
+  - id: typescript-handbook
+    name: TypeScript Handbook
+    url: https://www.typescriptlang.org/docs/handbook/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: mypy-docs
+    name: mypy Documentation
+    url: https://mypy.readthedocs.io/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: mypy
+    purpose: Python type checking and coverage
+    offline_capable: true
+  - tool: pyright
+    purpose: Python type checking
+    offline_capable: true
+  - tool: typescript
+    purpose: TypeScript type checking
+    offline_capable: true
+  - tool: monkeytype
+    purpose: Python type annotation inference
+    offline_capable: true
+  scripts:
+  - id: type-coverage-scan
+    language: bash
+    purpose: Measure type coverage
+    source: inline
+    code: |
+      # Python type coverage with mypy
+      mypy --html-report typecoverage . 2>/dev/null || echo "Install mypy: pip install mypy"
+      # Count typed vs untyped functions
+      echo "Functions with return types:"
+      grep -roh --include="*.py" "def [a-z_][a-z0-9_]*([^)]*)\s*->" . 2>/dev/null | wc -l
+      echo "Functions without return types:"
+      grep -roh --include="*.py" "def [a-z_][a-z0-9_]*([^)]*):" . 2>/dev/null | grep -v "\->" | wc -l
+signals:
+  critical:
+  - id: TC-CRIT-001
+    signal: Type coverage below 50% in production code
+    evidence_pattern: Less than half of functions typed
+    explanation: |
+      Low type coverage means most of the codebase is invisible to
+      static analysis tools. Type errors will only be caught at runtime,
+      often in production.
+    remediation: Establish typing policy and incrementally add types
+  - id: TC-CRIT-002
+    signal: Extensive use of Any type to bypass checking
+    evidence_pattern: More than 10% of annotations use Any
+    explanation: |
+      Overuse of Any defeats the purpose of typing by creating holes
+      in the type system. Bugs can flow through Any annotations
+      undetected.
+    remediation: Replace Any with specific types or generics
+  high:
+  - id: TC-HIGH-001
+    signal: Public API functions lacking type annotations
+    evidence_pattern: Exported functions without types
+    explanation: |
+      Public APIs should always have complete type annotations as they
+      define the contract with consumers. Missing types lead to
+      integration bugs.
+    remediation: Add complete type annotations to all public APIs
+  - id: TC-HIGH-002
+    signal: 'Type errors ignored with # type: ignore'
+    evidence_pattern: More than 5 type ignore comments
+    explanation: |
+      Type ignore comments suppress type errors without fixing them.
+      While sometimes necessary, frequent use indicates systemic
+      typing problems.
+    remediation: Fix underlying type issues rather than ignoring
+  medium:
+  - id: TC-MED-001
+    signal: Internal functions lacking return type annotations
+    evidence_pattern: Private functions without -> annotation
+    remediation: Add return type annotations
+  - id: TC-MED-002
+    signal: Class attributes without type annotations
+    evidence_pattern: self.x = value without type hint
+    remediation: Add class attribute type annotations
+  low:
+  - id: TC-LOW-001
+    signal: Local variables without type annotations
+    evidence_pattern: Variable assignments without hints
+    remediation: Add type hints for complex variables
+  positive:
+  - id: TC-POS-001
+    signal: Type coverage exceeds 90%
+  - id: TC-POS-002
+    signal: Strict type checking enabled
+  - id: TC-POS-003
+    signal: Type checking integrated in CI
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Run Type Checker
+    description: |
+      Execute the type checker to measure coverage and
+      identify type errors.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Run mypy for Python
+      command: |
+        mypy . --ignore-missing-imports 2>&1 | tail -30 || echo "mypy not available"
+    - purpose: Check TypeScript compilation
+      command: |
+        npx tsc --noEmit 2>&1 | tail -30 || echo "TypeScript not available"
+    expected_findings:
+    - Type error count
+    - Files with errors
+  - id: '2'
+    name: Measure Coverage
+    description: |
+      Calculate the percentage of code that has type annotations.
+    duration_estimate: 8 min
+    commands:
+    - purpose: Count typed Python functions
+      command: |
+        typed=$(grep -roh --include="*.py" "def [a-z_][a-z0-9_]*([^)]*)\s*->" . 2>/dev/null | wc -l)
+        untyped=$(grep -roh --include="*.py" "def [a-z_][a-z0-9_]*([^)]*):" . 2>/dev/null | grep -v "\->" | wc -l)
+        echo "Typed: $typed, Untyped: $untyped"
+        total=$((typed + untyped))
+        if [ "$total" -gt 0 ]; then
+          echo "Coverage: $((typed * 100 / total))%"
+        fi
+    - purpose: Count Any usage
+      command: |
+        grep -rn --include="*.py" ":\s*Any\b" . 2>/dev/null | wc -l
+    expected_findings:
+    - Type coverage percentage
+    - Any usage count
+  - id: '3'
+    name: Identify Type Ignores
+    description: |
+      Find places where type errors are being suppressed.
+    duration_estimate: 5 min
+    commands:
+    - purpose: Find type ignore comments
+      command: |
+        grep -rn --include="*.py" "#\s*type:\s*ignore" . 2>/dev/null | head -20
+    - purpose: Find @ts-ignore comments
+      command: |
+        grep -rn --include="*.ts" "@ts-ignore\|@ts-nocheck" . 2>/dev/null | head -20
+    expected_findings:
+    - Type ignore locations
+    - Suppression patterns
+  - id: '4'
+    name: Review Public API Coverage
+    description: |
+      Check that public APIs have complete type annotations.
+    duration_estimate: 7 min
+    commands:
+    - purpose: Find public API files
+      command: |
+        find . -name "__init__.py" -exec grep -l "^from\|^import" {} \; 2>/dev/null | head -10
+    - purpose: Check exported function types
+      command: |
+        grep -rn --include="__init__.py" "from.*import" . 2>/dev/null | head -10
+    expected_findings:
+    - Public API type coverage
+    - Missing annotations
+output:
+  deliverables:
+  - type: metrics
+    format: structured
+    content:
+    - type_coverage_percentage
+    - type_error_count
+    - any_usage_count
+    - ignore_comment_count
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Coverage Analysis
+    - Problem Areas
+    - Recommendations
+  confidence_guidance:
+    high: Full type checker analysis
+    medium: Partial coverage measurement
+    low: Grep-based estimation
+offline:
+  capability: full
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: tc-001
+  item: Type checker configured
+  level: BLOCKING
+  verification: |
+    (test -f mypy.ini || test -f pyrightconfig.json || test -f tsconfig.json || grep -q "mypy" pyproject.toml 2>/dev/null) && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: tc-002
+  item: Type coverage above 70%
+  level: WARNING
+  verification: |
+    typed=$(grep -roh --include="*.py" "def.*->" . 2>/dev/null | wc -l)
+    total=$(grep -roh --include="*.py" "def [a-z]" . 2>/dev/null | wc -l)
+    [ "$total" -eq 0 ] && echo "PASS" || ([ "$((typed * 100 / total))" -ge 70 ] && echo "PASS" || echo "FAIL")
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Reliability
+    - Maintainability
+relationships:
+  commonly_combined:
+  - code-quality.type-safety.null-safety
+  - code-quality.type-safety.type-coercion-risk
+  - code-quality.testing.test-coverage

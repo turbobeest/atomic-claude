@@ -1,0 +1,286 @@
+audit:
+  id: performance-efficiency.throughput.event-processing-rate
+  name: Event Processing Rate Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: throughput
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit measures the event processing throughput of event-driven
+    architectures. It evaluates how quickly events are consumed and
+    processed from event buses (EventBridge, SNS, Kafka, etc.),
+    identifies processing bottlenecks, and assesses the system's ability
+    to handle event bursts and sustained high volumes.
+  why_it_matters: |
+    In event-driven architectures, processing delays cascade through
+    the system. If user signup events back up, welcome emails are
+    delayed, profile creation is delayed, and downstream services
+    receive stale data. Understanding event processing capacity is
+    critical for maintaining system responsiveness.
+  when_to_run:
+  - When adding new event handlers
+  - When event lag is observed
+  - During event-driven architecture reviews
+  - Before high-event-volume periods
+prerequisites:
+  required_artifacts:
+  - type: event_bus_access
+    description: Access to event bus metrics (EventBridge, SNS, Kafka)
+  - type: handler_metrics
+    description: Event handler processing metrics
+  access_requirements:
+  - Access to event bus monitoring
+  - Access to event handler metrics
+  - Event schema/type documentation
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: sum(rate(events_processed_total[5m])) by (event_type)
+    purpose: Events processed per second by type
+    threshold: Meeting production requirements
+  - system: CloudWatch
+    query: SELECT SUM(Invocations) FROM AWS/Lambda WHERE FunctionName LIKE '%event-handler%'
+    purpose: Lambda event handler invocations
+    threshold: Matching event publication rate
+  - system: Prometheus
+    query: |
+      histogram_quantile(0.99, sum(rate(event_processing_duration_seconds_bucket[5m])) by (le, handler))
+    purpose: P99 event processing time
+    threshold: < event SLA
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: aws-eventbridge-best-practices
+    name: AWS EventBridge Best Practices
+    url: https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-best-practices.html
+    offline_cache: true
+  - id: event-driven-architecture
+    name: Event-Driven Architecture Patterns
+    url: https://docs.microsoft.com/en-us/azure/architecture/guide/architecture-styles/event-driven
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: aws-cli
+    purpose: Check EventBridge metrics
+    command: |
+      aws cloudwatch get-metric-statistics --namespace AWS/Events \
+        --metric-name MatchedEvents --dimensions Name=RuleName,Value=my-rule \
+        --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ) \
+        --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) --period 300 --statistics Sum
+  - tool: aws-cli
+    purpose: Check SQS queue depth for event queues
+    command: |
+      aws sqs get-queue-attributes --queue-url $QUEUE_URL \
+        --attribute-names ApproximateNumberOfMessages ApproximateNumberOfMessagesNotVisible
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      rate(events_published_total[5m]) - rate(events_processed_total[5m])
+    purpose: Event processing differential (publish vs consume)
+  - system: Prometheus
+    query: |
+      sum(events_pending_total) by (event_type)
+    purpose: Pending events by type
+signals:
+  critical:
+  - id: EVT-CRIT-001
+    signal: Event backlog growing continuously
+    evidence_threshold: deriv(events_pending[1h]) > 0
+    explanation: |
+      A growing event backlog means handlers cannot keep up with
+      publishers. Without intervention, the backlog will grow
+      indefinitely, causing increasing delays and potential
+      event expiration or loss.
+    remediation: Scale event handlers; optimize processing; implement backpressure
+  - id: EVT-CRIT-002
+    signal: Event processing failures exceeding 5%
+    evidence_threshold: failure_rate > 0.05
+    explanation: |
+      High failure rates mean events are being lost or require
+      manual intervention. In event-driven systems, lost events
+      can cause data inconsistency across services.
+    remediation: Investigate failure causes; implement dead letter queues; add retry logic
+  high:
+  - id: EVT-HIGH-001
+    signal: Event processing latency exceeds 30 seconds
+    evidence_threshold: P99 processing_time > 30s
+    explanation: |
+      High processing latency causes stale data propagation and
+      poor user experience in real-time features. Users may see
+      outdated information.
+    remediation: Optimize handler processing; add more handler instances; batch processing
+  - id: EVT-HIGH-002
+    signal: Event handler throughput less than 50% of publish rate
+    evidence_threshold: process_rate / publish_rate < 0.5
+    explanation: |
+      Severe imbalance between publishing and processing will
+      cause rapid backlog growth and system degradation.
+    remediation: Scale handlers proportionally; implement flow control
+  medium:
+  - id: EVT-MED-001
+    signal: No dead letter queue configured for failed events
+    remediation: Implement DLQ for all event handlers
+  - id: EVT-MED-002
+    signal: Event processing metrics not labeled by event type
+    remediation: Add event_type labels to processing metrics
+  low:
+  - id: EVT-LOW-001
+    signal: Event processing SLAs not documented
+  positive:
+  - id: EVT-POS-001
+    signal: Event processing rate exceeds publish rate
+  - id: EVT-POS-002
+    signal: Zero pending events during normal operation
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Event Types
+    description: |
+      Identify all event types, their publishers, handlers, and
+      expected volumes.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List EventBridge rules
+      command: aws events list-rules --query 'Rules[].Name'
+    - purpose: Query event type labels
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/label/event_type/values' | jq
+    expected_findings:
+    - Event type inventory
+    - Handler mapping
+  - id: '2'
+    name: Measure Processing Rates
+    description: |
+      Measure current event publishing and processing rates.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Query publish rate
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(events_published_total[5m]))by(event_type)'
+    - purpose: Query process rate
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(events_processed_total[5m]))by(event_type)'
+    expected_findings:
+    - Events published per second
+    - Events processed per second
+  - id: '3'
+    name: Check Event Backlog
+    description: |
+      Measure pending/queued events and backlog trends.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Query pending events
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=sum(events_pending_total)by(event_type)'
+    - purpose: Check SQS queue depth
+      command: |
+        aws sqs get-queue-attributes --queue-url $QUEUE_URL \
+          --attribute-names ApproximateNumberOfMessages
+    expected_findings:
+    - Current backlog size
+    - Backlog trend
+  - id: '4'
+    name: Analyze Handler Performance
+    description: |
+      Profile event handler performance to identify bottlenecks.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Query handler duration
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=histogram_quantile(0.99,sum(rate(event_processing_duration_seconds_bucket[5m]))by(le,handler))'
+    - purpose: Check Lambda duration
+      command: |
+        aws cloudwatch get-metric-statistics --namespace AWS/Lambda \
+          --metric-name Duration --dimensions Name=FunctionName,Value=event-handler \
+          --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ) \
+          --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) --period 300 --statistics Average
+    expected_findings:
+    - Slowest handlers
+    - Processing time breakdown
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Event Type Inventory
+    - Processing Rate Analysis
+    - Backlog Status
+    - Recommendations
+  confidence_guidance:
+    high: Production metrics with >24h of data
+    medium: Snapshot metrics during audit
+    low: Configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: event-driven-architecture
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires event system access and analysis
+    full:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: event-001
+  item: Event backlog not growing
+  level: CRITICAL
+  verification: |
+    curl -s 'http://prometheus:9090/api/v1/query?query=deriv(sum(events_pending_total)[1h])' | \
+      jq '.data.result[0].value[1] | tonumber <= 0'
+  expected: 'true'
+- id: event-002
+  item: Event processing rate >= publish rate
+  level: BLOCKING
+  verification: |
+    PROCESS=$(curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(events_processed_total[5m]))' | jq -r '.data.result[0].value[1]')
+    PUBLISH=$(curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(events_published_total[5m]))' | jq -r '.data.result[0].value[1]')
+    echo "scale=2; $PROCESS >= $PUBLISH" | bc
+  expected: '1'
+- id: event-003
+  item: Dead letter queue configured
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm DLQ exists for event handler failures
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - event-driven
+    - microservices
+relationships:
+  commonly_combined:
+  - performance-efficiency.throughput.message-processing-rate
+  - performance-efficiency.throughput.stream-processing-throughput

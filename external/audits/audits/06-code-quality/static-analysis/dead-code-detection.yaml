@@ -1,0 +1,267 @@
+audit:
+  id: code-quality.static-analysis.dead-code-detection
+  name: Dead Code Detection
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: static-analysis
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Identifies unreachable code, unused functions, dead branches, orphaned
+    files, and deprecated code paths that remain in the codebase. Uses
+    static analysis to detect code that is never executed or referenced.
+  why_it_matters: |
+    Dead code increases maintenance burden, confuses developers, and can
+    create false positives in security scans. It bloats bundle sizes,
+    slows build times, and can mask actual bugs. Accumulated dead code
+    signals poor codebase hygiene and technical debt.
+  when_to_run:
+  - Initial codebase assessment
+  - Before major releases
+  - After feature removal or deprecation
+  - Periodic codebase cleanup
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Complete source code repository
+  - type: build_config
+    description: Build configuration to understand entry points
+  access_requirements:
+  - Read access to source code
+  - Understanding of application entry points
+discovery:
+  file_patterns:
+  - glob: '**/*.py'
+    purpose: Python source files
+  - glob: '**/*.js'
+    purpose: JavaScript source files
+  - glob: '**/*.ts'
+    purpose: TypeScript source files
+  - glob: '**/*.java'
+    purpose: Java source files
+  code_patterns:
+  - pattern: '# TODO:?\s*(remove|delete|dead)'
+    type: regex
+    scope: source
+    purpose: Comments marking code for removal
+  - pattern: '@deprecated|DEPRECATED'
+    type: regex
+    scope: source
+    purpose: Deprecated code markers
+  - pattern: if\s+(false|0)\s*[:{]
+    type: regex
+    scope: source
+    purpose: Always-false conditionals
+knowledge_sources:
+  guides:
+  - id: vulture-docs
+    name: Vulture - Find Dead Python Code
+    url: https://github.com/jendrikseipp/vulture
+    offline_cache: true
+  - id: nist-800-218
+    name: NIST SP 800-218 - Secure Software Development Framework
+    url: https://csrc.nist.gov/publications/detail/sp/800-218/final
+    offline_cache: false
+  learning_resources:
+  - id: refactoring-book
+    title: 'Refactoring: Improving the Design of Existing Code'
+    type: book
+    reference: Martin Fowler, ISBN 978-0134757599
+tooling:
+  static_analysis:
+  - tool: vulture
+    purpose: Python dead code detection
+    offline_capable: true
+  - tool: ts-prune
+    purpose: TypeScript unused exports detection
+    offline_capable: true
+  - tool: unimport
+    purpose: Python unused import detection
+    offline_capable: true
+  - tool: webpack-bundle-analyzer
+    purpose: JavaScript bundle analysis for unused code
+    offline_capable: true
+  - tool: deadcode
+    purpose: Go dead code detection
+    offline_capable: true
+  scripts:
+  - id: dead-code-scan
+    language: bash
+    purpose: Run vulture for Python dead code
+    source: inline
+    code: |
+      #!/bin/bash
+      vulture . --min-confidence 80 2>/dev/null || echo "vulture not installed"
+signals:
+  critical:
+  - id: DEAD-CRIT-001
+    signal: Security-sensitive dead code still accessible
+    evidence_pattern: Unused authentication or authorization code paths
+    explanation: |
+      Dead security code can be accidentally re-enabled or may
+      contain vulnerabilities that could be exploited if code
+      paths change.
+    remediation: Remove dead security code completely; audit for sensitive data
+  high:
+  - id: DEAD-HIGH-001
+    signal: Large modules or classes entirely unused
+    evidence_pattern: No imports or references to module
+    explanation: |
+      Entire unused modules significantly bloat the codebase
+      and create confusion about system architecture.
+    remediation: Verify no dynamic loading; remove entire module
+  - id: DEAD-HIGH-002
+    signal: Dead code referencing external services
+    evidence_pattern: Unused API calls or service integrations
+    explanation: |
+      Dead integrations may cause confusion about dependencies
+      and could accidentally be re-enabled with stale credentials.
+    remediation: Remove dead integration code; update dependency documentation
+  medium:
+  - id: DEAD-MED-001
+    signal: Unused functions with high confidence
+    remediation: Remove after verifying no dynamic calls
+  - id: DEAD-MED-002
+    signal: Unreachable code branches
+    remediation: Remove dead branches; simplify conditionals
+  low:
+  - id: DEAD-LOW-001
+    signal: Unused local variables
+  - id: DEAD-LOW-002
+    signal: Commented-out code blocks
+  positive:
+  - id: DEAD-POS-001
+    signal: No dead code detected above confidence threshold
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Run automated dead code detection
+    description: |
+      Execute dead code detection tools to identify potentially
+      unused code with confidence scores.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Detect dead Python code
+      command: vulture . --min-confidence 80 2>/dev/null | head -50
+    - purpose: Find unused TypeScript exports
+      command: npx ts-prune 2>/dev/null | head -50
+    expected_findings:
+    - List of potentially dead code
+    - Confidence scores for findings
+  - id: '2'
+    name: Identify orphaned files
+    description: |
+      Find files that are not imported or referenced by any
+      other code in the repository.
+    duration_estimate: 20 min
+    expected_findings:
+    - Files with no incoming references
+    - Potential orphaned test files
+  - id: '3'
+    name: Check for deprecated markers
+    description: |
+      Search for code marked as deprecated that may be
+      candidates for removal.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find deprecated markers
+      command: grep -rn '@deprecated\|DEPRECATED\|# TODO.*remove' . --include='*.py' --include='*.js'
+        --include='*.ts' 2>/dev/null | head -30
+    expected_findings:
+    - Deprecated code locations
+    - Age of deprecation markers
+  - id: '4'
+    name: Analyze import graphs
+    description: |
+      Build import dependency graph to identify isolated
+      clusters of code.
+    duration_estimate: 20 min
+    expected_findings:
+    - Import graph visualization
+    - Isolated code clusters
+  - id: '5'
+    name: Verify with dynamic analysis
+    description: |
+      Cross-reference static findings with code coverage data
+      if available to reduce false positives.
+    duration_estimate: 15 min
+    expected_findings:
+    - Confirmed dead code from coverage data
+    - Reduced false positive rate
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Dead Code Inventory
+    - Risk Assessment
+    - Removal Recommendations
+  confidence_guidance:
+    high: Multiple tools confirm, no dynamic loading detected
+    medium: Single tool detection, possible dynamic usage
+    low: Heuristic detection, requires manual verification
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: vulture-docs
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires careful verification to avoid false positives
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: dead-code-001
+  item: Dead code detection tools executed
+  level: BLOCKING
+  verification: which vulture && echo PASS || echo FAIL
+  expected: PASS
+- id: dead-code-002
+  item: No security-sensitive dead code present
+  level: CRITICAL
+  verification: manual
+  verification_notes: Review dead code findings for security implications
+  expected: Confirmed by reviewer
+- id: dead-code-003
+  item: Dead code findings triaged and tracked
+  level: WARNING
+  verification: manual
+  verification_notes: Ensure findings are logged for removal or justification
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Maintainability
+relationships:
+  commonly_combined:
+  - code-quality.static-analysis.code-complexity
+  - code-quality.testing.unit-test-coverage

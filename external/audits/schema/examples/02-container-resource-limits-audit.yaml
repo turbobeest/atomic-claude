@@ -1,0 +1,639 @@
+# ============================================================
+# EXAMPLE AUDIT: Infrastructure/Metrics Domain
+# ============================================================
+# This example shows how to adapt the template for audits that:
+# - Examine infrastructure configuration and runtime metrics
+# - Use kubectl, cloud CLI, and monitoring queries
+# - Have quantitative thresholds for pass/fail
+# - Are highly automatable
+# ============================================================
+
+audit:
+  id: "compute-orchestration.container-configuration.resource-limits"
+  name: "Container Resource Limits Audit"
+  version: "1.0.0"
+  last_updated: "2025-01-18"
+  status: "active"
+  
+  category: "compute-orchestration"
+  category_number: 13
+  subcategory: "container-configuration"
+  
+  tier: "focused"          # Checklist-based, clear criteria
+  estimated_duration: "30-60 min"
+  
+  completeness: "complete" # Can run without discovery
+  requires_runtime: true   # Needs access to running cluster
+  destructive: false
+
+# ============================================================
+# EXECUTION: Highly automatable with clear thresholds
+# ============================================================
+
+execution:
+  automatable: "yes"       # Can be fully automated
+  severity: "critical"
+  scope: "infrastructure"
+  
+  default_profiles:
+    - "quick"              # Fast and automatable - good for quick
+    - "full"
+    - "production"
+    
+  blocks_phase: true       # Missing resource limits blocks production
+  parallelizable: true
+
+# ============================================================
+# DESCRIPTION
+# ============================================================
+
+description:
+  what: |
+    Verifies that all containers in Kubernetes deployments have
+    appropriate resource requests and limits configured. Checks
+    CPU and memory settings against best practices and cluster
+    capacity. Identifies pods running without limits (unbounded
+    resource consumption risk).
+    
+  why_it_matters: |
+    Missing or misconfigured resource limits cause:
+    - Noisy neighbor problems (one pod starves others)
+    - OOMKilled pods during memory pressure
+    - CPU throttling and unpredictable performance
+    - Cluster instability during traffic spikes
+    - Inability to autoscale effectively
+    - Failed scheduling when cluster is at capacity
+    
+  when_to_run:
+    - "Before production deployment"
+    - "After adding new services"
+    - "During capacity planning reviews"
+    - "After cluster upgrade"
+
+# ============================================================
+# PREREQUISITES
+# ============================================================
+
+prerequisites:
+  required_artifacts:
+    - type: "kubernetes_access"
+      description: "kubectl access to target cluster with read permissions"
+      
+    - type: "namespace_list"
+      description: "List of namespaces to audit (or 'all')"
+      
+  optional_artifacts:
+    - type: "resource_quotas"
+      description: "Documented resource quota policies"
+      
+    - type: "capacity_plan"
+      description: "Expected resource requirements per service"
+      
+  access_requirements:
+    - "kubectl get pods,deployments,daemonsets,statefulsets --all-namespaces"
+    - "kubectl describe nodes (for capacity context)"
+    - "Access to monitoring system for actual usage data (optional)"
+
+# ============================================================
+# DISCOVERY: Kubernetes resources and metrics
+# ============================================================
+
+discovery:
+  # Kubernetes resources to examine
+  kubernetes_resources:
+    - kind: "Deployment"
+      purpose: "Primary workload type"
+      fields_of_interest:
+        - "spec.template.spec.containers[*].resources"
+        - "spec.replicas"
+        
+    - kind: "StatefulSet"
+      purpose: "Stateful workloads"
+      fields_of_interest:
+        - "spec.template.spec.containers[*].resources"
+        
+    - kind: "DaemonSet"
+      purpose: "Per-node workloads"
+      fields_of_interest:
+        - "spec.template.spec.containers[*].resources"
+        
+    - kind: "CronJob"
+      purpose: "Scheduled workloads"
+      fields_of_interest:
+        - "spec.jobTemplate.spec.template.spec.containers[*].resources"
+        
+    - kind: "Pod"
+      purpose: "Standalone pods and actual running state"
+      fields_of_interest:
+        - "spec.containers[*].resources"
+        - "status.qosClass"
+        
+  # Metrics to pull (if monitoring available)
+  metrics_queries:
+    - system: "Prometheus"
+      query: |
+        container_memory_usage_bytes{namespace!="kube-system"}
+        / on(namespace,pod,container) 
+        kube_pod_container_resource_limits{resource="memory"}
+      purpose: "Memory utilization vs limits"
+      threshold: "< 0.8 (should use <80% of limit)"
+      
+    - system: "Prometheus"
+      query: |
+        rate(container_cpu_usage_seconds_total{namespace!="kube-system"}[5m])
+        / on(namespace,pod,container)
+        kube_pod_container_resource_limits{resource="cpu"}
+      purpose: "CPU utilization vs limits"
+      threshold: "< 0.9 (should use <90% of limit)"
+      
+    - system: "Prometheus"
+      query: |
+        kube_pod_container_resource_requests{resource="memory"}
+        / on(namespace,pod,container)
+        kube_pod_container_resource_limits{resource="memory"}
+      purpose: "Request to limit ratio"
+      threshold: ">= 0.5 (requests should be at least 50% of limits)"
+
+# ============================================================
+# KNOWLEDGE SOURCES: Kubernetes docs, not RFCs
+# ============================================================
+
+knowledge_sources:
+  specifications:
+    - id: "k8s-resource-management"
+      name: "Kubernetes Resource Management for Pods and Containers"
+      url: "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"
+      offline_cache: true
+      priority: "required"
+      size_estimate: "100KB"
+      
+    - id: "k8s-limit-ranges"
+      name: "Kubernetes Limit Ranges"
+      url: "https://kubernetes.io/docs/concepts/policy/limit-range/"
+      offline_cache: true
+      priority: "recommended"
+      
+  guides:
+    - id: "k8s-best-practices-resources"
+      name: "GKE Best Practices: Resource Management"
+      url: "https://cloud.google.com/kubernetes-engine/docs/best-practices/resource-management"
+      offline_cache: true
+      priority: "recommended"
+      
+    - id: "eks-right-sizing"
+      name: "AWS EKS Right Sizing Guide"
+      url: "https://aws.amazon.com/blogs/containers/right-sizing-eks/"
+      offline_cache: true
+      priority: "optional"
+
+# ============================================================
+# TOOLING: kubectl, cloud CLIs, monitoring queries
+# ============================================================
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Query Kubernetes resources"
+      install: "curl -LO 'https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl'"
+      offline_capable: false  # Needs cluster access
+      
+    - tool: "kubent"
+      purpose: "Check for deprecated APIs"
+      install: "curl -sSL https://github.com/doitintl/kube-no-trouble/releases/latest/download/kubent-linux-amd64.tar.gz | tar xz"
+      offline_capable: false
+      
+    - tool: "pluto"
+      purpose: "Detect deprecated Kubernetes apiVersions"
+      install: "brew install FairwindsOps/tap/pluto"
+      offline_capable: false
+      
+  monitoring_queries:
+    - system: "Prometheus/Grafana"
+      query: "sum(kube_pod_container_resource_requests{resource='memory'}) by (namespace)"
+      purpose: "Total memory requests by namespace"
+      
+    - system: "Prometheus/Grafana"
+      query: "sum(kube_pod_container_resource_limits{resource='memory'}) by (namespace)"
+      purpose: "Total memory limits by namespace"
+      
+  scripts:
+    - id: "resource-limits-checker"
+      language: "bash"
+      purpose: "Comprehensive resource limits check"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Check all pods for missing resource limits
+        
+        echo "=== Pods without memory limits ==="
+        kubectl get pods --all-namespaces -o json | jq -r '
+          .items[] | 
+          select(.spec.containers[].resources.limits.memory == null) |
+          "\(.metadata.namespace)/\(.metadata.name)"
+        '
+        
+        echo ""
+        echo "=== Pods without CPU limits ==="
+        kubectl get pods --all-namespaces -o json | jq -r '
+          .items[] | 
+          select(.spec.containers[].resources.limits.cpu == null) |
+          "\(.metadata.namespace)/\(.metadata.name)"
+        '
+        
+        echo ""
+        echo "=== Pods without memory requests ==="
+        kubectl get pods --all-namespaces -o json | jq -r '
+          .items[] | 
+          select(.spec.containers[].resources.requests.memory == null) |
+          "\(.metadata.namespace)/\(.metadata.name)"
+        '
+        
+        echo ""
+        echo "=== QoS Class Distribution ==="
+        kubectl get pods --all-namespaces -o json | jq -r '
+          .items | group_by(.status.qosClass) | 
+          map({qosClass: .[0].status.qosClass, count: length})
+        '
+      offline_capable: false
+
+# ============================================================
+# SIGNALS: Quantitative thresholds, not qualitative
+# ============================================================
+
+signals:
+  critical:
+    - id: "RESLIMIT-CRIT-001"
+      signal: "Production pods running without memory limits"
+      evidence_threshold: "Any pod in production namespace without spec.containers[*].resources.limits.memory"
+      verification_command: |
+        kubectl get pods -n production -o json | jq '[.items[] | select(.spec.containers[].resources.limits.memory == null)] | length'
+      verification_expected: "0"
+      explanation: |
+        Pods without memory limits can consume unlimited memory, causing:
+        - OOMKilled events for other pods
+        - Node instability
+        - Unpredictable application behavior
+        This is especially critical in production where stability is paramount.
+      remediation: |
+        Add memory limits to all containers:
+        ```yaml
+        resources:
+          limits:
+            memory: "512Mi"
+          requests:
+            memory: "256Mi"
+        ```
+        Start with 2x the observed p99 memory usage.
+      cwe: "CWE-770"  # Allocation of Resources Without Limits
+      
+    - id: "RESLIMIT-CRIT-002"
+      signal: "Pods with QoS class BestEffort in production"
+      evidence_threshold: "Any pod in production namespace with status.qosClass == 'BestEffort'"
+      verification_command: |
+        kubectl get pods -n production -o json | jq '[.items[] | select(.status.qosClass == "BestEffort")] | length'
+      verification_expected: "0"
+      explanation: |
+        BestEffort pods have no resource guarantees and are first to be
+        evicted under memory pressure. Production workloads should never
+        be BestEffort.
+      remediation: |
+        Add both requests and limits to achieve Guaranteed or Burstable QoS class.
+        
+  high:
+    - id: "RESLIMIT-HIGH-001"
+      signal: "Pods without CPU limits"
+      evidence_threshold: "Any pod without spec.containers[*].resources.limits.cpu"
+      verification_command: |
+        kubectl get pods --all-namespaces -o json | jq '[.items[] | select(.spec.containers[].resources.limits.cpu == null)] | length'
+      verification_expected: "0"
+      explanation: |
+        Pods without CPU limits can consume unlimited CPU cycles,
+        starving other workloads. While less critical than memory
+        (won't crash the node), it causes performance degradation.
+      remediation: |
+        Add CPU limits based on observed usage + headroom:
+        ```yaml
+        resources:
+          limits:
+            cpu: "500m"
+          requests:
+            cpu: "100m"
+        ```
+        
+    - id: "RESLIMIT-HIGH-002"
+      signal: "Memory limits significantly higher than requests"
+      evidence_threshold: "limits.memory > 4x requests.memory"
+      verification_command: |
+        kubectl get pods --all-namespaces -o json | jq '
+          [.items[].spec.containers[] | 
+           select(.resources.limits.memory != null and .resources.requests.memory != null) |
+           select((.resources.limits.memory | gsub("[^0-9]";"") | tonumber) > 
+                  4 * (.resources.requests.memory | gsub("[^0-9]";"") | tonumber))] | length'
+      verification_expected: "0"
+      explanation: |
+        Large gaps between requests and limits indicate poor capacity
+        planning. Scheduler uses requests for placement but limits for
+        enforcement, leading to overcommitment.
+      remediation: |
+        Right-size based on actual usage. Limits should typically be
+        1.5-2x requests for most workloads.
+        
+  medium:
+    - id: "RESLIMIT-MED-001"
+      signal: "Containers using default resource values"
+      evidence_threshold: "Resources exactly match LimitRange defaults"
+      explanation: |
+        Default values from LimitRange may not be appropriate for
+        the specific workload. Each service should have explicitly
+        configured resources based on profiling.
+      remediation: |
+        Profile application resource usage and set explicit values.
+        
+    - id: "RESLIMIT-MED-002"
+      signal: "Init containers without resource limits"
+      evidence_threshold: "Any initContainer without resources.limits"
+      verification_command: |
+        kubectl get pods --all-namespaces -o json | jq '[.items[] | select(.spec.initContainers != null) | select(.spec.initContainers[].resources.limits == null)] | length'
+      verification_expected: "0"
+      explanation: |
+        Init containers can also consume unbounded resources during
+        pod startup, affecting cluster stability.
+      remediation: |
+        Add resource limits to init containers, typically lower than
+        main container limits.
+        
+  positive:
+    - id: "RESLIMIT-POS-001"
+      signal: "All pods have Guaranteed QoS class"
+      evidence_threshold: "All pods have status.qosClass == 'Guaranteed'"
+      
+    - id: "RESLIMIT-POS-002"
+      signal: "Resource quota enforcement enabled"
+      evidence_threshold: "ResourceQuota objects exist in all namespaces"
+      
+    - id: "RESLIMIT-POS-003"
+      signal: "LimitRange defaults configured"
+      evidence_threshold: "LimitRange objects exist in all namespaces"
+
+# ============================================================
+# PROCEDURE: Command-driven, automatable
+# ============================================================
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+    
+  preparation:
+    - step: "Verify kubectl access"
+      verification: "kubectl cluster-info"
+    - step: "Identify target namespaces"
+    - step: "Document current cluster capacity"
+      verification: "kubectl describe nodes | grep -A 5 'Allocated resources'"
+    
+  steps:
+    - id: "1"
+      name: "Inventory All Workloads"
+      description: |
+        List all deployments, statefulsets, daemonsets, and cronjobs
+        across target namespaces.
+      duration_estimate: "5 min"
+      commands:
+        - purpose: "List all workload types"
+          command: |
+            kubectl get deploy,sts,ds,cronjob --all-namespaces -o wide
+        - purpose: "Count by namespace"
+          command: |
+            kubectl get pods --all-namespaces -o json | jq '.items | group_by(.metadata.namespace) | map({namespace: .[0].metadata.namespace, count: length})'
+      expected_findings:
+        - "Complete workload inventory"
+        - "Namespace distribution"
+        
+    - id: "2"
+      name: "Check Memory Limits"
+      description: |
+        Identify all pods/containers without memory limits.
+        This is the most critical check.
+      duration_estimate: "5 min"
+      commands:
+        - purpose: "Find pods without memory limits"
+          command: |
+            kubectl get pods --all-namespaces -o json | jq -r '.items[] | select(.spec.containers[].resources.limits.memory == null) | "\(.metadata.namespace)/\(.metadata.name)"'
+        - purpose: "Count by namespace"
+          command: |
+            kubectl get pods --all-namespaces -o json | jq '[.items[] | select(.spec.containers[].resources.limits.memory == null)] | group_by(.metadata.namespace) | map({namespace: .[0].metadata.namespace, count: length})'
+      expected_findings:
+        - "List of non-compliant pods"
+        - "Severity by namespace (production vs dev)"
+        
+    - id: "3"
+      name: "Check CPU Limits"
+      description: |
+        Identify all pods/containers without CPU limits.
+      duration_estimate: "5 min"
+      commands:
+        - purpose: "Find pods without CPU limits"
+          command: |
+            kubectl get pods --all-namespaces -o json | jq -r '.items[] | select(.spec.containers[].resources.limits.cpu == null) | "\(.metadata.namespace)/\(.metadata.name)"'
+      expected_findings:
+        - "List of pods without CPU limits"
+        
+    - id: "4"
+      name: "Analyze QoS Classes"
+      description: |
+        Check distribution of QoS classes. Production should be
+        Guaranteed or Burstable, never BestEffort.
+      duration_estimate: "5 min"
+      commands:
+        - purpose: "QoS distribution"
+          command: |
+            kubectl get pods --all-namespaces -o json | jq '.items | group_by(.status.qosClass) | map({qosClass: .[0].status.qosClass, count: length})'
+        - purpose: "BestEffort pods"
+          command: |
+            kubectl get pods --all-namespaces -o json | jq -r '.items[] | select(.status.qosClass == "BestEffort") | "\(.metadata.namespace)/\(.metadata.name)"'
+      expected_findings:
+        - "QoS class distribution"
+        - "BestEffort pods requiring remediation"
+        
+    - id: "5"
+      name: "Check Request/Limit Ratios"
+      description: |
+        Verify requests and limits are reasonably proportioned.
+        Large gaps indicate poor sizing.
+      duration_estimate: "5 min"
+      commands:
+        - purpose: "Memory ratio analysis"
+          command: |
+            kubectl get pods --all-namespaces -o json | jq '.items[].spec.containers[] | select(.resources.limits.memory != null and .resources.requests.memory != null) | {name: .name, requests: .resources.requests.memory, limits: .resources.limits.memory}'
+      expected_findings:
+        - "Pods with excessive limit/request ratios"
+        
+    - id: "6"
+      name: "Check Cluster-Level Controls"
+      description: |
+        Verify LimitRange and ResourceQuota are configured
+        as guardrails.
+      duration_estimate: "5 min"
+      commands:
+        - purpose: "List LimitRanges"
+          command: "kubectl get limitrange --all-namespaces"
+        - purpose: "List ResourceQuotas"
+          command: "kubectl get resourcequota --all-namespaces"
+      expected_findings:
+        - "LimitRange coverage"
+        - "ResourceQuota coverage"
+
+# ============================================================
+# OUTPUT
+# ============================================================
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      
+    - type: "workload_inventory"
+      format: "json"
+      description: "All workloads with their resource configurations"
+      
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Critical Findings (Unbounded Resources)"
+        - "QoS Class Analysis"
+        - "Namespace-by-Namespace Breakdown"
+        - "Remediation Priority List"
+        
+  confidence_guidance:
+    high: "Direct kubectl query results - objective data"
+    medium: "Metrics-based analysis with sampling"
+    low: "Inferred from partial data"
+
+# ============================================================
+# OFFLINE SUPPORT
+# ============================================================
+
+offline:
+  capability: "partial"
+  
+  cache_manifest:
+    knowledge:
+      - source_id: "k8s-resource-management"
+        priority: "required"
+      - source_id: "k8s-limit-ranges"
+        priority: "recommended"
+        
+  degradation:
+    - feature: "Live cluster queries"
+      impact: "Cannot audit without cluster access"
+      mitigation: "Export cluster state with 'kubectl get all -A -o yaml > cluster-state.yaml' before going offline"
+      
+    - feature: "Metrics queries"
+      impact: "Cannot analyze actual resource usage"
+      mitigation: "Export Prometheus data or Grafana snapshots"
+      
+  prepare_offline:
+    - command: "kubectl get pods --all-namespaces -o yaml > .audit-cache/pods.yaml"
+    - command: "kubectl get deploy,sts,ds --all-namespaces -o yaml > .audit-cache/workloads.yaml"
+    - command: "kubectl get limitrange,resourcequota --all-namespaces -o yaml > .audit-cache/policies.yaml"
+
+# ============================================================
+# PROFILES
+# ============================================================
+
+profiles:
+  membership:
+    quick:
+      included: true        # Fast and automatable
+      priority: 3
+    security:
+      included: false
+      reason: "Resource limits are reliability, not security"
+    production:
+      included: true
+      priority: 2           # Run early - blocks deployment
+    full:
+      included: true
+      priority: 15
+
+# ============================================================
+# CLOSEOUT: Bash commands with quantitative checks
+# ============================================================
+
+closeout_checklist:
+  - id: "reslimit-001"
+    item: "No production pods without memory limits"
+    level: "CRITICAL"
+    verification: |
+      [ $(kubectl get pods -n production -o json 2>/dev/null | jq '[.items[] | select(.spec.containers[].resources.limits.memory == null)] | length') -eq 0 ] && echo 'PASS' || echo 'FAIL'
+    expected: "PASS"
+    
+  - id: "reslimit-002"
+    item: "No BestEffort pods in production"
+    level: "CRITICAL"
+    verification: |
+      [ $(kubectl get pods -n production -o json 2>/dev/null | jq '[.items[] | select(.status.qosClass == "BestEffort")] | length') -eq 0 ] && echo 'PASS' || echo 'FAIL'
+    expected: "PASS"
+    
+  - id: "reslimit-003"
+    item: "All namespaces have LimitRange"
+    level: "BLOCKING"
+    verification: |
+      namespaces=$(kubectl get ns -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | grep -v kube)
+      for ns in $namespaces; do
+        if ! kubectl get limitrange -n $ns 2>/dev/null | grep -q .; then
+          echo "FAIL: $ns missing LimitRange"
+          exit 1
+        fi
+      done
+      echo 'PASS'
+    expected: "PASS"
+    
+  - id: "reslimit-004"
+    item: "CPU limits configured for all pods"
+    level: "WARNING"
+    verification: |
+      count=$(kubectl get pods --all-namespaces -o json | jq '[.items[] | select(.spec.containers[].resources.limits.cpu == null)] | length')
+      [ $count -eq 0 ] && echo 'PASS' || echo "WARNING: $count pods without CPU limits"
+    expected: "PASS"
+    
+  - id: "reslimit-005"
+    item: "ResourceQuota exists in production namespace"
+    level: "WARNING"
+    verification: |
+      kubectl get resourcequota -n production 2>/dev/null | grep -q . && echo 'PASS' || echo 'WARNING: No ResourceQuota'
+    expected: "PASS"
+
+# ============================================================
+# GOVERNANCE
+# ============================================================
+
+governance:
+  applicable_to:
+    archetypes:
+      - "microservices"
+      - "serverless"  # For container-based serverless
+    platforms:
+      - "kubernetes"
+      - "openshift"
+      - "eks"
+      - "gke"
+      - "aks"
+      
+  compliance_frameworks:
+    - framework: "CIS Kubernetes Benchmark"
+      controls: ["5.7.1", "5.7.2", "5.7.3", "5.7.4"]
+    - framework: "SOC2"
+      controls: ["CC6.1"]  # Capacity management
+
+# ============================================================
+# RELATIONSHIPS
+# ============================================================
+
+relationships:
+  commonly_combined:
+    - "compute-orchestration.container-configuration.image-security"
+    - "compute-orchestration.kubernetes-workloads.pod-security"
+    - "scalability-capacity.horizontal-scaling.autoscaling-policy"
+    - "observability-instrumentation.metrics.resource-metrics"

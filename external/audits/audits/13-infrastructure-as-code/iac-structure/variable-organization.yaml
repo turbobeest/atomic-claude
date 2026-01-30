@@ -1,0 +1,397 @@
+audit:
+  id: infrastructure-as-code.iac-structure.variable-organization
+  name: IaC Variable Organization
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: iac-structure
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: infrastructure
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates the organization and management of variables in
+    Infrastructure as Code. It examines variable definitions, typing,
+    validation, documentation, and the overall strategy for configuration
+    management.
+
+    Key areas examined:
+    - Variable definition structure and completeness
+    - Type constraints and validation rules
+    - Sensitive variable handling
+    - Default value appropriateness
+    - Variable documentation quality
+    - Variable file organization (.tfvars)
+    - Local values usage and organization
+  why_it_matters: |
+    Well-organized variables enable:
+    - Reusability: Modules can be configured for different use cases
+    - Safety: Validation prevents misconfigurations
+    - Security: Sensitive values are properly protected
+    - Maintainability: Self-documenting code is easier to update
+    - Compliance: Configuration changes are auditable
+
+    Poor variable organization leads to configuration errors, security
+    exposures, and difficulty managing infrastructure at scale.
+  when_to_run:
+  - During module development review
+  - When establishing IaC standards
+  - Before production deployment of new modules
+  - During periodic code quality assessments
+prerequisites:
+  required_artifacts:
+  - type: iac_repository
+    description: Access to infrastructure code repository
+  access_requirements:
+  - Read access to IaC repositories
+discovery:
+  code_patterns:
+  - pattern: variable\s+"([^"]+)"
+    type: regex
+    scope: config
+    purpose: Extract variable definitions
+  - pattern: type\s*=\s*([^\n]+)
+    type: regex
+    scope: config
+    purpose: Extract type constraints
+  - pattern: validation\s*\{
+    type: regex
+    scope: config
+    purpose: Find validation blocks
+  - pattern: sensitive\s*=\s*true
+    type: regex
+    scope: config
+    purpose: Identify sensitive variables
+  - pattern: locals\s*\{
+    type: regex
+    scope: config
+    purpose: Find local value definitions
+  file_patterns:
+  - glob: '**/variables.tf'
+    purpose: Variable definition files
+  - glob: '**/*.tfvars'
+    purpose: Variable value files
+  - glob: '**/locals.tf'
+    purpose: Local value definitions
+  - glob: '**/terraform.tfvars'
+    purpose: Default variable values
+knowledge_sources:
+  specifications:
+  - id: terraform-variables
+    name: Terraform Input Variables
+    url: https://developer.hashicorp.com/terraform/language/values/variables
+    offline_cache: true
+    priority: required
+  - id: terraform-locals
+    name: Terraform Local Values
+    url: https://developer.hashicorp.com/terraform/language/values/locals
+    offline_cache: true
+    priority: required
+  guides:
+  - id: terraform-style
+    name: Terraform Style Guide
+    url: https://developer.hashicorp.com/terraform/language/style
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: tflint
+    purpose: Lint variable definitions
+    offline_capable: true
+  - tool: terraform-docs
+    purpose: Generate documentation from variables
+    offline_capable: true
+  infrastructure_tools:
+  - tool: terraform validate
+    purpose: Validate variable configurations
+    command: terraform validate
+  scripts:
+  - id: variable-analyzer
+    language: bash
+    purpose: Analyze variable definitions
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Variables without types ==="
+      grep -rA5 'variable\s*"' --include='*.tf' | \
+        grep -B5 'variable' | grep -L 'type\s*=' | head -20
+
+      echo ""
+      echo "=== Variables without descriptions ==="
+      grep -rA5 'variable\s*"' --include='*.tf' | \
+        grep -B5 'variable' | grep -L 'description' | head -20
+signals:
+  critical:
+  - id: IAC-VAR-CRIT-001
+    signal: Sensitive values in .tfvars committed to version control
+    evidence_pattern: (password|secret|key|token|credential)\s*=\s*"[^$\{]
+    explanation: |
+      Sensitive values in version-controlled .tfvars files expose
+      credentials to anyone with repository access, creating severe
+      security vulnerabilities.
+    remediation: Use secret managers, environment variables, or encrypted .tfvars (SOPS)
+  - id: IAC-VAR-CRIT-002
+    signal: Sensitive variables not marked as sensitive
+    evidence_indicators:
+    - Variables named password/secret/key without sensitive=true
+    - Sensitive data visible in plan/apply output
+    explanation: |
+      Without sensitive marking, credentials appear in Terraform
+      output, logs, and state files in plaintext.
+    remediation: Add sensitive = true to all variables containing secrets
+  high:
+  - id: IAC-VAR-HIGH-001
+    signal: Variables without type constraints
+    evidence_indicators:
+    - Variables with no type specified
+    - Implicit any type usage
+    explanation: |
+      Untyped variables accept any value, leading to runtime errors
+      instead of early validation failures.
+    remediation: Add explicit type constraints to all variables
+  - id: IAC-VAR-HIGH-002
+    signal: Variables without descriptions
+    evidence_indicators:
+    - Variable blocks missing description attribute
+    - Empty or non-informative descriptions
+    explanation: |
+      Undocumented variables make modules difficult to use correctly,
+      leading to misconfigurations.
+    remediation: Add meaningful descriptions to all variables explaining purpose and constraints
+  - id: IAC-VAR-HIGH-003
+    signal: Overly permissive default values
+    evidence_indicators:
+    - Default to 0.0.0.0/0 for CIDR blocks
+    - Default to * for permissions
+    explanation: |
+      Permissive defaults create security risks when users don't
+      explicitly override with appropriate values.
+    remediation: Use restrictive defaults or require explicit values for security-sensitive variables
+  medium:
+  - id: IAC-VAR-MED-001
+    signal: Complex variables without validation rules
+    evidence_indicators:
+    - Object types without validation
+    - String variables that should be constrained
+    remediation: Add validation blocks for complex variables to catch errors early
+  - id: IAC-VAR-MED-002
+    signal: Inconsistent variable naming
+    evidence_indicators:
+    - Mixed naming conventions (camelCase, snake_case)
+    - Unclear or ambiguous names
+    remediation: Follow snake_case convention per Terraform style guide
+  - id: IAC-VAR-MED-003
+    signal: Variables duplicated across modules
+    evidence_indicators:
+    - Same variable defined in multiple modules with different descriptions
+    - Inconsistent default values for same variable
+    remediation: Standardize common variables across modules
+  - id: IAC-VAR-MED-004
+    signal: Excessive number of variables without grouping
+    evidence_indicators:
+    - More than 30 variables in a single module
+    - No logical grouping via variable files or object types
+    remediation: Group related variables into object types or split module
+  low:
+  - id: IAC-VAR-LOW-001
+    signal: Variables not organized alphabetically or logically
+    evidence_indicators:
+    - Random ordering of variables
+    - Related variables scattered in file
+    remediation: Organize variables logically (required first, then optional) or alphabetically
+  - id: IAC-VAR-LOW-002
+    signal: Unused variables defined
+    evidence_indicators:
+    - Variables defined but never referenced
+    remediation: Remove unused variables to reduce confusion
+  positive:
+  - id: IAC-VAR-POS-001
+    signal: Comprehensive variable validation
+    evidence_pattern: validation\s*\{[^}]*condition
+  - id: IAC-VAR-POS-002
+    signal: Well-documented variables with examples
+    evidence_indicators:
+    - Descriptions include usage examples
+    - Type constraints with clear structures
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Variable Definition Analysis
+    description: |
+      Analyze all variable definitions for completeness,
+      typing, and documentation quality.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Count total variables
+      command: grep -rh 'variable\s*"' --include='*.tf' | wc -l
+    - purpose: Find variables without types
+      command: grep -rA10 'variable\s*"' --include='variables.tf' | grep -B10 '}' | grep -v 'type\s*='
+        | grep 'variable\s*"' | head -20
+    - purpose: Find variables without descriptions
+      command: grep -rA10 'variable\s*"' --include='variables.tf' | grep -B10 '}' | grep -v 'description'
+        | grep 'variable\s*"' | head -20
+    - purpose: Check for validation blocks
+      command: grep -rn 'validation\s*{' --include='*.tf' | wc -l
+    expected_findings:
+    - Variable completeness metrics
+    - Variables lacking type or description
+    - Validation coverage
+  - id: '2'
+    name: Sensitive Variable Assessment
+    description: |
+      Evaluate handling of sensitive variables and identification
+      of potentially sensitive data.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find sensitive variable declarations
+      command: grep -rn 'sensitive\s*=\s*true' --include='*.tf'
+    - purpose: Find potentially sensitive variables not marked
+      command: grep -rn 'variable\s*"[^"]*\(password\|secret\|key\|token\|credential\)' --include='*.tf'
+        | grep -v sensitive
+    - purpose: Check tfvars for sensitive values
+      command: grep -rn '\(password\|secret\|key\|token\)\s*=' --include='*.tfvars' 2>/dev/null | head
+        -10
+    expected_findings:
+    - Sensitive variable handling
+    - Potential sensitive data exposure
+    - Variable file security
+  - id: '3'
+    name: Type Constraint Review
+    description: |
+      Assess the quality and appropriateness of type constraints
+      on variables.
+    duration_estimate: 15 min
+    commands:
+    - purpose: List all type constraints used
+      command: grep -rh 'type\s*=' --include='variables.tf' | sort | uniq -c | sort -rn
+    - purpose: Find complex object types
+      command: grep -rA20 'type\s*=\s*object' --include='*.tf' | head -50
+    - purpose: Find list/map types
+      command: grep -rn 'type\s*=\s*\(list\|map\)' --include='*.tf'
+    expected_findings:
+    - Type constraint patterns
+    - Complex type usage
+    - Type consistency
+  - id: '4'
+    name: Default Value Analysis
+    description: |
+      Evaluate default values for appropriateness, security,
+      and consistency.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find variables with defaults
+      command: grep -rA10 'variable\s*"' --include='variables.tf' | grep 'default\s*=' | head -30
+    - purpose: Check for potentially insecure defaults
+      command: grep -rn 'default\s*=.*\(0\.0\.0\.0/0\|\*\|any\)' --include='*.tf'
+    - purpose: Find required variables (no default)
+      command: grep -rA10 'variable\s*"' --include='variables.tf' | grep -B10 '}' | grep -v 'default'
+        | grep 'variable\s*"' | head -20
+    expected_findings:
+    - Default value patterns
+    - Potentially insecure defaults
+    - Required vs optional variable balance
+  - id: '5'
+    name: Variable Organization Structure
+    description: |
+      Review the overall organization of variables across
+      files and modules.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Count variables per file
+      command: 'for f in $(find . -name ''variables.tf''); do echo "$f: $(grep -c ''variable\s*"'' $f
+        2>/dev/null || echo 0)"; done | sort -t: -k2 -rn'
+    - purpose: Check for locals.tf files
+      command: find . -name 'locals.tf'
+    - purpose: Analyze local value usage
+      command: grep -rn 'locals\s*{' --include='*.tf' | wc -l
+    expected_findings:
+    - Variable distribution across files
+    - Module variable complexity
+    - Local value usage patterns
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Variable Quality Metrics
+    - Security Assessment
+    - Recommendations
+    - Variable Standards Proposal
+  confidence_guidance:
+    high: Direct analysis of variable definitions
+    medium: Pattern-based assessment requiring interpretation
+    low: Inferred from incomplete data
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-variables
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Variable analysis requires thorough examination
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: var-001
+  item: No sensitive values in .tfvars files
+  level: CRITICAL
+  verification: grep -rE '(password|secret|api_key|token|credential)\s*=\s*"[^$\{]' --include='*.tfvars'
+    . 2>/dev/null | wc -l | xargs -I{} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: var-002
+  item: All sensitive variables marked as sensitive
+  level: CRITICAL
+  verification: grep -rn 'variable\s*"[^"]*\(password\|secret\|key\|token\)' --include='*.tf' | grep -v
+    sensitive | wc -l | xargs -I{} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: var-003
+  item: All variables have type constraints
+  level: BLOCKING
+  verification: manual
+  verification_notes: Review variables.tf files to verify all variables have type attribute
+  expected: Confirmed by reviewer
+- id: var-004
+  item: All variables have descriptions
+  level: BLOCKING
+  verification: manual
+  verification_notes: Review variables.tf files to verify all variables have description attribute
+  expected: Confirmed by reviewer
+- id: var-005
+  item: No overly permissive defaults
+  level: WARNING
+  verification: grep -rn 'default\s*=.*0\.0\.0\.0/0' --include='*.tf' | wc -l | xargs -I{} test {} -eq
+    0 && echo PASS || echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CIS Benchmarks
+    controls:
+    - Configuration Management
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.iac-structure.module-organization
+  - infrastructure-as-code.security-compliance.secret-handling

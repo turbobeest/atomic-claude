@@ -1,0 +1,457 @@
+audit:
+  id: security-trust.authentication.sso-federated-identity
+  name: SSO/Federated Identity Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: authentication
+  tier: phd
+  estimated_duration: 4 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines Single Sign-On (SSO) and federated identity
+    implementations including SAML 2.0, OpenID Connect, and WS-Federation.
+    It evaluates XML signature validation, assertion handling, IdP trust
+    configuration, replay protection, metadata security, and IdP-initiated
+    SSO vulnerabilities per OWASP SAML Security Cheat Sheet.
+  why_it_matters: |
+    SSO implementations are high-value targets for authentication bypass.
+    SAML signature wrapping attacks (XSW) have compromised enterprise
+    SSO systems including Oracle Access Manager (CVE-2021-35587, CVSS 9.8).
+    Recent vulnerabilities like CVE-2025-47949 in samlify demonstrate ongoing
+    risks from CWE-347 (Improper Verification of Cryptographic Signature).
+    Golden SAML attacks enable persistent unauthorized access by forging
+    SAML responses when IdP signing keys are compromised.
+  when_to_run:
+  - Before production deployment of SSO
+  - After changes to IdP configuration
+  - During security assessments
+  - When integrating new identity providers
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: SSO/SAML/OIDC implementation code
+  - type: configuration
+    description: IdP metadata and SP configuration
+  access_requirements:
+  - Read access to SSO implementation codebase
+  - Access to IdP and SP configuration
+  - Understanding of federated identity architecture
+discovery:
+  code_patterns:
+  - pattern: saml|SAML|saml2|SAML2
+    type: regex
+    scope: source
+    purpose: Locate SAML implementation
+  - pattern: signature.*verify|verify.*signature|validateSignature
+    type: regex
+    scope: source
+    purpose: Find signature verification code
+  - pattern: xml.*parse|parseXml|DOMParser|etree\.parse
+    type: regex
+    scope: source
+    purpose: Identify XML parsing for XXE risks
+  - pattern: Assertion|NameID|Subject|Conditions
+    type: regex
+    scope: source
+    purpose: Find SAML assertion handling
+  - pattern: RelayState|InResponseTo|NotOnOrAfter
+    type: regex
+    scope: source
+    purpose: Check assertion validation fields
+  - pattern: idp.*initiated|unsolicited.*response
+    type: regex
+    scope: source
+    purpose: Detect IdP-initiated SSO
+  - pattern: metadata|entityID|singleSignOnService
+    type: regex
+    scope: source
+    purpose: Find IdP metadata handling
+  - pattern: x509|X509Certificate|signing.*cert
+    type: regex
+    scope: source
+    purpose: Locate certificate handling
+  - pattern: passport-saml|saml2-js|samlify|node-saml
+    type: regex
+    scope: source
+    purpose: Identify SAML library usage
+  file_patterns:
+  - glob: '**/*saml*'
+    purpose: SAML implementation files
+  - glob: '**/*sso*'
+    purpose: SSO configuration files
+  - glob: '**/metadata*.xml'
+    purpose: SAML metadata files
+  - glob: '**/idp*'
+    purpose: Identity provider configuration
+knowledge_sources:
+  specifications:
+  - id: saml-core
+    name: SAML 2.0 Core Specification
+    url: http://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+    offline_cache: true
+    priority: required
+  - id: oidc-core
+    name: OpenID Connect Core 1.0
+    url: https://openid.net/specs/openid-connect-core-1_0.html
+    offline_cache: true
+    priority: required
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: NIST SP 800-207 Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-saml
+    name: OWASP SAML Security Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/SAML_Security_Cheat_Sheet.html
+    offline_cache: true
+  - id: workos-saml-vulns
+    name: Common SAML Security Vulnerabilities
+    url: https://workos.com/guide/common-saml-security-vulnerabilities
+    offline_cache: true
+  papers:
+  - id: xsw-attacks
+    title: 'On Breaking SAML: Be Whoever You Want to Be'
+    url: https://www.usenix.org/conference/usenixsecurity12/technical-sessions/presentation/somorovsky
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: SAML vulnerability patterns
+    offline_capable: true
+  scripts:
+  - id: sso-security-scanner
+    language: bash
+    purpose: Scan for SSO security issues
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== SSO Security Scanner ==="
+      echo "SAML Implementation:"
+      grep -rn "saml\|SAML" --include="*.js" --include="*.ts" --include="*.py" --include="*.java" .
+      echo ""
+      echo "Signature Verification:"
+      grep -rn "verify.*signature\|validateSignature\|signatureVerification" --include="*.js" --include="*.ts" --include="*.py" .
+      echo ""
+      echo "IdP-Initiated SSO (Higher Risk):"
+      grep -rn "idp.*initiated\|unsolicited\|allowUnsolicitedAuthnResponse" --include="*.js" --include="*.ts" --include="*.py" .
+signals:
+  critical:
+  - id: AUTH-SSO-CRIT-001
+    signal: SAML signature verification disabled or bypassable
+    cwe: CWE-347
+    evidence_pattern: wantAssertionsSigned\s*[=:]\s*false|validateSignature\s*[=:]\s*false|verify.*[=:].*false
+    explanation: |
+      Disabled SAML signature verification allows attackers to forge
+      assertions and impersonate any user. CVE-2025-47949 in samlify
+      and CVE-2020-2021 in PAN-OS (CVSS 10) demonstrate critical impact
+      of signature bypass vulnerabilities.
+    remediation: |
+      Enable signature verification on all SAML responses and assertions.
+      Validate both response and assertion signatures. Use well-maintained
+      SAML libraries with security patches applied. Implement certificate
+      pinning for IdP certificates.
+  - id: AUTH-SSO-CRIT-002
+    signal: XML Signature Wrapping (XSW) vulnerability pattern
+    cwe: CWE-347
+    evidence_pattern: getElementsByTagName.*Assertion|firstChild.*Assertion(?!.*validate)
+    explanation: |
+      XML Signature Wrapping attacks manipulate SAML XML to move signed
+      content while adding unsigned malicious assertions. Many SAML
+      libraries have been vulnerable to various XSW attack variants.
+    remediation: |
+      Use SAML libraries with XSW protection. Validate signature covers
+      the actual assertion being processed, not just any element.
+      Implement schema validation before signature verification.
+      Use libraries updated after 2020 with XSW mitigations.
+  - id: AUTH-SSO-CRIT-003
+    signal: IdP signing certificate not validated or self-signed accepted
+    cwe: CWE-295
+    evidence_pattern: validateCert\s*[=:]\s*false|rejectUnauthorized\s*[=:]\s*false|allowSelfSigned
+    explanation: |
+      Accepting unvalidated or self-signed IdP certificates enables
+      man-in-the-middle attacks. Attackers can present their own
+      certificate and forge SAML responses that appear valid.
+    remediation: |
+      Validate IdP certificate against trusted CA or pinned certificate.
+      Reject self-signed certificates in production. Implement certificate
+      expiration monitoring. Use secure metadata exchange.
+  high:
+  - id: AUTH-SSO-HIGH-001
+    signal: IdP-initiated SSO enabled without CSRF protection
+    cwe: CWE-352
+    evidence_pattern: allowUnsolicitedAuthnResponse\s*[=:]\s*true|idpInitiated\s*[=:]\s*true
+    explanation: |
+      IdP-initiated SSO (unsolicited responses) lacks the SP-generated
+      AuthnRequest, eliminating CSRF protection. Attackers can trick
+      users into authenticating to malicious sessions. OWASP recommends
+      avoiding IdP-initiated SSO when possible.
+    remediation: |
+      Prefer SP-initiated SSO with InResponseTo validation. If IdP-initiated
+      is required, implement additional CSRF protections and session
+      binding. Consider one-time tokens for IdP-initiated flows.
+  - id: AUTH-SSO-HIGH-002
+    signal: SAML assertion replay protection missing
+    cwe: CWE-294
+    evidence_pattern: assertion(?!.*cache|.*replay|.*NotOnOrAfter|.*InResponseTo)
+    explanation: |
+      Without replay protection, intercepted SAML assertions can be
+      reused to authenticate as the victim. Time-based conditions
+      (NotOnOrAfter) and InResponseTo validation prevent replay attacks.
+    remediation: |
+      Validate NotBefore and NotOnOrAfter conditions on assertions.
+      Implement assertion ID caching to detect replays within validity
+      window. Validate InResponseTo matches original AuthnRequest ID.
+      Use short assertion validity windows (5 minutes or less).
+  - id: AUTH-SSO-HIGH-003
+    signal: RelayState parameter not validated for open redirect
+    cwe: CWE-601
+    evidence_pattern: RelayState(?!.*validate|.*whitelist|.*allowed)
+    explanation: |
+      The RelayState parameter specifies post-authentication redirect.
+      Without validation, attackers can redirect users to malicious
+      sites after authentication, enabling credential phishing.
+    remediation: |
+      Validate RelayState against whitelist of allowed URLs.
+      Use relative paths or URL signing for RelayState.
+      Reject external URLs in RelayState parameter.
+  - id: AUTH-SSO-HIGH-004
+    signal: XXE vulnerability in SAML XML parsing
+    cwe: CWE-611
+    evidence_pattern: DOMParser(?!.*disallow.*dtd)|etree\.parse(?!.*no_network)|parseXml(?!.*disableEntityLoader)
+    explanation: |
+      XML External Entity (XXE) vulnerabilities in SAML parsing enable
+      server-side request forgery, file disclosure, and denial of
+      service. Shibboleth SSRF vulnerability in 2023 demonstrates
+      ongoing risks in SAML XML handling.
+    remediation: |
+      Disable DTD processing and external entity resolution.
+      Use defusedxml in Python, secure parser settings in Java.
+      Validate against SAML schema after secure parsing.
+  medium:
+  - id: AUTH-SSO-MED-001
+    signal: SAML metadata not validated or fetched insecurely
+    cwe: CWE-494
+    evidence_pattern: metadata.*http://|fetch.*metadata(?!.*verify|.*signature)
+    remediation: |
+      Fetch metadata over HTTPS only. Validate metadata signatures.
+      Pin known good metadata or use manual configuration.
+      Implement metadata refresh with validation.
+  - id: AUTH-SSO-MED-002
+    signal: Weak SAML assertion conditions
+    cwe: CWE-613
+    evidence_pattern: NotOnOrAfter.*addMinutes\(30\)|validity.*(hour|day)
+    remediation: |
+      Set assertion validity to 5 minutes or less. Use tight time
+      skew tolerance (1-2 minutes). Implement clock synchronization.
+  - id: AUTH-SSO-MED-003
+    signal: Audience restriction not validated
+    cwe: CWE-345
+    evidence_pattern: Audience(?!.*validate|.*check)|ignoreAudience
+    remediation: |
+      Validate Audience element matches SP entity ID.
+      Reject assertions intended for other service providers.
+      Implement strict audience validation.
+  - id: AUTH-SSO-MED-004
+    signal: Session not bound to SAML authentication context
+    cwe: CWE-384
+    evidence_pattern: session.*create(?!.*saml|.*assertion)|login(?!.*validateAssertion)
+    remediation: |
+      Bind session to SAML session index for single logout.
+      Store authentication context level in session.
+      Implement step-up authentication when required.
+  low:
+  - id: AUTH-SSO-LOW-001
+    signal: SAML debugging enabled in production
+    evidence_pattern: saml.*debug\s*[=:]\s*true|LOG_SAML.*true
+    remediation: |
+      Disable SAML debug logging in production.
+      Ensure assertions are not logged in plaintext.
+      Use secure audit logging for authentication events.
+  positive:
+  - id: AUTH-SSO-POS-001
+    signal: SAML signature verification enforced
+    evidence_pattern: wantAssertionsSigned\s*[=:]\s*true|requireSignedAssertion
+  - id: AUTH-SSO-POS-002
+    signal: SP-initiated SSO preferred
+    evidence_pattern: allowUnsolicitedAuthnResponse\s*[=:]\s*false|spInitiated.*only
+  - id: AUTH-SSO-POS-003
+    signal: Assertion replay cache implemented
+    evidence_pattern: assertionCache|replayCache|assertion.*dedup
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify SSO Implementation
+    description: |
+      Catalog SSO protocols (SAML, OIDC) and libraries in use.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find SAML implementation
+      command: grep -rn 'saml\|SAML\|passport-saml\|samlify\|node-saml' --include='*.js' --include='*.ts'
+        --include='*.py' --include='*.java' .
+    - purpose: Find OIDC implementation
+      command: grep -rn 'oidc\|openid-connect\|passport-openidconnect' --include='*.js' --include='*.ts'
+        --include='*.py' .
+    expected_findings:
+    - SSO protocol identification
+    - Library version assessment
+  - id: '2'
+    name: Audit Signature Verification
+    description: |
+      Verify SAML signatures are properly validated.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Check signature verification settings
+      command: grep -rn 'wantAssertionsSigned\|validateSignature\|signatureVerification\|verify.*signature'
+        --include='*.js' --include='*.ts' --include='*.py' --include='*.java' .
+    - purpose: Check for disabled verification
+      command: grep -rn 'verify.*false\|validateSignature.*false' --include='*.js' --include='*.ts' --include='*.py'
+        .
+    expected_findings:
+    - Signature verification status
+    - XSW protection assessment
+  - id: '3'
+    name: Review Assertion Validation
+    description: |
+      Check assertion conditions, replay protection, and audience
+      validation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find assertion handling
+      command: grep -rn 'Assertion\|NotOnOrAfter\|NotBefore\|InResponseTo\|Audience' --include='*.js'
+        --include='*.ts' --include='*.py' .
+    - purpose: Check for replay cache
+      command: grep -rn 'cache\|replay\|dedup' --include='*.js' --include='*.ts' --include='*.py' . |
+        grep -i saml
+    expected_findings:
+    - Assertion validation completeness
+    - Replay protection status
+  - id: '4'
+    name: Assess IdP Configuration
+    description: |
+      Review IdP trust configuration and certificate validation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find IdP configuration
+      command: grep -rn 'idp\|entityID\|metadata\|x509\|certificate' --include='*.js' --include='*.ts'
+        --include='*.py' --include='*.yaml' --include='*.json' .
+    - purpose: Check IdP-initiated settings
+      command: grep -rn 'allowUnsolicited\|idpInitiated' --include='*.js' --include='*.ts' --include='*.py'
+        .
+    expected_findings:
+    - IdP trust configuration
+    - Certificate validation status
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - SSO Protocol Analysis
+    - Signature Security Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Direct evidence from code and configuration
+    medium: Configuration patterns requiring runtime verification
+    low: Potential issues requiring penetration testing
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-saml
+      priority: required
+    - source_id: saml-core
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: SSO security requires thorough analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: sso-001
+  item: SAML signature verification enabled
+  level: CRITICAL
+  verification: |
+    if grep -rq 'wantAssertionsSigned.*false\|validateSignature.*false\|verify.*signature.*false' --include='*.js' --include='*.ts' --include='*.py' .; then echo "FAIL"; else echo "PASS"; fi
+  expected: PASS
+- id: sso-002
+  item: IdP certificate validation enabled
+  level: CRITICAL
+  verification: |
+    if grep -rq 'validateCert.*false\|allowSelfSigned.*true\|rejectUnauthorized.*false' --include='*.js' --include='*.ts' --include='*.py' .; then echo "FAIL"; else echo "PASS"; fi
+  expected: PASS
+- id: sso-003
+  item: XXE protection in XML parsing
+  level: BLOCKING
+  verification: |
+    if grep -rq 'defusedxml\|disableEntityExpansion\|FEATURE_SECURE_PROCESSING' --include='*.py' --include='*.java' .; then echo "PASS"; else echo "WARNING - Verify XML parser security"; fi
+  expected: PASS
+- id: sso-004
+  item: Assertion replay protection implemented
+  level: BLOCKING
+  verification: |
+    if grep -rq 'cache.*assertion\|replay.*protect\|InResponseTo.*validate' --include='*.js' --include='*.ts' --include='*.py' .; then echo "PASS"; else echo "WARNING - Verify replay protection"; fi
+  expected: PASS
+- id: sso-005
+  item: IdP-initiated SSO disabled or secured
+  level: WARNING
+  verification: |
+    if grep -rq 'allowUnsolicitedAuthnResponse.*true\|idpInitiated.*true' --include='*.js' --include='*.ts' --include='*.py' .; then echo "WARNING - IdP-initiated enabled"; else echo "PASS"; fi
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP ASVS
+    controls:
+    - V2.1
+    - V3.1
+  - framework: SOC 2
+    controls:
+    - CC6.1
+relationships:
+  commonly_combined:
+  - security-trust.authentication.oauth2-implementation
+  - security-trust.authentication.session-management
+  - security-trust.authentication.token-lifecycle

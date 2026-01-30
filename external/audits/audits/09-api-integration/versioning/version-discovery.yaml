@@ -1,0 +1,264 @@
+audit:
+  id: api-integration.versioning.version-discovery
+  name: Version Discovery Assessment
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: api-integration
+  category_number: 9
+  subcategory: versioning
+  tier: expert
+  estimated_duration: 1 hour
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: documentation
+  default_profiles:
+  - full
+  parallelizable: true
+description:
+  what: |
+    Evaluates how API consumers can discover available versions, including
+    version listing endpoints, documentation, response headers, and
+    discoverability through hypermedia. Examines whether consumers can
+    programmatically determine supported versions.
+  why_it_matters: |
+    Consumers need to know what versions are available to plan migrations
+    and choose the right version for their needs. Poor discoverability leads
+    to use of deprecated versions, unexpected breakages when versions sunset,
+    and increased support burden.
+  when_to_run:
+  - During API onboarding documentation review
+  - When implementing new versioning
+  - Before deprecating versions
+prerequisites:
+  required_artifacts:
+  - type: api-spec
+    description: OpenAPI specifications
+  - type: api-docs
+    description: API documentation
+  access_requirements:
+  - Read access to API documentation
+  - Access to running API for discovery testing
+discovery:
+  code_patterns:
+  - pattern: /versions|/api/versions|supported.*versions
+    type: regex
+    scope: source
+    purpose: Version listing endpoints
+  - pattern: X-API-Versions|Available-Versions
+    type: regex
+    scope: source
+    purpose: Version headers
+  - pattern: api.*info|version.*info|status.*endpoint
+    type: regex
+    scope: source
+    purpose: Version info endpoints
+  file_patterns:
+  - glob: '**/*openapi*.{yaml,yml,json}'
+    purpose: OpenAPI specifications
+  - glob: '**/docs/**/*.md'
+    purpose: Documentation files
+knowledge_sources:
+  guides:
+  - id: api-discoverability
+    name: API Discoverability Best Practices
+    url: https://cloud.google.com/apis/design/standard_methods
+    offline_cache: true
+  specifications:
+  - id: rfc-5988
+    name: RFC 5988 - Web Linking
+    url: https://datatracker.ietf.org/doc/html/rfc5988
+    offline_cache: true
+    priority: recommended
+tooling:
+  static_analysis:
+  - tool: spectral
+    purpose: Check OpenAPI for version info
+    offline_capable: true
+signals:
+  critical:
+  - id: DISCOVER-CRIT-001
+    signal: No way to discover available API versions
+    evidence_indicators:
+    - No version listing endpoint
+    - No version info in documentation
+    - No version headers in responses
+    explanation: |
+      Consumers cannot plan for version migrations or know which versions
+      to use. They may accidentally use deprecated versions or miss new
+      features.
+    remediation: Add version listing endpoint or document versions clearly
+  - id: DISCOVER-CRIT-002
+    signal: Version documentation outdated or incorrect
+    evidence_pattern: deprecated.*v[0-9].*still.*documented|removed.*still.*listed
+    explanation: |
+      Outdated version documentation leads consumers to integrate with
+      versions that no longer exist or are about to sunset.
+    remediation: Keep version documentation synchronized with actual availability
+  high:
+  - id: DISCOVER-HIGH-001
+    signal: No programmatic version discovery
+    evidence_indicators:
+    - Versions only documented in human-readable docs
+    - No API endpoint for version listing
+    explanation: |
+      Without programmatic discovery, automated tools and CI/CD pipelines
+      cannot detect version availability or deprecations.
+    remediation: Implement /versions or /api endpoint returning version info
+  - id: DISCOVER-HIGH-002
+    signal: Version response header missing
+    evidence_pattern: (?!X-API-Version|API-Version)
+    explanation: |
+      Response headers not indicating version makes debugging difficult.
+      Consumers cannot verify which version responded to their request.
+    remediation: Add API-Version header to all responses
+  medium:
+  - id: DISCOVER-MED-001
+    signal: No version links in HATEOAS responses
+    evidence_indicators:
+    - HATEOAS without version-related links
+    - No link to version documentation
+    remediation: Add version-related links to hypermedia responses
+  - id: DISCOVER-MED-002
+    signal: OpenAPI spec version mismatch with actual API
+    evidence_pattern: version.*mismatch|spec.*outdated
+    remediation: Synchronize OpenAPI version with deployed API version
+  low:
+  - id: DISCOVER-LOW-001
+    signal: No changelog between versions
+    remediation: Provide changelog documenting changes between versions
+  positive:
+  - id: DISCOVER-POS-001
+    signal: Version listing endpoint with metadata
+  - id: DISCOVER-POS-002
+    signal: API-Version header in all responses
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Check Version Documentation
+    description: |
+      Review documentation for version information.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find version in OpenAPI
+      command: grep -n 'version:' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null | head -5
+    - purpose: Find version docs
+      command: grep -rn 'version\|Version' --include='*.md' . | grep -i 'api\|available\|supported' |
+        head -20
+    expected_findings:
+    - Documented version info
+    - Version availability
+  - id: '2'
+    name: Find Version Discovery Endpoints
+    description: |
+      Look for endpoints that expose version information.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find version endpoints
+      command: grep -rn '/versions\|/api-info\|/status' --include='*.java' --include='*.ts' --include='*.yaml'
+        .
+    - purpose: Find health/info endpoints
+      command: grep -rn 'health\|info\|status' --include='*.java' --include='*.ts' . | grep -i endpoint
+        | head -20
+    expected_findings:
+    - Version discovery endpoints
+    - Info/status endpoints
+  - id: '3'
+    name: Check Response Headers
+    description: |
+      Verify version information in response headers.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find version headers
+      command: grep -rn 'X-API-Version\|API-Version\|setHeader.*version' --include='*.java' --include='*.ts'
+        .
+    - purpose: Find response interceptors
+      command: grep -rn 'interceptor\|middleware\|filter' --include='*.java' --include='*.ts' . | grep
+        -i version | head -10
+    expected_findings:
+    - Version header implementation
+    - Response modification patterns
+  - id: '4'
+    name: Evaluate Discoverability Mechanisms
+    description: |
+      Assess overall version discoverability.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find HATEOAS version links
+      command: grep -rn '_links.*version\|version.*_links\|rel.*version' --include='*.java' --include='*.ts'
+        .
+    - purpose: Check for API catalog
+      command: find . -name '*catalog*' -o -name '*registry*' 2>/dev/null | head -10
+    expected_findings:
+    - Hypermedia version links
+    - API catalog presence
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Discoverability Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Discovery mechanisms thoroughly analyzed
+    medium: Partial discoverability found
+    low: Limited discovery mechanisms
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: api-discoverability
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires runtime testing
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: discover-001
+  item: Version information documented
+  level: CRITICAL
+  verification: |
+    if grep -rq 'version' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null || grep -rq 'version' --include='*.md' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+  expected: PASS
+- id: discover-002
+  item: Version discovery endpoint exists
+  level: BLOCKING
+  verification: |
+    if grep -rq '/versions\|/api-info\|/api/v.*/info' --include='*.java' --include='*.ts' --include='*.yaml' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+  expected: PASS
+- id: discover-003
+  item: API-Version header in responses
+  level: WARNING
+  verification: |
+    if grep -rq 'X-API-Version\|API-Version' --include='*.java' --include='*.ts' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+  expected: PASS
+- id: discover-004
+  item: Version changelog maintained
+  level: WARNING
+  verification: |
+    if find . -name '*CHANGELOG*' -o -name '*changelog*' 2>/dev/null | grep -q .; then echo "PASS"; else echo "FAIL"; fi
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - api-service
+    - platform
+    - developer-portal
+relationships:
+  commonly_combined:
+  - api-integration.versioning.versioning-strategy
+  - api-integration.versioning.deprecation-communication

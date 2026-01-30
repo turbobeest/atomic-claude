@@ -1,0 +1,384 @@
+audit:
+  id: accessibility-inclusion.assistive-technology.voice-control-compatibility
+  name: Voice Control Compatibility
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: accessibility-inclusion
+  category_number: 15
+  subcategory: assistive-technology
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: manual
+  severity: high
+  scope: runtime
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: false
+description:
+  what: |
+    This audit evaluates application compatibility with voice control
+    assistive technologies used by people who cannot use traditional
+    keyboards or pointing devices due to motor impairments.
+
+    Voice control systems include:
+    - Dragon NaturallySpeaking (Windows) - industry standard
+    - macOS Voice Control - built-in Apple voice control
+    - Windows Voice Access - built-in Windows 11 voice control
+    - Android Voice Access
+    - iOS Voice Control
+
+    The audit verifies:
+    - All interactive elements have speakable names
+    - Visible labels match accessible names (WCAG 2.5.3)
+    - Click targets can be activated by voice
+    - Form fields can be filled via voice dictation
+    - Menus and dialogs are voice-operable
+    - Mouse-only interactions have voice alternatives
+  why_it_matters: |
+    Voice control users interact with applications by speaking commands:
+    - "Click [button name]"
+    - "Show numbers" (to see numeric overlays for clicking)
+    - "Type [text]"
+    - "Press Tab"
+
+    If controls don't have speakable names that match visible text, users
+    cannot activate them. If names don't match visible labels, users say
+    the visible text but nothing happens. This creates fundamental access
+    barriers for users with motor impairments.
+  when_to_run:
+  - During accessibility audits
+  - When adding new interactive elements
+  - After significant UI changes
+  - When motor accessibility feedback is received
+prerequisites:
+  required_artifacts:
+  - type: running_application
+    description: Application available for voice control testing
+  access_requirements:
+  - Voice control software (Dragon, macOS Voice Control, or Voice Access)
+  - Microphone for voice input
+  - Access to all application features
+discovery:
+  code_patterns:
+  - pattern: <button[^>]*>\s*<(svg|img|i)[^>]*>\s*</button>
+    type: regex
+    scope: source
+    purpose: Find icon-only buttons that need visible labels
+  - pattern: aria-label=['"][^'"]+['"]
+    type: regex
+    scope: source
+    purpose: Find elements with accessible names that may differ from visible text
+  - pattern: onClick|onmousedown|onmouseup
+    type: regex
+    scope: source
+    purpose: Find mouse event handlers that need voice alternatives
+  file_patterns:
+  - glob: '**/*.{js,jsx,ts,tsx}'
+    purpose: JavaScript components
+  - glob: '**/*.vue'
+    purpose: Vue components
+  - glob: '**/components/**'
+    purpose: Component library
+knowledge_sources:
+  specifications:
+  - id: wcag-2.5.3
+    name: 'WCAG 2.2 SC 2.5.3: Label in Name'
+    url: https://www.w3.org/WAI/WCAG22/Understanding/label-in-name.html
+    offline_cache: true
+    priority: required
+  - id: wcag-2.1.1
+    name: 'WCAG 2.2 SC 2.1.1: Keyboard'
+    url: https://www.w3.org/WAI/WCAG22/Understanding/keyboard.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: dragon-web
+    name: Dragon Web Extension Development Guide
+    url: https://www.nuance.com/dragon/business-solutions/accessibility.html
+    offline_cache: false
+  - id: apple-voice-control
+    name: Apple Voice Control User Guide
+    url: https://support.apple.com/guide/mac-help/voice-control
+    offline_cache: true
+tooling:
+  assessment_tools:
+  - tool: Dragon NaturallySpeaking
+    purpose: Industry-standard voice control testing
+  - tool: macOS Voice Control
+    purpose: Free macOS voice control testing
+  - tool: Windows Voice Access
+    purpose: Windows 11 voice control testing
+  scripts:
+  - id: label-mismatch-finder
+    language: bash
+    purpose: Find potential label/name mismatches
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Elements with aria-label (potential mismatches) ==="
+      grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+        'aria-label=' . | head -30
+
+      echo ""
+      echo "=== Icon-only buttons (may need visible labels) ==="
+      grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+        '<button[^>]*>[^<]*<.*Icon' . | grep -v "aria-label" | head -20
+signals:
+  critical:
+  - id: A11Y-VOICE-CRIT-001
+    signal: Interactive elements have no speakable name
+    evidence_indicators:
+    - Icon-only buttons without accessible names
+    - Buttons with only images inside
+    - Links with no text content
+    explanation: |
+      Voice control users cannot activate elements without speakable names.
+      They cannot say "click" followed by nothing, and show numbers mode
+      is inefficient for frequent use.
+    remediation: |
+      Add visible text labels to buttons. If icon-only design is required,
+      add aria-label that matches what a sighted user would describe the
+      button as (e.g., "close", "menu", "search").
+  - id: A11Y-VOICE-CRIT-002
+    signal: Accessible name does not contain visible label text
+    evidence_pattern: aria-label.*(?!visible text)
+    explanation: |
+      WCAG 2.5.3 requires that accessible names contain the visible label
+      text. When they differ, users speak the visible text but voice
+      control doesn't recognize it because the accessible name is different.
+    remediation: |
+      Ensure aria-label includes the visible text:
+      - Button says "Submit" visually
+      - aria-label should be "Submit" or "Submit form", not "Send"
+      Use aria-labelledby to point to visible text when possible.
+  high:
+  - id: A11Y-VOICE-HIGH-001
+    signal: Mouse-only interactions with no keyboard/voice alternative
+    evidence_indicators:
+    - Drag and drop without alternative
+    - Hover-triggered actions
+    - Right-click context menus only
+    explanation: |
+      Voice control can simulate clicks but not complex mouse gestures.
+      Interactions requiring hover, drag, or right-click are inaccessible.
+    remediation: |
+      Provide keyboard-accessible alternatives:
+      - Drag and drop: add move buttons or keyboard shortcuts
+      - Hover content: make accessible via focus or click
+      - Context menus: provide button-triggered menu alternative
+  - id: A11Y-VOICE-HIGH-002
+    signal: Complex widgets not voice-operable
+    evidence_indicators:
+    - Sliders requiring drag
+    - Color pickers without text input
+    - Map interactions without alternatives
+    explanation: |
+      Custom widgets may require interactions that cannot be replicated
+      via voice control, even with show numbers mode.
+    remediation: |
+      Provide voice-friendly alternatives:
+      - Sliders: add text input or increment buttons
+      - Color pickers: add hex/RGB text input
+      - Maps: add address search and coordinates display
+  medium:
+  - id: A11Y-VOICE-MED-001
+    signal: Ambiguous element names
+    evidence_indicators:
+    - Multiple elements with same name
+    - Generic names like 'Submit' appear multiple times
+    - No way to distinguish between similar controls
+    explanation: |
+      When multiple elements share the same name, saying "click [name]"
+      may activate the wrong one, requiring users to fall back to show
+      numbers mode.
+    remediation: |
+      Make names unique within context, or use aria-label to differentiate:
+      - "Submit contact form" vs "Submit search"
+      - "Delete item 1" vs "Delete item 2"
+  - id: A11Y-VOICE-MED-002
+    signal: Form fields difficult to fill via voice
+    evidence_indicators:
+    - Fields with specific format requirements
+    - Auto-formatting interrupts dictation
+    - Validation triggers while typing
+    explanation: |
+      Voice dictation may not match expected formats, and aggressive
+      validation can interrupt the dictation process.
+    remediation: |
+      Accept flexible input formats. Delay validation until field blur.
+      Provide clear format guidance that voice users can follow.
+  low:
+  - id: A11Y-VOICE-LOW-001
+    signal: Minor voice control inefficiencies
+    evidence_indicators:
+    - Names longer than necessary
+    - Suboptimal but functional interactions
+    explanation: |
+      Voice control works but could be more efficient with shorter
+      names or better interaction patterns.
+    remediation: |
+      Optimize based on voice control user feedback when available.
+  positive:
+  - id: A11Y-VOICE-POS-001
+    signal: All controls voice-accessible
+    evidence_indicators:
+    - All buttons have speakable names
+    - Names match visible labels
+    - All interactions voice-operable
+  - id: A11Y-VOICE-POS-002
+    signal: Voice control optimization implemented
+    evidence_indicators:
+    - Unique, concise element names
+    - Alternative interactions provided
+    - Form inputs voice-friendly
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: tester
+  steps:
+  - id: '1'
+    name: Inventory interactive elements
+    description: |
+      Identify all interactive elements and verify they have speakable
+      accessible names.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find potentially unlabeled elements
+      command: |
+        grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+          '<button' . | grep -v -E "(aria-label|>[A-Za-z])" | head -20
+    expected_findings:
+    - Elements needing voice-accessible names
+  - id: '2'
+    name: Verify label in name compliance
+    description: |
+      Check that accessible names include visible label text per
+      WCAG 2.5.3.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find aria-label attributes
+      command: |
+        grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+          'aria-label=' . | head -30
+    questions:
+    - Does each aria-label include the visible text?
+    - Are there mismatches between visible and accessible names?
+    expected_findings:
+    - Label/name mismatch issues
+  - id: '3'
+    name: Test with voice control software
+    description: |
+      Use voice control to navigate and interact with the application,
+      attempting to complete key user tasks.
+    duration_estimate: 60 min
+    questions:
+    - Can all buttons be activated by saying their name?
+    - Can forms be completed using voice dictation?
+    - Can menus and dialogs be operated by voice?
+    - Are there any interactions that require mouse?
+    expected_findings:
+    - Voice control usability assessment
+    - Specific elements that failed
+  - id: '4'
+    name: Test show numbers mode
+    description: |
+      Verify that show numbers mode (numeric overlays) works as fallback
+      for elements that can't be activated by name.
+    duration_estimate: 20 min
+    questions:
+    - Do numbers appear on all interactive elements?
+    - Can all elements be activated via number?
+    - Are numbers positioned correctly?
+    expected_findings:
+    - Show numbers mode functionality
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Voice Control Testing Results
+    - Label in Name Compliance
+    - Alternative Interaction Needs
+    - Recommendations
+  confidence_guidance:
+    high: Tested with voice control software on all major flows
+    medium: Spot-tested with voice control
+    low: Code analysis without voice control testing
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: wcag-2.5.3
+      priority: required
+    - source_id: wcag-2.1.1
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires voice control software testing
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: voice-001
+  item: All interactive elements have speakable names
+  level: CRITICAL
+  verification: manual
+  verification_notes: Test with voice control that all buttons can be activated by name
+  expected: Confirmed by reviewer
+- id: voice-002
+  item: Accessible names contain visible label text (WCAG 2.5.3)
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify aria-labels include visible text
+  expected: Confirmed by reviewer
+- id: voice-003
+  item: No mouse-only interactions
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify all interactions have keyboard/voice alternatives
+  expected: Confirmed by reviewer
+- id: voice-004
+  item: Primary user flows completable via voice
+  level: BLOCKING
+  verification: manual
+  verification_notes: Complete main tasks using only voice control
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - web-application
+    - spa
+    - website
+    - forms-heavy
+  compliance_frameworks:
+  - framework: WCAG 2.2
+    controls:
+    - 2.5.3
+    - 2.1.1
+  - framework: Section 508
+    controls:
+    - '1194.22'
+  - framework: EN 301 549
+    controls:
+    - 9.2.5.3
+    - 9.2.1.1
+relationships:
+  commonly_combined:
+  - accessibility-inclusion.robust-compatibility.aria-label-completeness
+  - accessibility-inclusion.assistive-technology.switch-device-compatibility
+  - accessibility-inclusion.robust-compatibility.assistive-tech-compatibility

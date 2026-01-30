@@ -1,0 +1,300 @@
+audit:
+  id: performance-efficiency.latency.geographic-latency
+  name: Geographic Latency Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: latency
+  tier: expert
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit measures latency experienced by users in different
+    geographic regions. It evaluates the impact of distance from
+    servers, CDN effectiveness, edge caching, and multi-region
+    deployment strategies. The audit identifies regions with poor
+    performance and assesses the need for additional points of presence.
+  why_it_matters: |
+    The speed of light imposes minimum latency based on distance.
+    A user in Sydney accessing a server in Virginia experiences at
+    least 150ms of round-trip latency. For global applications,
+    geographic latency can dominate the user experience. Understanding
+    regional performance helps prioritize infrastructure investments.
+  when_to_run:
+  - When expanding to new geographic markets
+  - After CDN or multi-region deployment changes
+  - When receiving user complaints from specific regions
+  - During infrastructure capacity planning
+prerequisites:
+  required_artifacts:
+  - type: infrastructure_map
+    description: Understanding of server and CDN locations
+  - type: regional_metrics
+    description: Metrics segmented by user region or edge location
+  access_requirements:
+  - Access to CDN analytics
+  - Access to RUM (Real User Monitoring) data
+  - Ability to run synthetic tests from multiple regions
+discovery:
+  metrics_queries:
+  - system: CloudFront
+    query: SELECT AVG(time_taken) FROM cloudfront_logs GROUP BY edge_location
+    purpose: Latency by CDN edge location
+    threshold: < 200ms for static assets
+  - system: Prometheus
+    query: |
+      histogram_quantile(0.99,
+        sum(rate(http_request_duration_seconds_bucket[5m])) by (le, region)
+      )
+    purpose: API latency by user region
+    threshold: < 1s for all regions
+  - system: RUM
+    query: SELECT percentile(duration, 99) FROM PageView FACET countryCode
+    purpose: Page load time by country
+    threshold: < 3s for all major markets
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: aws-global-infrastructure
+    name: AWS Global Infrastructure
+    url: https://aws.amazon.com/about-aws/global-infrastructure/
+    offline_cache: true
+  - id: cloudflare-network
+    name: Cloudflare Network Performance
+    url: https://www.cloudflare.com/network/
+    offline_cache: true
+  papers:
+  - id: speed-of-light-latency
+    title: Networking Named Content - Speed of Light Limitations
+    url: https://dl.acm.org/doi/10.1145/1658939.1658941
+tooling:
+  infrastructure_tools:
+  - tool: curl
+    purpose: Measure latency from current location
+    command: |
+      curl -w "TTFB: %{time_starttransfer}s, Total: %{time_total}s\n" \
+        -o /dev/null -s https://api.example.com/health
+  - tool: webpagetest
+    purpose: Synthetic testing from multiple locations
+    command: webpagetest test https://www.example.com --location EC2-us-west-2
+  - tool: globalping
+    purpose: Ping from multiple global locations
+    command: globalping ping api.example.com --from 'World'
+  monitoring_queries:
+  - system: CloudWatch RUM
+    query: |
+      SELECT AVG(PerformanceNavigationDuration)
+      FROM RUM
+      WHERE AppMonitorName = 'myapp'
+      GROUP BY CountryCode
+    purpose: Navigation timing by country
+  - system: New Relic
+    query: |
+      SELECT percentile(duration, 99)
+      FROM PageView
+      WHERE appName = 'My App'
+      FACET countryCode
+      SINCE 1 day ago
+    purpose: Page load percentile by country
+signals:
+  critical:
+  - id: GEO-CRIT-001
+    signal: Major market region has P99 latency exceeding 10 seconds
+    evidence_threshold: P99 > 10s for region with >5% traffic
+    explanation: |
+      Users in major markets experiencing 10+ second latency will
+      abandon the application. This is a critical business issue
+      if the region represents significant revenue or growth target.
+    remediation: Deploy edge presence; enable CDN caching; consider regional backend
+  - id: GEO-CRIT-002
+    signal: No CDN configured for static assets
+    evidence_indicators:
+    - Static assets served from origin only
+    - No Cache-Control headers on assets
+    explanation: |
+      Without a CDN, every user downloads static assets from the
+      origin server, adding 100-500ms of latency based on distance.
+      This is a basic optimization that should always be in place.
+    remediation: Configure CDN for static assets with appropriate caching
+  high:
+  - id: GEO-HIGH-001
+    signal: Geographic latency variance exceeds 5x between best and worst regions
+    evidence_threshold: max_region_latency / min_region_latency > 5
+    explanation: |
+      Large regional variance indicates inconsistent global experience.
+      Users in poorly-served regions have a significantly degraded
+      experience compared to users near your infrastructure.
+    remediation: Evaluate multi-region deployment; add edge caching; optimize for distant regions
+  - id: GEO-HIGH-002
+    signal: API requests served from single region only
+    evidence_indicators:
+    - All backend traffic routes to one region
+    - No regional failover capability
+    explanation: |
+      Single-region deployment creates geographic latency and
+      introduces single point of failure. Users far from the
+      region experience unavoidable network latency.
+    remediation: Implement multi-region deployment or read replicas
+  medium:
+  - id: GEO-MED-001
+    signal: Regional latency metrics not collected
+    remediation: Add region labels to latency metrics; implement RUM
+  - id: GEO-MED-002
+    signal: CDN hit ratio below 80% for static assets
+    remediation: Review caching headers; extend TTLs for immutable assets
+  low:
+  - id: GEO-LOW-001
+    signal: No synthetic monitoring from remote regions
+  positive:
+  - id: GEO-POS-001
+    signal: Multi-region deployment with geographic routing
+  - id: GEO-POS-002
+    signal: CDN hit ratio above 95% for static assets
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Map Infrastructure Geography
+    description: |
+      Document the geographic distribution of infrastructure including
+      servers, databases, CDN edges, and any regional deployments.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List AWS regions with resources
+      command: |
+        for region in $(aws ec2 describe-regions --query 'Regions[].RegionName' --output text); do
+          echo "=== $region ===" && aws ec2 describe-instances --region $region --query 'Reservations[].Instances[].InstanceType' --output text
+        done 2>/dev/null | grep -v "^$"
+    - purpose: Check CDN distribution
+      command: aws cloudfront list-distributions --query 'DistributionList.Items[].{Id:Id,Origins:Origins.Items[0].DomainName}'
+    expected_findings:
+    - Infrastructure regions
+    - CDN configuration
+  - id: '2'
+    name: Measure Regional Latency
+    description: |
+      Use synthetic testing tools to measure latency from multiple
+      geographic locations.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Test from current location
+      command: |
+        curl -w "Connect: %{time_connect}s, TTFB: %{time_starttransfer}s, Total: %{time_total}s\n" \
+          -o /dev/null -s https://api.example.com/health
+    - purpose: Global ping test
+      command: globalping ping api.example.com --from 'EU,Asia,Australia,South America' --limit 5
+    expected_findings:
+    - Latency from each major region
+    - Regions with poor performance
+  - id: '3'
+    name: Analyze RUM Data
+    description: |
+      Review Real User Monitoring data to understand actual user
+      experience by region.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Query RUM percentiles by country
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=histogram_quantile(0.99,sum(rate(page_load_time_bucket[1d]))by(le,country))'
+    expected_findings:
+    - P99 page load by country
+    - Correlation with user satisfaction
+  - id: '4'
+    name: Evaluate CDN Effectiveness
+    description: |
+      Analyze CDN cache hit rates and performance by edge location.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check CDN cache hit ratio
+      command: |
+        aws cloudfront get-distribution --id E1234567890 --query 'Distribution.DistributionConfig.DefaultCacheBehavior.CachePolicyId'
+    - purpose: Query CloudFront metrics
+      command: |
+        aws cloudwatch get-metric-statistics --namespace AWS/CloudFront \
+          --metric-name CacheHitRate --dimensions Name=DistributionId,Value=E1234567890 \
+          --start-time $(date -u -d '1 day ago' +%Y-%m-%dT%H:%M:%SZ) \
+          --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) --period 3600 --statistics Average
+    expected_findings:
+    - Cache hit rates
+    - Edge location performance
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Infrastructure Geography
+    - Regional Latency Analysis
+    - CDN Effectiveness
+    - Recommendations by Region
+  confidence_guidance:
+    high: RUM data with >1000 samples per region
+    medium: Synthetic testing from 3+ locations per region
+    low: Single-point measurements or estimates
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-global-infrastructure
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires multi-region testing and analysis
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: geo-latency-001
+  item: CDN configured for static assets
+  level: CRITICAL
+  verification: |
+    aws cloudfront list-distributions --query 'DistributionList.Items | length(@) > 0'
+  expected: 'true'
+- id: geo-latency-002
+  item: No major region exceeds 3s P99 for page load
+  level: BLOCKING
+  verification: |
+    curl -s 'http://prometheus:9090/api/v1/query?query=max(histogram_quantile(0.99,sum(rate(page_load_time_bucket[1d]))by(le,country)))' | \
+      jq '.data.result[0].value[1] | tonumber < 3'
+  threshold: < 3s
+- id: geo-latency-003
+  item: Regional latency monitoring in place
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm RUM or synthetic monitoring covers major user regions
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - global
+    - user-facing
+relationships:
+  commonly_combined:
+  - performance-efficiency.latency.end-to-end-latency
+  - performance-efficiency.network-efficiency.cdn-optimization

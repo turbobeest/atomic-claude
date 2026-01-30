@@ -1,0 +1,284 @@
+audit:
+  id: observability-instrumentation.logging.log-query-performance
+  name: Log Query Performance Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: logging
+  tier: expert
+  estimated_duration: 1 hour
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates the performance of log query operations in the log aggregation
+    system. Reviews query latency, index optimization, common query patterns,
+    and the ability to quickly search logs during incidents. Identifies
+    bottlenecks that slow down log-based troubleshooting.
+  why_it_matters: |
+    During production incidents, every second counts. Slow log queries delay
+    root cause identification and extend outage duration. Query performance
+    depends on proper indexing, data modeling, and query patterns. Poor
+    performance discourages log usage and leads to blind troubleshooting.
+  when_to_run:
+  - Log aggregation system setup or migration
+  - When log queries become noticeably slow
+  - After significant log volume growth
+  - Performance optimization initiatives
+prerequisites:
+  required_artifacts:
+  - type: infrastructure_access
+    description: Access to log aggregation system
+  - type: query_history
+    description: Common query patterns and saved searches
+  access_requirements:
+  - Access to log aggregation platform (Elasticsearch, Splunk, etc.)
+  - Access to query performance metrics
+  - Knowledge of common search patterns
+discovery:
+  metrics_queries:
+  - system: Elasticsearch
+    query: _nodes/stats/indices/search
+    purpose: Query latency statistics
+    threshold: P99 < 5 seconds
+  - system: Prometheus
+    query: histogram_quantile(0.99, rate(elasticsearch_indices_search_query_time_seconds_bucket[5m]))
+    purpose: Search latency percentiles
+  documents_to_review:
+  - type: Index mappings
+    purpose: Review field types and analyzers
+  - type: Saved searches/queries
+    purpose: Understand common query patterns
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: elasticsearch-tuning
+    name: Elasticsearch Performance Tuning
+    url: https://www.elastic.co/guide/en/elasticsearch/reference/current/tune-for-search-speed.html
+    offline_cache: true
+  - id: splunk-search
+    name: Splunk Search Best Practices
+    url: https://docs.splunk.com/Documentation/Splunk/latest/Search/Writebettersearches
+    offline_cache: true
+  learning_resources:
+  - id: elasticsearch-definitive
+    title: 'Elasticsearch: The Definitive Guide'
+    type: book
+    reference: O'Reilly Media - Query Optimization
+tooling:
+  infrastructure_tools:
+  - tool: curl
+    purpose: Query Elasticsearch performance stats
+    command: curl -s 'elasticsearch:9200/_nodes/stats/indices/search'
+  - tool: curl
+    purpose: Profile slow queries
+    command: curl -s 'elasticsearch:9200/logs-*/_search?profile=true'
+  monitoring_queries:
+  - system: Elasticsearch
+    query: _cluster/settings?include_defaults=true&filter_path=**.search
+    purpose: Review search configuration
+  - system: Prometheus
+    query: elasticsearch_indices_search_query_time_seconds
+    purpose: Track search latency over time
+  scripts:
+  - id: benchmark-queries
+    language: bash
+    purpose: Benchmark common query patterns
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Query Performance Test ==="
+      time curl -s 'elasticsearch:9200/logs-*/_search' -H 'Content-Type: application/json' -d '{"query":{"match_all":{}},"size":100}' > /dev/null
+      echo "=== Filtered Query Test ==="
+      time curl -s 'elasticsearch:9200/logs-*/_search' -H 'Content-Type: application/json' -d '{"query":{"bool":{"filter":[{"range":{"@timestamp":{"gte":"now-1h"}}}]}},"size":100}' > /dev/null
+signals:
+  critical:
+  - id: LOG-QUERY-CRIT-001
+    signal: Log queries regularly timing out
+    evidence_indicators:
+    - Query timeout errors in logs
+    - Users report searches not completing
+    explanation: |
+      Query timeouts during incidents prevent effective troubleshooting,
+      extending outage duration and impacting customers.
+    remediation: Optimize indexes, review query patterns, scale infrastructure
+  high:
+  - id: LOG-QUERY-HIGH-001
+    signal: P99 query latency exceeds 10 seconds
+    explanation: Slow queries frustrate users and discourage log usage
+    remediation: Profile slow queries, optimize indexes, add caching
+  - id: LOG-QUERY-HIGH-002
+    signal: No indexing on commonly filtered fields
+    explanation: Full scans on large datasets cause slow queries
+    remediation: Add indexes for frequently queried fields
+  medium:
+  - id: LOG-QUERY-MED-001
+    signal: Wildcard queries on high-cardinality fields
+    remediation: Use keyword fields and exact matches where possible
+  - id: LOG-QUERY-MED-002
+    signal: No query result caching enabled
+    remediation: Enable caching for repeated queries
+  low:
+  - id: LOG-QUERY-LOW-001
+    signal: Query performance not monitored
+  positive:
+  - id: LOG-QUERY-POS-001
+    signal: P99 query latency under 2 seconds
+  - id: LOG-QUERY-POS-002
+    signal: Query optimization guidelines documented
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Measure baseline query performance
+    description: |
+      Collect current query latency metrics to establish a baseline
+      for common query patterns.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Get search statistics
+      command: curl -s 'elasticsearch:9200/_nodes/stats/indices/search' | jq '.nodes | to_entries[0].value.indices.search'
+    - purpose: Get slow log settings
+      command: curl -s 'elasticsearch:9200/_settings' | jq '.. | .index?.search?.slowlog? // empty'
+    expected_findings:
+    - Average and percentile latencies
+    - Query throughput
+  - id: '2'
+    name: Identify slow query patterns
+    description: |
+      Review slow query logs and identify patterns that cause
+      performance issues.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Enable slow query logging temporarily
+      command: 'curl -s -X PUT ''elasticsearch:9200/logs-*/_settings'' -H ''Content-Type: application/json''
+        -d ''{"index.search.slowlog.threshold.query.warn":"5s"}'''
+    questions:
+    - What are the most common slow query patterns?
+    - Which fields are frequently searched?
+    - Are there wildcard or regex queries?
+    expected_findings:
+    - Slow query patterns
+    - Problematic query types
+  - id: '3'
+    name: Review index configuration
+    description: |
+      Examine index mappings, field types, and analyzers to identify
+      optimization opportunities.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Get index mappings
+      command: curl -s 'elasticsearch:9200/logs-*/_mapping' | jq 'to_entries[0].value.mappings.properties
+        | keys'
+    - purpose: Check shard count
+      command: curl -s 'elasticsearch:9200/_cat/shards/logs-*?v&s=index'
+    expected_findings:
+    - Field type appropriateness
+    - Shard configuration
+  - id: '4'
+    name: Benchmark common queries
+    description: |
+      Run performance tests on the most common query patterns
+      to quantify latency.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Test time-range query
+      command: 'time curl -s ''elasticsearch:9200/logs-*/_search'' -H ''Content-Type: application/json''
+        -d ''{"query":{"range":{"@timestamp":{"gte":"now-1h"}}}}'''
+    - purpose: Test keyword filter
+      command: 'time curl -s ''elasticsearch:9200/logs-*/_search'' -H ''Content-Type: application/json''
+        -d ''{"query":{"term":{"level.keyword":"error"}}}'''
+    expected_findings:
+    - Query latency by pattern
+    - Performance bottlenecks
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Performance Baseline
+    - Slow Query Analysis
+    - Index Optimization
+    - Recommendations
+  confidence_guidance:
+    high: Direct measurement of query performance
+    medium: Inferred from configuration and metrics
+    low: Estimated based on index size and configuration
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: elasticsearch-tuning
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires runtime performance testing
+    full:
+      included: true
+      priority: 3
+    production:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: log-query-001
+  item: P99 query latency measured and acceptable
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify P99 search latency is under 10 seconds
+  expected: P99 < 10s
+- id: log-query-002
+  item: Slow query logging enabled
+  level: WARNING
+  verification: curl -s 'elasticsearch:9200/_settings' | jq '.. | .slowlog? // empty' | grep -q 'threshold'
+    && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: log-query-003
+  item: Commonly filtered fields are indexed appropriately
+  level: WARNING
+  verification: manual
+  verification_notes: Verify keyword fields exist for level, service, host filters
+  expected: Confirmed by reviewer
+- id: log-query-004
+  item: Query performance is monitored
+  level: WARNING
+  verification: manual
+  verification_notes: Verify dashboards or alerts exist for search latency
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC7.2
+relationships:
+  commonly_combined:
+  - observability-instrumentation.logging.log-aggregation
+  - observability-instrumentation.logging.log-storage-cost
+  - observability-instrumentation.logging.structured-logging

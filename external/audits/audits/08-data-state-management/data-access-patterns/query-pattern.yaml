@@ -1,0 +1,347 @@
+audit:
+  id: data-state-management.data-access-patterns.query-pattern
+  name: Query Pattern Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: data-state-management
+  category_number: 8
+  subcategory: data-access-patterns
+  tier: phd
+  estimated_duration: 90 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - performance
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates database query patterns including query construction approaches,
+    index utilization, query complexity, and separation of read vs write
+    operations. Analyzes whether queries are optimized for their access
+    patterns and whether CQRS principles are applied where beneficial.
+  why_it_matters: |
+    Query patterns directly determine application performance and database
+    load. Poorly constructed queries, missing indices, and inappropriate
+    query complexity cause slow responses and database bottlenecks. Good
+    query patterns scale; bad patterns become exponentially worse with data growth.
+  when_to_run:
+  - Performance optimization
+  - Database scaling reviews
+  - Before large data migrations
+  - When investigating slow queries
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application code with database queries
+  - type: database_schema
+    description: Database schema and index definitions
+  access_requirements:
+  - Read access to application source code
+  - Access to database schema
+discovery:
+  code_patterns:
+  - pattern: SELECT.*FROM|find\(|findOne\(|where\(
+    type: regex
+    scope: source
+    purpose: Detect query operations
+  - pattern: JOIN|LEFT JOIN|INNER JOIN|aggregate
+    type: regex
+    scope: source
+    purpose: Detect complex queries
+  - pattern: INSERT|UPDATE|DELETE|create\(|save\(
+    type: regex
+    scope: source
+    purpose: Detect write operations
+  - pattern: INDEX|CREATE INDEX|ensureIndex
+    type: regex
+    scope: config
+    purpose: Detect index definitions
+  file_patterns:
+  - glob: '**/queries/**'
+    purpose: Query modules
+  - glob: '**/migrations/**'
+    purpose: Schema and index migrations
+  - glob: '**/*.sql'
+    purpose: SQL files
+knowledge_sources:
+  guides:
+  - id: query-optimization
+    name: SQL Query Optimization
+    url: https://use-the-index-luke.com/
+    offline_cache: true
+  - id: cqrs-pattern
+    name: CQRS Pattern
+    url: https://docs.microsoft.com/en-us/azure/architecture/patterns/cqrs
+    offline_cache: true
+  learning_resources:
+  - id: sql-performance
+    title: SQL Performance Explained
+    type: book
+    reference: 'Markus Winand, ISBN: 978-3950307825'
+tooling:
+  static_analysis:
+  - tool: sqlfluff
+    purpose: SQL linting and style checking
+    offline_capable: true
+  - tool: explain-analyzer
+    purpose: Query plan analysis
+    offline_capable: true
+  scripts:
+  - id: query-pattern-scan
+    language: bash
+    purpose: Analyze query patterns in codebase
+    source: inline
+    code: |
+      echo "=== Query Pattern Analysis ==="
+      echo "--- Read queries ---"
+      grep -rn "SELECT\|find(\|findOne(\|findMany(" \
+        --include="*.ts" --include="*.java" --include="*.py" --include="*.sql" . 2>/dev/null | \
+        grep -v node_modules | head -30
+
+      echo "--- Write operations ---"
+      grep -rn "INSERT\|UPDATE\|DELETE\|save(\|create(\|update(" \
+        --include="*.ts" --include="*.java" --include="*.py" --include="*.sql" . 2>/dev/null | \
+        grep -v node_modules | head -30
+
+      echo "--- Complex joins ---"
+      grep -rn "JOIN\|leftJoin\|innerJoin" \
+        --include="*.ts" --include="*.java" --include="*.py" --include="*.sql" . 2>/dev/null | \
+        grep -v node_modules | head -20
+signals:
+  critical:
+  - id: QP-CRIT-001
+    signal: Queries without index support
+    evidence_pattern: WHERE clauses on non-indexed columns
+    explanation: |
+      Queries filtering on non-indexed columns cause full table scans.
+      As data grows, these queries become exponentially slower. Every
+      frequently-executed WHERE clause needs index support.
+    remediation: Add indices for columns used in WHERE, JOIN, and ORDER BY
+  - id: QP-CRIT-002
+    signal: SELECT * in production code
+    evidence_pattern: SELECT * FROM table or findAll() without field selection
+    explanation: |
+      Selecting all columns wastes bandwidth, memory, and prevents
+      covering index optimization. Code should select only needed columns.
+    remediation: Explicitly select required columns only
+  high:
+  - id: QP-HIGH-001
+    signal: Complex queries in hot paths
+    evidence_pattern: Multi-join queries in frequently called endpoints
+    explanation: |
+      Complex queries with multiple joins are expensive. Running them
+      on every request instead of caching or pre-computing results
+      wastes database resources.
+    remediation: Cache results, use materialized views, or denormalize for reads
+  - id: QP-HIGH-002
+    signal: No pagination on large result sets
+    evidence_pattern: find() or SELECT without LIMIT on unbounded queries
+    explanation: |
+      Queries returning unbounded results can return millions of rows,
+      exhausting memory and causing timeouts. All list queries should
+      have pagination.
+    remediation: Add LIMIT/OFFSET or cursor-based pagination
+  - id: QP-HIGH-003
+    signal: Write queries in read endpoints
+    evidence_pattern: INSERT/UPDATE in GET handlers
+    explanation: |
+      GET requests should be idempotent and side-effect free. Write
+      operations in GET endpoints violate HTTP semantics and can cause
+      issues with caching, browser prefetching, and crawlers.
+    remediation: Move writes to POST/PUT/DELETE endpoints
+  medium:
+  - id: QP-MED-001
+    signal: ORDER BY on non-indexed columns
+    evidence_pattern: Sorting on columns without indices
+    remediation: Add indices for columns used in ORDER BY
+  - id: QP-MED-002
+    signal: No query result caching
+    evidence_pattern: Same expensive query executed repeatedly
+    remediation: Cache query results with appropriate TTL
+  - id: QP-MED-003
+    signal: LIKE with leading wildcard
+    evidence_pattern: WHERE column LIKE '%value%'
+    remediation: Use full-text search for text searching
+  low:
+  - id: QP-LOW-001
+    signal: Inline SQL strings
+    evidence_pattern: SQL in business logic instead of repository
+    remediation: Centralize queries in repository layer
+  - id: QP-LOW-002
+    signal: No query comments for complex queries
+    evidence_pattern: Multi-join queries without explaining comments
+    remediation: Add comments explaining complex query purpose
+  positive:
+  - id: QP-POS-001
+    signal: Read/write separation (CQRS)
+    evidence_pattern: Separate read models optimized for queries
+  - id: QP-POS-002
+    signal: Covering indices for hot queries
+    evidence_pattern: Indices include all selected columns
+  - id: QP-POS-003
+    signal: Query performance monitoring
+    evidence_pattern: Slow query logging and alerting configured
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Query Patterns
+    description: |
+      Catalog the types of queries used in the application.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find SELECT queries
+      command: |
+        grep -rn "SELECT\|find(\|findOne(\|findMany(\|findAll(" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | grep -v test | head -40
+    - purpose: Find write operations
+      command: |
+        grep -rn "INSERT\|UPDATE\|DELETE\|save(\|create(\|remove(" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | grep -v test | head -40
+    expected_findings:
+    - Query pattern distribution
+    - Read vs write ratio
+  - id: '2'
+    name: Analyze Query Complexity
+    description: |
+      Review complex queries for optimization potential.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find joins
+      command: |
+        grep -rn "JOIN\|leftJoin\|rightJoin\|innerJoin" \
+          --include="*.ts" --include="*.java" --include="*.sql" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    - purpose: Find aggregations
+      command: |
+        grep -rn "COUNT\|SUM\|AVG\|GROUP BY\|aggregate" \
+          --include="*.ts" --include="*.java" --include="*.sql" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Complex query inventory
+    - Aggregation patterns
+  - id: '3'
+    name: Review Index Coverage
+    description: |
+      Check if indices support the query patterns.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find index definitions
+      command: |
+        grep -rn "CREATE INDEX\|@Index\|ensureIndex\|createIndex" \
+          --include="*.sql" --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | head -30
+    - purpose: Find WHERE clauses
+      command: |
+        grep -rn "WHERE\|where(\|andWhere\|orWhere" \
+          --include="*.ts" --include="*.java" --include="*.sql" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Index coverage assessment
+    - Missing index candidates
+  - id: '4'
+    name: Check Pagination
+    description: |
+      Verify pagination on list queries.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find pagination patterns
+      command: |
+        grep -rn "LIMIT\|OFFSET\|take\|skip\|limit(\|offset(" \
+          --include="*.ts" --include="*.java" --include="*.py" --include="*.sql" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    - purpose: Find unbounded queries
+      command: |
+        grep -rn "findAll\|find({\s*})\|SELECT.*FROM.*[^L][^I][^M][^I][^T]" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v "limit\|LIMIT" | grep -v node_modules | head -20
+    expected_findings:
+    - Pagination coverage
+    - Unbounded query risks
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - query_inventory
+    - complexity_analysis
+    - index_gaps
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Query Pattern Analysis
+    - Index Coverage
+    - Performance Risks
+    - Recommendations
+  confidence_guidance:
+    high: Clear missing index or unbounded query
+    medium: Query pattern suggests potential issue
+    low: Requires EXPLAIN analysis to confirm
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: query-optimization
+      priority: required
+    - source_id: sql-performance
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    performance:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: qp-001
+  item: All list queries have pagination
+  level: CRITICAL
+  verification: |
+    grep -rn "findAll\|findMany" --include="*.ts" --include="*.java" . 2>/dev/null | \
+      grep -v "limit\|take\|LIMIT\|pagination" | grep -v node_modules | grep -v test | \
+      wc -l | xargs -I {} test {} -lt 3 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: qp-002
+  item: Indices defined for frequently queried columns
+  level: CRITICAL
+  verification: |
+    grep -rn "INDEX\|@Index\|ensureIndex" --include="*.sql" --include="*.ts" --include="*.java" . 2>/dev/null | \
+      wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: qp-003
+  item: No SELECT * in production queries
+  level: BLOCKING
+  verification: |
+    grep -rn "SELECT \*" --include="*.ts" --include="*.java" --include="*.sql" . 2>/dev/null | \
+      grep -v test | grep -v node_modules | wc -l | \
+      xargs -I {} test {} -lt 3 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Performance Efficiency
+relationships:
+  commonly_combined:
+  - data-state-management.data-access-patterns.orm-usage
+  - data-state-management.data-access-patterns.caching-strategy
+  - performance-efficiency.database.query-optimization

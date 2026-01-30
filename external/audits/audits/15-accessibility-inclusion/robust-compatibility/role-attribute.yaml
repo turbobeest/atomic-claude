@@ -1,0 +1,422 @@
+audit:
+  id: accessibility-inclusion.robust-compatibility.role-attribute
+  name: ARIA Role Attribute Correctness
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: accessibility-inclusion
+  category_number: 15
+  subcategory: robust-compatibility
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines ARIA role attributes to verify they are used
+    correctly according to the WAI-ARIA specification. The audit checks:
+
+    - Only valid ARIA roles are used
+    - Roles are applied to appropriate element types
+    - Abstract roles are not used directly
+    - Role changes are not made on focusable elements dynamically
+    - Required context roles are present (e.g., listitem in list)
+    - Required owned elements exist (e.g., menu owns menuitems)
+    - Presentational roles don't hide interactive content
+
+    Roles fall into categories:
+    - Document structure roles (article, list, row, etc.)
+    - Landmark roles (banner, main, navigation, etc.)
+    - Widget roles (button, checkbox, slider, etc.)
+    - Window roles (dialog, alertdialog)
+    - Abstract roles (never use directly)
+  why_it_matters: |
+    ARIA roles communicate element purpose to assistive technologies.
+    Incorrect role usage can:
+    - Misrepresent element purpose entirely
+    - Break expected keyboard interaction patterns
+    - Cause screen readers to misinterpret page structure
+    - Create accessibility barriers where none existed before
+    - Override correct native semantics with incorrect ones
+
+    Correct role usage enables complex UI patterns to be accessible,
+    but incorrect usage is worse than no ARIA at all.
+  when_to_run:
+  - When implementing custom widgets
+  - During accessibility audits
+  - After adding ARIA to components
+  - When refactoring UI components
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Frontend components with role attributes
+  - type: running_application
+    description: Application for role verification
+  access_requirements:
+  - Source code access
+  - Browser accessibility inspector
+  - Screen reader for testing
+discovery:
+  code_patterns:
+  - pattern: role=['"][^'"]+['"]
+    type: regex
+    scope: source
+    purpose: Find all role attributes
+  - pattern: role=['"]presentation['"]|role=['"]none['"]
+    type: regex
+    scope: source
+    purpose: Find presentational roles
+  - pattern: role=['"](?:widget|roletype|structure|section|window|input|select|command|composite|landmark|range)['"]
+    type: regex
+    scope: source
+    purpose: Find abstract roles (invalid)
+  file_patterns:
+  - glob: '**/*.{js,jsx,ts,tsx}'
+    purpose: JavaScript/TypeScript components
+  - glob: '**/*.vue'
+    purpose: Vue components
+  - glob: '**/*.html'
+    purpose: HTML files
+  - glob: '**/components/**'
+    purpose: Component library
+knowledge_sources:
+  specifications:
+  - id: wai-aria-roles
+    name: WAI-ARIA 1.2 Role Definitions
+    url: https://www.w3.org/TR/wai-aria-1.2/#role_definitions
+    offline_cache: true
+    priority: required
+  - id: aria-in-html
+    name: ARIA in HTML
+    url: https://www.w3.org/TR/html-aria/
+    offline_cache: true
+    priority: required
+  - id: wcag-4.1.2
+    name: 'WCAG 2.2 SC 4.1.2: Name, Role, Value'
+    url: https://www.w3.org/WAI/WCAG22/Understanding/name-role-value.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aria-apg
+    name: ARIA Authoring Practices Guide
+    url: https://www.w3.org/WAI/ARIA/apg/
+    offline_cache: true
+  - id: aria-roles-guide
+    name: MDN ARIA Roles Reference
+    url: https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Roles
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: axe-core
+    purpose: Validate ARIA role usage
+    offline_capable: true
+  - tool: eslint-plugin-jsx-a11y
+    purpose: Lint ARIA role usage in React
+    offline_capable: true
+  scripts:
+  - id: role-inventory
+    language: bash
+    purpose: Catalog all ARIA roles used
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== ARIA Roles Inventory ==="
+      grep -rohn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+        --include="*.html" 'role="[^"]*"' . | \
+        sed 's/role="//;s/"//' | sort | uniq -c | sort -rn
+
+      echo ""
+      echo "=== Presentational Roles ==="
+      grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+        'role="presentation"\|role="none"' .
+
+      echo ""
+      echo "=== Abstract Roles (invalid) ==="
+      grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+        -E 'role="(widget|roletype|structure|section|window|input|select|command|composite|landmark|range)"' .
+signals:
+  critical:
+  - id: A11Y-ROLE-CRIT-001
+    signal: Abstract ARIA role used
+    evidence_pattern: role="(widget|roletype|structure|section|window|input|select|command|composite|landmark|range)"
+    explanation: |
+      An abstract ARIA role is used directly. Abstract roles are base types
+      in the role taxonomy and must not be used in content. They're ignored
+      by assistive technologies or cause errors.
+    remediation: |
+      Replace abstract roles with concrete role subtypes:
+      - Instead of role="widget", use role="button", "checkbox", etc.
+      - Instead of role="landmark", use role="banner", "main", etc.
+      - Instead of role="structure", use role="article", "list", etc.
+  - id: A11Y-ROLE-CRIT-002
+    signal: Presentational role on focusable element
+    evidence_pattern: role="(presentation|none)"[^>]*(tabindex|href|onclick)
+    explanation: |
+      A focusable element has role="presentation" or role="none", which
+      removes semantic meaning while keeping the element focusable. This
+      creates confusing keyboard interaction where focus lands on elements
+      with no announced purpose.
+    remediation: |
+      Either remove the presentational role to preserve semantics, or make
+      the element non-focusable. If using for layout, ensure no interactive
+      elements are affected.
+  - id: A11Y-ROLE-CRIT-003
+    signal: Role conflicts with native element semantics
+    evidence_pattern: <(button|input|a).*role="(?!button|link|checkbox|radio)
+    explanation: |
+      An ARIA role overrides native HTML element semantics inappropriately.
+      For example, a <button> with role="link" or <a> with role="button"
+      creates mismatched expectations for keyboard behavior.
+    remediation: |
+      Use the native HTML element matching the desired role:
+      - Use <button> for button behavior
+      - Use <a href> for link behavior
+      - Don't override unless truly necessary for complex widgets
+  high:
+  - id: A11Y-ROLE-HIGH-001
+    signal: Invalid ARIA role value
+    evidence_pattern: role="[^"]+"
+    explanation: |
+      An ARIA role attribute contains a value not defined in the WAI-ARIA
+      specification. Invalid roles are ignored, leaving the element with
+      no meaningful role for assistive technologies.
+    remediation: |
+      Use only valid ARIA role values from the specification. Common mistakes:
+      - "role='header'" should be "role='banner'"
+      - "role='sidebar'" should be "role='complementary'"
+      - Verify against WAI-ARIA role definitions.
+  - id: A11Y-ROLE-HIGH-002
+    signal: Role missing required context
+    evidence_indicators:
+    - role='listitem' not inside role='list'
+    - role='menuitem' not inside role='menu'
+    - role='tab' not inside role='tablist'
+    explanation: |
+      Certain roles require specific parent roles to function correctly.
+      Without proper context, assistive technologies cannot properly
+      interpret the relationship.
+    remediation: |
+      Ensure required context roles are present:
+      - listitem requires list or group parent
+      - menuitem requires menu or menubar parent
+      - tab requires tablist parent
+      - row requires table, grid, or treegrid parent
+  - id: A11Y-ROLE-HIGH-003
+    signal: Role missing required owned elements
+    evidence_indicators:
+    - role='list' with no role='listitem' children
+    - role='tablist' with no role='tab' children
+    - role='menu' with no role='menuitem' children
+    explanation: |
+      Certain roles require specific child roles to form a complete
+      widget pattern. Without proper children, the widget is incomplete.
+    remediation: |
+      Add required child roles:
+      - list must contain listitem elements
+      - tablist must contain tab elements
+      - menu must contain menuitem elements
+  medium:
+  - id: A11Y-ROLE-MED-001
+    signal: Redundant role on semantic HTML
+    evidence_pattern: <nav[^>]*role="navigation"|<main[^>]*role="main"
+    explanation: |
+      ARIA role duplicates the implicit role of a semantic HTML element.
+      While not harmful, it's unnecessary and may indicate confusion about
+      ARIA usage.
+    remediation: |
+      Remove redundant roles. Native HTML5 elements have implicit roles:
+      - <nav> = role="navigation"
+      - <main> = role="main"
+      - <header> = role="banner" (when not nested)
+      - <button> = role="button"
+  - id: A11Y-ROLE-MED-002
+    signal: Role applied to wrong element type
+    evidence_pattern: <div[^>]*role="button"[^>]*(?!tabindex)
+    explanation: |
+      A role is applied to an element that doesn't naturally support the
+      expected interaction. For example, a div with role="button" but no
+      keyboard handling.
+    remediation: |
+      Use native elements when possible. When using divs with widget roles:
+      - Add tabindex="0" for focusability
+      - Implement keyboard event handlers
+      - Add appropriate ARIA states
+  low:
+  - id: A11Y-ROLE-LOW-001
+    signal: Multiple similar roles without differentiation
+    evidence_indicators:
+    - Multiple role='navigation' without aria-label
+    - Multiple role='region' without accessible names
+    explanation: |
+      Multiple landmarks of the same type exist without labels to
+      differentiate them for assistive technology users.
+    remediation: |
+      Add aria-label to differentiate multiple landmarks of the same type.
+  positive:
+  - id: A11Y-ROLE-POS-001
+    signal: ARIA roles match APG patterns
+    evidence_indicators:
+    - Widget roles follow ARIA Authoring Practices
+    - Proper role hierarchies implemented
+  - id: A11Y-ROLE-POS-002
+    signal: Native HTML preferred over ARIA roles
+    evidence_indicators:
+    - Semantic HTML elements used appropriately
+    - Roles only applied when native elements insufficient
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory all ARIA roles
+    description: |
+      Create a complete inventory of all ARIA role values used in the
+      codebase.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Catalog roles by frequency
+      command: |
+        grep -rohn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+          --include="*.html" 'role="[^"]*"' . | \
+          sed 's/role="//;s/"//' | sort | uniq -c | sort -rn
+    - purpose: Find role usage with context
+      command: |
+        grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+          'role="' . | head -50
+    expected_findings:
+    - Complete role inventory
+    - File locations for each role usage
+  - id: '2'
+    name: Validate role values
+    description: |
+      Check all role values against the WAI-ARIA specification for validity.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check for abstract roles
+      command: |
+        grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+          -E 'role="(widget|roletype|structure|section|window|input|select|command|composite|landmark|range)"' .
+    expected_findings:
+    - Any invalid or abstract roles
+  - id: '3'
+    name: Check role relationships
+    description: |
+      Verify roles have required context (parents) and owned elements
+      (children).
+    duration_estimate: 30 min
+    questions:
+    - Do all listitems have list parents?
+    - Do all tabs have tablist parents?
+    - Do all lists contain listitem children?
+    expected_findings:
+    - Role relationship violations
+  - id: '4'
+    name: Test with accessibility tree
+    description: |
+      Use browser accessibility inspector to verify roles appear correctly
+      in the accessibility tree.
+    duration_estimate: 25 min
+    questions:
+    - Do elements appear with correct roles in accessibility tree?
+    - Are relationships properly represented?
+    - Are any roles being ignored?
+    expected_findings:
+    - Accessibility tree verification results
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: role_inventory
+    format: table
+    description: All roles used with validation status
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Role Usage Analysis
+    - Validation Findings
+    - Recommendations
+  confidence_guidance:
+    high: All roles validated against spec with accessibility tree verification
+    medium: Automated validation without manual verification
+    low: Pattern matching without validation
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: wai-aria-roles
+      priority: required
+    - source_id: aria-in-html
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed role analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: role-attr-001
+  item: No abstract ARIA roles used
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+      -E 'role="(widget|roletype|structure|section|window|input|select|command|composite|landmark|range)"' . | wc -l | \
+      xargs -I {} sh -c '[ {} -eq 0 ] && echo "PASS" || echo "FAIL"'
+  expected: PASS
+- id: role-attr-002
+  item: All role values are valid
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify all roles against WAI-ARIA specification
+  expected: Confirmed by reviewer
+- id: role-attr-003
+  item: Role relationships correct
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify parent-child role relationships
+  expected: Confirmed by reviewer
+- id: role-attr-004
+  item: No presentational role on focusable elements
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+      'role="presentation"' . | grep -E "(tabindex|href=|onClick)" | wc -l | \
+      xargs -I {} sh -c '[ {} -eq 0 ] && echo "PASS" || echo "FAIL"'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - web-application
+    - spa
+    - custom-widgets
+  compliance_frameworks:
+  - framework: WCAG 2.2
+    controls:
+    - 4.1.2
+  - framework: Section 508
+    controls:
+    - 1194.22(n)
+  - framework: EN 301 549
+    controls:
+    - 9.4.1.2
+relationships:
+  commonly_combined:
+  - accessibility-inclusion.robust-compatibility.aria-usage
+  - accessibility-inclusion.robust-compatibility.aria-label-completeness
+  - accessibility-inclusion.assistive-technology.screen-reader-flow

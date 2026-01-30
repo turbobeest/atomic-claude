@@ -1,0 +1,329 @@
+# ============================================================
+# Network Bandwidth Audit
+# ============================================================
+# Evaluates network bandwidth utilization, throughput patterns,
+# and identifies bottlenecks in network infrastructure.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.resource-utilization.network-bandwidth"
+  name: "Network Bandwidth Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "resource-utilization"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines network bandwidth utilization across nodes, pods, and
+    services. It analyzes ingress/egress traffic patterns, identifies bandwidth
+    hogs, evaluates network policy impacts, and assesses whether network
+    resources are appropriately provisioned for workload requirements.
+
+  why_it_matters: |
+    Network bandwidth bottlenecks cause increased latency, dropped connections,
+    and degraded user experience. In containerized environments, noisy neighbors
+    can starve other workloads of bandwidth. Cloud network costs can explode
+    without proper monitoring. Bandwidth issues often manifest as mysterious
+    performance problems that are difficult to diagnose.
+
+  when_to_run:
+    - "After deploying network-intensive applications"
+    - "When investigating latency or throughput issues"
+    - "During capacity planning for traffic growth"
+    - "After changes to network policies or topology"
+
+prerequisites:
+  required_artifacts:
+    - type: "metrics-system"
+      description: "Access to node_exporter or CNI metrics"
+    - type: "network-monitoring"
+      description: "Network flow or bandwidth metrics"
+
+  access_requirements:
+    - "Read access to node network metrics"
+    - "Access to CNI plugin metrics (Calico, Cilium, etc.)"
+    - "Access to cloud network metrics (VPC flow logs, etc.)"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus"
+      query: "rate(node_network_receive_bytes_total[5m]) + rate(node_network_transmit_bytes_total[5m])"
+      purpose: "Total bandwidth utilization per node"
+      threshold: "Below interface capacity"
+    - system: "Prometheus"
+      query: "rate(container_network_receive_bytes_total[5m])"
+      purpose: "Container ingress bandwidth"
+      threshold: "Within expected bounds for service"
+    - system: "Prometheus"
+      query: "rate(node_network_receive_drop_total[5m]) + rate(node_network_transmit_drop_total[5m])"
+      purpose: "Dropped packets indicating saturation"
+      threshold: "Should be zero or minimal"
+    - system: "Prometheus"
+      query: "rate(node_network_receive_errs_total[5m]) + rate(node_network_transmit_errs_total[5m])"
+      purpose: "Network errors"
+      threshold: "Should be zero"
+
+  file_patterns:
+    - glob: "**/networkpolicy*.yaml"
+      purpose: "Kubernetes network policies"
+    - glob: "**/ingress*.yaml"
+      purpose: "Ingress configurations"
+
+knowledge_sources:
+  specifications:
+    - id: "k8s-network"
+      name: "Kubernetes Network Policies"
+      url: "https://kubernetes.io/docs/concepts/services-networking/network-policies/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "cilium-bandwidth"
+      name: "Cilium Bandwidth Management"
+      url: "https://docs.cilium.io/en/stable/network/kubernetes/bandwidth-manager/"
+      offline_cache: true
+    - id: "aws-vpc-bandwidth"
+      name: "AWS EC2 Network Performance"
+      url: "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-network-bandwidth.html"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "iftop"
+      purpose: "Real-time bandwidth monitoring per connection"
+      command: "iftop -i eth0 -n"
+    - tool: "nethogs"
+      purpose: "Bandwidth usage per process"
+      command: "nethogs eth0"
+    - tool: "kubectl"
+      purpose: "Check pod network configurations"
+      command: "kubectl get pods -A -o wide"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        topk(10, sum(rate(container_network_receive_bytes_total[5m])) by (pod, namespace))
+      purpose: "Top 10 bandwidth consumers"
+
+signals:
+  critical:
+    - id: "NET-CRIT-001"
+      signal: "Network interface approaching saturation"
+      evidence_threshold: "bandwidth_utilization > 90% of interface capacity"
+      explanation: |
+        When network interfaces approach saturation, all traffic experiences
+        increased latency and potential packet loss. This affects all services
+        on the node, not just the bandwidth consumers.
+      remediation: "Identify and throttle bandwidth hogs, upgrade network tier, or distribute load"
+
+    - id: "NET-CRIT-002"
+      signal: "Significant packet drops or errors"
+      evidence_threshold: "packet_drops > 0.1% of total packets"
+      explanation: |
+        Packet drops indicate network congestion or hardware issues. TCP
+        retransmissions caused by drops add latency and consume bandwidth.
+        In severe cases, connections may timeout completely.
+      remediation: "Investigate source of drops, check hardware health, reduce congestion"
+
+  high:
+    - id: "NET-HIGH-001"
+      signal: "Single service consuming disproportionate bandwidth"
+      evidence_threshold: "single_service > 50% of total bandwidth"
+      explanation: |
+        One service dominating bandwidth starves other services. This creates
+        noisy neighbor problems and can cause cascading failures as other
+        services time out waiting for network resources.
+      remediation: "Implement bandwidth limits, optimize the service, or isolate it"
+
+    - id: "NET-HIGH-002"
+      signal: "Cross-AZ or cross-region traffic exceeding expected levels"
+      evidence_threshold: "cross_zone_traffic > 30% of total traffic"
+      explanation: |
+        Cross-zone/region traffic is expensive and adds latency. High volumes
+        suggest misconfigured service discovery, missing local caches, or
+        poor deployment topology.
+      remediation: "Review service topology, implement zone affinity, add local caches"
+
+  medium:
+    - id: "NET-MED-001"
+      signal: "No bandwidth limits configured for network-intensive pods"
+      evidence_pattern: "Missing bandwidth annotations on high-traffic pods"
+      remediation: "Configure bandwidth limits using CNI annotations"
+
+    - id: "NET-MED-002"
+      signal: "Inefficient data transfer patterns (many small requests)"
+      evidence_pattern: "High packet rate with low throughput"
+      remediation: "Implement request batching or connection pooling"
+
+  low:
+    - id: "NET-LOW-001"
+      signal: "Network metrics collection incomplete for some workloads"
+
+  positive:
+    - id: "NET-POS-001"
+      signal: "Bandwidth utilization well below capacity limits"
+    - id: "NET-POS-002"
+      signal: "Zero packet drops across monitoring period"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory network configurations"
+      description: |
+        Collect network-related configurations including policies, bandwidth
+        limits, and service endpoints.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "List network policies"
+          command: "kubectl get networkpolicies -A"
+        - purpose: "Check for bandwidth annotations"
+          command: |
+            kubectl get pods -A -o json | jq -r '.items[] | select(.metadata.annotations["kubernetes.io/ingress-bandwidth"] or .metadata.annotations["kubernetes.io/egress-bandwidth"]) | "\(.metadata.namespace)/\(.metadata.name)"'
+      expected_findings:
+        - "Network policy inventory"
+        - "Pods with bandwidth limits"
+
+    - id: "2"
+      name: "Analyze bandwidth utilization"
+      description: |
+        Query metrics to understand current bandwidth consumption patterns
+        at node and pod levels.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Node bandwidth utilization"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(node_network_receive_bytes_total[5m])+rate(node_network_transmit_bytes_total[5m]))by(instance)' | jq '.data.result'
+        - purpose: "Top bandwidth consumers"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=topk(10,sum(rate(container_network_receive_bytes_total[5m]))by(pod,namespace))' | jq '.data.result'
+      expected_findings:
+        - "Bandwidth usage per node"
+        - "Top consuming pods/services"
+
+    - id: "3"
+      name: "Check for network errors"
+      description: |
+        Investigate packet drops, errors, and retransmissions that indicate
+        network health issues.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check packet drops"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(node_network_receive_drop_total[5m])+rate(node_network_transmit_drop_total[5m]))by(instance)' | jq '.data.result'
+        - purpose: "Check network errors"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(node_network_receive_errs_total[5m])+rate(node_network_transmit_errs_total[5m]))by(instance)' | jq '.data.result'
+      expected_findings:
+        - "Packet drop rates"
+        - "Network error rates"
+
+    - id: "4"
+      name: "Analyze traffic patterns"
+      description: |
+        Examine traffic flow patterns to identify inefficiencies such as
+        unnecessary cross-zone traffic or chatty protocols.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Internal vs external traffic ratio"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(container_network_receive_bytes_total[5m]))by(namespace)/sum(rate(container_network_receive_bytes_total[5m]))'
+      expected_findings:
+        - "Traffic distribution patterns"
+        - "Cross-zone traffic volumes"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Bandwidth Utilization Analysis"
+        - "Network Health Assessment"
+        - "Traffic Pattern Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct metrics observation over extended period"
+    medium: "Point-in-time metrics or partial coverage"
+    low: "Configuration analysis without runtime metrics"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "k8s-network"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime metrics collection"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "net-001"
+    item: "No interfaces with sustained utilization above 80%"
+    level: "CRITICAL"
+    verification: |
+      curl -s 'http://prometheus:9090/api/v1/query?query=max((rate(node_network_receive_bytes_total[5m])+rate(node_network_transmit_bytes_total[5m]))/1e9)' | jq '.data.result[0].value[1] | tonumber < 0.8'
+    expected: "true"
+
+  - id: "net-002"
+    item: "Zero packet drops in past hour"
+    level: "BLOCKING"
+    verification: |
+      curl -s 'http://prometheus:9090/api/v1/query?query=sum(increase(node_network_receive_drop_total[1h])+increase(node_network_transmit_drop_total[1h]))' | jq '.data.result[0].value[1] | tonumber == 0'
+    expected: "true"
+
+  - id: "net-003"
+    item: "Bandwidth limits configured for high-traffic services"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify top 10 bandwidth consumers have limits"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.network-efficiency.tcp-optimization"
+    - "performance-efficiency.latency.network-latency"

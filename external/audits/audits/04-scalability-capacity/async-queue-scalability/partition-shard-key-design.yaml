@@ -1,0 +1,297 @@
+audit:
+  id: scalability-capacity.async-queue-scalability.partition-shard-key-design
+  name: Partition/Shard Key Design Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: scalability-capacity
+  category_number: 4
+  subcategory: async-queue-scalability
+  tier: phd
+  estimated_duration: 4 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Analyzes partition and shard key selection for message queues and
+    event streams, evaluating key distribution, cardinality, and ordering
+    requirements. Examines how keys are derived from message content,
+    identifies hot partition risks, and assesses the balance between
+    ordering guarantees and parallel processing capacity.
+  why_it_matters: |
+    Poor partition key design creates hot partitions that bottleneck
+    throughput and prevent horizontal scaling. Keys with low cardinality
+    limit parallelism, while keys that break ordering requirements cause
+    data consistency issues. Proper key design is foundational to
+    achieving both scalability and correctness in event-driven systems.
+  when_to_run:
+  - During architecture design of event-driven systems
+  - When experiencing uneven partition load
+  - Before adding new message types or producers
+  - When scaling issues arise despite adding resources
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Producer code that generates partition keys
+  - type: message_schemas
+    description: Message/event schemas and key definitions
+  - type: metrics_system
+    description: Per-partition throughput and lag metrics
+  access_requirements:
+  - Access to producer service source code
+  - Access to topic/queue configuration
+  - Access to partition-level metrics
+discovery:
+  code_patterns:
+  - pattern: partitionKey|partition\.key|PartitionKey
+    type: regex
+    scope: source
+    purpose: Find partition key assignments in producer code
+  - pattern: shardKey|routingKey|messageKey
+    type: regex
+    scope: source
+    purpose: Find alternative key terminology
+  - pattern: key\s*=|setKey\(|withKey\(
+    type: regex
+    scope: source
+    purpose: Find key setting patterns
+  file_patterns:
+  - glob: '**/*producer*.{java,ts,py,go}'
+    purpose: Producer implementation files
+  - glob: '**/*event*.{java,ts,py,go}'
+    purpose: Event publishing code
+  - glob: '**/topic*.yaml'
+    purpose: Topic configuration with partition counts
+  metrics_queries:
+  - system: Prometheus
+    query: sum(rate(kafka_topic_partition_current_offset[5m])) by (partition)
+    purpose: Message rate per partition
+    threshold: Variance should be < 20% across partitions
+  - system: Prometheus
+    query: max(kafka_consumer_lag_sum) by (partition)
+    purpose: Consumer lag per partition
+    threshold: Hot partitions show significantly higher lag
+knowledge_sources:
+  guides:
+  - id: kafka-partitioning
+    name: Kafka Partitioning Strategy
+    url: https://kafka.apache.org/documentation/#producerconfigs_partitioner.class
+    offline_cache: true
+  - id: kinesis-sharding
+    name: AWS Kinesis Partition Key Design
+    url: https://docs.aws.amazon.com/streams/latest/dev/key-concepts.html
+    offline_cache: true
+  papers:
+  - id: consistent-hashing
+    title: Consistent Hashing and Random Trees
+    url: https://www.cs.princeton.edu/courses/archive/fall09/cos518/papers/chash.pdf
+tooling:
+  infrastructure_tools:
+  - tool: kafka-topics
+    purpose: Check partition counts and configuration
+    command: kafka-topics.sh --describe --topic <topic>
+  - tool: kafka-console-consumer
+    purpose: Sample messages to analyze key distribution
+    command: kafka-console-consumer.sh --topic <topic> --property print.key=true
+  monitoring_queries:
+  - system: Prometheus
+    query: stddev(rate(kafka_topic_partition_current_offset[1h])) / avg(rate(kafka_topic_partition_current_offset[1h]))
+    purpose: Coefficient of variation in partition load
+  - system: Prometheus
+    query: topk(5, sum(kafka_consumer_lag_sum) by (partition))
+    purpose: Identify hottest partitions
+  scripts:
+  - id: key-cardinality-analyzer
+    language: python
+    purpose: Analyze partition key cardinality from sample data
+    source: inline
+    code: |
+      #!/usr/bin/env python3
+      # Sample script to analyze key distribution
+      # Usage: kafka-console-consumer | python key_cardinality.py
+      import sys
+      from collections import Counter
+      keys = Counter()
+      for line in sys.stdin:
+          if '\t' in line:
+              key = line.split('\t')[0]
+              keys[key] += 1
+      print(f"Unique keys: {len(keys)}")
+      print(f"Top 10: {keys.most_common(10)}")
+signals:
+  critical:
+  - id: PARTITION-CRIT-001
+    signal: Partition key with cardinality < partition count
+    evidence_pattern: unique_keys < partition_count in metrics
+    explanation: |
+      When key cardinality is lower than partition count, some partitions
+      will always be empty, wasting resources and limiting throughput.
+      The system cannot scale beyond the key cardinality.
+    remediation: Redesign key to include higher-cardinality components
+  - id: PARTITION-CRIT-002
+    signal: Single key receiving >50% of traffic
+    evidence_threshold: Partition with >50% of total messages
+    explanation: |
+      A dominant key creates a hot partition that becomes the throughput
+      ceiling for the entire system, negating horizontal scaling benefits.
+    remediation: Add randomization suffix or redesign key structure
+  high:
+  - id: PARTITION-HIGH-001
+    signal: Partition load variance exceeds 3x between partitions
+    explanation: Uneven distribution wastes resources and causes hotspots
+    remediation: Review key distribution and consider key salting
+  - id: PARTITION-HIGH-002
+    signal: Ordering requirements not documented for key design
+    explanation: Key changes may break assumed ordering guarantees
+    remediation: Document ordering requirements per message type
+  medium:
+  - id: PARTITION-MED-001
+    signal: Partition count not aligned with consumer parallelism
+    remediation: Adjust partition count to match maximum consumer count
+  - id: PARTITION-MED-002
+    signal: No mechanism to handle key hot spots
+    remediation: Implement key salting or sub-partitioning for hot keys
+  low:
+  - id: PARTITION-LOW-001
+    signal: Key selection logic scattered across codebase
+  positive:
+  - id: PARTITION-POS-001
+    signal: High cardinality keys with even distribution verified
+  - id: PARTITION-POS-002
+    signal: Key design documented with ordering rationale
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Map Partition Key Assignments
+    description: |
+      Locate all partition key assignments in producer code,
+      documenting how keys are derived from message content.
+    duration_estimate: 60 min
+    commands:
+    - purpose: Find partition key code
+      command: grep -r 'partitionKey\|partition\.key' --include='*.java' --include='*.ts' .
+    expected_findings:
+    - All partition key derivation logic
+    - Key sources per message type
+  - id: '2'
+    name: Analyze Key Cardinality
+    description: |
+      Determine the cardinality of each partition key type
+      and compare to partition counts.
+    duration_estimate: 45 min
+    questions:
+    - What is the cardinality of each key field?
+    - Does cardinality exceed partition count?
+    - Are there known low-cardinality keys?
+    expected_findings:
+    - Cardinality estimates per key type
+    - Potential bottleneck keys
+  - id: '3'
+    name: Review Partition Metrics
+    description: |
+      Analyze per-partition metrics to identify actual
+      distribution patterns and hot partitions.
+    duration_estimate: 45 min
+    expected_findings:
+    - Partition load distribution
+    - Hot partition identification
+  - id: '4'
+    name: Assess Ordering Requirements
+    description: |
+      Document which message types require ordering and
+      verify keys provide necessary guarantees.
+    duration_estimate: 30 min
+    questions:
+    - Which consumers depend on message ordering?
+    - What entity scope requires ordering (user, account, etc.)?
+    expected_findings:
+    - Ordering requirements documentation
+    - Key-ordering alignment verification
+  - id: '5'
+    name: Evaluate Scalability Ceiling
+    description: |
+      Calculate maximum throughput achievable with current
+      key design and partition configuration.
+    duration_estimate: 30 min
+    expected_findings:
+    - Theoretical maximum throughput
+    - Scaling limitations
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Partition Key Inventory
+    - Cardinality Analysis
+    - Distribution Metrics
+    - Recommendations
+  confidence_guidance:
+    high: Key code reviewed, metrics analyzed, cardinality verified
+    medium: Key design reviewed with limited metrics data
+    low: Code review only without production metrics
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: kafka-partitioning
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires deep code analysis and metrics review
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: partition-key-001
+  item: Key cardinality exceeds partition count for all topics
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify unique_keys >> partition_count for each topic
+  expected: Confirmed by reviewer
+- id: partition-key-002
+  item: Partition load variance is within acceptable range
+  level: BLOCKING
+  verification: manual
+  verification_notes: Coefficient of variation < 0.5 across partitions
+  expected: Confirmed by reviewer
+- id: partition-key-003
+  item: Ordering requirements documented for each message type
+  level: WARNING
+  verification: manual
+  verification_notes: Documentation exists linking keys to ordering needs
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - event-driven
+    - microservices
+    - data-pipeline
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC7.1
+relationships:
+  commonly_combined:
+  - scalability-capacity.async-queue-scalability.consumer-scaling
+  - scalability-capacity.async-queue-scalability.event-processing-scalability

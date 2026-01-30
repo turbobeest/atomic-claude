@@ -1,0 +1,375 @@
+# ============================================================
+# AUDIT: DNS Resolution Audit
+# ============================================================
+
+audit:
+  id: "performance-efficiency.network-efficiency.dns-resolution"
+  name: "DNS Resolution Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "network-efficiency"
+
+  tier: "expert"
+  estimated_duration: "1.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes DNS resolution configuration and performance across the application
+    infrastructure. Evaluates DNS caching strategies, TTL settings, resolver
+    selection, and advanced features like DNS prefetching, DNS-over-HTTPS (DoH),
+    and HTTPS DNS resource records. Identifies DNS-related latency issues.
+
+  why_it_matters: |
+    DNS resolution typically adds 20-120ms to the first request to any domain.
+    Without proper caching, this overhead is paid repeatedly. Studies show
+    DNS accounts for 10-20% of page load time. Poor DNS configuration can
+    cause cascading failures when resolvers become unavailable. DNS prefetching
+    can eliminate perceived DNS latency for subsequent navigation.
+
+  when_to_run:
+    - "Initial infrastructure setup"
+    - "When adding external service dependencies"
+    - "Performance optimization initiatives"
+    - "CDN or DNS provider changes"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure_config"
+      description: "DNS configuration and resolver settings"
+    - type: "codebase"
+      description: "Application code for DNS prefetch analysis"
+
+  access_requirements:
+    - "DNS zone configuration access"
+    - "Application server resolver configuration"
+    - "CDN DNS settings access"
+
+discovery:
+  code_patterns:
+    - pattern: "dns-prefetch|preconnect"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find DNS prefetching hints in HTML"
+    - pattern: "resolver|dns|nameserver"
+      type: "keyword"
+      scope: "config"
+      purpose: "Locate DNS configuration"
+
+  file_patterns:
+    - glob: "**/resolv.conf"
+      purpose: "System DNS resolver configuration"
+    - glob: "**/index.html"
+      purpose: "DNS prefetch link tags"
+    - glob: "**/nginx*.conf"
+      purpose: "Nginx resolver configuration"
+
+knowledge_sources:
+  specifications:
+    - id: "rfc1035"
+      name: "RFC 1035 - Domain Names - Implementation and Specification"
+      url: "https://datatracker.ietf.org/doc/html/rfc1035"
+      offline_cache: true
+      priority: "required"
+    - id: "rfc8484"
+      name: "RFC 8484 - DNS Queries over HTTPS (DoH)"
+      url: "https://datatracker.ietf.org/doc/html/rfc8484"
+      offline_cache: true
+      priority: "recommended"
+    - id: "rfc9460"
+      name: "RFC 9460 - Service Binding and Parameter Specification"
+      url: "https://datatracker.ietf.org/doc/html/rfc9460"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "google-dns-best"
+      name: "Google Cloud DNS Best Practices"
+      url: "https://cloud.google.com/dns/docs/best-practices"
+      offline_cache: true
+    - id: "cloudflare-dns"
+      name: "Cloudflare DNS Documentation"
+      url: "https://developers.cloudflare.com/dns/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "dig"
+      purpose: "DNS query and analysis"
+      command: "dig +stats example.com"
+    - tool: "host"
+      purpose: "Simple DNS lookup"
+      command: "host example.com"
+    - tool: "nslookup"
+      purpose: "DNS troubleshooting"
+      command: "nslookup -debug example.com"
+
+  scripts:
+    - id: "dns-analyzer"
+      language: "bash"
+      purpose: "Comprehensive DNS analysis"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        DOMAIN="$1"
+        echo "=== DNS Analysis for $DOMAIN ==="
+
+        # Resolution time
+        echo -e "\n--- Resolution Time ---"
+        dig +stats "$DOMAIN" | grep 'Query time'
+
+        # TTL check
+        echo -e "\n--- TTL Values ---"
+        dig "$DOMAIN" | grep -E '^[^;]' | awk '{print $1, $2, $5}'
+
+        # Nameservers
+        echo -e "\n--- Nameservers ---"
+        dig NS "$DOMAIN" +short
+
+        # Check for HTTPS record
+        echo -e "\n--- HTTPS Record ---"
+        dig TYPE65 "$DOMAIN" +short
+
+signals:
+  critical:
+    - id: "DNS-CRIT-001"
+      signal: "No DNS caching configured for application"
+      evidence_pattern: "Every request triggers DNS lookup; no local cache"
+      explanation: |
+        Without DNS caching, every HTTP request to an external service
+        incurs 20-120ms DNS resolution overhead. For applications making
+        hundreds of API calls, this adds seconds of unnecessary latency.
+        This is especially problematic in containerized environments with
+        frequent pod restarts.
+      remediation: "Configure local DNS cache (systemd-resolved, dnsmasq) or use connection pooling"
+
+    - id: "DNS-CRIT-002"
+      signal: "DNS TTL set to 0 or very low (<60s) for high-traffic domains"
+      evidence_pattern: "TTL <= 60 in DNS records"
+      explanation: |
+        Zero or very low TTLs force constant DNS re-resolution, overwhelming
+        DNS infrastructure and adding latency to every request. Low TTLs
+        should only be used during DNS migrations. Production TTLs should
+        typically be 300-3600 seconds.
+      remediation: "Increase DNS TTL to at least 300 seconds for stable records"
+
+  high:
+    - id: "DNS-HIGH-001"
+      signal: "DNS prefetching not implemented for known external domains"
+      evidence_pattern: "No <link rel='dns-prefetch'> for external CDNs, APIs"
+      explanation: |
+        DNS prefetching allows browsers to resolve domain names before they're
+        needed, hiding DNS latency entirely for user-initiated navigation.
+        Not using dns-prefetch for known external resources (CDNs, analytics,
+        APIs) leaves easy performance wins on the table.
+      remediation: "Add <link rel='dns-prefetch' href='//external-domain.com'> for critical external resources"
+
+    - id: "DNS-HIGH-002"
+      signal: "Single DNS resolver configured (single point of failure)"
+      evidence_pattern: "Only one nameserver in resolv.conf"
+      explanation: |
+        Relying on a single DNS resolver creates availability risk. If that
+        resolver becomes unavailable, all DNS-dependent operations fail.
+        Best practice is to configure at least 2-3 resolvers with proper
+        failover behavior.
+      remediation: "Configure multiple DNS resolvers with proper ordering"
+
+  medium:
+    - id: "DNS-MED-001"
+      signal: "No HTTPS DNS record for HTTP/3 discovery"
+      evidence_pattern: "Missing TYPE65 (HTTPS) DNS record"
+      remediation: "Add HTTPS DNS record to enable HTTP/3 discovery and improve connection setup"
+
+    - id: "DNS-MED-002"
+      signal: "DNS resolution time exceeds 50ms"
+      evidence_pattern: "dig Query time > 50ms"
+      remediation: "Use geographically closer DNS resolvers or implement DNS caching"
+
+  low:
+    - id: "DNS-LOW-001"
+      signal: "DNS-over-HTTPS (DoH) not configured for privacy"
+
+  positive:
+    - id: "DNS-POS-001"
+      signal: "DNS prefetching configured for all external domains"
+    - id: "DNS-POS-002"
+      signal: "Multiple DNS resolvers configured with proper fallback"
+    - id: "DNS-POS-003"
+      signal: "HTTPS DNS records configured for HTTP/3 discovery"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Measure DNS Resolution Time"
+      description: |
+        Measure DNS resolution time for all domains used by the application
+        to identify slow resolution or missing cache benefits.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Measure DNS resolution time"
+          command: "dig +stats example.com | grep 'Query time'"
+        - purpose: "Multiple resolution test (cached vs uncached)"
+          command: "for i in 1 2 3; do dig +stats example.com | grep 'Query time'; done"
+        - purpose: "Check current resolver"
+          command: "cat /etc/resolv.conf"
+
+      expected_findings:
+        - "First query slower than subsequent (cache working)"
+        - "Resolution time under 50ms for cached queries"
+
+    - id: "2"
+      name: "Audit DNS TTL Settings"
+      description: |
+        Review TTL settings for all DNS records to ensure they're
+        appropriate for the use case.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Check TTL for A records"
+          command: "dig example.com | grep -E '^example.com' | awk '{print $2}'"
+        - purpose: "Check all record TTLs"
+          command: "dig any example.com | grep -v '^;' | grep -E '^[a-zA-Z]' | awk '{print $1, $2, $4}'"
+        - purpose: "Check CDN TTL"
+          command: "dig cdn.example.com | grep -E '^cdn' | awk '{print $2}'"
+
+      expected_findings:
+        - "TTLs >= 300 seconds for stable records"
+        - "Reasonable TTLs for CDN (typically 60-300s)"
+
+    - id: "3"
+      name: "Review DNS Prefetching"
+      description: |
+        Examine HTML output for DNS prefetch hints and verify
+        all external domains are covered.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Check for dns-prefetch links"
+          command: "curl -s https://example.com | grep -i 'dns-prefetch\\|preconnect'"
+        - purpose: "Find external domains on page"
+          command: "curl -s https://example.com | grep -oE 'https?://[^/\"]+' | sort -u | grep -v example.com"
+
+      expected_findings:
+        - "DNS prefetch for all external domains"
+        - "Preconnect for critical external resources"
+
+    - id: "4"
+      name: "Check Advanced DNS Features"
+      description: |
+        Verify advanced DNS features like HTTPS records for
+        HTTP/3 discovery and DNS resolver redundancy.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Check for HTTPS record"
+          command: "dig TYPE65 example.com +short"
+        - purpose: "Verify resolver redundancy"
+          command: "grep nameserver /etc/resolv.conf | wc -l"
+        - purpose: "Check CAA records"
+          command: "dig CAA example.com +short"
+
+      expected_findings:
+        - "HTTPS record present for HTTP/3 discovery"
+        - "Multiple nameservers configured"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "DNS Resolution Performance"
+        - "TTL Analysis"
+        - "Prefetching Coverage"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct DNS measurements with dig"
+    medium: "Configuration file analysis"
+    low: "Inferred from application behavior"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "rfc1035"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: "DNS checks are fast"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "dns-001"
+    item: "DNS resolution time under 50ms"
+    level: "BLOCKING"
+    verification: |
+      TIME=$(dig +stats example.com | grep 'Query time' | grep -oE '[0-9]+')
+      if [ "$TIME" -lt 50 ]; then echo "PASS: ${TIME}ms"; else echo "FAIL: ${TIME}ms"; fi
+    expected: "PASS"
+
+  - id: "dns-002"
+    item: "DNS TTL >= 300 seconds for stable records"
+    level: "BLOCKING"
+    verification: |
+      TTL=$(dig example.com | grep -E '^example.com' | awk '{print $2}' | head -1)
+      if [ "${TTL:-0}" -ge 300 ]; then echo "PASS: ${TTL}s TTL"; else echo "FAIL: ${TTL}s TTL"; fi
+    expected: "PASS"
+
+  - id: "dns-003"
+    item: "Multiple DNS resolvers configured"
+    level: "WARNING"
+    verification: |
+      COUNT=$(grep -c nameserver /etc/resolv.conf)
+      if [ "$COUNT" -ge 2 ]; then echo "PASS: $COUNT resolvers"; else echo "FAIL: Only $COUNT resolver"; fi
+    expected: "PASS"
+
+  - id: "dns-004"
+    item: "DNS prefetching configured for external domains"
+    level: "WARNING"
+    verification: |
+      PREFETCH=$(curl -s https://example.com | grep -c 'dns-prefetch')
+      if [ "$PREFETCH" -gt 0 ]; then echo "PASS: $PREFETCH prefetch hints"; else echo "FAIL: No prefetch"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.network-efficiency.connection-reuse"
+    - "performance-efficiency.network-efficiency.prefetching-strategy"

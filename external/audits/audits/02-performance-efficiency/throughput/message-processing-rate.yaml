@@ -1,0 +1,288 @@
+audit:
+  id: performance-efficiency.throughput.message-processing-rate
+  name: Message Processing Rate Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: throughput
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit measures the message processing throughput of queue-based
+    systems (Kafka, RabbitMQ, SQS, etc.). It evaluates consumer lag,
+    processing rates, queue depths, and the ability to keep up with
+    incoming message volume. The audit identifies processing bottlenecks
+    and evaluates queue system health.
+  why_it_matters: |
+    Message queue backlog is a leading indicator of system stress.
+    When consumers cannot keep up with producers, queues grow, latency
+    increases, and eventually messages may be lost or systems fail.
+    Understanding processing rates is critical for async system health
+    and capacity planning.
+  when_to_run:
+  - After adding new message producers or consumers
+  - When consumer lag increases
+  - During capacity planning for async workloads
+  - When investigating delayed processing
+prerequisites:
+  required_artifacts:
+  - type: queue_access
+    description: Access to message queue metrics (Kafka, RabbitMQ, SQS)
+  - type: consumer_metrics
+    description: Consumer processing rate metrics
+  access_requirements:
+  - Access to message queue monitoring
+  - Consumer application metrics access
+discovery:
+  metrics_queries:
+  - system: Kafka
+    query: kafka_consumer_records_consumed_rate
+    purpose: Consumer message processing rate
+    threshold: '>= producer rate'
+  - system: Prometheus
+    query: |
+      sum(rate(kafka_consumer_records_consumed_total[5m])) by (topic)
+    purpose: Messages consumed per second by topic
+    threshold: No sustained lag growth
+  - system: RabbitMQ
+    query: rabbitmq_queue_messages_ready
+    purpose: Queue depth (messages waiting)
+    threshold: Should trend toward 0
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: kafka-consumer-tuning
+    name: Kafka Consumer Tuning
+    url: https://kafka.apache.org/documentation/#consumerconfigs
+    offline_cache: true
+  - id: rabbitmq-monitoring
+    name: RabbitMQ Monitoring Guide
+    url: https://www.rabbitmq.com/monitoring.html
+    offline_cache: true
+  - id: aws-sqs-best-practices
+    name: AWS SQS Best Practices
+    url: https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-best-practices.html
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: kafka-consumer-groups
+    purpose: Check Kafka consumer lag
+    command: |
+      kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
+        --describe --group my-consumer-group
+  - tool: rabbitmqctl
+    purpose: Check RabbitMQ queue status
+    command: rabbitmqctl list_queues name messages consumers
+  - tool: aws-cli
+    purpose: Check SQS queue depth
+    command: |
+      aws sqs get-queue-attributes --queue-url $QUEUE_URL \
+        --attribute-names ApproximateNumberOfMessages
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      sum(kafka_consumer_group_lag) by (topic, consumergroup)
+    purpose: Total consumer lag by group
+  - system: Prometheus
+    query: |
+      rate(kafka_consumer_records_consumed_total[5m])
+      - rate(kafka_producer_record_send_total[5m])
+    purpose: Consume rate vs produce rate differential
+signals:
+  critical:
+  - id: MSG-CRIT-001
+    signal: Consumer lag growing continuously for more than 1 hour
+    evidence_threshold: lag increase rate > 0 for 1h
+    explanation: |
+      Continuously growing lag means consumers cannot keep up with
+      producers. Without intervention, queues will eventually
+      overflow or messages will expire. This indicates a capacity
+      problem that will not self-resolve.
+    remediation: Scale consumers; reduce message production; optimize processing
+  - id: MSG-CRIT-002
+    signal: Queue approaching configured max size
+    evidence_threshold: queue_size > 80% of max_queue_size
+    explanation: |
+      Queues near capacity will start rejecting new messages or
+      blocking producers. This can cause cascading failures upstream
+      when producers cannot send messages.
+    remediation: Increase queue capacity; scale consumers; implement backpressure
+  high:
+  - id: MSG-HIGH-001
+    signal: Consumer processing rate less than 50% of production rate
+    evidence_threshold: consume_rate / produce_rate < 0.5
+    explanation: |
+      Significant imbalance between production and consumption rates
+      will cause queue growth and processing delays. The gap must be
+      closed before lag becomes unmanageable.
+    remediation: Add consumer instances; optimize consumer processing; batch operations
+  - id: MSG-HIGH-002
+    signal: Message processing latency exceeds 5 minutes
+    evidence_threshold: oldest_message_age > 5m
+    explanation: |
+      Old messages in the queue indicate processing delays that
+      impact downstream systems expecting timely data.
+    remediation: Investigate consumer health; scale processing capacity
+  medium:
+  - id: MSG-MED-001
+    signal: No consumer lag monitoring configured
+    remediation: Implement lag monitoring with alerting on growth trends
+  - id: MSG-MED-002
+    signal: Consumer processing rate not tracked per topic
+    remediation: Add topic-level processing rate metrics
+  low:
+  - id: MSG-LOW-001
+    signal: Message processing SLO not defined
+  positive:
+  - id: MSG-POS-001
+    signal: Consumer lag consistently at zero or minimal
+  - id: MSG-POS-002
+    signal: Consumer rate exceeds producer rate with headroom
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Queues and Topics
+    description: |
+      Identify all message queues and topics in use, their purpose,
+      and expected throughput requirements.
+    duration_estimate: 15 min
+    commands:
+    - purpose: List Kafka topics
+      command: kafka-topics.sh --bootstrap-server localhost:9092 --list
+    - purpose: List RabbitMQ queues
+      command: rabbitmqctl list_queues name messages consumers
+    expected_findings:
+    - List of queues/topics
+    - Purpose and criticality
+  - id: '2'
+    name: Measure Processing Rates
+    description: |
+      Measure current production and consumption rates for each
+      queue/topic.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Query Kafka consumer rate
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(kafka_consumer_records_consumed_total[5m]))by(topic)'
+    - purpose: Query production rate
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(kafka_producer_record_send_total[5m]))by(topic)'
+    expected_findings:
+    - Messages produced per second
+    - Messages consumed per second
+  - id: '3'
+    name: Check Consumer Lag
+    description: |
+      Measure consumer lag and identify topics/queues with processing
+      delays.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check Kafka consumer lag
+      command: |
+        kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
+          --describe --all-groups 2>/dev/null | grep -v "^$"
+    - purpose: Query lag from Prometheus
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=sum(kafka_consumer_group_lag)by(consumergroup,topic)'
+    expected_findings:
+    - Consumer lag by topic/group
+    - Lag trend (growing/stable/shrinking)
+  - id: '4'
+    name: Analyze Bottlenecks
+    description: |
+      Identify why consumers may be slow: CPU, I/O, external calls,
+      batch size configuration.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check consumer CPU usage
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/query?query=avg(rate(container_cpu_usage_seconds_total{pod=~".*consumer.*"}[5m]))by(pod)'
+    expected_findings:
+    - Consumer resource utilization
+    - Processing bottleneck identification
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Queue Inventory
+    - Processing Rate Analysis
+    - Consumer Lag Status
+    - Recommendations
+  confidence_guidance:
+    high: Metrics from production with >24h of data
+    medium: Snapshot metrics during audit
+    low: Configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: kafka-consumer-tuning
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires queue access and runtime analysis
+    full:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: msg-rate-001
+  item: Consumer lag not growing continuously
+  level: CRITICAL
+  verification: |
+    # Check if lag trend is positive (growing) over 1 hour
+    curl -s 'http://prometheus:9090/api/v1/query?query=deriv(sum(kafka_consumer_group_lag)[1h])' | \
+      jq '.data.result[0].value[1] | tonumber <= 0'
+  expected: 'true'
+- id: msg-rate-002
+  item: Consumer rate >= producer rate
+  level: BLOCKING
+  verification: |
+    CONSUME=$(curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(kafka_consumer_records_consumed_total[5m]))' | jq -r '.data.result[0].value[1]')
+    PRODUCE=$(curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(kafka_producer_record_send_total[5m]))' | jq -r '.data.result[0].value[1]')
+    echo "scale=2; $CONSUME >= $PRODUCE" | bc
+  expected: '1'
+- id: msg-rate-003
+  item: Consumer lag monitoring with alerting
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm lag alerts are configured
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - event-driven
+    - async-processing
+relationships:
+  commonly_combined:
+  - performance-efficiency.throughput.event-processing-rate
+  - performance-efficiency.throughput.stream-processing-throughput

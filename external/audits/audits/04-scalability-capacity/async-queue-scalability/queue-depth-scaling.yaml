@@ -1,0 +1,293 @@
+audit:
+  id: scalability-capacity.async-queue-scalability.queue-depth-scaling
+  name: Queue Depth Scaling Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: scalability-capacity
+  category_number: 4
+  subcategory: async-queue-scalability
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates how message queue systems respond to varying queue depths,
+    analyzing consumer throughput degradation, memory utilization patterns,
+    and system stability under high-depth scenarios. Examines queue depth
+    monitoring, alerting thresholds, and scaling policies that trigger
+    based on queue depth metrics.
+  why_it_matters: |
+    Unbounded queue growth leads to memory exhaustion, increased latency,
+    and cascading failures. Systems without proper queue depth scaling
+    experience message processing delays that compound over time, potentially
+    causing data loss when queues reach hard limits or when broker memory
+    is exhausted. Understanding queue depth behavior is essential for
+    capacity planning and incident prevention.
+  when_to_run:
+  - Before production deployment of new queue-based workflows
+  - When experiencing message processing delays
+  - During capacity planning exercises
+  - After significant changes to producer or consumer throughput
+prerequisites:
+  required_artifacts:
+  - type: queue_infrastructure
+    description: Access to message queue systems (RabbitMQ, Kafka, SQS, etc.)
+  - type: metrics_system
+    description: Queue depth and throughput metrics history
+  - type: configuration
+    description: Queue configuration files and scaling policies
+  access_requirements:
+  - Read access to queue management APIs
+  - Access to monitoring dashboards and metrics systems
+  - Consumer and producer configuration files
+discovery:
+  code_patterns:
+  - pattern: maxQueueSize|queue.*capacity|max.*messages
+    type: regex
+    scope: config
+    purpose: Find queue depth limits and capacity settings
+  - pattern: queue.*depth.*alarm|queue.*threshold
+    type: regex
+    scope: config
+    purpose: Identify queue depth alerting configurations
+  file_patterns:
+  - glob: '**/rabbitmq*.conf'
+    purpose: RabbitMQ configuration files
+  - glob: '**/kafka*.properties'
+    purpose: Kafka broker and topic configurations
+  - glob: '**/*queue*.yaml'
+    purpose: Queue service configurations
+  metrics_queries:
+  - system: Prometheus
+    query: sum(rabbitmq_queue_messages) by (queue)
+    purpose: Current queue depths across all queues
+    threshold: Should not consistently exceed 10000 messages
+  - system: CloudWatch
+    query: ApproximateNumberOfMessagesVisible
+    purpose: SQS queue depth monitoring
+    threshold: Based on consumer capacity
+knowledge_sources:
+  specifications:
+  - id: amqp-091
+    name: AMQP 0-9-1 Specification
+    url: https://www.rabbitmq.com/amqp-0-9-1-reference.html
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: rabbitmq-monitoring
+    name: RabbitMQ Monitoring Guide
+    url: https://www.rabbitmq.com/monitoring.html
+    offline_cache: true
+  - id: kafka-ops
+    name: Kafka Operations Guide
+    url: https://kafka.apache.org/documentation/#operations
+    offline_cache: true
+  papers:
+  - id: queue-theory
+    title: Queueing Theory and Performance Analysis
+    url: https://www.cs.cmu.edu/~harchol/Papers/queue-survey.pdf
+tooling:
+  infrastructure_tools:
+  - tool: rabbitmqctl
+    purpose: Query RabbitMQ queue statistics
+    command: rabbitmqctl list_queues name messages consumers
+  - tool: kafka-consumer-groups
+    purpose: Check consumer lag and partition status
+    command: kafka-consumer-groups.sh --describe --all-groups
+  monitoring_queries:
+  - system: Prometheus
+    query: rate(rabbitmq_queue_messages_published_total[5m])
+    purpose: Message publish rate for capacity planning
+  - system: Prometheus
+    query: rabbitmq_queue_messages / rate(rabbitmq_queue_messages_delivered_total[5m])
+    purpose: Estimated time to drain queue
+  scripts:
+  - id: queue-depth-analyzer
+    language: bash
+    purpose: Analyze queue depth trends from metrics
+    source: inline
+    code: |
+      #!/bin/bash
+      # Query queue depths and identify growth trends
+      echo "Checking queue depth configurations..."
+      grep -r "maxQueueSize\|queue.*capacity" . 2>/dev/null || echo "No explicit limits found"
+signals:
+  critical:
+  - id: QUEUE-CRIT-001
+    signal: No queue depth limits configured
+    evidence_pattern: Absence of maxQueueSize or x-max-length settings
+    explanation: |
+      Unbounded queues can consume all available memory, crashing the
+      broker and causing complete message loss. Every production queue
+      should have explicit depth limits with overflow handling policies.
+    remediation: Configure x-max-length and x-overflow policies for all queues
+  - id: QUEUE-CRIT-002
+    signal: Queue depth exceeds consumer capacity by 10x or more
+    evidence_threshold: queue_depth > (consumer_rate * 600)
+    explanation: |
+      When queue depth exceeds 10 minutes of consumer processing capacity,
+      the system is in a degraded state with significant latency impact.
+    remediation: Scale consumers or implement backpressure mechanisms
+  high:
+  - id: QUEUE-HIGH-001
+    signal: No queue depth monitoring or alerting
+    explanation: Cannot detect queue growth before it becomes critical
+    remediation: Implement queue depth metrics and alerting thresholds
+  - id: QUEUE-HIGH-002
+    signal: Auto-scaling not triggered by queue depth
+    explanation: Manual intervention required during traffic spikes
+    remediation: Configure auto-scaling policies based on queue depth metrics
+  medium:
+  - id: QUEUE-MED-001
+    signal: Alert thresholds not calibrated to consumer capacity
+    remediation: Set thresholds based on queue drain time calculations
+  - id: QUEUE-MED-002
+    signal: No dead letter queue for overflow handling
+    remediation: Configure DLQ with x-dead-letter-exchange for failed messages
+  low:
+  - id: QUEUE-LOW-001
+    signal: Queue depth metrics not retained for capacity planning
+  positive:
+  - id: QUEUE-POS-001
+    signal: Queue depth limits with graceful overflow handling configured
+  - id: QUEUE-POS-002
+    signal: Auto-scaling policies respond to queue depth changes
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Queue Infrastructure
+    description: |
+      Identify all message queues in the system, their purpose,
+      and current configuration settings including depth limits.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List all configured queues
+      command: rabbitmqctl list_queues name messages consumers memory
+    expected_findings:
+    - Complete inventory of queues and their configurations
+    - Current depth and consumer counts
+  - id: '2'
+    name: Analyze Queue Depth Limits
+    description: |
+      Review each queue's depth limits, overflow policies, and
+      dead letter configurations.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Check queue policies
+      command: rabbitmqctl list_policies
+    expected_findings:
+    - Explicit depth limits per queue
+    - Overflow handling policies
+  - id: '3'
+    name: Review Monitoring and Alerting
+    description: |
+      Evaluate queue depth monitoring coverage and alert thresholds
+      against calculated consumer capacity.
+    duration_estimate: 45 min
+    questions:
+    - Are all queues monitored for depth?
+    - Do alert thresholds align with consumer throughput?
+    - Is queue growth rate monitored?
+    expected_findings:
+    - Monitoring coverage gaps
+    - Alert threshold appropriateness
+  - id: '4'
+    name: Assess Scaling Policies
+    description: |
+      Review auto-scaling configurations and verify they respond
+      appropriately to queue depth changes.
+    duration_estimate: 30 min
+    expected_findings:
+    - Auto-scaling trigger conditions
+    - Scale-up response times
+  - id: '5'
+    name: Historical Analysis
+    description: |
+      Analyze historical queue depth data to identify patterns,
+      peak loads, and near-miss incidents.
+    duration_estimate: 30 min
+    expected_findings:
+    - Peak queue depth patterns
+    - Correlation with incidents
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Queue Inventory
+    - Depth Limit Analysis
+    - Monitoring Gaps
+    - Scaling Recommendations
+  confidence_guidance:
+    high: Queue configurations verified, metrics data analyzed
+    medium: Configuration reviewed but limited metrics history
+    low: Partial access to queue infrastructure
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: rabbitmq-monitoring
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires metrics analysis and infrastructure review
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: queue-depth-001
+  item: All production queues have explicit depth limits
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify x-max-length or equivalent is set for each queue
+  expected: Confirmed by reviewer
+- id: queue-depth-002
+  item: Queue depth monitoring covers all queues
+  level: BLOCKING
+  verification: manual
+  verification_notes: Check monitoring dashboard includes all queues
+  expected: Confirmed by reviewer
+- id: queue-depth-003
+  item: Alert thresholds are documented and justified
+  level: WARNING
+  verification: manual
+  verification_notes: Thresholds should be based on consumer capacity
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - event-driven
+    - microservices
+    - data-pipeline
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC7.1
+    - CC7.2
+relationships:
+  commonly_combined:
+  - scalability-capacity.async-queue-scalability.consumer-scaling
+  - scalability-capacity.async-queue-scalability.backpressure-mechanism

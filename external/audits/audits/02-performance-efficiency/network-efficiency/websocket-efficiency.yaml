@@ -1,0 +1,376 @@
+# ============================================================
+# AUDIT: WebSocket Efficiency Audit
+# ============================================================
+
+audit:
+  id: "performance-efficiency.network-efficiency.websocket-efficiency"
+  name: "WebSocket Efficiency Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "network-efficiency"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates WebSocket implementation efficiency including connection management,
+    message format optimization, heartbeat/ping-pong handling, reconnection logic,
+    and proper use cases for WebSockets vs alternative technologies (SSE, HTTP polling).
+    Analyzes connection scaling, memory usage, and message throughput.
+
+  why_it_matters: |
+    WebSockets enable real-time bidirectional communication but require careful
+    implementation. Poor connection management can exhaust server resources, memory
+    leaks from unclosed connections crash applications, and oversized messages
+    increase latency. Studies show 30% of WebSocket implementations have reconnection
+    bugs. Proper implementation enables sub-50ms message delivery while poor
+    implementation can degrade to worse than polling.
+
+  when_to_run:
+    - "Real-time feature development"
+    - "Connection scaling issues"
+    - "Memory leak investigations"
+    - "Performance optimization"
+
+prerequisites:
+  required_artifacts:
+    - type: "codebase"
+      description: "Application source code with WebSocket implementations"
+    - type: "runtime_access"
+      description: "Running application for connection testing"
+
+  access_requirements:
+    - "WebSocket server and client code"
+    - "Server monitoring access for connection metrics"
+    - "Network tools for WebSocket frame analysis"
+
+discovery:
+  code_patterns:
+    - pattern: "WebSocket|new WS\\(|ws://|wss://"
+      type: "regex"
+      scope: "source"
+      purpose: "Find WebSocket instantiation"
+    - pattern: "socket\\.io|Socket\\.IO|io\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find Socket.IO usage"
+    - pattern: "onmessage|onopen|onclose|onerror"
+      type: "keyword"
+      scope: "source"
+      purpose: "WebSocket event handlers"
+
+  file_patterns:
+    - glob: "**/*socket*.{ts,js}"
+      purpose: "WebSocket-related files"
+    - glob: "**/*ws*.{ts,js}"
+      purpose: "WebSocket modules"
+    - glob: "**/realtime/**/*.{ts,js}"
+      purpose: "Real-time feature code"
+
+knowledge_sources:
+  specifications:
+    - id: "rfc6455"
+      name: "RFC 6455 - The WebSocket Protocol"
+      url: "https://datatracker.ietf.org/doc/html/rfc6455"
+      offline_cache: true
+      priority: "required"
+    - id: "rfc7692"
+      name: "RFC 7692 - Compression Extensions for WebSocket"
+      url: "https://datatracker.ietf.org/doc/html/rfc7692"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "socket-io-docs"
+      name: "Socket.IO Documentation"
+      url: "https://socket.io/docs/v4/"
+      offline_cache: true
+    - id: "ws-npm"
+      name: "ws npm package documentation"
+      url: "https://github.com/websockets/ws"
+      offline_cache: true
+
+  learning_resources:
+    - id: "high-perf-websocket"
+      title: "High Performance WebSocket"
+      type: "article"
+      reference: "https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API"
+
+tooling:
+  infrastructure_tools:
+    - tool: "websocat"
+      purpose: "WebSocket command-line client"
+      command: "websocat wss://example.com/ws"
+    - tool: "wscat"
+      purpose: "WebSocket testing tool"
+      command: "wscat -c wss://example.com/ws"
+
+  scripts:
+    - id: "ws-connection-test"
+      language: "bash"
+      purpose: "Test WebSocket connection and latency"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        URL="$1"
+        echo "=== WebSocket Connection Test for $URL ==="
+
+        # Check upgrade headers
+        echo -e "\n--- Upgrade Headers ---"
+        curl -sI -H "Upgrade: websocket" -H "Connection: Upgrade" \
+             -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+             -H "Sec-WebSocket-Version: 13" \
+             "$URL" | head -10
+
+signals:
+  critical:
+    - id: "WS-CRIT-001"
+      signal: "WebSocket connections not properly closed on component unmount"
+      evidence_pattern: "new WebSocket() without corresponding close() in cleanup"
+      explanation: |
+        Unclosed WebSocket connections cause memory leaks and can exhaust
+        server resources. In React, every component mount creates a new connection
+        if cleanup is missing. After 100 mounts, you have 100 open connections.
+        This is one of the most common causes of browser tab crashes.
+      remediation: "Always close WebSocket in cleanup (useEffect return, componentWillUnmount)"
+
+    - id: "WS-CRIT-002"
+      signal: "No reconnection logic for dropped connections"
+      evidence_pattern: "WebSocket onerror/onclose without reconnection attempt"
+      explanation: |
+        Network hiccups, server restarts, and load balancer timeouts will drop
+        WebSocket connections. Without automatic reconnection with exponential
+        backoff, users experience broken real-time features requiring manual
+        page refresh.
+      remediation: "Implement reconnection with exponential backoff (1s, 2s, 4s, 8s... max 30s)"
+
+  high:
+    - id: "WS-HIGH-001"
+      signal: "Large JSON messages sent over WebSocket (>100KB)"
+      evidence_pattern: "WebSocket messages exceeding 100KB"
+      explanation: |
+        WebSocket is designed for small, frequent messages. Large messages
+        block the connection, increase memory pressure, and add latency.
+        Messages over 100KB should use chunking or traditional HTTP with
+        streaming.
+      remediation: "Chunk large messages, use binary format, or switch to HTTP for bulk transfers"
+
+    - id: "WS-HIGH-002"
+      signal: "WebSocket used where Server-Sent Events (SSE) would suffice"
+      evidence_pattern: "WebSocket with only server-to-client messages"
+      explanation: |
+        If communication is only server-to-client (notifications, feeds),
+        SSE is simpler, has automatic reconnection, and works better with
+        HTTP/2. WebSockets require custom reconnection logic and don't
+        benefit from HTTP/2 multiplexing.
+      remediation: "Evaluate SSE for unidirectional server-to-client communication"
+
+  medium:
+    - id: "WS-MED-001"
+      signal: "No ping/pong heartbeat configured"
+      evidence_pattern: "Missing heartbeat interval in WebSocket configuration"
+      remediation: "Implement 30-60 second heartbeat to detect stale connections"
+
+    - id: "WS-MED-002"
+      signal: "WebSocket compression not enabled"
+      evidence_pattern: "permessage-deflate extension not negotiated"
+      remediation: "Enable WebSocket compression for text messages"
+
+  low:
+    - id: "WS-LOW-001"
+      signal: "Binary message format not used for structured data"
+
+  positive:
+    - id: "WS-POS-001"
+      signal: "Proper connection lifecycle management with cleanup"
+    - id: "WS-POS-002"
+      signal: "Exponential backoff reconnection implemented"
+    - id: "WS-POS-003"
+      signal: "Message compression enabled"
+    - id: "WS-POS-004"
+      signal: "Heartbeat mechanism for connection health"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Audit WebSocket Lifecycle Management"
+      description: |
+        Review code for proper WebSocket connection creation and cleanup,
+        particularly in React components and event handlers.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find WebSocket instantiation"
+          command: "grep -rn 'new WebSocket\\|new WS(' --include='*.ts' --include='*.js' src/"
+        - purpose: "Find cleanup/close calls"
+          command: "grep -rn '\\.close()' --include='*.ts' --include='*.js' src/ | grep -i socket"
+        - purpose: "Check useEffect cleanup"
+          command: "grep -B5 -A10 'new WebSocket' --include='*.tsx' --include='*.jsx' src/ | grep -E 'return|cleanup|close'"
+
+      expected_findings:
+        - "WebSocket close() in component cleanup"
+        - "Proper lifecycle management"
+
+    - id: "2"
+      name: "Review Reconnection Logic"
+      description: |
+        Verify that WebSocket implementations include reconnection
+        with exponential backoff for resilience.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find reconnection patterns"
+          command: "grep -rn 'reconnect\\|retry\\|backoff' --include='*.ts' --include='*.js' src/"
+        - purpose: "Check onerror/onclose handlers"
+          command: "grep -rn 'onerror\\|onclose' --include='*.ts' --include='*.js' src/ | grep -i socket"
+        - purpose: "Find setTimeout in socket code"
+          command: "grep -B5 -A5 'setTimeout' --include='*.ts' --include='*.js' src/ | grep -i socket"
+
+      expected_findings:
+        - "Reconnection logic present"
+        - "Exponential backoff implemented"
+
+    - id: "3"
+      name: "Analyze Message Patterns"
+      description: |
+        Review WebSocket message handling for size, format, and
+        frequency patterns.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find message sending code"
+          command: "grep -rn '\\.send(' --include='*.ts' --include='*.js' src/ | grep -i socket"
+        - purpose: "Check message serialization"
+          command: "grep -rn 'JSON\\.stringify' --include='*.ts' --include='*.js' src/ | head -20"
+        - purpose: "Find onmessage handlers"
+          command: "grep -rn 'onmessage\\|addEventListener.*message' --include='*.ts' --include='*.js' src/"
+
+      expected_findings:
+        - "Small message sizes"
+        - "Efficient serialization"
+
+    - id: "4"
+      name: "Test WebSocket Server Configuration"
+      description: |
+        Test WebSocket server for proper upgrade handling, compression,
+        and heartbeat configuration.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Test WebSocket upgrade"
+          command: |
+            curl -sI -H "Upgrade: websocket" -H "Connection: Upgrade" \
+                 -H "Sec-WebSocket-Key: test123" -H "Sec-WebSocket-Version: 13" \
+                 https://example.com/ws
+        - purpose: "Check server config for compression"
+          command: "grep -rn 'perMessageDeflate\\|compression' --include='*.ts' --include='*.js' src/"
+        - purpose: "Check heartbeat config"
+          command: "grep -rn 'ping\\|heartbeat\\|keepalive' --include='*.ts' --include='*.js' src/ | grep -i socket"
+
+      expected_findings:
+        - "101 Switching Protocols response"
+        - "Compression enabled"
+        - "Heartbeat configured"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Lifecycle Management Analysis"
+        - "Reconnection Logic Review"
+        - "Message Pattern Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct code inspection and runtime testing"
+    medium: "Code pattern analysis"
+    low: "Inferred from partial evidence"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "rfc6455"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed code analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "websocket-001"
+    item: "WebSocket connections properly closed in cleanup"
+    level: "CRITICAL"
+    verification: |
+      WS=$(grep -rn 'new WebSocket' --include='*.ts' --include='*.tsx' src/ | wc -l)
+      CLOSE=$(grep -rn '\\.close()' --include='*.ts' --include='*.tsx' src/ | grep -i socket | wc -l)
+      if [ "$CLOSE" -ge "$WS" ]; then echo "PASS"; else echo "FAIL: $WS creates vs $CLOSE closes"; fi
+    expected: "PASS"
+
+  - id: "websocket-002"
+    item: "Reconnection logic implemented"
+    level: "CRITICAL"
+    verification: |
+      RECON=$(grep -rn 'reconnect\|retry' --include='*.ts' --include='*.js' src/ | grep -i socket | wc -l)
+      if [ "$RECON" -gt 0 ]; then echo "PASS"; else echo "FAIL: No reconnection logic"; fi
+    expected: "PASS"
+
+  - id: "websocket-003"
+    item: "Heartbeat/ping configured"
+    level: "BLOCKING"
+    verification: |
+      PING=$(grep -rn 'ping\|heartbeat' --include='*.ts' --include='*.js' src/ | grep -i socket | wc -l)
+      if [ "$PING" -gt 0 ]; then echo "PASS"; else echo "FAIL: No heartbeat"; fi
+    expected: "PASS"
+
+  - id: "websocket-004"
+    item: "WebSocket compression enabled"
+    level: "WARNING"
+    verification: |
+      COMP=$(grep -rn 'perMessageDeflate\|compression' --include='*.ts' --include='*.js' src/ | wc -l)
+      if [ "$COMP" -gt 0 ]; then echo "PASS"; else echo "FAIL: Compression not configured"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.network-efficiency.connection-reuse"
+    - "performance-efficiency.resource-utilization.memory-management"

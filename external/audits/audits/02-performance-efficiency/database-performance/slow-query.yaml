@@ -1,0 +1,317 @@
+audit:
+  id: performance-efficiency.database-performance.slow-query
+  name: Slow Query Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: database-performance
+  tier: expert
+  estimated_duration: 2.5 hours
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: data
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit identifies and analyzes slow database queries through slow
+    query logs, query statistics, and execution plan analysis. It prioritizes
+    queries by impact (execution time * frequency), identifies root causes,
+    and provides specific optimization recommendations.
+  why_it_matters: |
+    Slow queries directly impact user experience, causing page loads to
+    timeout and transactions to fail. They consume disproportionate database
+    resources, affecting all users. Identifying and fixing the top 10 slow
+    queries often provides more benefit than any other single optimization.
+  when_to_run:
+  - During regular performance monitoring
+  - When investigating user-reported slowness
+  - After deploying new features
+  - Before scaling database resources
+prerequisites:
+  required_artifacts:
+  - type: query-logs
+    description: Slow query log or pg_stat_statements enabled
+  - type: database-access
+    description: Access to EXPLAIN and query analysis
+  access_requirements:
+  - Access to pg_stat_statements or slow query log
+  - EXPLAIN ANALYZE privileges
+  - Read access to query history
+discovery:
+  metrics_queries:
+  - system: PostgreSQL
+    query: |
+      SELECT query, calls, mean_exec_time, total_exec_time,
+             rows / NULLIF(calls, 0) as avg_rows
+      FROM pg_stat_statements
+      ORDER BY total_exec_time DESC
+      LIMIT 20
+    purpose: Top queries by total execution time
+    threshold: Focus on queries consuming most total time
+  - system: PostgreSQL
+    query: |
+      SELECT query, calls, mean_exec_time
+      FROM pg_stat_statements
+      WHERE mean_exec_time > 100
+      ORDER BY mean_exec_time DESC
+    purpose: Slowest queries by average time
+    threshold: mean_exec_time should be < 100ms for OLTP
+  - system: MySQL
+    query: |
+      SELECT * FROM mysql.slow_log
+      ORDER BY query_time DESC
+      LIMIT 20
+    purpose: Recent slow queries from MySQL slow log
+    threshold: Review all queries exceeding threshold
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  specifications:
+  - id: postgres-explain
+    name: PostgreSQL EXPLAIN
+    url: https://www.postgresql.org/docs/current/using-explain.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: query-analysis
+    name: Query Performance Analysis
+    url: https://www.postgresql.org/docs/current/monitoring-stats.html
+    offline_cache: true
+  - id: slow-query-patterns
+    name: Common Slow Query Patterns
+    url: https://use-the-index-luke.com/sql/explain-plan
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: psql
+    purpose: Query pg_stat_statements
+    command: psql -c 'SELECT * FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 10'
+  - tool: pgBadger
+    purpose: Analyze PostgreSQL logs for slow queries
+    command: pgbadger postgresql.log -o report.html
+  - tool: pt-query-digest
+    purpose: Analyze MySQL slow query log
+    command: pt-query-digest /var/log/mysql/slow.log
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      topk(10, pg_stat_statements_mean_time_seconds)
+    purpose: Slowest queries by mean execution time
+signals:
+  critical:
+  - id: SLOW-CRIT-001
+    signal: Queries exceeding 5 second execution time
+    evidence_threshold: mean_exec_time > 5000ms
+    explanation: |
+      5+ second queries cause visible user experience degradation.
+      Users perceive the application as broken. These queries often
+      hold locks, affecting other transactions, and may cause timeouts.
+    remediation: Immediate optimization required - add indexes, rewrite, or limit scope
+  - id: SLOW-CRIT-002
+    signal: Slow query consuming majority of database time
+    evidence_threshold: single query > 30% of total database time
+    explanation: |
+      When one query dominates database time, it's a single point of
+      failure for performance. Any degradation in this query affects
+      the entire application. This concentration of load is risky.
+    remediation: Optimize the query and distribute load
+  high:
+  - id: SLOW-HIGH-001
+    signal: Queries with mean time > 500ms in user-facing paths
+    evidence_threshold: mean_exec_time > 500ms AND calls > 100/day
+    explanation: |
+      Sub-second queries are still slow for interactive use. Combined
+      with application overhead, they result in multi-second page loads.
+      Users expect responses under 200ms.
+    remediation: Analyze EXPLAIN, add indexes, or restructure query
+  - id: SLOW-HIGH-002
+    signal: High-frequency queries with poor efficiency
+    evidence_threshold: calls > 1000 AND mean_exec_time > 100ms
+    explanation: |
+      Frequently executed queries compound their impact. A 100ms query
+      called 1000 times per hour consumes 100 seconds of database time
+      hourly. Small improvements have large cumulative effects.
+    remediation: Optimize for efficiency - even 10% improvement is significant
+  medium:
+  - id: SLOW-MED-001
+    signal: Batch/report queries impacting OLTP performance
+    evidence_pattern: Long-running analytics during business hours
+    remediation: Schedule reports during off-peak or use read replica
+  - id: SLOW-MED-002
+    signal: Slow queries without monitoring alerts
+    evidence_pattern: No alerting configured for slow queries
+    remediation: Configure alerting on pg_stat_statements or slow query log
+  low:
+  - id: SLOW-LOW-001
+    signal: Admin/maintenance queries running slowly
+  positive:
+  - id: SLOW-POS-001
+    signal: P99 query latency under 100ms
+  - id: SLOW-POS-002
+    signal: No queries exceeding SLA thresholds
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify slow queries
+    description: |
+      Query statistics to find the slowest and most impactful
+      queries in the workload.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Top 20 by total time (impact)
+      command: |
+        psql -c "SELECT query, calls, total_exec_time::bigint as total_ms, mean_exec_time::int as mean_ms, rows FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 20"
+    - purpose: Top 20 by mean time (latency)
+      command: |
+        psql -c "SELECT query, calls, mean_exec_time::int as mean_ms, max_exec_time::int as max_ms FROM pg_stat_statements WHERE calls > 10 ORDER BY mean_exec_time DESC LIMIT 20"
+    - purpose: Queries exceeding threshold
+      command: |
+        psql -c "SELECT query, calls, mean_exec_time::int FROM pg_stat_statements WHERE mean_exec_time > 100 ORDER BY calls DESC"
+    expected_findings:
+    - Highest impact queries
+    - Slowest individual queries
+  - id: '2'
+    name: Analyze top slow queries
+    description: |
+      Generate EXPLAIN ANALYZE for the top slow queries to understand
+      execution plan and identify optimization opportunities.
+    duration_estimate: 45 min
+    commands:
+    - purpose: EXPLAIN ANALYZE for slow query
+      command: |
+        psql -c "EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) <slow_query>"
+    - purpose: Identify expensive operations
+      command: |
+        psql -c "EXPLAIN (ANALYZE, FORMAT JSON) <slow_query>" | jq '.[0]["Plan"]["Actual Total Time"]'
+    expected_findings:
+    - Execution plan bottlenecks
+    - Index opportunities
+  - id: '3'
+    name: Categorize slow queries
+    description: |
+      Group slow queries by root cause to prioritize optimization
+      efforts effectively.
+    duration_estimate: 30 min
+    questions:
+    - Missing index causing full scan?
+    - N+1 pattern from application?
+    - Complex JOIN needing restructure?
+    - Lack of proper filtering?
+    - Suboptimal query plan?
+    expected_findings:
+    - Root cause categories
+    - Prioritized optimization list
+  - id: '4'
+    name: Develop optimization plan
+    description: |
+      Create specific recommendations for each slow query with
+      expected improvement estimates.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Test index impact with hypothetical index
+      command: |
+        psql -c "SELECT * FROM hypopg_create_index('CREATE INDEX ON table(column)'); EXPLAIN SELECT * FROM table WHERE column = 'value'"
+    expected_findings:
+    - Specific optimization recommendations
+    - Expected performance improvements
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Top Slow Queries
+    - Root Cause Analysis
+    - Optimization Recommendations
+    - Expected Improvements
+  confidence_guidance:
+    high: EXPLAIN ANALYZE with production data
+    medium: Statistics analysis without full plan review
+    low: Query pattern identification only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: postgres-explain
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed query analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: slow-001
+  item: No queries with mean execution time > 1 second
+  level: CRITICAL
+  verification: |
+    psql -c "SELECT count(*) FROM pg_stat_statements WHERE mean_exec_time > 1000 AND calls > 10" -t | grep -q "^0$"
+  expected: 'true'
+- id: slow-002
+  item: Top 10 slow queries have optimization plans
+  level: BLOCKING
+  verification: manual
+  verification_notes: Document optimization plan for each top 10 query
+  expected: Confirmed by reviewer
+- id: slow-003
+  item: Slow query alerting configured
+  level: WARNING
+  verification: manual
+  verification_notes: Verify alerts exist for queries > 500ms
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+relationships:
+  commonly_combined:
+  - performance-efficiency.database-performance.query-optimization
+  - performance-efficiency.database-performance.missing-index
+  - performance-efficiency.database-performance.index-usage
+
+  # Multi-database slow query detection commands:
+  # PostgreSQL:
+  #   SELECT query, calls, mean_exec_time, total_exec_time FROM pg_stat_statements ORDER BY mean_exec_time DESC LIMIT 20;
+  #   SELECT * FROM pg_stat_activity WHERE state = 'active' AND query_start < now() - interval '5 seconds';
+  #   EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) <query>;
+  # MySQL:
+  #   SELECT * FROM performance_schema.events_statements_summary_by_digest ORDER BY avg_timer_wait DESC LIMIT 20;
+  #   SHOW FULL PROCESSLIST;
+  #   SET profiling = 1; <query>; SHOW PROFILE;
+  # MongoDB:
+  #   db.currentOp({"secs_running": {"$gt": 5}})
+  #   db.system.profile.find({millis: {$gt: 100}}).sort({millis: -1}).limit(20)
+  #   db.collection.find(<query>).explain("executionStats")
+  # Redis:
+  #   redis-cli SLOWLOG GET 20
+  #   redis-cli CLIENT LIST
+  #   redis-cli DEBUG SLEEP 0 (check blocked clients)
+  # Elasticsearch:
+  #   GET /_nodes/hot_threads
+  #   GET /_tasks?detailed=true&actions=*search
+  #   GET /_cluster/pending_tasks

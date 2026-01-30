@@ -1,0 +1,349 @@
+audit:
+  id: architecture-design.boundaries-modularity.module-boundary
+  name: Module Boundary Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: architecture-design
+  category_number: 7
+  subcategory: boundaries-modularity
+  tier: phd
+  estimated_duration: 90 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - architecture
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates whether module boundaries are well-defined, respected, and
+    enforce proper encapsulation. This includes analyzing public vs private
+    interfaces, checking for violations of module encapsulation, and ensuring
+    modules communicate through well-defined APIs rather than reaching into
+    internal implementation details.
+  why_it_matters: |
+    Clear module boundaries enable independent development, testing, and
+    deployment. When boundaries are violated, changes ripple unexpectedly
+    through the system, making refactoring dangerous and development slow.
+    Poor boundaries create tight coupling that prevents system evolution.
+  when_to_run:
+  - Architecture reviews
+  - Before major refactoring
+  - Modularization initiatives
+  - Technical debt assessments
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  - type: module_config
+    description: Module/package configuration files
+  access_requirements:
+  - Read access to source code repository
+discovery:
+  code_patterns:
+  - pattern: import.*internal|from.*\.internal\.|require.*internal
+    type: regex
+    scope: source
+    purpose: Detect imports from internal modules
+  - pattern: import.*\.\..*\.\..*\.\.
+    type: regex
+    scope: source
+    purpose: Detect deep relative imports crossing boundaries
+  - pattern: '@internal|@private|@package'
+    type: regex
+    scope: source
+    purpose: Detect visibility annotations
+  file_patterns:
+  - glob: '**/index.{js,ts}'
+    purpose: Module entry points
+  - glob: '**/__init__.py'
+    purpose: Python package definitions
+  - glob: '**/internal/**'
+    purpose: Internal implementation directories
+  - glob: '**/package.json'
+    purpose: NPM package boundaries
+knowledge_sources:
+  learning_resources:
+  - id: clean-architecture
+    title: Clean Architecture
+    type: book
+    reference: 'Robert C. Martin, ISBN: 978-0134494166'
+  - id: modular-programming
+    title: Modular Programming with JavaScript
+    type: book
+    reference: Sasan Seydnejad
+  guides:
+  - id: go-modules
+    name: Go Modules Reference
+    url: https://go.dev/ref/mod
+    offline_cache: true
+  - id: python-packages
+    name: Python Packaging User Guide
+    url: https://packaging.python.org/
+    offline_cache: true
+  - id: ddd-evans
+    name: Domain-Driven Design Reference
+    url: https://www.domainlanguage.com/ddd/reference/
+    offline_cache: true
+  - id: pragmatic-programmer
+    name: Pragmatic Programmer Tips
+    url: https://pragprog.com/tips/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: madge
+    purpose: JavaScript/TypeScript module dependency analysis
+    offline_capable: true
+  - tool: eslint-plugin-import
+    purpose: Import path and boundary enforcement
+    offline_capable: true
+  - tool: dependency-cruiser
+    purpose: Module boundary rule enforcement
+    offline_capable: true
+  - tool: nx
+    purpose: Monorepo boundary enforcement
+    offline_capable: true
+  scripts:
+  - id: module-boundary-scan
+    language: bash
+    purpose: Analyze module boundary patterns
+    source: inline
+    code: |
+      echo "=== Module Boundary Analysis ==="
+      echo "--- Module entry points ---"
+      find . -name "index.ts" -o -name "index.js" -o -name "__init__.py" | \
+        grep -v node_modules | head -30
+
+      echo "--- Internal directory access ---"
+      grep -rn "import.*internal\|from.*internal\|require.*internal" \
+        --include="*.js" --include="*.ts" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -30
+
+      echo "--- Deep relative imports ---"
+      grep -rn "from.*\\.\\.\\/.*\\.\\.\\/.*\\.\\.\\/" \
+        --include="*.js" --include="*.ts" . 2>/dev/null | head -20
+signals:
+  critical:
+  - id: MBND-CRIT-001
+    signal: Cross-module access to internal implementation
+    evidence_pattern: import.*\/internal\/|from.*\.internal\.
+    explanation: |
+      Importing from another module's internal directory violates
+      encapsulation. Internal implementation can change without warning.
+    remediation: Import only from public API (index files, __all__ exports)
+  - id: MBND-CRIT-002
+    signal: Circular dependencies between modules
+    evidence_pattern: Module A imports B imports C imports A
+    explanation: |
+      Circular dependencies prevent independent testing and deployment.
+      They indicate design problems and can cause initialization issues.
+    remediation: Extract shared code to separate module or invert dependencies
+  high:
+  - id: MBND-HIGH-001
+    signal: No clear public API definition
+    evidence_pattern: Missing index.ts/index.js/__init__.py exports
+    explanation: |
+      Without explicit public API, any file can be imported, making
+      the entire module surface area public and unstable.
+    remediation: Create index files that explicitly export public API
+  - id: MBND-HIGH-002
+    signal: Deep relative imports crossing boundaries
+    evidence_pattern: ../../../../other-module/internal/file
+    explanation: |
+      Deep relative imports that cross module boundaries bypass the
+      public API and create hidden coupling.
+    remediation: Use module aliases or import from public entry points
+  - id: MBND-HIGH-003
+    signal: Runtime type/instance checks crossing boundaries
+    evidence_pattern: instanceof.*from.*other.*module
+    explanation: |
+      Cross-module instanceof checks create tight coupling. Modules
+      should depend on interfaces, not concrete implementations.
+    remediation: Use duck typing, interfaces, or dependency injection
+  medium:
+  - id: MBND-MED-001
+    signal: Missing __all__ in Python __init__.py
+    evidence_pattern: __init__.py without __all__ definition
+    remediation: Define __all__ to explicitly declare public API
+  - id: MBND-MED-002
+    signal: Inconsistent module export patterns
+    evidence_pattern: Some modules use index, others don't
+    remediation: Standardize on consistent public API pattern
+  - id: MBND-MED-003
+    signal: Star imports from other modules
+    evidence_pattern: from module import *|import * from
+    remediation: Import specific symbols to make dependencies explicit
+  low:
+  - id: MBND-LOW-001
+    signal: Module lacks README or documentation
+    evidence_pattern: No README in module directory
+    remediation: Add README documenting module purpose and public API
+  - id: MBND-LOW-002
+    signal: Module name doesn't match directory
+    evidence_pattern: package.json name vs directory name mismatch
+    remediation: Align package name with directory structure
+  positive:
+  - id: MBND-POS-001
+    signal: Clear public/internal separation
+    evidence_pattern: index.ts exports only public API
+  - id: MBND-POS-002
+    signal: Module boundary rules enforced by tooling
+    evidence_pattern: dependency-cruiser, eslint-plugin-boundaries configured
+  - id: MBND-POS-003
+    signal: Modules expose only interfaces, not implementations
+    evidence_pattern: Export types/interfaces, implementation internal
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Module Structure
+    description: |
+      Map out the module/package structure of the codebase.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find module boundaries
+      command: |
+        find . -name "package.json" -o -name "__init__.py" -o -name "go.mod" | \
+          grep -v node_modules | head -50
+    - purpose: List top-level modules
+      command: |
+        ls -d */ 2>/dev/null | head -20
+    expected_findings:
+    - Module structure map
+    - Package boundaries
+  - id: '2'
+    name: Analyze Public API Definitions
+    description: |
+      Check how modules define their public interfaces.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find entry point files
+      command: |
+        find . \( find . -name "index.ts" -o -name "index.js" \) | grep -v node_modules | head -30
+    - purpose: Check exports in index files
+      command: |
+        find . -name "index.ts" -not -path "*/node_modules/*" | \
+          xargs grep -l "export" 2>/dev/null | head -20
+    expected_findings:
+    - Public API patterns
+    - Export completeness
+  - id: '3'
+    name: Detect Boundary Violations
+    description: |
+      Search for imports that violate module encapsulation.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find internal imports
+      command: |
+        grep -rn "import.*internal\|from.*internal\|require.*internal" \
+          --include="*.js" --include="*.ts" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    - purpose: Find deep relative imports
+      command: |
+        grep -rn "\\.\\./\\.\\./\\.\\./\\.\\." --include="*.js" --include="*.ts" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    - purpose: Run madge for circular dependencies
+      command: |
+        npx madge --circular src/ 2>/dev/null || echo "madge not available"
+    expected_findings:
+    - Boundary violations
+    - Circular dependencies
+  - id: '4'
+    name: Review Boundary Enforcement
+    description: |
+      Check whether tooling enforces module boundaries.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check for eslint import rules
+      command: |
+        cat .eslintrc* 2>/dev/null | grep -E "import|boundaries" || echo "No import rules found"
+    - purpose: Check for dependency-cruiser
+      command: |
+        cat .dependency-cruiser.js 2>/dev/null || cat .dependency-cruiser.json 2>/dev/null || echo "No dependency-cruiser config"
+    expected_findings:
+    - Enforcement tooling
+    - Rule coverage
+  - id: '5'
+    name: Generate Boundary Report
+    description: |
+      Compile findings into a module boundary assessment.
+    duration_estimate: 15 min
+    expected_findings:
+    - Module boundary map
+    - Violation inventory
+    - Enforcement recommendations
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - boundary_violations
+    - circular_dependencies
+    - missing_public_apis
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Module Map
+    - Boundary Violations
+    - Recommendations
+  confidence_guidance:
+    high: Clear boundary violation detected
+    medium: Pattern suggests potential violation
+    low: Requires architectural context review
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: clean-architecture
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires thorough analysis
+    full:
+      included: true
+      priority: 1
+    architecture:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: mbnd-001
+  item: No cross-module internal imports
+  level: CRITICAL
+  verification: grep -rn 'internal' --include='*.ts' --include='*.js'
+  expected: Zero internal imports from outside modules
+- id: mbnd-002
+  item: All modules have public API definitions
+  level: HIGH
+  verification: All modules have index files
+  expected: 100% public API coverage
+- id: mbnd-003
+  item: No circular dependencies
+  level: CRITICAL
+  verification: madge --circular shows no cycles
+  expected: Zero circular dependencies
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Modularity
+    - Maintainability
+relationships:
+  commonly_combined:
+  - architecture-design.boundaries-modularity.circular-dependency
+  - architecture-design.boundaries-modularity.layer-separation
+  - architecture-design.boundaries-modularity.dependency-direction

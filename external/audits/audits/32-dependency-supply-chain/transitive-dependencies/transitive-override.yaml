@@ -1,0 +1,228 @@
+audit:
+  id: dependency-supply-chain.transitive-dependencies.transitive-override
+  name: Transitive Dependency Override Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: dependency-supply-chain
+  category_number: 32
+  subcategory: transitive-dependencies
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: dependencies
+  default_profiles:
+  - full
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit reviews the use of dependency overrides/resolutions
+    to force specific versions of transitive dependencies. It assesses
+    whether overrides are properly documented, still necessary, and
+    not introducing compatibility issues.
+  why_it_matters: |
+    Overrides are powerful but risky. They can fix security vulnerabilities
+    in transitives that direct deps haven't patched, but they can also
+    break compatibility. Undocumented or stale overrides become technical
+    debt and security risks themselves.
+  when_to_run:
+  - During dependency audits
+  - After security patches
+  - When troubleshooting dependency issues
+  - Quarterly cleanup reviews
+prerequisites:
+  required_artifacts:
+  - type: dependency_manifest
+    description: package.json with overrides/resolutions
+  access_requirements:
+  - Read access to package files
+discovery:
+  file_patterns:
+  - glob: '**/package.json'
+    purpose: Find npm overrides
+  - glob: '**/.npmrc'
+    purpose: Find npm config
+  - glob: '**/pyproject.toml'
+    purpose: Find Poetry overrides
+knowledge_sources:
+  guides:
+  - id: npm-overrides
+    name: npm Overrides
+    url: https://docs.npmjs.com/cli/v9/configuring-npm/package-json#overrides
+  - id: yarn-resolutions
+    name: Yarn Selective Resolutions
+    url: https://classic.yarnpkg.com/lang/en/docs/selective-version-resolutions/
+  standards:
+  - id: dependency-override-practices
+    name: Override Best Practices
+    relevance: Safe use of overrides
+tooling:
+  analysis_tools:
+  - tool: npm ls
+    purpose: Verify overrides applied
+signals:
+  critical:
+  - id: DEP-OVER-CRIT-001
+    signal: Undocumented security-critical override
+    evidence_indicators:
+    - Override for vulnerability fix without comment
+    - No ticket or CVE reference
+    explanation: |
+      Undocumented overrides obscure important security context.
+      When the override was added and why affects whether it
+      should be kept, updated, or removed.
+    remediation: Document all overrides with reason and CVE references
+  - id: DEP-OVER-CRIT-002
+    signal: Override forcing vulnerable version
+    evidence_indicators:
+    - Override pins to version with CVE
+    - Security update available
+    remediation: Update override to patched version
+  high:
+  - id: DEP-OVER-HIGH-001
+    signal: Stale overrides no longer needed
+    evidence_indicators:
+    - Direct dep now uses overridden version
+    - Override from years ago
+    remediation: Remove unnecessary overrides
+  - id: DEP-OVER-HIGH-002
+    signal: Override may break compatibility
+    evidence_indicators:
+    - Major version override
+    - No testing verification
+    remediation: Verify compatibility; add tests
+  medium:
+  - id: DEP-OVER-MED-001
+    signal: Multiple overrides for same reason
+    evidence_indicators:
+    - Several CVE-related overrides
+    - Pattern suggests upstream issue
+    remediation: Consider updating direct deps instead
+  - id: DEP-OVER-MED-002
+    signal: Override documentation incomplete
+    evidence_indicators:
+    - Missing reason or ticket
+    - Unclear when to remove
+    remediation: Add complete documentation
+  low:
+  - id: DEP-OVER-LOW-001
+    signal: Override for optimization
+    evidence_indicators:
+    - Deduplication override
+    - Non-security reason
+    remediation: Document; lower priority
+  positive:
+  - id: DEP-OVER-POS-001
+    signal: All overrides documented with reasons
+  - id: DEP-OVER-POS-002
+    signal: Minimal necessary overrides
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Find npm Overrides
+    description: Locate override configuration
+    commands:
+    - purpose: Check for npm overrides
+      command: cat package.json 2>/dev/null | jq '.overrides // empty' || echo 'No npm overrides'
+  - id: '2'
+    name: Find Yarn Resolutions
+    description: Locate yarn resolutions
+    commands:
+    - purpose: Check for yarn resolutions
+      command: cat package.json 2>/dev/null | jq '.resolutions // empty' || echo 'No yarn resolutions'
+  - id: '3'
+    name: Verify Overrides Applied
+    description: Check overrides are actually working
+    commands:
+    - purpose: Verify with npm ls
+      command: npm ls 2>/dev/null | grep -E '(overridden|->)' | head -10 || echo 'Check npm ls output
+        for overrides'
+  - id: '4'
+    name: Check Override Necessity
+    description: Determine if overrides still needed
+    commands:
+    - purpose: Check current version without override
+      command: |-
+        echo 'For each override:
+        1. Remove temporarily
+        2. Run npm install
+        3. Check what version would be installed
+        4. Compare with override target'
+  - id: '5'
+    name: Review Override Documentation
+    description: Check if overrides are documented
+    commands:
+    - purpose: Check for override documentation
+      command: grep -A5 'overrides\|resolutions' package.json 2>/dev/null || echo 'Review override comments
+        in package.json'
+  - id: '6'
+    name: Generate Override Report
+    description: Document all current overrides
+    commands:
+    - purpose: Generate override inventory
+      command: |-
+        echo 'Override Documentation Template:
+
+        Package: [original package]
+        Overridden To: [forced version]
+        Reason: [CVE/compat/dedupe]
+        Ticket: [reference]
+        Added: [date]
+        Review: [when to revisit]'
+output:
+  deliverables:
+  - type: override_inventory
+    format: structured
+    description: List of all dependency overrides
+  - type: override_assessment
+    format: structured
+    description: Assessment of override necessity
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Override Inventory
+    - Documentation Review
+    - Cleanup Recommendations
+closeout_checklist:
+- id: dep-over-001
+  item: All overrides inventoried
+  level: REQUIRED
+  verification: Override list complete
+- id: dep-over-002
+  item: Overrides documented with reasons
+  level: CRITICAL
+  verification: Each override has comment
+- id: dep-over-003
+  item: Stale overrides identified
+  level: REQUIRED
+  verification: Unnecessary overrides flagged
+- id: dep-over-004
+  item: No overrides to vulnerable versions
+  level: CRITICAL
+  verification: Overrides scanned for CVEs
+governance:
+  applicable_to:
+    archetypes:
+    - all-software-projects
+  compliance_mappings:
+  - framework: SOC 2
+    control: CC8.1
+    description: Change documentation
+relationships:
+  commonly_combined:
+  - dependency-supply-chain.transitive-dependencies.version-conflict-detection
+  depends_on:
+  - dependency-supply-chain.transitive-dependencies.version-conflict-detection
+  feeds_into:
+  - dependency-supply-chain.vulnerability-scanning.cve-detection

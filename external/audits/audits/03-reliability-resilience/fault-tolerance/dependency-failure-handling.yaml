@@ -1,0 +1,399 @@
+audit:
+  id: reliability-resilience.fault-tolerance.dependency-failure-handling
+  name: Dependency Failure Handling Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: fault-tolerance
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: architecture
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates how the system handles failures across all its
+    dependencies: databases, caches, message queues, external APIs, and
+    internal services. It examines error detection, error classification,
+    error handling strategies, failure isolation, and recovery procedures.
+    The audit covers the entire dependency failure lifecycle from detection
+    to recovery.
+  why_it_matters: |
+    Dependencies fail - it's not if, but when. Network partitions, service
+    outages, database failures, and API rate limits are inevitable in
+    distributed systems. How a system handles these failures determines its
+    overall reliability. Poor handling causes cascading failures, data loss,
+    and extended outages. Proper handling isolates failures, maintains partial
+    functionality, and enables graceful recovery. This is the integration of
+    all other fault tolerance patterns.
+  when_to_run:
+  - During architecture design reviews
+  - Before production deployment
+  - After adding new dependencies
+  - Post-incident reviews
+  - Quarterly reliability assessments
+prerequisites:
+  required_artifacts:
+  - type: source-code
+    description: Application source code for error handling analysis
+  - type: architecture-docs
+    description: System architecture and dependency documentation
+  access_requirements:
+  - Read access to application source code
+  - Access to dependency configurations
+  - Access to error handling documentation
+  - Access to monitoring and alerting configurations
+discovery:
+  code_patterns:
+  - pattern: catch.*Exception|except.*Error|rescue
+    type: regex
+    scope: source
+    purpose: Exception handling blocks
+  - pattern: ConnectionException|TimeoutException|ServiceUnavailable
+    type: regex
+    scope: source
+    purpose: Dependency-specific exceptions
+  - pattern: onError|handleError|errorHandler
+    type: regex
+    scope: source
+    purpose: Error handler implementations
+  - pattern: healthCheck|health.*check|liveness|readiness
+    type: regex
+    scope: source
+    purpose: Health check implementations
+  - pattern: '@Retryable|@CircuitBreaker|@Fallback'
+    type: regex
+    scope: source
+    purpose: Resilience annotations
+  file_patterns:
+  - glob: '**/src/**/*.{java,go,py,ts,js}'
+    purpose: Application source code
+  - glob: '**/handlers/**/*'
+    purpose: Error handlers
+  - glob: '**/exceptions/**/*'
+    purpose: Custom exception definitions
+  metrics_queries:
+  - system: Prometheus
+    query: http_client_requests_total{status=~'5..'}
+    purpose: Dependency error rates
+  - system: Prometheus
+    query: database_errors_total
+    purpose: Database error frequency
+knowledge_sources:
+  specifications:
+  - id: aws-failure-handling
+    name: AWS Well-Architected - Failure Management
+    url: https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/failure-management.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: google-error-handling
+    name: Google API Error Handling
+    url: https://cloud.google.com/apis/design/errors
+    offline_cache: true
+  - id: netflix-fault-tolerance
+    name: Netflix Fault Tolerance
+    url: https://netflixtechblog.com/fault-tolerance-in-a-high-volume-distributed-system-91ab4faae74a
+    offline_cache: true
+  - id: resilience4j-patterns
+    name: Resilience4j Patterns
+    url: https://resilience4j.readme.io/docs
+    offline_cache: true
+  - id: release-it
+    name: Michael Nygard - Release It!
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+    offline_cache: true
+  - id: sre-book
+    name: Site Reliability Engineering
+    url: https://sre.google/sre-book/table-of-contents/
+    offline_cache: true
+  learning_resources:
+  - id: release-it
+    title: Release It! Second Edition
+    type: book
+    reference: ISBN 978-1680502398
+tooling:
+  static_analysis:
+  - tool: code-analysis
+    purpose: Find error handling patterns
+    offline_capable: true
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      sum(rate(http_client_requests_total{status=~"5.."}[5m])) by (service)
+    purpose: Error rates per dependency
+  - system: Prometheus
+    query: |
+      sum(rate(circuit_breaker_state_transitions_total[1h])) by (name)
+    purpose: Circuit breaker activity
+signals:
+  critical:
+  - id: DEPF-CRIT-001
+    signal: Dependency failures not caught, causing unhandled exceptions
+    evidence_pattern: client.*no.*catch|api.*call.*unhandled
+    explanation: |
+      Dependency calls without error handling cause unhandled exceptions
+      that propagate to users as 500 errors. Every external call must
+      have appropriate try-catch handling with meaningful error responses
+      or fallback behavior.
+    remediation: Wrap all dependency calls with appropriate exception handling
+  - id: DEPF-CRIT-002
+    signal: Database failure crashes application
+    evidence_pattern: database.*connection.*fatal|db.*required.*startup
+    explanation: |
+      Applications that crash on database unavailability cannot recover
+      when the database returns. Design applications to handle database
+      failures gracefully: queue writes, serve cached reads, or degrade
+      functionality rather than crashing.
+    remediation: Implement graceful database failure handling with degraded functionality
+  - id: DEPF-CRIT-003
+    signal: No health check for critical dependencies
+    evidence_pattern: health.*check.*missing|dependency.*health.*none
+    explanation: |
+      Without health checks for dependencies, orchestrators cannot detect
+      when containers are unable to fulfill requests due to dependency
+      failures. Include dependency health in readiness probes.
+    remediation: Include critical dependency health in readiness probes
+  high:
+  - id: DEPF-HIGH-001
+    signal: Generic exception handling hides root cause
+    evidence_pattern: catch.*Exception|except.*Exception.*pass
+    explanation: |
+      Catching generic exceptions hides specific error types and prevents
+      appropriate handling. Different errors (timeout, connection refused,
+      rate limit) require different responses. Catch specific exceptions.
+    remediation: Catch specific exception types and handle appropriately
+  - id: DEPF-HIGH-002
+    signal: No distinction between transient and permanent failures
+    evidence_pattern: retry.*all.*errors|no.*error.*classification
+    explanation: |
+      Transient failures (network blip, temporary overload) should be
+      retried. Permanent failures (invalid credentials, not found) should
+      not. Without classification, retries are either too aggressive or
+      too conservative.
+    remediation: Classify errors as transient or permanent and handle appropriately
+  - id: DEPF-HIGH-003
+    signal: No isolation between dependency failures
+    evidence_pattern: shared.*client|single.*pool.*all
+    explanation: |
+      When multiple dependencies share resources (thread pools, connection
+      pools), one slow dependency affects all others. Use bulkhead patterns
+      to isolate dependencies from each other.
+    remediation: Implement bulkhead isolation between dependencies
+  medium:
+  - id: DEPF-MED-001
+    signal: Dependency errors not logged with context
+    explanation: |
+      Error logs without context (request ID, user ID, dependency name)
+      make debugging difficult. Log sufficient context to trace failures
+      through the system.
+    remediation: Log dependency errors with full context (request ID, operation, parameters)
+  - id: DEPF-MED-002
+    signal: No metrics on dependency failure rates
+    explanation: |
+      Metrics on dependency failures enable proactive detection and
+      trending. Without metrics, failures are only detected when users
+      complain.
+    remediation: Implement metrics for dependency call success/failure rates
+  - id: DEPF-MED-003
+    signal: Recovery from dependency failure not tested
+    explanation: |
+      Systems must recover when dependencies return. Testing ensures
+      circuit breakers close, connections reconnect, and normal operation
+      resumes.
+    remediation: Test recovery scenarios when dependencies return after failure
+  low:
+  - id: DEPF-LOW-001
+    signal: Dependency failure handling not documented
+    explanation: |
+      Documentation of expected failure behaviors aids operations and
+      incident response.
+  positive:
+  - id: DEPF-POS-001
+    signal: Comprehensive error handling for all dependencies
+  - id: DEPF-POS-002
+    signal: Circuit breakers on all external services
+  - id: DEPF-POS-003
+    signal: Graceful degradation tested and verified
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory dependencies
+    description: |
+      Create a complete inventory of all system dependencies including
+      databases, caches, queues, and external services.
+    duration_estimate: 25 min
+    questions:
+    - What databases does the system use?
+    - What caches and message queues are used?
+    - What external APIs are called?
+    - What internal services are dependencies?
+    expected_findings:
+    - Complete dependency inventory
+    - Criticality assessment per dependency
+  - id: '2'
+    name: Audit error handling coverage
+    description: |
+      Review code for error handling around all dependency calls.
+    duration_estimate: 40 min
+    commands:
+    - purpose: Find exception handling
+      command: |
+        grep -r "catch\|except\|rescue" --include="*.java" --include="*.go" --include="*.py" --include="*.ts" src/
+    - purpose: Find unhandled calls
+      command: |
+        grep -r "httpClient\|database\|redis" --include="*.java" --include="*.go" --include="*.py" src/
+    expected_findings:
+    - Error handling coverage
+    - Unhandled dependency calls
+  - id: '3'
+    name: Evaluate failure classification
+    description: |
+      Check how errors are classified and whether different error
+      types receive appropriate handling.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find error classification
+      command: |
+        grep -r "transient\|permanent\|retryable" --include="*.java" --include="*.go" --include="*.py" src/
+    questions:
+    - Are errors classified as transient vs permanent?
+    - Do different error types trigger different handling?
+    expected_findings:
+    - Error classification approach
+    - Classification gaps
+  - id: '4'
+    name: Review resilience patterns
+    description: |
+      Verify circuit breakers, retries, timeouts, and fallbacks are
+      implemented for dependencies.
+    duration_estimate: 35 min
+    commands:
+    - purpose: Find resilience annotations
+      command: |
+        grep -r "@CircuitBreaker\|@Retry\|@Timeout\|@Fallback" --include="*.java" --include="*.go" --include="*.py" src/
+    - purpose: Find resilience configurations
+      command: |
+        grep -r "circuitbreaker\|retry\|timeout\|fallback" --include="*.yaml" --include="*.properties" config/
+    expected_findings:
+    - Resilience pattern coverage
+    - Missing protections
+  - id: '5'
+    name: Assess monitoring and alerting
+    description: |
+      Verify dependency failures are monitored and alerts are configured.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check error metrics
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/label/__name__/values' | jq '.data[] | select(contains("error") or contains("failure"))'
+    questions:
+    - Are dependency error rates monitored?
+    - Are alerts configured for elevated error rates?
+    - Is there visibility into circuit breaker states?
+    expected_findings:
+    - Monitoring coverage
+    - Alerting gaps
+  - id: '6'
+    name: Test failure scenarios
+    description: |
+      Verify system behavior under dependency failure conditions.
+    duration_estimate: 30 min
+    questions:
+    - What happens when each dependency fails?
+    - Is the failure experience acceptable for users?
+    - Does the system recover when dependencies return?
+    - Have chaos engineering tests been conducted?
+    expected_findings:
+    - Failure behavior per dependency
+    - Recovery verification
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Dependency Inventory
+    - Error Handling Assessment
+    - Resilience Pattern Coverage
+    - Recommendations
+  confidence_guidance:
+    high: Failure scenarios tested with chaos engineering
+    medium: Code review with monitoring analysis
+    low: Code review only
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: aws-failure-handling
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: depf-001
+  item: All dependency calls have exception handling
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify try-catch around all external calls
+  expected: Confirmed by reviewer
+- id: depf-002
+  item: Critical dependencies have circuit breakers
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify circuit breakers on databases and external APIs
+  expected: Confirmed by reviewer
+- id: depf-003
+  item: Dependency health included in readiness probes
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify readiness probes check critical dependencies
+  expected: Confirmed by reviewer
+- id: depf-004
+  item: Dependency failure rates are monitored
+  level: WARNING
+  verification: manual
+  verification_notes: Verify error rate metrics exist for each dependency
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.1
+    - CC7.2
+  - framework: ISO 27001
+    controls:
+    - A.17.1.1
+relationships:
+  commonly_combined:
+  - reliability-resilience.fault-tolerance.circuit-breaker
+  - reliability-resilience.fault-tolerance.fallback-strategy
+  - reliability-resilience.fault-tolerance.timeout-configuration
+  - reliability-resilience.fault-tolerance.retry-policy

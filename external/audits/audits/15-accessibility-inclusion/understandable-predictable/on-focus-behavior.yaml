@@ -1,0 +1,371 @@
+audit:
+  id: accessibility-inclusion.understandable-predictable.on-focus-behavior
+  name: On Focus Behavior Predictability
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: accessibility-inclusion
+  category_number: 15
+  subcategory: understandable-predictable
+  tier: phd
+  estimated_duration: 2-4 hours  # median: 3h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines user interface components to ensure that receiving
+    keyboard focus does not trigger unexpected changes in context. Per WCAG
+    Success Criterion 3.2.1 (On Focus), when any UI component receives focus,
+    it must not initiate a change of context such as:
+    - Automatic form submission
+    - Opening new windows or dialogs
+    - Navigation to different pages
+    - Significant content changes
+    - Focus moving to different components
+
+    The audit analyzes JavaScript event handlers, framework components, and
+    interactive elements to identify focus-triggered behaviors that could
+    disorient users, particularly those using keyboard navigation or screen
+    readers.
+  why_it_matters: |
+    Unexpected context changes on focus create significant barriers for:
+    - Keyboard-only users who navigate sequentially through interfaces
+    - Screen reader users who may lose their place in the page
+    - Users with cognitive disabilities who rely on predictable behavior
+    - Users with motor impairments who may accidentally trigger focus events
+
+    Unpredictable focus behavior can cause users to inadvertently submit forms,
+    navigate away from content they were reading, or lose their orientation in
+    the application. This violates user expectations and can make interfaces
+    essentially unusable for some populations.
+  when_to_run:
+  - During accessibility compliance reviews
+  - After implementing new interactive components
+  - When modifying focus management logic
+  - Before major releases
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Frontend source code with UI components
+  - type: running_application
+    description: Deployed or local application for manual testing
+  access_requirements:
+  - Source code repository access
+  - Browser developer tools
+  - Screen reader for verification testing
+discovery:
+  code_patterns:
+  - pattern: onfocus\s*=|addEventListener\s*\(['"]focus['"]
+    type: regex
+    scope: source
+    purpose: Identify focus event handlers in HTML/JavaScript
+  - pattern: '@focus|v-on:focus|\(focus\)'
+    type: regex
+    scope: source
+    purpose: Identify focus handlers in Vue templates
+  - pattern: onFocus\s*=|onFocus:\s*
+    type: regex
+    scope: source
+    purpose: Identify focus handlers in React/JSX components
+  - pattern: \$\([^)]+\)\.focus\(|\$\([^)]+\)\.on\(['"]focus['"]
+    type: regex
+    scope: source
+    purpose: Identify jQuery focus handlers
+  - pattern: window\.location|window\.open|document\.location
+    type: regex
+    scope: source
+    purpose: Identify navigation operations that could be focus-triggered
+  - pattern: \.submit\(\)|form\.submit
+    type: regex
+    scope: source
+    purpose: Identify form submissions that could be focus-triggered
+  file_patterns:
+  - glob: '**/*.{js,jsx,ts,tsx}'
+    purpose: JavaScript and TypeScript source files
+  - glob: '**/*.vue'
+    purpose: Vue single-file components
+  - glob: '**/*.html'
+    purpose: HTML files with inline scripts
+  - glob: '**/*.svelte'
+    purpose: Svelte component files
+knowledge_sources:
+  specifications:
+  - id: wcag-3.2.1
+    name: 'WCAG 2.2 Success Criterion 3.2.1: On Focus'
+    url: https://www.w3.org/WAI/WCAG22/Understanding/on-focus.html
+    offline_cache: true
+    priority: required
+  - id: wcag-3.2
+    name: 'WCAG Guideline 3.2: Predictable'
+    url: https://www.w3.org/WAI/WCAG22/Understanding/predictable.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: w3c-focus-management
+    name: 'W3C WAI: Keyboard Focus Management'
+    url: https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/
+    offline_cache: true
+  - id: deque-focus
+    name: 'Deque: Focus Management Best Practices'
+    url: https://www.deque.com/blog/focus-management-accessible-applications/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: axe-core
+    purpose: Automated accessibility testing including focus behavior
+    offline_capable: true
+  - tool: eslint-plugin-jsx-a11y
+    purpose: Lint React components for accessibility issues
+    offline_capable: true
+  - tool: pa11y
+    purpose: Automated accessibility testing
+    offline_capable: true
+  scripts:
+  - id: focus-handler-finder
+    language: bash
+    purpose: Find all focus event handlers in codebase
+    source: inline
+    code: |
+      #!/bin/bash
+      # Search for focus event handlers across frontend code
+      echo "=== Focus Event Handlers ==="
+      grep -rn --include="*.js" --include="*.jsx" --include="*.ts" --include="*.tsx" \
+        -E "(onfocus|onFocus|addEventListener.*focus|@focus|\(focus\))" .
+
+      echo ""
+      echo "=== Potential Context Changes in Focus Handlers ==="
+      grep -rn --include="*.js" --include="*.jsx" --include="*.ts" --include="*.tsx" \
+        -B5 -A10 "onFocus" . | grep -E "(window\.(location|open)|\.submit\(|navigate|redirect)"
+signals:
+  critical:
+  - id: A11Y-FOCUS-CRIT-001
+    signal: Focus triggers automatic navigation
+    evidence_pattern: onFocus.*window\.location|onFocus.*navigate
+    explanation: |
+      A focus event triggers automatic navigation to a different page or URL.
+      This completely changes the user's context without any action and can
+      strand keyboard users who tab into the element unexpectedly.
+    remediation: |
+      Remove automatic navigation from focus handlers. Navigation should only
+      occur on explicit user actions like clicks or Enter key presses. If
+      preview behavior is needed, use a tooltip or adjacent preview area.
+  - id: A11Y-FOCUS-CRIT-002
+    signal: Focus triggers automatic form submission
+    evidence_pattern: onFocus.*\.submit\(|onFocus.*form\.submit
+    explanation: |
+      Receiving focus automatically submits a form. This causes users to
+      inadvertently submit incomplete or incorrect data simply by tabbing
+      through the interface.
+    remediation: |
+      Never submit forms on focus events. Require explicit submission via
+      submit button click, Enter key on submit button, or similar deliberate
+      user action.
+  high:
+  - id: A11Y-FOCUS-HIGH-001
+    signal: Focus opens new window or dialog without user action
+    evidence_pattern: onFocus.*window\.open|onFocus.*modal|onFocus.*dialog
+    explanation: |
+      A focus event opens a new window, popup, or modal dialog. This disrupts
+      user workflow and can confuse screen reader users whose focus shifts
+      unexpectedly.
+    remediation: |
+      Open dialogs and windows only on explicit user actions. If showing
+      additional information on focus, use expandable content or tooltips
+      that don't trap focus.
+  - id: A11Y-FOCUS-HIGH-002
+    signal: Focus triggers significant DOM changes
+    evidence_pattern: onFocus.*(innerHTML|replaceChild|appendChild.*createElement)
+    explanation: |
+      Focus events trigger significant changes to page content through DOM
+      manipulation. This can confuse users about their current position and
+      disrupt assistive technology operation.
+    remediation: |
+      Limit focus-triggered DOM changes to minor updates like showing help
+      text. Major content changes should require explicit user action.
+  medium:
+  - id: A11Y-FOCUS-MED-001
+    signal: Focus programmatically moves focus to another element
+    evidence_pattern: onFocus.*\.focus\(\)
+    explanation: |
+      A focus handler moves focus to a different element, potentially creating
+      unexpected navigation patterns or focus loops.
+    remediation: |
+      Avoid moving focus in response to focus events except for documented
+      skip link behavior or error correction patterns. Document any intentional
+      focus movement for users.
+  low:
+  - id: A11Y-FOCUS-LOW-001
+    signal: Focus handler performs network requests
+    evidence_pattern: onFocus.*(fetch|axios|XMLHttpRequest)
+    explanation: |
+      Focus events trigger network requests which could lead to delayed
+      context changes or state updates that affect the interface.
+    remediation: |
+      Ensure network requests triggered on focus do not result in context
+      changes. Consider debouncing and ensure results don't alter the page
+      unexpectedly.
+  positive:
+  - id: A11Y-FOCUS-POS-001
+    signal: Appropriate focus indicators implemented
+    evidence_indicators:
+    - Visual focus styles defined for all interactive elements
+    - Focus handlers limited to visual feedback only
+  - id: A11Y-FOCUS-POS-002
+    signal: Focus management follows ARIA patterns
+    evidence_indicators:
+    - Focus moves predictably within components
+    - No automatic context changes on focus
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify focus event handlers
+    description: |
+      Search the codebase for all focus event handlers across different
+      frameworks and patterns.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find focus handlers in JavaScript/TypeScript
+      command: |
+        grep -rn --include="*.js" --include="*.jsx" --include="*.ts" --include="*.tsx" \
+          -E "(onfocus|onFocus|addEventListener.*['\"]focus['\"])" .
+    - purpose: Find focus handlers in Vue components
+      command: |
+        grep -rn --include="*.vue" -E "(@focus|v-on:focus)" .
+    expected_findings:
+    - List of all focus event handlers
+    - File locations and line numbers
+  - id: '2'
+    name: Analyze focus handler behavior
+    description: |
+      For each identified focus handler, analyze what actions it performs
+      to determine if any cause context changes.
+    duration_estimate: 45 min
+    questions:
+    - Does this handler modify window.location or navigate?
+    - Does this handler submit forms?
+    - Does this handler open popups or modals?
+    - Does this handler significantly modify DOM content?
+    - Does this handler move focus to other elements?
+    expected_findings:
+    - Classification of each focus handler by behavior type
+    - Identification of problematic context-changing handlers
+  - id: '3'
+    name: Manual keyboard testing
+    description: |
+      Navigate through the application using only keyboard to verify
+      focus behavior is predictable.
+    duration_estimate: 30 min
+    questions:
+    - Can you tab through all interactive elements without unexpected changes?
+    - Does focus always remain visible?
+    - Are there any focus traps or loops?
+    - Does any element cause navigation or submission on focus?
+    expected_findings:
+    - Documented focus navigation path
+    - Any unexpected behaviors experienced
+  - id: '4'
+    name: Screen reader verification
+    description: |
+      Test focus behavior with screen reader to ensure announcements
+      and context are maintained appropriately.
+    duration_estimate: 30 min
+    questions:
+    - Are focus changes announced appropriately?
+    - Is context maintained when tabbing between elements?
+    - Are there any unexpected announcements on focus?
+    expected_findings:
+    - Screen reader announcement patterns
+    - Context preservation assessment
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Focus Handler Analysis
+    - Manual Testing Results
+    - Recommendations
+  confidence_guidance:
+    high: Code analysis confirmed with manual keyboard and screen reader testing
+    medium: Code analysis only, or limited manual testing
+    low: Pattern matching without contextual analysis
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: wcag-3.2.1
+      priority: required
+    - source_id: wcag-3.2
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires manual testing for complete assessment
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: on-focus-001
+  item: No navigation on focus events
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.js" --include="*.jsx" --include="*.ts" --include="*.tsx" \
+      -E "onFocus.*window\\.location|onFocus.*navigate" . | wc -l | \
+      xargs -I {} sh -c '[ {} -eq 0 ] && echo "PASS" || echo "FAIL"'
+  expected: PASS
+- id: on-focus-002
+  item: No form submission on focus events
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.js" --include="*.jsx" --include="*.ts" --include="*.tsx" \
+      -E "onFocus.*\\.submit\\(" . | wc -l | \
+      xargs -I {} sh -c '[ {} -eq 0 ] && echo "PASS" || echo "FAIL"'
+  expected: PASS
+- id: on-focus-003
+  item: Keyboard navigation tested manually
+  level: BLOCKING
+  verification: manual
+  verification_notes: Tester confirms they could tab through entire application without unexpected context
+    changes
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - web-application
+    - spa
+    - pwa
+    - website
+  compliance_frameworks:
+  - framework: WCAG 2.2
+    controls:
+    - 3.2.1
+  - framework: Section 508
+    controls:
+    - 1194.22(l)
+  - framework: EN 301 549
+    controls:
+    - 9.3.2.1
+relationships:
+  commonly_combined:
+  - accessibility-inclusion.understandable-predictable.on-input-behavior
+  - accessibility-inclusion.understandable-predictable.navigation-consistency
+  - accessibility-inclusion.robust-compatibility.aria-usage

@@ -1,0 +1,437 @@
+audit:
+  id: configuration-management.configuration-identification.config-ownership
+  name: Configuration Ownership Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: configuration-management
+  category_number: 30
+  subcategory: configuration-identification
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the assignment and tracking of configuration item
+    ownership across the organization. It evaluates:
+    - Ownership assignment for all configuration items
+    - Clear ownership metadata and documentation
+    - Ownership transfer procedures
+    - Team vs individual ownership models
+    - Owner responsibilities and accountability
+    - Ownership for third-party and external configurations
+    - Escalation paths for ownership disputes
+  why_it_matters: |
+    Configuration ownership is essential for accountability:
+    - ITIL requires every CI to have a clearly identified owner
+    - Ownership determines who approves changes to configurations
+    - Unowned configurations lack accountability for quality and security
+    - Incident response requires knowing who to contact for config issues
+    - Compliance audits need documented ownership chains
+    - Change impact assessment requires owner consultation
+    - Configuration deprecation needs owner decision authority
+  when_to_run:
+  - During organizational restructuring
+  - When onboarding new services or systems
+  - After team changes or departures
+  - During compliance audits
+  - Quarterly ownership reviews
+prerequisites:
+  required_artifacts:
+  - type: configuration_files
+    description: Configuration files and infrastructure code
+  - type: documentation
+    description: Team structure and ownership documentation
+  access_requirements:
+  - Read access to configuration repositories
+  - Access to team and organizational structure
+  - Access to CMDB or asset management system
+discovery:
+  code_patterns:
+  - pattern: (owner|maintainer|team|contact)\s*[=:]\s*['"]?\w+
+    type: regex
+    scope: config
+    purpose: Detect ownership metadata in config files
+  - pattern: CODEOWNERS|OWNERS
+    type: regex
+    scope: files
+    purpose: Detect ownership files
+  - pattern: '@owner\s+\w+|owned[-_]by'
+    type: regex
+    scope: source
+    purpose: Detect ownership annotations
+  - pattern: (contact|support|maintainer)[-_]email
+    type: regex
+    scope: config
+    purpose: Detect contact information
+  - pattern: slack[-_]channel|pager[-_]duty
+    type: regex
+    scope: config
+    purpose: Detect escalation contacts
+  file_patterns:
+  - glob: '**/CODEOWNERS'
+    purpose: GitHub CODEOWNERS files
+  - glob: '**/OWNERS'
+    purpose: Kubernetes OWNERS files
+  - glob: '**/*owners*'
+    purpose: Ownership documentation
+  - glob: '**/team.yaml'
+    purpose: Team definition files
+  - glob: '**/MAINTAINERS*'
+    purpose: Maintainer files
+knowledge_sources:
+  specifications:
+  - id: itil-ci-ownership
+    name: ITIL Configuration Item Ownership
+    url: https://www.axelos.com/best-practice-solutions/itil
+    offline_cache: true
+    priority: required
+  - id: cmmi-cm
+    name: CMMI Configuration Management
+    url: https://cmmiinstitute.com/cmmi
+    offline_cache: true
+    priority: required
+  guides:
+  - id: github-codeowners
+    name: GitHub CODEOWNERS
+    url: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: codeowners-validator
+    purpose: Validate CODEOWNERS file
+    offline_capable: true
+  scripts:
+  - id: ownership-audit
+    language: bash
+    purpose: Audit configuration ownership
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Configuration Ownership Audit ==="
+      echo ""
+      echo "=== CODEOWNERS Files ==="
+      find . -name "CODEOWNERS" -o -name "OWNERS" 2>/dev/null | head -20
+      echo ""
+      echo "=== Ownership Metadata in Configs ==="
+      grep -rn "owner:\|maintainer:\|team:" \
+        --include="*.yaml" --include="*.json" . 2>/dev/null | head -30
+      echo ""
+      echo "=== Configs Without Ownership ==="
+      find . -name "*.yaml" -path "*/config/*" -exec grep -L "owner" {} \; 2>/dev/null | head -20
+signals:
+  critical:
+  - id: COWN-CRIT-001
+    signal: Critical configurations have no assigned owner
+    evidence_indicators:
+    - Production configurations without ownership
+    - Security configurations unowned
+    - No CODEOWNERS for infrastructure code
+    explanation: |
+      ITIL requires every CI to have an owner. Unowned critical
+      configurations lack accountability for changes, security,
+      and maintenance. Incident response is impaired without
+      clear ownership.
+    remediation: |
+      - Assign owners to all critical configurations
+      - Document ownership in CODEOWNERS files
+      - Add ownership metadata to configuration files
+      - Establish ownership assignment process
+    cwe: CWE-1059
+  high:
+  - id: COWN-HIGH-001
+    signal: Ownership metadata outdated or stale
+    evidence_indicators:
+    - Owners no longer with organization
+    - Teams that no longer exist as owners
+    - No ownership review in past year
+    explanation: |
+      Stale ownership creates accountability gaps. Messages to
+      former owners go unanswered, and no one takes responsibility
+      for configuration maintenance and changes.
+    remediation: |
+      - Review and update ownership assignments
+      - Implement ownership validation in CI/CD
+      - Establish periodic ownership review process
+      - Create offboarding procedure for ownership transfer
+  - id: COWN-HIGH-002
+    signal: No ownership escalation path defined
+    evidence_indicators:
+    - Single owner without backup
+    - No team ownership for critical configs
+    - No escalation contacts defined
+    explanation: |
+      Single-point ownership creates fragility. If the owner is
+      unavailable, configuration changes and incident response
+      are blocked. Team ownership with escalation provides resilience.
+    remediation: |
+      - Assign team ownership for critical configurations
+      - Define backup owners for individual ownership
+      - Document escalation paths
+      - Integrate with on-call rotation
+  - id: COWN-HIGH-003
+    signal: Third-party configuration ownership unclear
+    evidence_indicators:
+    - Vendor configurations without internal owner
+    - SaaS configurations unassigned
+    - External service configs lack accountability
+    explanation: |
+      Third-party configurations need internal owners to manage
+      vendor relationships, coordinate changes, and respond to
+      incidents. Without ownership, vendor configs drift unmanaged.
+    remediation: |
+      - Assign internal owners for all third-party configs
+      - Document vendor contact information
+      - Include external configs in ownership reviews
+      - Define owner responsibilities for vendor configs
+  medium:
+  - id: COWN-MED-001
+    signal: Ownership not machine-readable
+    evidence_indicators:
+    - Ownership in documentation only
+    - No CODEOWNERS or ownership metadata
+    - Manual ownership lookup required
+    explanation: |
+      Machine-readable ownership enables automation including
+      automatic review requests, alerting, and compliance checks.
+      Documentation-only ownership requires manual processes.
+    remediation: |
+      - Implement CODEOWNERS files
+      - Add ownership metadata to configurations
+      - Integrate ownership with review workflows
+      - Enable automated ownership validation
+  - id: COWN-MED-002
+    signal: Owner responsibilities not defined
+    evidence_indicators:
+    - No documented owner responsibilities
+    - Owners unsure of their duties
+    - Ad-hoc ownership interpretation
+    explanation: |
+      Ownership assignment without clear responsibilities creates
+      confusion. Owners may not know they should review changes,
+      maintain documentation, or respond to incidents.
+    remediation: |
+      - Document configuration owner responsibilities
+      - Train owners on their duties
+      - Include responsibilities in ownership assignment
+      - Measure owner accountability
+  - id: COWN-MED-003
+    signal: No ownership transfer process
+    evidence_indicators:
+    - Ownership changes undocumented
+    - No handoff procedure
+    - Knowledge loss during ownership change
+    explanation: |
+      Ownership transitions without proper handoff result in
+      knowledge loss and potential configuration issues. New
+      owners lack context and history.
+    remediation: |
+      - Define ownership transfer procedure
+      - Require documentation handoff
+      - Include transfer in offboarding process
+      - Track ownership change history
+  low:
+  - id: COWN-LOW-001
+    signal: Ownership granularity inappropriate
+    evidence_indicators:
+    - Single owner for entire repository
+    - Overly granular ownership creating overhead
+    - Ownership scope misaligned with team structure
+    explanation: |
+      Ownership granularity should match organizational structure
+      and change patterns. Too coarse creates bottlenecks; too
+      fine creates overhead and conflicts.
+    remediation: |
+      - Review ownership granularity
+      - Align with team boundaries
+      - Adjust for change frequency
+      - Consider directory-level ownership
+  positive:
+  - id: COWN-POS-001
+    signal: Comprehensive ownership assignment
+    evidence_indicators:
+    - All configurations have assigned owners
+    - CODEOWNERS files maintained
+    - Ownership metadata in configurations
+  - id: COWN-POS-002
+    signal: Ownership integrated with workflows
+    evidence_indicators:
+    - Automatic review assignment based on ownership
+    - Ownership-based alerting
+    - Ownership validation in CI/CD
+procedure:
+  context:
+    cognitive_mode: methodical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Ownership Documentation Review
+    description: |
+      Review ownership documentation including CODEOWNERS and metadata.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find CODEOWNERS files
+      command: |
+        find . -name "CODEOWNERS" -o -name "OWNERS" -o -name "MAINTAINERS*" \
+          2>/dev/null | head -20
+    - purpose: Review CODEOWNERS content
+      command: |
+        cat CODEOWNERS .github/CODEOWNERS 2>/dev/null | head -50
+    - purpose: Find ownership metadata in configs
+      command: |
+        grep -rn "owner:\|maintainer:\|team:" \
+          --include="*.yaml" --include="*.json" . 2>/dev/null | head -30
+    expected_findings:
+    - CODEOWNERS files present
+    - Ownership patterns
+    - Metadata coverage
+  - id: '2'
+    name: Ownership Coverage Assessment
+    description: |
+      Assess ownership coverage across configuration files.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Count configs with ownership
+      command: |
+        grep -rl "owner:" --include="*.yaml" --include="*.json" \
+          . 2>/dev/null | wc -l
+    - purpose: Find configs without ownership
+      command: |
+        find . -name "*.yaml" -path "*config*" -not -path "*/node_modules/*" \
+          -exec grep -L "owner" {} \; 2>/dev/null | head -30
+    - purpose: Check critical configs for ownership
+      command: |
+        find . \( -path "*prod*" -o -path "*security*" \) \
+          -name "*.yaml" -exec grep -L "owner" {} \; 2>/dev/null | head -20
+    expected_findings:
+    - Ownership coverage percentage
+    - Unowned configurations
+    - Critical configs without owners
+  - id: '3'
+    name: Ownership Validity Check
+    description: |
+      Verify that assigned owners are current and valid.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Extract owner values
+      command: |
+        grep -rho "owner:\s*\S*" --include="*.yaml" . 2>/dev/null | \
+          cut -d: -f2 | sort | uniq -c | sort -rn | head -30
+    - purpose: Check CODEOWNERS for valid teams/users
+      command: |
+        cat CODEOWNERS .github/CODEOWNERS 2>/dev/null | \
+          grep -E "^[^#]" | awk '{print $NF}' | sort | uniq
+    expected_findings:
+    - Owner list
+    - Owner validity status
+    - Stale owners
+  - id: '4'
+    name: Ownership Process Assessment
+    description: |
+      Evaluate ownership assignment and transfer processes.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find ownership documentation
+      command: |
+        find . -type f \( -name "*ownership*" -o -name "*owner*guide*" \) \
+          -not -path "*/node_modules/*" 2>/dev/null | head -10
+    - purpose: Check for ownership in contribution guide
+      command: |
+        grep -i "owner\|codeowner\|maintainer" CONTRIBUTING* README* \
+          2>/dev/null | head -20
+    expected_findings:
+    - Ownership processes documented
+    - Transfer procedures
+    - Owner responsibilities
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Ownership Coverage
+    - Validity Assessment
+    - Process Evaluation
+    - Recommendations
+  - type: ownership_matrix
+    format: table
+    description: Configuration items and their owners
+  confidence_guidance:
+    high: Ownership explicitly documented in metadata
+    medium: Ownership inferred from patterns or history
+    low: Ownership unclear, requires investigation
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: itil-ci-ownership
+      priority: required
+    - source_id: cmmi-cm
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 3
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: cown-001
+  item: All critical configurations have assigned owners
+  level: CRITICAL
+  verification: |
+    find . \( -path "*prod*" -o -path "*security*" \) -name "*.yaml" \
+      -exec grep -l "owner" {} \; 2>/dev/null | wc -l | \
+      xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: cown-002
+  item: CODEOWNERS file exists and is valid
+  level: BLOCKING
+  verification: |
+    test -f CODEOWNERS -o -f .github/CODEOWNERS && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: cown-003
+  item: Owner validity verified (no stale owners)
+  level: WARNING
+  verification: manual
+  verification_notes: Verify all listed owners are current team members
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ITIL
+    controls:
+    - Configuration Management
+  - framework: CMMI
+    controls:
+    - CM SP 1.1
+  - framework: ISO 27001
+    controls:
+    - A.5.9
+    - A.8.9
+  - framework: SOC 2
+    controls:
+    - CC6.1
+relationships:
+  commonly_combined:
+  - configuration-management.configuration-control.approval-workflow
+  - configuration-management.configuration-identification.config-discovery

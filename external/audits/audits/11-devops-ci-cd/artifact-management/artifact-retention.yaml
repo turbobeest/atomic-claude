@@ -1,0 +1,280 @@
+audit:
+  id: devops-ci-cd.artifact-management.artifact-retention
+  name: Artifact Retention Assessment
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: devops-ci-cd
+  category_number: 11
+  subcategory: artifact-management
+  tier: expert
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: deployment
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines artifact retention policies including retention
+    periods, cleanup automation, storage cost management, and compliance
+    with regulatory requirements. It evaluates whether retention balances
+    operational needs with cost efficiency.
+  why_it_matters: |
+    Poor retention policies either consume excessive storage costs or
+    delete artifacts needed for rollback and compliance. Well-designed
+    retention enables efficient storage use while maintaining
+    operational capability and regulatory compliance.
+  when_to_run:
+  - When storage costs escalate
+  - After failed rollbacks due to missing artifacts
+  - During compliance audits
+  - Quarterly policy reviews
+prerequisites:
+  required_artifacts:
+  - type: registry_config
+    description: Artifact registry configurations
+  - type: retention_policies
+    description: Documented retention policies
+  access_requirements:
+  - Read access to registry configurations
+  - Access to storage cost data
+  - Permission to view retention policies
+discovery:
+  file_patterns:
+  - glob: '**/lifecycle*'
+    purpose: Lifecycle policy configurations
+  - glob: '**/retention*'
+    purpose: Retention policy files
+  - glob: '**/terraform/**/*registry*.tf'
+    purpose: Registry Terraform configs
+  code_patterns:
+  - pattern: lifecycle|retention|expir|ttl
+    type: keyword
+    scope: config
+    purpose: Retention-related configurations
+  - pattern: keep.*count|max.*age|older.*than
+    type: regex
+    scope: config
+    purpose: Retention limit specifications
+knowledge_sources:
+  guides:
+  - id: ecr-lifecycle
+    name: ECR Lifecycle Policies
+    url: https://docs.aws.amazon.com/AmazonECR/latest/userguide/LifecyclePolicies.html
+    offline_cache: true
+  - id: gcr-lifecycle
+    name: GCR Image Lifecycle
+    url: https://cloud.google.com/container-registry/docs/managing
+    offline_cache: true
+  specifications:
+  - id: data-retention
+    name: Data Retention Best Practices
+    url: https://www.nist.gov/document/nist-sp-800-88
+    offline_cache: true
+    priority: optional
+  - id: nsa-supply-chain
+    name: 'NSA: Securing the Software Supply Chain'
+    url: https://media.defense.gov/2022/Sep/01/2003068942/-1/-1/0/ESF_SECURING_THE_SOFTWARE_SUPPLY_CHAIN_DEVELOPERS.PDF
+    offline_cache: true
+    priority: required
+tooling:
+  infrastructure_tools:
+  - tool: aws
+    purpose: View ECR lifecycle policies
+    command: aws ecr get-lifecycle-policy --repository-name repo
+  - tool: gcloud
+    purpose: View GCR image retention
+    command: gcloud artifacts docker images list --include-tags
+  scripts:
+  - id: retention-check
+    language: bash
+    purpose: Find retention configurations
+    source: inline
+    code: |
+      #!/bin/bash
+      # Find retention policies
+      echo "=== Lifecycle Policies ==="
+      grep -ri 'lifecycle\|retention\|expir' \
+        --include='*.tf' --include='*.yaml' \
+        . 2>/dev/null | head -20
+signals:
+  critical:
+  - id: ARTRET-CRIT-001
+    signal: No retention policy - artifacts accumulate indefinitely
+    evidence_indicators:
+    - No lifecycle policies configured
+    - Artifact count growing without bounds
+    explanation: |
+      Unlimited retention causes storage costs to grow indefinitely
+      and creates security exposure from old, potentially vulnerable artifacts.
+    remediation: Implement retention policies with automated cleanup
+  - id: ARTRET-CRIT-002
+    signal: Production artifacts deleted before rollback window
+    evidence_indicators:
+    - Recent production versions unavailable for rollback
+    - Retention shorter than incident recovery timeline
+    explanation: |
+      Premature deletion prevents rollback during extended incidents
+      and can force risky forward-fixes.
+    remediation: Ensure retention exceeds maximum expected rollback window
+  high:
+  - id: ARTRET-HIGH-001
+    signal: Retention policies differ between environments
+    evidence_indicators:
+    - Production and staging have different retention
+    - No documented rationale for differences
+    explanation: |
+      Inconsistent retention complicates debugging across environments
+      and may indicate accidental configuration drift.
+    remediation: Standardize retention policies or document rationale for differences
+  - id: ARTRET-HIGH-002
+    signal: No retention policy for compliance-required artifacts
+    evidence_indicators:
+    - Audit-required artifacts not protected from deletion
+    - Compliance period not reflected in retention
+    explanation: |
+      Deleting compliance-required artifacts before retention
+      periods creates regulatory risk.
+    remediation: Tag compliance artifacts with extended retention matching requirements
+  medium:
+  - id: ARTRET-MED-001
+    signal: Retention cleanup not automated
+    remediation: Implement scheduled cleanup automation
+  - id: ARTRET-MED-002
+    signal: Storage costs not monitored
+    remediation: Implement cost monitoring and alerting for artifact storage
+  low:
+  - id: ARTRET-LOW-001
+    signal: Retention policies not documented
+  positive:
+  - id: ARTRET-POS-001
+    signal: Tiered retention with production/compliance protection
+  - id: ARTRET-POS-002
+    signal: Automated cleanup with cost optimization
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Document current retention policies
+    description: |
+      Identify retention policies configured for each artifact
+      registry and storage system.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find lifecycle configurations
+      command: grep -ri 'lifecycle\|retention' --include='*.tf' --include='*.yaml' . 2>/dev/null | head
+        -20
+    expected_findings:
+    - Retention policy inventory
+    - Coverage assessment
+  - id: '2'
+    name: Evaluate retention adequacy
+    description: |
+      Assess whether retention periods meet operational and
+      compliance requirements.
+    duration_estimate: 30 min
+    questions:
+    - What is the expected rollback window?
+    - What are compliance retention requirements?
+    - Do retention policies cover these needs?
+    expected_findings:
+    - Adequacy assessment
+    - Gap identification
+  - id: '3'
+    name: Review cleanup automation
+    description: |
+      Verify that retention enforcement is automated and
+      running reliably.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check for cleanup jobs
+      command: grep -ri 'cleanup\|prune\|expire' --include='*.yaml' --include='*.yml' . 2>/dev/null |
+        head -15
+    expected_findings:
+    - Automation status
+    - Reliability assessment
+  - id: '4'
+    name: Analyze storage costs
+    description: |
+      Review storage cost trends and identify optimization
+      opportunities.
+    duration_estimate: 20 min
+    questions:
+    - What are current artifact storage costs?
+    - Are costs trending up or stable?
+    - Are there unused artifacts consuming storage?
+    expected_findings:
+    - Cost analysis
+    - Optimization opportunities
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Retention Policy Analysis
+    - Cost Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Direct inspection of retention policies with storage analysis
+    medium: Configuration review with estimated impact
+    low: Documentation review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: ecr-lifecycle
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires storage analysis
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: artret-001
+  item: Retention policies configured for all registries
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify lifecycle policies exist for all artifact registries
+  expected: Confirmed by reviewer
+- id: artret-002
+  item: Production retention exceeds rollback window
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify production artifacts retained long enough for rollback
+  expected: Confirmed by reviewer
+- id: artret-003
+  item: Cleanup automation running reliably
+  level: WARNING
+  verification: manual
+  verification_notes: Verify automated cleanup is configured and executing
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC6.5
+  - framework: GDPR
+    controls:
+    - Article 17
+relationships:
+  commonly_combined:
+  - devops-ci-cd.artifact-management.artifact-versioning
+  - devops-ci-cd.environment-management.environment-cleanup

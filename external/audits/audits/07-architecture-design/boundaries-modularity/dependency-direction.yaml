@@ -1,0 +1,342 @@
+audit:
+  id: architecture-design.boundaries-modularity.dependency-direction
+  name: Dependency Direction Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: architecture-design
+  category_number: 7
+  subcategory: boundaries-modularity
+  tier: phd
+  estimated_duration: 60 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - architecture
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates whether dependencies flow in the correct direction according
+    to architectural principles. This includes ensuring outer layers depend
+    on inner layers (not vice versa), stable components are depended upon
+    by volatile components (not vice versa), and abstractions don't depend
+    on details.
+  why_it_matters: |
+    Correct dependency direction is fundamental to maintainable architecture.
+    When dependencies flow wrong, changes to volatile components cascade to
+    stable components, infrastructure changes break business logic, and the
+    system becomes increasingly rigid. The Dependency Inversion Principle
+    exists specifically to address this.
+  when_to_run:
+  - Architecture reviews
+  - Major feature development
+  - Technical debt assessments
+  - Modularization initiatives
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  - type: architecture_docs
+    description: Architecture documentation (helpful but optional)
+  access_requirements:
+  - Read access to source code repository
+discovery:
+  code_patterns:
+  - pattern: import.*infrastructure|from.*infrastructure
+    type: regex
+    scope: source
+    purpose: Detect infrastructure imports in domain
+  - pattern: import.*framework|from.*framework|import.*express|import.*django
+    type: regex
+    scope: source
+    purpose: Detect framework imports in core
+  - pattern: interface\s+\w+|abstract\s+class|Protocol\[
+    type: regex
+    scope: source
+    purpose: Detect abstraction definitions
+  file_patterns:
+  - glob: '**/domain/**'
+    purpose: Domain layer
+  - glob: '**/infrastructure/**'
+    purpose: Infrastructure layer
+  - glob: '**/application/**'
+    purpose: Application layer
+  - glob: '**/interfaces/**'
+    purpose: Interface definitions
+knowledge_sources:
+  learning_resources:
+  - id: clean-architecture
+    title: Clean Architecture
+    type: book
+    reference: 'Robert C. Martin, ISBN: 978-0134494166'
+  - id: agile-principles
+    title: Agile Software Development, Principles, Patterns, and Practices
+    type: book
+    reference: Robert C. Martin - Dependency Inversion Principle
+  guides:
+  - id: dip
+    name: Dependency Inversion Principle
+    url: https://blog.cleancoder.com/uncle-bob/2016/01/04/ALittleAboutDIP.html
+    offline_cache: true
+  - id: stable-deps
+    name: Stable Dependencies Principle
+    url: https://wiki.c2.com/?StableDependenciesPrinciple
+    offline_cache: true
+  - id: ddd-evans
+    name: Domain-Driven Design Reference
+    url: https://www.domainlanguage.com/ddd/reference/
+    offline_cache: true
+  - id: pragmatic-programmer
+    name: Pragmatic Programmer Tips
+    url: https://pragprog.com/tips/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: dependency-cruiser
+    purpose: Dependency rule enforcement
+    offline_capable: true
+  - tool: madge
+    purpose: Dependency visualization
+    offline_capable: true
+  - tool: nx
+    purpose: Monorepo dependency constraints
+    offline_capable: true
+  scripts:
+  - id: dependency-direction-scan
+    language: bash
+    purpose: Analyze dependency direction
+    source: inline
+    code: |
+      echo "=== Dependency Direction Analysis ==="
+      echo "--- Domain imports (should be minimal) ---"
+      find . -path "*/domain/*" \( -name "*.ts" -o -name "*.js" -o -name "*.py" \) | \
+        xargs grep -h "^import\|^from" 2>/dev/null | sort -u | head -30
+
+      echo "--- Infrastructure in domain (violations) ---"
+      grep -rn "import.*infrastructure\|from.*infrastructure" \
+        --include="*.ts" --include="*.js" --include="*.py" . 2>/dev/null | \
+        grep -i "domain" | grep -v node_modules | head -20
+
+      echo "--- Framework in core (violations) ---"
+      grep -rn "import.*express\|import.*fastify\|import.*django\|import.*flask" \
+        --include="*.ts" --include="*.js" --include="*.py" . 2>/dev/null | \
+        grep -E "domain|core|entity" | grep -v node_modules | head -20
+signals:
+  critical:
+  - id: DEPDIR-CRIT-001
+    signal: Domain depends on infrastructure
+    evidence_pattern: domain/.*import.*infrastructure|core/.*import.*database
+    explanation: |
+      Domain code depending on infrastructure violates the Dependency
+      Rule. Domain becomes untestable without real infrastructure and
+      can't evolve independently.
+    remediation: Introduce interfaces, have infrastructure depend on domain contracts
+  - id: DEPDIR-CRIT-002
+    signal: Business logic depends on web framework
+    evidence_pattern: service/.*import.*express|domain/.*import.*fastapi
+    explanation: |
+      Business logic tied to web framework can't be reused for CLI,
+      events, or other entry points. Framework changes break business code.
+    remediation: Isolate framework, have framework adapter call framework-agnostic services
+  high:
+  - id: DEPDIR-HIGH-001
+    signal: Stable module depends on volatile module
+    evidence_pattern: Core utility importing feature-specific code
+    explanation: |
+      Stable modules (utilities, core) depending on volatile modules
+      (features, UI) causes unstable modules to affect stable ones.
+    remediation: Invert dependency, extract interface in stable module
+  - id: DEPDIR-HIGH-002
+    signal: Abstractions depend on details
+    evidence_pattern: interface/.*import.*implementation
+    explanation: |
+      Abstractions (interfaces, ports) depending on details (implementations,
+      adapters) inverts the proper direction.
+    remediation: Interfaces should be defined independent of implementations
+  - id: DEPDIR-HIGH-003
+    signal: Inner layer depends on outer layer
+    evidence_pattern: 'Clean Architecture violation: inner importing outer'
+    explanation: |
+      Clean Architecture requires dependencies point inward. Outer
+      layers (UI, DB) depend on inner (domain), never reverse.
+    remediation: Use dependency injection to invert the dependency
+  medium:
+  - id: DEPDIR-MED-001
+    signal: Missing abstraction for external dependency
+    evidence_pattern: Direct SDK/client usage without interface
+    remediation: Wrap external dependencies behind interfaces
+  - id: DEPDIR-MED-002
+    signal: Concrete class references where interfaces should be used
+    evidence_pattern: new ConcreteClass instead of inject interface
+    remediation: Program to interfaces, inject dependencies
+  - id: DEPDIR-MED-003
+    signal: Test depending on implementation details
+    evidence_pattern: Test imports internal modules
+    remediation: Test through public interfaces
+  low:
+  - id: DEPDIR-LOW-001
+    signal: No dependency direction rules defined
+    evidence_pattern: Missing dependency-cruiser or similar config
+    remediation: Define and enforce dependency rules in tooling
+  - id: DEPDIR-LOW-002
+    signal: Inconsistent dependency patterns
+    evidence_pattern: Some modules follow DIP, others don't
+    remediation: Standardize dependency approach across codebase
+  positive:
+  - id: DEPDIR-POS-001
+    signal: Clean Architecture dependency flow
+    evidence_pattern: Outer layers depend on inner, never reverse
+  - id: DEPDIR-POS-002
+    signal: Dependency rules enforced by tooling
+    evidence_pattern: dependency-cruiser configured and in CI
+  - id: DEPDIR-POS-003
+    signal: Interfaces defined for all external dependencies
+    evidence_pattern: Ports/adapters pattern properly implemented
+procedure:
+  context:
+    cognitive_mode: architectural
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Map Layer Structure
+    description: |
+      Identify the architectural layers and their intended dependencies.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find layer directories
+      command: |
+        find . -type d \( -name "domain" -o -name "infrastructure" -o -name "application" \
+          -o -name "presentation" -o -name "interfaces" -o -name "adapters" \) \
+          -not -path "*/node_modules/*" 2>/dev/null
+    - purpose: Document expected flow
+      command: |
+        echo "Expected: presentation -> application -> domain <- infrastructure"
+    expected_findings:
+    - Layer identification
+    - Expected dependency flow
+  - id: '2'
+    name: Analyze Domain Dependencies
+    description: |
+      Check that domain/core layer has minimal external dependencies.
+    duration_estimate: 15 min
+    commands:
+    - purpose: List domain imports
+      command: |
+        find . -path "*/domain/*" -name "*.ts" -o -path "*/domain/*" -name "*.js" | \
+          xargs grep -h "^import\|^from" 2>/dev/null | sort -u | head -40
+    - purpose: Find violations
+      command: |
+        grep -rn "import.*infrastructure\|import.*express\|import.*mongoose" \
+          --include="*.ts" --include="*.js" --include="*.py" . 2>/dev/null | \
+          grep -E "domain|core|entity" | grep -v node_modules | head -20
+    expected_findings:
+    - Domain dependency purity
+    - Violation locations
+  - id: '3'
+    name: Check Abstraction Direction
+    description: |
+      Verify that abstractions don't depend on details.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find interface files
+      command: |
+        find . -name "*interface*.ts" -o -name "*port*.ts" -o -name "*contract*.ts" | \
+          grep -v node_modules | head -20
+    - purpose: Check interface imports
+      command: |
+        find . \( find . -name "*interface*.ts" -o -name "*port*.ts" \) | \
+          xargs grep -h "^import" 2>/dev/null | head -20
+    expected_findings:
+    - Interface dependency patterns
+    - Abstraction violations
+  - id: '4'
+    name: Verify Dependency Rule Enforcement
+    description: |
+      Check for automated enforcement of dependency rules.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check dependency-cruiser config
+      command: |
+        cat .dependency-cruiser.js 2>/dev/null || cat .dependency-cruiser.json 2>/dev/null || echo "No config found"
+    - purpose: Run dependency validation
+      command: |
+        npx dependency-cruiser --validate src/ 2>/dev/null || echo "dependency-cruiser not configured"
+    expected_findings:
+    - Rule enforcement status
+    - Configured constraints
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - direction_violations
+    - layer_dependencies
+    - enforcement_status
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Layer Dependency Analysis
+    - Violations
+    - Recommendations
+  confidence_guidance:
+    high: Clear dependency direction violation
+    medium: Pattern suggests potential violation
+    low: Requires architectural context
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: clean-architecture
+      priority: required
+    - source_id: dip
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires thorough analysis
+    full:
+      included: true
+      priority: 1
+    architecture:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: depdir-001
+  item: Domain has no infrastructure dependencies
+  level: CRITICAL
+  verification: Domain layer imports only abstractions
+  expected: Pure domain layer
+- id: depdir-002
+  item: Dependencies flow inward
+  level: CRITICAL
+  verification: Outer layers depend on inner
+  expected: Clean Architecture compliance
+- id: depdir-003
+  item: Dependency rules enforced in CI
+  level: HIGH
+  verification: dependency-cruiser or equivalent configured
+  expected: Automated enforcement
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Modularity
+    - Maintainability
+    - Testability
+relationships:
+  commonly_combined:
+  - architecture-design.boundaries-modularity.layer-separation
+  - architecture-design.boundaries-modularity.circular-dependency
+  - architecture-design.boundaries-modularity.module-boundary

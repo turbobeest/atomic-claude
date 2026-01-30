@@ -1,0 +1,280 @@
+audit:
+  id: code-quality.error-handling.error-message-quality
+  name: Error Message Quality Assessment Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: error-handling
+  tier: expert
+  estimated_duration: 35 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  - quality
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates the quality of error messages throughout the application,
+    checking for actionable, specific, and informative error messages.
+    This includes examining user-facing errors, log messages, and exception
+    messages for clarity and usefulness.
+  why_it_matters: |
+    Poor error messages frustrate users, extend debugging time, and may
+    leak sensitive information. Good error messages should help identify
+    what went wrong, why, and what to do about it. They're critical for
+    both user experience and developer productivity.
+  when_to_run:
+  - During code reviews
+  - UX reviews
+  - Security audits (for info leakage)
+  - Localization preparation
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  access_requirements:
+  - Read access to source code repository
+discovery:
+  code_patterns:
+  - pattern: '"(Error|Failed|Invalid|Exception)"'
+    type: regex
+    scope: source
+    purpose: Identify generic error messages
+  - pattern: '"Something went wrong"'
+    type: regex
+    scope: source
+    purpose: Identify unhelpful generic messages
+  - pattern: throw\s+new\s+\w+\s*\(\s*\)
+    type: regex
+    scope: source
+    purpose: Identify exceptions without messages
+  - pattern: Error\s*\(\s*['"]['"]\s*\)
+    type: regex
+    scope: source
+    purpose: Identify empty error messages
+  file_patterns:
+  - glob: '**/*.{java,cs,ts,js,py,rb,go}'
+    purpose: Source code files
+knowledge_sources:
+  specifications:
+  - id: cwe-209
+    name: 'CWE-209: Information Exposure Through an Error Message'
+    url: https://cwe.mitre.org/data/definitions/209.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: error-message-guidelines
+    name: Microsoft Error Message Guidelines
+    url: https://docs.microsoft.com/en-us/style-guide/error-messages
+    offline_cache: true
+  - id: ux-error-messages
+    name: Nielsen Norman - Error Message Guidelines
+    url: https://www.nngroup.com/articles/error-message-guidelines/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: sonarqube
+    purpose: Generic message detection
+    offline_capable: false
+  - tool: custom-lint
+    purpose: Error message quality rules
+    offline_capable: true
+  scripts:
+  - id: error-message-scan
+    language: bash
+    purpose: Find poor error messages
+    source: inline
+    code: |
+      # Find generic error messages
+      grep -rn --include="*.{ts,java}" -iE "\"(error|failed|invalid|something went wrong)\"" . 2>/dev/null | head -50
+signals:
+  critical:
+  - id: EH-MSG-CRIT-001
+    signal: Error messages expose sensitive data (paths, credentials, SQL)
+    evidence_pattern: (password|secret|key|/home/|C:\\|SELECT.*FROM)
+    cwe: CWE-209
+    explanation: |
+      Error messages exposing sensitive information create security
+      vulnerabilities through information disclosure.
+    remediation: Sanitize error messages before displaying to users
+  - id: EH-MSG-CRIT-002
+    signal: Stack traces exposed to end users
+    evidence_pattern: at\s+[a-zA-Z]+\.[a-zA-Z]+\(.*\.java:\d+
+    cwe: CWE-209
+    explanation: |
+      Exposing stack traces reveals implementation details that help
+      attackers understand the system.
+    remediation: Log full errors, show generic messages to users
+  high:
+  - id: EH-MSG-HIGH-001
+    signal: Generic error messages ('Error', 'Failed', 'Invalid')
+    evidence_pattern: '"(Error|Failed|Invalid|Exception)"'
+    explanation: |
+      Single-word error messages provide no actionable information
+      for users or developers.
+    remediation: Add specific details about what failed and why
+  - id: EH-MSG-HIGH-002
+    signal: Exceptions thrown without messages
+    evidence_pattern: throw\s+new\s+\w+\(\s*\)
+    explanation: |
+      Exceptions without messages lose context about what went wrong.
+    remediation: Always provide descriptive messages for exceptions
+  medium:
+  - id: EH-MSG-MED-001
+    signal: Error messages with technical jargon for users
+    evidence_pattern: user.*error.*(null|undefined|NaN|exception)
+    remediation: Use user-friendly language for user-facing errors
+  - id: EH-MSG-MED-002
+    signal: Non-actionable error messages
+    evidence_pattern: '"Something went wrong|An error occurred"'
+    remediation: Add guidance on what user can do
+  low:
+  - id: EH-MSG-LOW-001
+    signal: Inconsistent error message format
+    evidence_pattern: varied_error_formats
+    remediation: Standardize error message format
+  positive:
+  - id: EH-MSG-POS-001
+    signal: Error messages include error codes
+    evidence_pattern: error.*code|ERR-\d+
+  - id: EH-MSG-POS-002
+    signal: User-facing errors separated from technical logs
+    evidence_pattern: user_error.*vs.*log_error
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Find Generic Messages
+    description: |
+      Search for common generic error message patterns that provide
+      little value.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find generic errors
+      command: |
+        grep -rn --include="*.{ts,java,py}" -iE "\"(error|failed|invalid|something went wrong)\"" . 2>/dev/null | head -50
+    - purpose: Find empty exception messages
+      command: |
+        grep -rn --include="*.{ts,java}" -E "throw\s+new\s+\w+\(\s*\)" . 2>/dev/null | head -30
+    expected_findings:
+    - Generic error messages
+    - Empty exception messages
+  - id: '2'
+    name: Check for Information Disclosure
+    description: |
+      Search for error messages that might expose sensitive information.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find potential info leaks
+      command: |
+        grep -rn --include="*.{ts,java}" -iE "error.*(path|password|secret|query|sql)" . 2>/dev/null | head -30
+    expected_findings:
+    - Potential information disclosure
+    - Stack trace exposure
+  - id: '3'
+    name: Assess User-Facing Messages
+    description: |
+      Review error messages that are shown to end users for clarity
+      and actionability.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find user-facing errors
+      command: |
+        grep -rn --include="*.{ts,tsx,jsx}" -E "error.*message|showError|toast.*error" . 2>/dev/null | head -30
+    expected_findings:
+    - User-facing error patterns
+    - Message quality assessment
+  - id: '4'
+    name: Generate Quality Report
+    description: |
+      Compile findings and recommendations for improving error messages.
+    duration_estimate: 5 min
+    expected_findings:
+    - Quality score
+    - Improvement recommendations
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - location
+    - message_text
+    - issue_type
+    - recommendation
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Message Quality Analysis
+    - Security Concerns
+    - UX Recommendations
+  confidence_guidance:
+    high: Clear quality issue detected
+    medium: Potential issue, context needed
+    low: May be acceptable in context
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-209
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires semantic analysis
+    full:
+      included: true
+      priority: 2
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: error-msg-001
+  item: Error message scan completed
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.{ts,java}" -iE "\"(error|failed|invalid)\"" . 2>/dev/null | wc -l
+  expected: Count documented
+- id: error-msg-002
+  item: No sensitive data in error messages
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{ts,java}" -iE "error.*(password|secret|key)" . 2>/dev/null | wc -l
+  expected: '0'
+- id: error-msg-003
+  item: User-facing messages reviewed
+  level: WARNING
+  verification: manual
+  verification_notes: Review UI error messages for quality
+  expected: All reviewed
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-209
+  - framework: OWASP
+    controls:
+    - Information Exposure
+  - framework: ISO 25010
+    controls:
+    - Usability
+relationships:
+  commonly_combined:
+  - code-quality.error-handling.exception-swallowing
+  - security.information-disclosure.error-disclosure
+  - code-quality.documentation.code-documentation

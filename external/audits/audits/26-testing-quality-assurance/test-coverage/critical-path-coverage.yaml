@@ -1,0 +1,391 @@
+# ============================================================
+# AUDIT: Critical Path Coverage
+# ============================================================
+# Evaluates test coverage of business-critical and high-risk
+# code paths that require exceptional testing assurance.
+# ============================================================
+
+audit:
+  id: "testing-quality-assurance.test-coverage.critical-path-coverage"
+  name: "Critical Path Coverage"
+  version: "1.0.0"
+  last_updated: "2026-01-22"
+  status: "active"
+
+  category: "testing-quality-assurance"
+  category_number: 26
+  subcategory: "test-coverage"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "requires_discovery"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "testing"
+
+  default_profiles:
+    - "full"
+    - "security"
+    - "production"
+
+  blocks_phase: true
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates test coverage specifically for business-critical code paths
+    including authentication, authorization, payment processing, data
+    validation, and core business logic. Verifies that high-risk code
+    receives proportionally higher test coverage than overall metrics.
+    Maps critical paths to test coverage and identifies gaps.
+
+  why_it_matters: |
+    Not all code is equally important. Overall 80% coverage is meaningless
+    if the 20% untested includes authentication bypass conditions or payment
+    calculation errors. Critical paths require near-100% coverage regardless
+    of project-wide metrics. Bugs in critical paths have disproportionate
+    business impact.
+
+  when_to_run:
+    - "Pre-release security review"
+    - "After changes to authentication/authorization"
+    - "Payment system modifications"
+    - "Core business logic updates"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Source code with identified critical modules"
+    - type: "critical_path_documentation"
+      description: "Documentation of business-critical paths"
+
+  access_requirements:
+    - "Source code repository access"
+    - "Coverage reporting with module granularity"
+    - "Architecture documentation for path identification"
+
+discovery:
+  file_patterns:
+    - glob: "**/auth/**"
+      purpose: "Authentication code"
+    - glob: "**/payment*/**"
+      purpose: "Payment processing"
+    - glob: "**/security/**"
+      purpose: "Security modules"
+    - glob: "**/validation/**"
+      purpose: "Input validation"
+    - glob: "**/core/**"
+      purpose: "Core business logic"
+
+  code_patterns:
+    - pattern: "@Transactional|@Secured|@Authorized"
+      type: "regex"
+      scope: "source"
+      purpose: "Annotated critical methods"
+    - pattern: "password|token|secret|credential"
+      type: "regex"
+      scope: "source"
+      purpose: "Security-sensitive code"
+    - pattern: "amount|price|payment|charge|refund"
+      type: "regex"
+      scope: "source"
+      purpose: "Financial operations"
+
+  metrics_queries:
+    - system: "SonarQube"
+      query: "component_measures?component=auth&metricKeys=coverage"
+      purpose: "Coverage of authentication modules"
+      threshold: ">= 95%"
+
+knowledge_sources:
+  specifications:
+    - id: "owasp-testing"
+      name: "OWASP Testing Guide"
+      url: "https://owasp.org/www-project-web-security-testing-guide/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "risk-based-testing"
+      name: "Risk-Based Testing Approach"
+      url: "https://www.guru99.com/risk-based-testing.html"
+      offline_cache: true
+    - id: "critical-path-method"
+      name: "Critical Path Analysis for Testing"
+      url: "https://www.ministryoftesting.com/articles/critical-path-testing"
+      offline_cache: true
+
+  learning_resources:
+    - id: "risk-analysis"
+      title: "Software Testing: Risk Analysis"
+      type: "course"
+      reference: "ISTQB Advanced"
+
+tooling:
+  static_analysis:
+    - tool: "Coverage tools with filter"
+      purpose: "Module-specific coverage analysis"
+      offline_capable: true
+    - tool: "SonarQube"
+      purpose: "Coverage by component"
+      offline_capable: false
+
+  scripts:
+    - id: "critical-path-coverage"
+      language: "bash"
+      purpose: "Check coverage of critical modules"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Critical Path Coverage Analysis ==="
+
+        # Define critical paths
+        CRITICAL_PATHS="auth,security,payment,validation,core"
+
+        for path in ${CRITICAL_PATHS//,/ }; do
+          echo "Checking coverage for: $path"
+          if [ -f "coverage/coverage-summary.json" ]; then
+            cat coverage/coverage-summary.json | jq --arg p "$path" '
+              to_entries | map(select(.key | contains($p))) |
+              if length > 0 then
+                {module: $p, files: length, avg_coverage: ([.[].value.lines.pct] | add / length)}
+              else
+                {module: $p, files: 0, avg_coverage: "N/A"}
+              end
+            '
+          fi
+        done
+
+signals:
+  critical:
+    - id: "CRITPATH-CRIT-001"
+      signal: "Authentication code coverage below 90%"
+      evidence_threshold: "Auth modules with < 90% line coverage"
+      explanation: |
+        Authentication vulnerabilities are among the most exploited
+        security flaws. Any untested auth path could contain a bypass
+        condition that attackers will find.
+      remediation: |
+        Achieve 100% coverage for authentication code:
+        1. Test all authentication methods
+        2. Cover all failure scenarios
+        3. Test session management completely
+        4. Verify token validation exhaustively
+
+    - id: "CRITPATH-CRIT-002"
+      signal: "Payment processing has untested paths"
+      evidence_pattern: "Payment modules with any uncovered lines"
+      explanation: |
+        Untested payment code risks financial errors, double charges,
+        or exploitable flaws. Financial regulators may require proof
+        of comprehensive testing.
+      remediation: |
+        Implement 100% coverage for payment code with:
+        - All calculation paths tested
+        - All error conditions verified
+        - Edge cases like currency rounding covered
+        - Transaction failure scenarios tested
+
+  high:
+    - id: "CRITPATH-HIGH-001"
+      signal: "Authorization/permission checks partially covered"
+      evidence_threshold: "RBAC/permission code < 85% coverage"
+      explanation: |
+        Authorization bypass is a common vulnerability. Untested
+        permission checks may fail open, granting unintended access.
+      remediation: |
+        Test all permission combinations:
+        - Each role's access rights
+        - Permission boundary conditions
+        - Escalation prevention
+        - Default deny verification
+
+    - id: "CRITPATH-HIGH-002"
+      signal: "Input validation has coverage gaps"
+      evidence_threshold: "Validation code < 85% coverage"
+      explanation: |
+        Incomplete validation testing risks injection attacks and
+        data corruption. Untested validation paths may accept
+        malicious input.
+      remediation: |
+        Cover all validation paths including:
+        - Valid input acceptance
+        - Invalid input rejection
+        - Boundary values
+        - Malicious input patterns
+
+  medium:
+    - id: "CRITPATH-MED-001"
+      signal: "Critical paths not explicitly identified"
+      evidence_pattern: "No documentation of critical modules"
+      remediation: "Document and tag critical code paths for coverage tracking"
+
+    - id: "CRITPATH-MED-002"
+      signal: "Critical path coverage not tracked separately"
+      evidence_pattern: "No per-module coverage reporting"
+      remediation: "Configure coverage reporting with module-level granularity"
+
+  low:
+    - id: "CRITPATH-LOW-001"
+      signal: "Logging in critical paths untested"
+      evidence_pattern: "Security logging statements uncovered"
+
+  positive:
+    - id: "CRITPATH-POS-001"
+      signal: "All critical paths have 95%+ coverage"
+      evidence_threshold: "Auth, payment, security all >= 95%"
+
+    - id: "CRITPATH-POS-002"
+      signal: "Critical paths tested with mutation testing"
+      evidence_threshold: "80%+ mutation score for critical modules"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify critical paths"
+      description: |
+        Determine which code paths are business-critical and require
+        exceptional coverage assurance.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find auth-related code"
+          command: "find . -type f -name '*.{js,ts,py,java}' | xargs grep -l -E 'auth|login|session|token' 2>/dev/null | head -20"
+        - purpose: "Find payment code"
+          command: "find . -type f -name '*.{js,ts,py,java}' | xargs grep -l -E 'payment|charge|refund|amount' 2>/dev/null | head -20"
+      expected_findings:
+        - "List of critical modules"
+        - "Critical path inventory"
+
+    - id: "2"
+      name: "Measure critical path coverage"
+      description: |
+        Extract coverage metrics specifically for identified critical paths.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Get coverage for auth modules"
+          command: "cat coverage/coverage-summary.json 2>/dev/null | jq 'to_entries | map(select(.key | contains(\"auth\")))'"
+      expected_findings:
+        - "Per-module coverage metrics"
+        - "Critical path coverage gaps"
+
+    - id: "3"
+      name: "Analyze coverage gaps"
+      description: |
+        Identify specific uncovered lines in critical paths and assess risk.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find uncovered lines in critical files"
+          command: "grep -E 'auth|payment|security' coverage/lcov.info 2>/dev/null | head -50"
+      expected_findings:
+        - "Specific uncovered code"
+        - "Risk assessment per gap"
+
+    - id: "4"
+      name: "Verify test quality"
+      description: |
+        Assess whether tests for critical paths include proper assertions.
+      duration_estimate: "30 min"
+      questions:
+        - "Do auth tests verify both success and failure?"
+        - "Do payment tests cover error scenarios?"
+        - "Are boundary conditions tested?"
+      expected_findings:
+        - "Test quality assessment"
+        - "Missing test scenarios"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "coverage_matrix"
+      format: "table"
+      sections:
+        - "Critical Path Inventory"
+        - "Coverage by Critical Module"
+        - "Gap Analysis"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Critical Path Coverage Status"
+        - "Risk Assessment"
+        - "Remediation Priorities"
+
+  confidence_guidance:
+    high: "Coverage measured with module granularity"
+    medium: "Coverage estimated from file patterns"
+    low: "Critical paths not formally identified"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "owasp-testing"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed analysis"
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 5
+
+closeout_checklist:
+  - id: "critpath-001"
+    item: "Critical paths identified"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Document list of critical modules"
+    expected: "Confirmed by reviewer"
+
+  - id: "critpath-002"
+    item: "Critical path coverage measured"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Record coverage percentage for each critical module"
+    expected: "Confirmed by reviewer"
+
+  - id: "critpath-003"
+    item: "Coverage gaps prioritized"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Rank gaps by risk for remediation"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "PCI-DSS"
+      controls: ["6.5", "6.6"]
+    - framework: "SOC2"
+      controls: ["CC7.1", "CC7.2"]
+    - framework: "HIPAA"
+      controls: ["164.312(c)(1)"]
+
+relationships:
+  commonly_combined:
+    - "testing-quality-assurance.test-coverage.code-coverage"
+    - "testing-quality-assurance.security-testing.penetration-test-coverage"
+    - "security-trust.authentication.authentication-testing"

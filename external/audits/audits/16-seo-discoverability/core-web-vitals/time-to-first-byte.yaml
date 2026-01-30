@@ -1,0 +1,387 @@
+# ============================================================
+# AUDIT: Time to First Byte (TTFB) Optimization
+# ============================================================
+# Evaluates TTFB performance, measuring server responsiveness
+# and its impact on overall page load performance.
+# ============================================================
+
+audit:
+  id: "seo-discoverability.core-web-vitals.time-to-first-byte"
+
+  name: "Time to First Byte (TTFB) Optimization Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "seo-discoverability"
+  category_number: 16
+  subcategory: "core-web-vitals"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines Time to First Byte (TTFB) performance, which
+    measures the time from when a user requests a page to when the
+    first byte of the response arrives. TTFB is a foundational metric
+    that affects all subsequent performance metrics. It evaluates
+    server response times, identifies bottlenecks, and provides
+    infrastructure optimization recommendations.
+
+  why_it_matters: |
+    TTFB represents the sum of redirect time, DNS lookup, connection
+    time, TLS negotiation, and server processing time. High TTFB
+    (over 800ms) delays everything else - FCP, LCP, and interactivity.
+    Good TTFB (under 200ms) gives pages a head start on rendering.
+    TTFB is especially important for performance in distant regions.
+
+  when_to_run:
+    - "During infrastructure optimization"
+    - "When deploying to new regions"
+    - "After backend changes"
+    - "When Core Web Vitals are slow"
+    - "During CDN evaluation"
+
+prerequisites:
+  required_artifacts:
+    - type: "website"
+      description: "Live website accessible for testing"
+    - type: "server_access"
+      description: "Access to server configuration (optional)"
+
+  access_requirements:
+    - "Ability to test from multiple locations"
+    - "Server/infrastructure access for optimization"
+
+discovery:
+  code_patterns:
+    - pattern: "Cache-Control|ETag|Last-Modified"
+      type: "regex"
+      scope: "config"
+      purpose: "Find caching headers"
+    - pattern: "CDN|CloudFlare|Fastly|CloudFront"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find CDN configuration"
+
+  file_patterns:
+    - glob: "**/nginx.conf"
+      purpose: "Nginx server configuration"
+    - glob: "**/apache*.conf"
+      purpose: "Apache server configuration"
+    - glob: "**/vercel.json"
+      purpose: "Vercel configuration"
+
+knowledge_sources:
+  specifications:
+    - id: "web-vitals-ttfb"
+      name: "web.dev: Time to First Byte"
+      url: "https://web.dev/ttfb/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "google-optimize-ttfb"
+      name: "Google: Optimize TTFB"
+      url: "https://web.dev/optimize-ttfb/"
+      offline_cache: true
+    - id: "cloudflare-ttfb"
+      name: "Cloudflare: What is TTFB?"
+      url: "https://www.cloudflare.com/learning/performance/ttfb-time-to-first-byte/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "Lighthouse"
+      purpose: "TTFB measurement in lab"
+      offline_capable: true
+    - tool: "WebPageTest"
+      purpose: "Multi-location TTFB testing"
+      offline_capable: false
+
+  infrastructure_tools:
+    - tool: "curl"
+      purpose: "Measure TTFB from command line"
+      command: "curl -o /dev/null -s -w 'TTFB: %{time_starttransfer}s\\n' URL"
+    - tool: "PageSpeed Insights"
+      purpose: "Field TTFB data"
+      command: "https://pagespeed.web.dev/"
+    - tool: "Pingdom"
+      purpose: "Global performance testing"
+      command: "https://tools.pingdom.com/"
+
+  scripts:
+    - id: "ttfb-checker"
+      language: "bash"
+      purpose: "Measure TTFB from multiple requests"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        URL=$1
+        echo "=== TTFB Analysis for: $URL ==="
+
+        echo ""
+        echo "Running 5 requests..."
+        for i in {1..5}; do
+          TTFB=$(curl -o /dev/null -s -w '%{time_starttransfer}' "$URL")
+          echo "Request $i: ${TTFB}s"
+        done
+
+        echo ""
+        echo "Response headers:"
+        curl -sI "$URL" | grep -E "^(Cache-Control|CDN|X-Cache|Server|CF-)"
+
+signals:
+  critical:
+    - id: "TTFB-CRIT-001"
+      signal: "TTFB exceeds 1.8 seconds (poor threshold)"
+      evidence_threshold: "TTFB > 1800ms"
+      explanation: |
+        TTFB over 1.8 seconds is classified as "poor" and severely
+        impacts all other performance metrics. Users may see a blank
+        page for extended periods before anything loads.
+      remediation: "Implement CDN, optimize server-side processing, add caching"
+
+    - id: "TTFB-CRIT-002"
+      signal: "Server errors causing retries and high TTFB"
+      evidence_indicators:
+        - "Intermittent 5xx errors"
+        - "Highly variable TTFB"
+      explanation: |
+        Server errors require retries, dramatically increasing
+        effective TTFB and user frustration.
+      remediation: "Fix server stability issues, implement health checks"
+
+  high:
+    - id: "TTFB-HIGH-001"
+      signal: "TTFB between 800ms-1.8s (needs improvement)"
+      evidence_threshold: "TTFB > 800ms && TTFB <= 1800ms"
+      explanation: |
+        TTFB in this range is classified as "needs improvement" and
+        puts pages at a competitive disadvantage.
+      remediation: "Implement optimization strategies for sub-800ms TTFB"
+
+    - id: "TTFB-HIGH-002"
+      signal: "No CDN in use for static or cacheable content"
+      explanation: |
+        Without a CDN, users far from the origin server experience
+        high latency for every request.
+      remediation: "Implement CDN for global performance"
+
+    - id: "TTFB-HIGH-003"
+      signal: "No server-side caching"
+      explanation: |
+        Without caching, every request requires full server-side
+        processing, increasing TTFB.
+      remediation: "Implement page caching, database query caching"
+
+  medium:
+    - id: "TTFB-MED-001"
+      signal: "Multiple redirects increasing TTFB"
+      remediation: "Reduce redirect chains, update internal links"
+
+    - id: "TTFB-MED-002"
+      signal: "Slow database queries affecting TTFB"
+      remediation: "Optimize queries, add database indexes, implement query caching"
+
+    - id: "TTFB-MED-003"
+      signal: "No HTTP/2 or HTTP/3 support"
+      remediation: "Enable HTTP/2 or HTTP/3 for connection efficiency"
+
+  low:
+    - id: "TTFB-LOW-001"
+      signal: "TTFB varies by geographic region"
+
+    - id: "TTFB-LOW-002"
+      signal: "DNS lookup time above 50ms"
+
+  positive:
+    - id: "TTFB-POS-001"
+      signal: "TTFB under 200ms (excellent)"
+    - id: "TTFB-POS-002"
+      signal: "CDN with high cache hit ratio"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Measure TTFB Field Data"
+      description: |
+        Collect real-user TTFB data from Chrome User Experience
+        Report via PageSpeed Insights.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Get field TTFB data"
+          command: "PageSpeed Insights for key pages"
+      expected_findings:
+        - "Field TTFB distribution"
+        - "Mobile vs desktop TTFB"
+        - "Page type variations"
+
+    - id: "2"
+      name: "Test from Multiple Locations"
+      description: |
+        Measure TTFB from various geographic locations to understand
+        global performance.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Multi-location testing"
+          command: "WebPageTest with different test locations"
+      expected_findings:
+        - "TTFB by region"
+        - "CDN effectiveness"
+        - "Geographic patterns"
+
+    - id: "3"
+      name: "Analyze TTFB Components"
+      description: |
+        Break down TTFB into components: DNS, connection, TLS,
+        waiting (server processing).
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Detailed timing breakdown"
+          command: "Chrome DevTools > Network > Timing"
+      expected_findings:
+        - "Time per component"
+        - "Bottleneck identification"
+        - "Optimization targets"
+
+    - id: "4"
+      name: "Review Caching Strategy"
+      description: |
+        Examine server-side caching, CDN caching, and HTTP cache
+        headers.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check cache headers"
+          command: "curl -sI URL | grep -E 'Cache|Age|CDN'"
+      expected_findings:
+        - "Cache header configuration"
+        - "CDN cache status"
+        - "Cache effectiveness"
+
+    - id: "5"
+      name: "Check Server Configuration"
+      description: |
+        Review server configuration for performance settings like
+        keep-alive, compression, and HTTP/2.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "HTTP version support"
+        - "Compression status"
+        - "Keep-alive settings"
+
+    - id: "6"
+      name: "Audit Backend Performance"
+      description: |
+        Review application-level factors affecting TTFB like
+        database queries and API calls.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Slow operations"
+        - "N+1 queries"
+        - "Blocking calls"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "TTFB Performance Summary"
+        - "Geographic Analysis"
+        - "Caching Assessment"
+        - "Infrastructure Recommendations"
+
+  confidence_guidance:
+    high: "Field data plus multi-location lab testing"
+    medium: "Lab testing from multiple locations"
+    low: "Single location lab test"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "web-vitals-ttfb"
+        priority: "required"
+      - source_id: "google-optimize-ttfb"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires infrastructure analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "ttfb-001"
+    item: "TTFB under 800ms on key pages"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Check PageSpeed Insights field data"
+    expected: "Confirmed by reviewer"
+
+  - id: "ttfb-002"
+    item: "CDN in use for cacheable content"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify CDN headers in response"
+    expected: "Confirmed by reviewer"
+
+  - id: "ttfb-003"
+    item: "Server-side caching implemented"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Check Cache-Control headers"
+    expected: "Confirmed by reviewer"
+
+  - id: "ttfb-004"
+    item: "HTTP/2 or HTTP/3 enabled"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Check protocol in DevTools"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["web-application", "marketing-site", "ecommerce", "content-site"]
+
+  compliance_frameworks:
+    - framework: "Web Performance Best Practices"
+      controls: ["Server Performance", "CDN", "Caching"]
+
+relationships:
+  commonly_combined:
+    - "seo-discoverability.core-web-vitals.largest-contentful-paint"
+    - "seo-discoverability.core-web-vitals.first-contentful-paint"
+    - "seo-discoverability.technical-seo.crawlability"

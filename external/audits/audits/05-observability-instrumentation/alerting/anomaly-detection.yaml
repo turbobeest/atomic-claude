@@ -1,0 +1,304 @@
+# ============================================================
+# ANOMALY DETECTION AUDIT
+# ============================================================
+# Evaluates anomaly detection capabilities for identifying
+# unusual patterns that static thresholds cannot detect.
+
+audit:
+  id: "observability-instrumentation.alerting.anomaly-detection"
+  name: "Anomaly Detection Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "observability-instrumentation"
+  category_number: 5
+  subcategory: "alerting"
+
+  tier: "expert"
+  estimated_duration: "2.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Reviews anomaly detection implementations including statistical methods,
+    machine learning models, seasonality handling, and the integration of
+    anomaly alerts with traditional threshold-based alerting.
+
+  why_it_matters: |
+    Static thresholds cannot detect many types of problems: gradual degradation,
+    unusual patterns at normal values, or issues during varying load. Anomaly
+    detection catches problems that would otherwise go unnoticed until they
+    become critical failures.
+
+  when_to_run:
+    - "After missed incidents that anomaly detection might catch"
+    - "Quarterly observability review"
+    - "When implementing new anomaly detection"
+    - "Seasonal pattern analysis"
+
+prerequisites:
+  required_artifacts:
+    - type: "anomaly_detection_config"
+      description: "Anomaly detection system configuration"
+    - type: "historical_metrics"
+      description: "Sufficient historical data for baseline"
+
+  access_requirements:
+    - "Anomaly detection platform access"
+    - "Metrics historical data"
+    - "Alert configuration"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus"
+      query: "anomaly_score"
+      purpose: "Check for anomaly detection metrics"
+      threshold: "Anomaly detection implemented"
+
+    - system: "Datadog"
+      query: "anomaly alerts"
+      purpose: "List anomaly-based alerts"
+      threshold: "Key metrics covered"
+
+  code_patterns:
+    - pattern: "anomaly|outlier|baseline|deviation|zscore|forecast"
+      type: "regex"
+      scope: "alert_rules"
+      purpose: "Identify anomaly detection usage"
+
+  file_patterns:
+    - glob: "**/anomaly*.yaml"
+      purpose: "Anomaly detection configuration"
+    - glob: "**/ml-alerts*.yaml"
+      purpose: "ML-based alert rules"
+    - glob: "**/forecast*.yaml"
+      purpose: "Forecasting configuration"
+
+knowledge_sources:
+  specifications:
+    - id: "prometheus-predict"
+      name: "Prometheus Predict Functions"
+      url: "https://prometheus.io/docs/prometheus/latest/querying/functions/#predict_linear"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "datadog-anomaly"
+      name: "Datadog Anomaly Detection"
+      url: "https://docs.datadoghq.com/monitors/types/anomaly/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "prometheus"
+      purpose: "Test prediction queries"
+      command: "curl -s 'http://prometheus:9090/api/v1/query?query=predict_linear(http_requests_total[1h],3600)'"
+
+    - tool: "datadog-cli"
+      purpose: "List anomaly monitors"
+      command: "dog monitor show --type anomaly"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "predict_linear(rate(http_requests_total[1h])[6h:1h], 3600)"
+      purpose: "Predict future request rate"
+
+signals:
+  critical:
+    - id: "ANOMALY-CRIT-001"
+      signal: "No anomaly detection for critical services"
+      evidence_pattern: "Critical services only have static thresholds"
+      explanation: |
+        Critical services benefit most from anomaly detection as subtle
+        degradations can have major business impact. Static thresholds
+        miss gradual degradation and unusual patterns.
+      remediation: "Implement anomaly detection for key SLIs"
+
+    - id: "ANOMALY-CRIT-002"
+      signal: "Anomaly detection without seasonality"
+      evidence_pattern: "Anomaly alerts during known traffic patterns"
+      explanation: |
+        Without seasonality awareness, anomaly detection generates false
+        positives during predictable variations like daily or weekly
+        traffic patterns.
+      remediation: "Configure seasonality in anomaly detection"
+
+  high:
+    - id: "ANOMALY-HIGH-001"
+      signal: "High false positive rate from anomaly detection"
+      evidence_threshold: "false_positive_rate > 30%"
+      explanation: |
+        High false positives cause alert fatigue and erode trust in
+        anomaly detection, leading teams to ignore or disable it.
+      remediation: "Tune sensitivity and improve training data"
+
+    - id: "ANOMALY-HIGH-002"
+      signal: "Insufficient training data"
+      evidence_pattern: "Anomaly baseline < 2 weeks"
+      explanation: |
+        Short baselines produce inaccurate anomaly detection that
+        misses normal variations and flags them as anomalies.
+      remediation: "Extend training period to capture full patterns"
+
+  medium:
+    - id: "ANOMALY-MED-001"
+      signal: "No forecast-based capacity alerting"
+      evidence_pattern: "Capacity alerts only on current values"
+      remediation: "Add predictive capacity alerts"
+
+    - id: "ANOMALY-MED-002"
+      signal: "Anomaly detection not integrated with incident workflow"
+      evidence_pattern: "Anomaly alerts go to separate channel"
+      remediation: "Integrate anomaly alerts with standard alerting"
+
+  low:
+    - id: "ANOMALY-LOW-001"
+      signal: "No anomaly detection documentation"
+      remediation: "Document anomaly detection methods and tuning"
+
+  positive:
+    - id: "ANOMALY-POS-001"
+      signal: "Well-tuned anomaly detection with low false positives"
+      evidence_pattern: "Anomaly detection catching real issues"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory anomaly detection"
+      description: |
+        Document all anomaly detection implementations including
+        methods, metrics covered, and configuration.
+      duration_estimate: "40 min"
+
+      commands:
+        - purpose: "Find anomaly-related alerts"
+          command: "kubectl get prometheusrules -A -o yaml | grep -B 5 -A 10 'predict_linear\\|deriv\\|changes\\|holt_winters'"
+        - purpose: "List ML-based monitors"
+          command: "curl -s -H 'DD-API-KEY: ${DD_API_KEY}' -H 'DD-APPLICATION-KEY: ${DD_APP_KEY}' 'https://api.datadoghq.com/api/v1/monitor' | jq '[.[] | select(.type | contains(\"anomaly\"))] | length'"
+
+      expected_findings:
+        - "Anomaly detection inventory"
+        - "Coverage assessment"
+
+    - id: "2"
+      name: "Evaluate detection accuracy"
+      description: |
+        Review anomaly detection accuracy by examining false
+        positive rates and missed detections.
+      duration_estimate: "50 min"
+
+      commands:
+        - purpose: "Get anomaly alert history"
+          command: "curl -s 'http://alertmanager:9093/api/v2/alerts?filter=alertname=~\".*anomaly.*\"' | jq 'length'"
+        - purpose: "Check prediction accuracy"
+          command: "curl -s 'http://prometheus:9090/api/v1/query?query=abs(predict_linear(http_requests_total[1h],3600)-http_requests_total)/http_requests_total'"
+
+      expected_findings:
+        - "False positive rate"
+        - "Detection accuracy"
+
+    - id: "3"
+      name: "Review configuration"
+      description: |
+        Examine anomaly detection configuration including
+        seasonality, sensitivity, and training parameters.
+      duration_estimate: "40 min"
+
+      commands:
+        - purpose: "Check seasonality configuration"
+          command: "grep -r 'seasonality\\|period\\|weekly\\|daily' /etc/monitoring/anomaly/"
+
+      expected_findings:
+        - "Configuration completeness"
+        - "Tuning recommendations"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Coverage Analysis"
+        - "Accuracy Assessment"
+        - "Tuning Recommendations"
+
+  confidence_guidance:
+    high: "Historical accuracy analysis with incident correlation"
+    medium: "Configuration review with sample testing"
+    low: "Configuration review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "prometheus-predict"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires accuracy analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "anomaly-001"
+    item: "Anomaly detection inventory complete"
+    level: "CRITICAL"
+    verification: "manual"
+    expected: "All implementations documented"
+
+  - id: "anomaly-002"
+    item: "Accuracy assessed"
+    level: "BLOCKING"
+    verification: "manual"
+    expected: "False positive rate calculated"
+
+  - id: "anomaly-003"
+    item: "Seasonality configured"
+    level: "WARNING"
+    verification: "manual"
+    expected: "Seasonality handling documented"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SRE Best Practices"
+      controls: ["Advanced Alerting"]
+
+relationships:
+  commonly_combined:
+    - "observability-instrumentation.alerting.alert-threshold"
+    - "observability-instrumentation.alerting.composite-alert"
+    - "observability-instrumentation.alerting.alert-slo-alignment"

@@ -1,0 +1,246 @@
+audit:
+  id: observability-instrumentation.distributed-tracing.trace-coverage
+  name: Trace Coverage Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: distributed-tracing
+  tier: expert
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Examines distributed tracing instrumentation across all services to identify
+    coverage gaps, uninstrumented endpoints, missing spans, and services lacking
+    trace context propagation. Evaluates both automatic and manual instrumentation.
+  why_it_matters: |
+    Incomplete trace coverage creates blind spots in understanding system behavior.
+    Missing traces during incidents leads to prolonged debugging time, incorrect
+    root cause analysis, and inability to understand request flows. Even 95%
+    coverage means 5% of requests are invisible during troubleshooting.
+  when_to_run:
+  - New service deployment
+  - Post-incident review reveals tracing gaps
+  - Quarterly observability review
+  - After infrastructure migrations
+prerequisites:
+  required_artifacts:
+  - type: tracing_backend
+    description: Access to Jaeger, Zipkin, or similar tracing system
+  - type: service_catalog
+    description: List of all production services
+  access_requirements:
+  - Tracing backend query access
+  - Service registry or discovery system
+  - Application source code for instrumentation review
+discovery:
+  metrics_queries:
+  - system: Jaeger
+    query: services
+    purpose: List all services reporting traces
+    threshold: All production services present
+  - system: Prometheus
+    query: count by (service) (traces_spans_total)
+    purpose: Count services with active tracing
+    threshold: 100% service coverage
+  code_patterns:
+  - pattern: '@Trace|@WithSpan|tracer\.start|opentelemetry|jaeger|zipkin'
+    type: regex
+    scope: source
+    purpose: Identify tracing instrumentation
+  - pattern: span\.set_attribute|span\.add_event|span\.set_status
+    type: regex
+    scope: source
+    purpose: Identify span enrichment
+  file_patterns:
+  - glob: '**/tracing*.{py,rb,js,ts,java,go}'
+    purpose: Tracing configuration files
+  - glob: '**/opentelemetry*.{yaml,yml,json}'
+    purpose: OpenTelemetry configuration
+  - glob: '**/jaeger*.{yaml,yml}'
+    purpose: Jaeger agent configuration
+knowledge_sources:
+  specifications:
+  - id: opentelemetry-spec
+    name: OpenTelemetry Specification
+    url: https://opentelemetry.io/docs/specs/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: otel-instrumentation
+    name: OpenTelemetry Instrumentation Guide
+    url: https://opentelemetry.io/docs/instrumentation/
+    offline_cache: true
+tooling:
+signals:
+  critical:
+  - id: TRACE-COV-CRIT-001
+    signal: Critical services have no tracing
+    evidence_pattern: Payment|Auth|Order services missing from trace backend
+    explanation: |
+      Core business services without tracing create dangerous blind spots.
+      Incidents involving these services cannot be properly diagnosed,
+      leading to extended outages and customer impact.
+    remediation: Immediately instrument critical path services with OpenTelemetry
+  - id: TRACE-COV-CRIT-002
+    signal: Less than 50% service coverage
+    evidence_threshold: instrumented_services / total_services < 0.50
+    explanation: |
+      Majority of services uninstrumented means distributed tracing provides
+      minimal value. Cross-service request flows cannot be understood.
+    remediation: Prioritize instrumentation rollout starting with critical paths
+  high:
+  - id: TRACE-COV-HIGH-001
+    signal: Service coverage between 50-80%
+    evidence_threshold: 0.50 <= coverage < 0.80
+    explanation: |
+      Significant coverage gaps limit tracing utility. Request flows
+      frequently disappear into uninstrumented services.
+    remediation: Create instrumentation backlog prioritized by service criticality
+  - id: TRACE-COV-HIGH-002
+    signal: Database calls not traced
+    evidence_pattern: No spans for database operations
+    explanation: |
+      Database operations are often the primary source of latency.
+      Without database spans, performance analysis is incomplete.
+    remediation: Add database instrumentation libraries for all data stores
+  medium:
+  - id: TRACE-COV-MED-001
+    signal: Service coverage between 80-95%
+    evidence_threshold: 0.80 <= coverage < 0.95
+    remediation: Address remaining coverage gaps systematically
+  - id: TRACE-COV-MED-002
+    signal: External API calls not traced
+    evidence_pattern: HTTP client calls missing spans
+    remediation: Instrument HTTP clients with tracing middleware
+  low:
+  - id: TRACE-COV-LOW-001
+    signal: Background jobs not traced
+    remediation: Add tracing to async workers and scheduled jobs
+  positive:
+  - id: TRACE-COV-POS-001
+    signal: Full trace coverage achieved
+    evidence_threshold: coverage >= 0.95
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory all services
+    description: |
+      Compile complete list of all production services from service
+      registry, Kubernetes namespaces, or infrastructure documentation.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List Kubernetes services
+      command: kubectl get services -A -o jsonpath='{.items[*].metadata.name}'
+    - purpose: List services from registry
+      command: curl -s http://consul:8500/v1/catalog/services | jq 'keys[]'
+    expected_findings:
+    - Complete service inventory
+    - Service count by namespace/team
+  - id: '2'
+    name: Query traced services
+    description: |
+      Retrieve list of services currently reporting traces to the
+      tracing backend and compare against service inventory.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get Jaeger service list
+      command: curl -s http://jaeger:16686/api/services | jq '.data[]'
+    - purpose: Get service span counts
+      command: curl -s 'http://jaeger:16686/api/traces?service=api-gateway&limit=100'
+    expected_findings:
+    - List of instrumented services
+    - Coverage percentage
+    - Gap identification
+  - id: '3'
+    name: Review instrumentation depth
+    description: |
+      For instrumented services, verify spans include meaningful
+      attributes, proper error flagging, and complete context propagation.
+    duration_estimate: 40 min
+    commands:
+    - purpose: Sample trace inspection
+      command: curl -s 'http://jaeger:16686/api/traces/{traceId}' | jq '.data[0].spans[] | {operationName,
+        tags}'
+    expected_findings:
+    - Span attribute completeness
+    - Error flagging presence
+    - Context propagation verification
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Coverage Analysis
+    - Gap Inventory
+    - Prioritized Recommendations
+  confidence_guidance:
+    high: Direct service inventory comparison with tracing backend
+    medium: Sampling-based coverage estimation
+    low: Code review without runtime verification
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: opentelemetry-spec
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive service inventory and runtime verification
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: trace-coverage-001
+  item: Service inventory completed
+  level: CRITICAL
+  verification: test $(kubectl get services -A --no-headers | wc -l) -gt 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: trace-coverage-002
+  item: Traced services enumerated
+  level: CRITICAL
+  verification: curl -sf http://jaeger:16686/api/services | jq -e '.data | length > 0' && echo PASS ||
+    echo FAIL
+  expected: PASS
+- id: trace-coverage-003
+  item: Coverage gaps documented
+  level: BLOCKING
+  verification: manual
+  expected: Coverage gap list produced
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SRE Best Practices
+    controls:
+    - Observability Coverage
+relationships:
+  commonly_combined:
+  - observability-instrumentation.distributed-tracing.span-context-propagation
+  - observability-instrumentation.distributed-tracing.trace-sampling
+  - observability-instrumentation.alerting.alert-slo-alignment

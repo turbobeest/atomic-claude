@@ -1,0 +1,330 @@
+# ============================================================
+# Disk I/O Audit
+# ============================================================
+# Evaluates disk I/O patterns, throughput, latency, and IOPS
+# utilization across storage infrastructure.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.resource-utilization.disk-io"
+  name: "Disk I/O Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "resource-utilization"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines disk I/O performance including read/write throughput,
+    IOPS utilization, I/O latency, queue depth, and storage class performance.
+    It analyzes both container-level and node-level I/O metrics to identify
+    bottlenecks and misconfigured storage.
+
+  why_it_matters: |
+    Disk I/O bottlenecks cause severe performance degradation, especially for
+    database workloads, logging systems, and stateful applications. I/O latency
+    directly impacts application response times. Saturated disks cause request
+    queuing, timeouts, and potential data corruption under extreme conditions.
+
+  when_to_run:
+    - "After deploying I/O-intensive workloads"
+    - "When investigating latency issues"
+    - "During storage capacity planning"
+    - "After provisioning new storage classes"
+
+prerequisites:
+  required_artifacts:
+    - type: "metrics-system"
+      description: "Access to node_exporter or equivalent I/O metrics"
+    - type: "storage-system"
+      description: "Access to storage system metrics (EBS, PD, etc.)"
+
+  access_requirements:
+    - "Read access to node-level I/O metrics"
+    - "Access to cloud storage performance metrics"
+    - "Read access to Kubernetes PV/PVC configurations"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus"
+      query: "rate(node_disk_read_bytes_total[5m]) + rate(node_disk_written_bytes_total[5m])"
+      purpose: "Total disk throughput per node"
+      threshold: "Below storage class limits"
+    - system: "Prometheus"
+      query: "rate(node_disk_io_time_seconds_total[5m])"
+      purpose: "Disk utilization percentage"
+      threshold: "< 80% for healthy performance"
+    - system: "Prometheus"
+      query: "node_disk_io_time_weighted_seconds_total / node_disk_io_time_seconds_total"
+      purpose: "Average I/O queue time"
+      threshold: "< 10ms for SSD, < 50ms for HDD"
+    - system: "Prometheus"
+      query: "rate(node_disk_reads_completed_total[5m]) + rate(node_disk_writes_completed_total[5m])"
+      purpose: "IOPS utilization"
+      threshold: "Below provisioned IOPS"
+
+  file_patterns:
+    - glob: "**/storageclass*.yaml"
+      purpose: "Kubernetes storage class definitions"
+    - glob: "**/pvc*.yaml"
+      purpose: "Persistent volume claim configurations"
+
+knowledge_sources:
+  specifications:
+    - id: "k8s-storage"
+      name: "Kubernetes Storage"
+      url: "https://kubernetes.io/docs/concepts/storage/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "aws-ebs-performance"
+      name: "AWS EBS Performance"
+      url: "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-volume-types.html"
+      offline_cache: true
+    - id: "gcp-disk-performance"
+      name: "GCP Persistent Disk Performance"
+      url: "https://cloud.google.com/compute/docs/disks/performance"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "iostat"
+      purpose: "Monitor disk I/O statistics"
+      command: "iostat -x 1 5"
+    - tool: "iotop"
+      purpose: "Identify top I/O consumers"
+      command: "iotop -oP"
+    - tool: "kubectl"
+      purpose: "Check PVC and storage class configurations"
+      command: "kubectl get pvc -A -o wide"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        histogram_quantile(0.99,
+          rate(node_disk_read_time_seconds_total[5m])
+          / rate(node_disk_reads_completed_total[5m])
+        )
+      purpose: "P99 read latency"
+
+signals:
+  critical:
+    - id: "DISK-CRIT-001"
+      signal: "Disk I/O utilization exceeding 95% causing saturation"
+      evidence_threshold: "node_disk_io_time_seconds > 0.95 for > 5 minutes"
+      explanation: |
+        When disk utilization exceeds 95%, the disk is saturated. All I/O
+        operations queue behind each other, causing exponential latency
+        increases. This severely impacts all workloads sharing the storage.
+      remediation: "Provision faster storage, spread I/O across volumes, or reduce I/O load"
+
+    - id: "DISK-CRIT-002"
+      signal: "Disk I/O latency exceeding acceptable thresholds"
+      evidence_threshold: "avg_io_latency > 100ms for SSD or > 500ms for HDD"
+      explanation: |
+        High I/O latency directly translates to application latency. Database
+        queries wait for disk, log writes block application threads, and
+        overall system responsiveness degrades significantly.
+      remediation: "Investigate I/O patterns, upgrade storage tier, or optimize I/O-heavy workloads"
+
+  high:
+    - id: "DISK-HIGH-001"
+      signal: "IOPS consumption near provisioned limits"
+      evidence_threshold: "actual_iops > 80% of provisioned_iops"
+      explanation: |
+        Approaching IOPS limits means workloads will soon be throttled by the
+        storage provider. Cloud providers often throttle without warning when
+        IOPS limits are exceeded, causing sudden performance degradation.
+      remediation: "Increase provisioned IOPS or optimize I/O patterns"
+
+    - id: "DISK-HIGH-002"
+      signal: "High I/O queue depth indicating bottleneck"
+      evidence_threshold: "avg_queue_depth > 32 for extended periods"
+      explanation: |
+        High queue depth means I/O requests are backing up faster than the disk
+        can process them. This is a leading indicator of imminent performance
+        problems even if current latency appears acceptable.
+      remediation: "Reduce I/O concurrency or provision faster storage"
+
+  medium:
+    - id: "DISK-MED-001"
+      signal: "Mismatched storage class for workload requirements"
+      evidence_pattern: "I/O-intensive workload on standard storage class"
+      remediation: "Migrate to appropriate storage class (SSD for latency-sensitive)"
+
+    - id: "DISK-MED-002"
+      signal: "Excessive small random I/O operations"
+      evidence_threshold: "random_io_ratio > 80% with small block sizes"
+      remediation: "Batch writes, use write-ahead logging, or enable write caching"
+
+  low:
+    - id: "DISK-LOW-001"
+      signal: "Disk throughput significantly below provisioned capacity"
+
+  positive:
+    - id: "DISK-POS-001"
+      signal: "Healthy I/O latency within expected ranges"
+    - id: "DISK-POS-002"
+      signal: "Appropriate storage class selection for workload types"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory storage configurations"
+      description: |
+        Collect storage class and PVC configurations to understand provisioned
+        storage characteristics and their intended use.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "List all PVCs with storage classes"
+          command: |
+            kubectl get pvc -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,STORAGE_CLASS:.spec.storageClassName,SIZE:.spec.resources.requests.storage,STATUS:.status.phase'
+        - purpose: "Check storage class configurations"
+          command: "kubectl get storageclass -o yaml"
+      expected_findings:
+        - "PVC inventory with storage classes"
+        - "Storage class parameters and provisioners"
+
+    - id: "2"
+      name: "Analyze node-level I/O metrics"
+      description: |
+        Examine disk utilization, throughput, and latency at the node level
+        to identify saturated or underperforming storage.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check disk utilization per node"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=rate(node_disk_io_time_seconds_total[5m])' | jq '.data.result'
+        - purpose: "Check I/O latency"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=rate(node_disk_read_time_seconds_total[5m])/rate(node_disk_reads_completed_total[5m])' | jq '.data.result'
+      expected_findings:
+        - "Disk utilization percentages"
+        - "Current I/O latency by device"
+
+    - id: "3"
+      name: "Identify I/O hotspots"
+      description: |
+        Find workloads and processes generating the most I/O to understand
+        where optimization efforts should focus.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Top I/O consumers (requires node access)"
+          command: "iotop -boP -d 5 -n 3 | head -50"
+        - purpose: "Container I/O metrics"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=topk(10,rate(container_fs_writes_bytes_total[5m]))' | jq '.data.result'
+      expected_findings:
+        - "Top I/O consuming processes/containers"
+        - "I/O patterns by workload"
+
+    - id: "4"
+      name: "Check cloud storage metrics"
+      description: |
+        For cloud environments, verify IOPS and throughput against provisioned
+        limits and check for throttling events.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "AWS EBS metrics (CloudWatch)"
+          command: |
+            aws cloudwatch get-metric-statistics --namespace AWS/EBS --metric-name VolumeQueueLength --dimensions Name=VolumeId,Value=<vol-id> --start-time $(date -d '1 hour ago' -Iseconds) --end-time $(date -Iseconds) --period 300 --statistics Average
+      expected_findings:
+        - "Cloud storage performance metrics"
+        - "Throttling events if any"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Storage Configuration Review"
+        - "I/O Performance Analysis"
+        - "Bottleneck Identification"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct metrics observation over extended period"
+    medium: "Point-in-time metrics observation"
+    low: "Configuration analysis without runtime verification"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "k8s-storage"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime metrics collection"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "disk-001"
+    item: "No disks with sustained utilization above 90%"
+    level: "CRITICAL"
+    verification: |
+      curl -s 'http://prometheus:9090/api/v1/query?query=max(rate(node_disk_io_time_seconds_total[5m]))' | jq '.data.result[0].value[1] | tonumber < 0.9'
+    expected: "true"
+
+  - id: "disk-002"
+    item: "I/O latency within acceptable ranges"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify P99 read/write latency < 50ms for SSD workloads"
+    expected: "Confirmed by reviewer"
+
+  - id: "disk-003"
+    item: "IOPS consumption below 80% of provisioned limits"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Check cloud provider metrics for IOPS utilization"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.database-performance.query-optimization"
+    - "performance-efficiency.resource-utilization.ephemeral-storage"

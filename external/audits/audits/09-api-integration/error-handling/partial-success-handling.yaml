@@ -1,0 +1,315 @@
+# ============================================================
+# AUDIT: Partial Success Handling Assessment
+# ============================================================
+# Evaluates API behavior for batch/bulk operations with mixed results
+# ============================================================
+
+audit:
+  id: "api-integration.error-handling.partial-success-handling"
+
+  name: "Partial Success Handling Assessment"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "api-integration"
+  category_number: 9
+  subcategory: "error-handling"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates how APIs handle partial success scenarios in batch operations,
+    bulk updates, and multi-step processes. Examines response structure for
+    mixed results, item-level error reporting, transaction handling, and
+    idempotency for retry scenarios.
+
+  why_it_matters: |
+    Batch operations often have mixed results - some items succeed, others
+    fail. Poor handling forces all-or-nothing semantics (inefficient) or
+    leaves consumers unsure what succeeded. Clear partial success handling
+    enables efficient batch processing and proper error recovery.
+
+  when_to_run:
+    - "When designing batch APIs"
+    - "Before releasing bulk operations"
+    - "When debugging batch processing issues"
+
+prerequisites:
+  required_artifacts:
+    - type: "api-source"
+      description: "Batch/bulk operation implementations"
+    - type: "api-spec"
+      description: "OpenAPI specifications"
+
+  access_requirements:
+    - "Read access to API source code"
+    - "Access to API specifications"
+
+discovery:
+  code_patterns:
+    - pattern: "batch|bulk|multi|mass"
+      type: "regex"
+      scope: "source"
+      purpose: "Batch operation implementations"
+    - pattern: "partialSuccess|partial.*failure|mixed.*result"
+      type: "regex"
+      scope: "source"
+      purpose: "Partial success handling"
+    - pattern: "207.*Multi-Status|MultiStatus"
+      type: "regex"
+      scope: "source"
+      purpose: "207 Multi-Status usage"
+
+  file_patterns:
+    - glob: "**/batch/**/*.{java,ts,py}"
+      purpose: "Batch processing code"
+    - glob: "**/bulk/**/*.{java,ts,py}"
+      purpose: "Bulk operation code"
+    - glob: "**/*openapi*.{yaml,yml,json}"
+      purpose: "API specifications"
+
+knowledge_sources:
+  specifications:
+    - id: "rfc-4918"
+      name: "RFC 4918 - HTTP 207 Multi-Status"
+      url: "https://datatracker.ietf.org/doc/html/rfc4918#section-13"
+      offline_cache: true
+      priority: "required"
+    - id: "owasp-api-security"
+      name: "OWASP API Security Top 10"
+      url: "https://owasp.org/API-Security/"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "batch-api-design"
+      name: "Batch API Design Best Practices"
+      url: "https://cloud.google.com/apis/design/standard_methods#batch"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "spectral"
+      purpose: "Check for batch response patterns"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "PARTIAL-CRIT-001"
+      signal: "Batch operations return 200 with hidden failures"
+      evidence_pattern: "batch.*return.*200|bulk.*success.*all"
+      explanation: |
+        Returning 200 for batch operations that had failures misleads
+        consumers. They assume all items succeeded when some may have
+        failed silently.
+      remediation: "Return 207 Multi-Status or include explicit success/failure counts"
+
+    - id: "PARTIAL-CRIT-002"
+      signal: "No item-level error details in batch response"
+      evidence_indicators:
+        - "Single error for entire batch"
+        - "No per-item status"
+      explanation: |
+        Without item-level errors, consumers cannot determine which items
+        failed or why. They must retry entire batches or investigate manually.
+      remediation: "Return per-item status with error details for failed items"
+
+  high:
+    - id: "PARTIAL-HIGH-001"
+      signal: "Batch operation not atomic but no partial success handling"
+      evidence_pattern: "for.*each.*save|batch(?!.*transaction)"
+      explanation: |
+        Non-atomic batch operations can leave data in inconsistent state
+        if failures occur mid-batch. Clear partial success reporting is
+        essential.
+      remediation: "Either make atomic (transaction) or implement proper partial success"
+
+    - id: "PARTIAL-HIGH-002"
+      signal: "No way to identify processed items on retry"
+      evidence_indicators:
+        - "No item IDs in response"
+        - "Cannot distinguish processed from unprocessed"
+      explanation: |
+        When retrying failed batches, consumers need to know which items
+        succeeded to avoid duplicates or skip already-processed items.
+      remediation: "Include item IDs and status for all items in response"
+
+  medium:
+    - id: "PARTIAL-MED-001"
+      signal: "Inconsistent partial success format"
+      evidence_pattern: "errors.*array|failed.*list|failures"
+      remediation: "Standardize partial success response format across all batch endpoints"
+
+    - id: "PARTIAL-MED-002"
+      signal: "No success/failure counts in response"
+      evidence_indicators:
+        - "No total_count in response"
+        - "No success_count or failure_count"
+      remediation: "Include counts: total, succeeded, failed in batch responses"
+
+  low:
+    - id: "PARTIAL-LOW-001"
+      signal: "No partial success documentation"
+      remediation: "Document batch response format and partial success handling"
+
+  positive:
+    - id: "PARTIAL-POS-001"
+      signal: "207 Multi-Status used for partial success"
+    - id: "PARTIAL-POS-002"
+      signal: "Per-item status with error details"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Batch Operations"
+      description: |
+        Find all batch/bulk operation endpoints.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find batch endpoints"
+          command: "grep -rn 'batch\\|bulk\\|multi\\|mass' --include='*.java' --include='*.ts' . | grep -i 'mapping\\|route\\|endpoint' | head -30"
+        - purpose: "Find array request bodies"
+          command: "grep -rn 'List<\\|\\[\\]\\|array' --include='*.java' --include='*.ts' . | grep -i 'request\\|body\\|param' | head -30"
+        - purpose: "Check OpenAPI for batch ops"
+          command: "grep -B5 -A10 'type:\\s*array' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null | head -40"
+      expected_findings:
+        - "Batch operation inventory"
+        - "Array parameter patterns"
+
+    - id: "2"
+      name: "Analyze Response Handling"
+      description: |
+        Examine how batch responses are structured.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find batch response classes"
+          command: "grep -rn 'BatchResponse\\|BulkResult\\|MultiStatus' --include='*.java' --include='*.ts' ."
+        - purpose: "Find 207 usage"
+          command: "grep -rn '207\\|MULTI_STATUS\\|Multi-Status' --include='*.java' --include='*.ts' ."
+        - purpose: "Find per-item status handling"
+          command: "grep -rn 'item.*status\\|result.*\\[\\]\\|errors.*\\[\\]' --include='*.java' --include='*.ts' . | head -30"
+      expected_findings:
+        - "Response structure"
+        - "Status code usage"
+
+    - id: "3"
+      name: "Check Transaction Handling"
+      description: |
+        Verify transaction vs partial commit behavior.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find transaction annotations"
+          command: "grep -rn '@Transactional\\|transaction\\|atomic' --include='*.java' --include='*.ts' . | grep -v test | head -30"
+        - purpose: "Find loop processing"
+          command: "grep -rn 'for.*each.*save\\|forEach.*create\\|map.*insert' --include='*.java' --include='*.ts' . | head -20"
+      expected_findings:
+        - "Transaction usage"
+        - "Non-atomic patterns"
+
+    - id: "4"
+      name: "Review Error Aggregation"
+      description: |
+        Check how errors are aggregated and reported.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find error aggregation"
+          command: "grep -rn 'errors.*add\\|failures.*add\\|collect.*error' --include='*.java' --include='*.ts' . | head -20"
+        - purpose: "Find summary counts"
+          command: "grep -rn 'success.*count\\|failure.*count\\|total.*processed' --include='*.java' --include='*.ts' ."
+      expected_findings:
+        - "Error collection patterns"
+        - "Summary information"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Batch Operation Analysis"
+        - "Response Pattern Review"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Batch operations thoroughly analyzed"
+    medium: "Partial batch operation coverage"
+    low: "Limited batch operations found"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "rfc-4918"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed batch operation analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "partial-001"
+    item: "Batch operations don't hide failures in 200"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Reviewer confirms batch ops use 207 or explicit failure reporting"
+    expected: "Confirmed by reviewer"
+
+  - id: "partial-002"
+    item: "Per-item status in batch responses"
+    level: "BLOCKING"
+    verification: |
+      if grep -rq 'item.*status\|result.*\[\]\|errors.*\[\]' --include='*.java' --include='*.ts' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+  - id: "partial-003"
+    item: "Success/failure counts included"
+    level: "BLOCKING"
+    verification: |
+      if grep -rq 'success.*count\|failure.*count\|total.*count' --include='*.java' --include='*.ts' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+  - id: "partial-004"
+    item: "Batch response format documented"
+    level: "WARNING"
+    verification: |
+      if grep -rq 'batch\|bulk\|partial' --include='*.md' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["api-service", "microservice", "data-pipeline"]
+
+relationships:
+  commonly_combined:
+    - "api-integration.error-handling.error-response-format"
+    - "api-integration.api-design.idempotency-design"

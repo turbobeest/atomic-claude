@@ -1,0 +1,357 @@
+# ============================================================
+# AUDIT: Content Duplication
+# ============================================================
+# Evaluates duplicate content issues affecting SEO and
+# search engine indexing efficiency.
+
+audit:
+  id: "seo-discoverability.content-discovery.content-duplication"
+
+  name: "Content Duplication Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "seo-discoverability"
+  category_number: 16
+  subcategory: "content-discovery"
+
+  tier: "expert"
+  estimated_duration: "2.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit identifies duplicate content issues including exact duplicates,
+    near-duplicate pages, internal duplicate content, and external content
+    scraping/plagiarism. It examines URL parameters causing duplicates,
+    www/non-www issues, HTTP/HTTPS variations, trailing slash inconsistencies,
+    and canonical tag implementation for duplicate management.
+
+  why_it_matters: |
+    Duplicate content confuses search engines about which version to index
+    and rank, diluting ranking signals across multiple URLs. This wastes
+    crawl budget, splits link equity, and can result in the wrong version
+    (or no version) appearing in search results. While not a direct penalty,
+    duplicate content significantly hinders SEO performance and can be
+    mistaken for content manipulation.
+
+  when_to_run:
+    - "After site migrations or restructuring"
+    - "When indexing issues appear in Search Console"
+    - "During technical SEO audits"
+    - "When launching new content sections"
+
+prerequisites:
+  required_artifacts:
+    - type: "deployed_website"
+      description: "Live site for duplicate detection"
+    - type: "sitemap"
+      description: "XML sitemap for URL inventory"
+
+  access_requirements:
+    - "Full site crawl access"
+    - "Google Search Console for duplicate reports"
+    - "Server access for redirect configuration"
+
+discovery:
+  code_patterns:
+    - pattern: "rel=[\"']canonical[\"']"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect canonical tag implementation"
+    - pattern: "<meta\\s+name=[\"']robots[\"'][^>]*noindex"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect noindex directives"
+
+  file_patterns:
+    - glob: "**/*.html"
+      purpose: "HTML files for content comparison"
+    - glob: "**/sitemap*.xml"
+      purpose: "URL inventory from sitemaps"
+
+knowledge_sources:
+  specifications:
+    - id: "google-duplicate"
+      name: "Google Duplicate Content Guidelines"
+      url: "https://developers.google.com/search/docs/crawling-indexing/consolidate-duplicate-urls"
+      offline_cache: true
+      priority: "required"
+    - id: "canonical-spec"
+      name: "Canonical URL Specification"
+      url: "https://datatracker.ietf.org/doc/html/rfc6596"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "moz-duplicate"
+      name: "Moz Duplicate Content Guide"
+      url: "https://moz.com/learn/seo/duplicate-content"
+      offline_cache: true
+    - id: "ahrefs-duplicate"
+      name: "Ahrefs Duplicate Content Guide"
+      url: "https://ahrefs.com/blog/duplicate-content/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "Screaming Frog"
+      purpose: "Detect duplicate titles, descriptions, and content"
+      offline_capable: false
+    - tool: "Sitebulb"
+      purpose: "Content similarity analysis"
+      offline_capable: false
+    - tool: "Copyscape"
+      purpose: "External duplicate content detection"
+      offline_capable: false
+
+  infrastructure_tools:
+    - tool: "curl"
+      purpose: "Test URL variations for duplicates"
+      command: "curl -sI http://example.com && curl -sI https://example.com"
+
+  scripts:
+    - id: "canonical-checker"
+      language: "bash"
+      purpose: "Extract and verify canonical URLs"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Extract canonical URLs
+        curl -s $URL | \
+        grep -oE 'rel="canonical"[^>]*href="[^"]*"' | \
+        grep -oE 'href="[^"]*"'
+
+signals:
+  critical:
+    - id: "SEO-DUP-CRIT-001"
+      signal: "Same content accessible at multiple URLs without canonicalization"
+      evidence_pattern: "Identical content on different URLs, no canonical tag"
+      explanation: |
+        Without canonical tags, search engines must guess which URL to
+        index, often choosing the wrong one or splitting ranking signals.
+        This is a fundamental technical SEO failure.
+      remediation: "Implement canonical tags pointing to preferred URL version"
+    - id: "SEO-DUP-CRIT-002"
+      signal: "HTTP and HTTPS versions both accessible"
+      evidence_pattern: "Both http:// and https:// return 200 status"
+      explanation: |
+        Having both HTTP and HTTPS versions accessible creates duplicate
+        content and splits link equity between secure and insecure versions.
+      remediation: "Implement 301 redirect from HTTP to HTTPS"
+
+  high:
+    - id: "SEO-DUP-HIGH-001"
+      signal: "URL parameters creating duplicates"
+      explanation: |
+        Parameters like ?sort=, ?filter=, ?ref= create infinite URL
+        variations with the same content, wasting crawl budget.
+      remediation: "Use canonical tags or parameter handling in Search Console"
+    - id: "SEO-DUP-HIGH-002"
+      signal: "www and non-www both accessible"
+      explanation: |
+        Like HTTP/HTTPS, having both www and non-www accessible creates
+        duplicates and dilutes link equity.
+      remediation: "Redirect non-preferred version to preferred (www or non-www)"
+
+  medium:
+    - id: "SEO-DUP-MED-001"
+      signal: "Trailing slash inconsistency"
+      remediation: "Standardize on trailing slash or no trailing slash with redirects"
+    - id: "SEO-DUP-MED-002"
+      signal: "Pagination creating duplicate content"
+      remediation: "Implement proper pagination with rel=prev/next or view-all canonical"
+
+  low:
+    - id: "SEO-DUP-LOW-001"
+      signal: "Print-friendly versions without noindex"
+
+  positive:
+    - id: "SEO-DUP-POS-001"
+      signal: "All URLs have proper canonical tags"
+    - id: "SEO-DUP-POS-002"
+      signal: "URL variations properly redirected"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "URL Variation Testing"
+      description: |
+        Test common URL variations to identify duplicate access
+        points (HTTP/HTTPS, www/non-www, trailing slash).
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Test HTTP/HTTPS"
+          command: "curl -sI http://$DOMAIN | head -5 && curl -sI https://$DOMAIN | head -5"
+        - purpose: "Test www/non-www"
+          command: "curl -sI https://www.$DOMAIN | head -5 && curl -sI https://$DOMAIN | head -5"
+        - purpose: "Test trailing slash"
+          command: "curl -sI $URL | head -5 && curl -sI ${URL}/ | head -5"
+
+      expected_findings:
+        - "URL variation behavior"
+        - "Redirect configuration status"
+
+    - id: "2"
+      name: "Canonical Tag Audit"
+      description: |
+        Verify canonical tags are present and correctly
+        point to preferred URLs.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Extract canonical URLs"
+          command: "curl -s $URL | grep -oE 'rel=\"canonical\"[^>]*href=\"[^\"]*\"'"
+        - purpose: "Verify canonical matches current URL"
+          command: "echo 'Compare canonical with current URL'"
+
+      expected_findings:
+        - "Canonical tag coverage"
+        - "Incorrect canonical references"
+
+    - id: "3"
+      name: "Internal Duplicate Detection"
+      description: |
+        Identify pages with similar or identical content
+        within the site.
+      duration_estimate: "35 min"
+
+      questions:
+        - "Are there pages with identical titles?"
+        - "Are there pages with identical meta descriptions?"
+        - "Are there near-duplicate product or category pages?"
+
+      expected_findings:
+        - "Internal duplicates identified"
+        - "Similarity patterns"
+
+    - id: "4"
+      name: "Parameter Duplicate Analysis"
+      description: |
+        Identify URL parameters that create duplicate
+        content variations.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find URLs with parameters"
+          command: "curl -s $SITEMAP_URL | grep -oE 'https?://[^<]*\\?' | head -20"
+
+      expected_findings:
+        - "Problematic parameters identified"
+        - "Parameter handling recommendations"
+
+    - id: "5"
+      name: "Search Console Duplicate Review"
+      description: |
+        Review Google Search Console for indexed duplicates
+        and crawl issues related to duplicate content.
+      duration_estimate: "20 min"
+
+      questions:
+        - "Does Search Console show duplicate pages excluded?"
+        - "Which pages are affected by duplicate detection?"
+        - "Are there canonical issues flagged?"
+
+      expected_findings:
+        - "Google-identified duplicate issues"
+        - "Indexing impact assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Duplicate URL Inventory"
+        - "Canonical Tag Status"
+        - "Parameter Issues"
+        - "Remediation Priority List"
+
+  confidence_guidance:
+    high: "Complete crawl with content similarity analysis"
+    medium: "Spot-check verification of common patterns"
+    low: "Surface-level URL testing only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "google-duplicate"
+        priority: "required"
+      - source_id: "canonical-spec"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: "Critical for indexing health"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "content-duplication-001"
+    item: "All pages have canonical tags"
+    level: "CRITICAL"
+    verification: "curl -s URL | grep -c 'rel=\"canonical\"'"
+    expected: "1"
+
+  - id: "content-duplication-002"
+    item: "HTTP redirects to HTTPS"
+    level: "CRITICAL"
+    verification: "curl -sI http://$DOMAIN | grep -i 'location:.*https'"
+    expected: "HTTPS redirect present"
+
+  - id: "content-duplication-003"
+    item: "www/non-www consolidated"
+    level: "BLOCKING"
+    verification: "curl -sI https://$DOMAIN | head -1"
+    expected: "200 or 301 to preferred version"
+
+  - id: "content-duplication-004"
+    item: "No duplicate pages in Search Console"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Check Search Console Coverage for duplicate exclusions"
+    expected: "Minimal duplicates"
+
+governance:
+  applicable_to:
+    archetypes: ["web-application", "marketing-site", "e-commerce", "blog"]
+
+  compliance_frameworks:
+    - framework: "Google Webmaster Guidelines"
+      controls: ["Duplicate Content"]
+
+relationships:
+  commonly_combined:
+    - "seo-discoverability.technical-seo.canonical-url"
+    - "seo-discoverability.technical-seo.redirect-chains"
+    - "seo-discoverability.indexation.crawl-budget"

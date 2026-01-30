@@ -30,7 +30,10 @@ task_403_openspec_generation() {
     local edge_case_hunter_prompt=""
 
     # Get agent repo path from Phase 0 config
-    local agent_repo="${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}"
+    # Check embedded repo first (monorepo deployment), then env var, then default
+    local agent_repo="$ATOMIC_ROOT/repos/agents"
+    [[ -f "$ATOMIC_ROOT/external/agents/agent-inventory.csv" ]] && agent_repo="$ATOMIC_ROOT/external/agents"
+    [[ -n "$ATOMIC_AGENT_REPO" ]] && agent_repo="$ATOMIC_AGENT_REPO"
 
     if [[ -f "$roster_file" ]]; then
         echo -e "  ${DIM}Loading agents from roster...${NC}"

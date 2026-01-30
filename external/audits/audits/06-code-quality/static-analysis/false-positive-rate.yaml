@@ -1,0 +1,373 @@
+# ============================================================
+# AUDIT FILE - False Positive Rate v1.0
+# ============================================================
+
+# ============================================================
+# SECTION 1: IDENTITY & METADATA
+# ============================================================
+
+audit:
+  id: "code-quality.static-analysis.false-positive-rate"
+
+  name: "False Positive Rate"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "code-quality"
+  category_number: 6
+  subcategory: "static-analysis"
+
+  tier: "expert"
+  estimated_duration: "2-4 hours"  # median: 3h
+
+  completeness: "requires_discovery"
+  requires_runtime: false
+  destructive: false
+
+# ============================================================
+# SECTION 2: EXECUTION CLASSIFICATION
+# ============================================================
+
+execution:
+  automatable: "partial"
+
+  severity: "medium"
+
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+# ============================================================
+# SECTION 3: DESCRIPTION & RATIONALE
+# ============================================================
+
+description:
+  what: |
+    Evaluates the false positive rate of static analysis tools in use.
+    Analyzes suppression patterns, measures signal-to-noise ratio, and
+    identifies overly aggressive rules that generate noise rather than
+    actionable findings.
+
+  why_it_matters: |
+    High false positive rates lead to "alert fatigue" where developers
+    ignore warnings, potentially missing real issues. Suppressions
+    accumulate, reducing analysis effectiveness. Teams may disable
+    useful tools entirely due to noise.
+
+  when_to_run:
+    - "After enabling new static analysis rules"
+    - "When suppression count is growing"
+    - "Periodic analysis tool tuning"
+    - "Developer feedback about tool noise"
+
+# ============================================================
+# SECTION 4: PREREQUISITES
+# ============================================================
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Source code with inline suppressions"
+    - type: "configuration"
+      description: "Static analysis tool configurations"
+    - type: "analysis_output"
+      description: "Historical static analysis reports (optional)"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Access to static analysis output/history"
+
+# ============================================================
+# SECTION 5: DISCOVERY SPECIFICATION
+# ============================================================
+
+discovery:
+  file_patterns:
+    - glob: "**/*.py"
+      purpose: "Python files for suppression analysis"
+    - glob: "**/*.js"
+      purpose: "JavaScript files for suppression analysis"
+    - glob: "**/*.ts"
+      purpose: "TypeScript files for suppression analysis"
+
+  code_patterns:
+    - pattern: "eslint-disable|@ts-ignore|@ts-expect-error"
+      type: "regex"
+      scope: "source"
+      purpose: "JavaScript/TypeScript suppressions"
+    - pattern: "# noqa|# type: ignore|# pylint: disable"
+      type: "regex"
+      scope: "source"
+      purpose: "Python suppressions"
+    - pattern: "//nolint|// nolint"
+      type: "regex"
+      scope: "source"
+      purpose: "Go suppressions"
+
+# ============================================================
+# SECTION 6: EXTERNAL KNOWLEDGE SOURCES
+# ============================================================
+
+knowledge_sources:
+  guides:
+    - id: "eslint-disable"
+      name: "ESLint Disabling Rules"
+      url: "https://eslint.org/docs/user-guide/configuring/rules#disabling-rules"
+      offline_cache: true
+
+    - id: "nist-800-218"
+      name: "NIST SP 800-218 - Secure Software Development Framework"
+      url: "https://csrc.nist.gov/publications/detail/sp/800-218/final"
+      offline_cache: false
+
+  papers:
+    - id: "false-positives"
+      title: "Why Don't Software Developers Use Static Analysis Tools to Find Bugs?"
+      url: "https://ieeexplore.ieee.org/document/6606613"
+
+# ============================================================
+# SECTION 7: TOOLING & AUTOMATION
+# ============================================================
+
+tooling:
+  scripts:
+    - id: "suppression-analysis"
+      language: "bash"
+      purpose: "Count and categorize suppressions"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== ESLint Suppressions ==="
+        grep -rn 'eslint-disable' . --include='*.js' --include='*.ts' 2>/dev/null | wc -l
+        echo "=== TypeScript Suppressions ==="
+        grep -rn '@ts-ignore\|@ts-expect-error' . --include='*.ts' 2>/dev/null | wc -l
+        echo "=== Python Suppressions ==="
+        grep -rn '# noqa\|# type: ignore\|# pylint: disable' . --include='*.py' 2>/dev/null | wc -l
+
+# ============================================================
+# SECTION 8: SIGNALS & FINDINGS TAXONOMY
+# ============================================================
+
+signals:
+  critical:
+    - id: "FPR-CRIT-001"
+      signal: "File-wide or project-wide rule disabling"
+      evidence_pattern: "eslint-disable at file level without specific rule"
+      explanation: |
+        Blanket suppressions indicate rules are too noisy to be
+        practical, effectively disabling static analysis.
+      remediation: "Configure rules properly or disable at project level with justification"
+
+  high:
+    - id: "FPR-HIGH-001"
+      signal: "Suppression rate above 5% of findings"
+      evidence_pattern: "High ratio of suppressions to code lines"
+      explanation: |
+        High suppression rates indicate poor tool calibration
+        or overly aggressive rules generating false positives.
+      remediation: "Review and tune rules; investigate suppression patterns"
+
+    - id: "FPR-HIGH-002"
+      signal: "Growing suppression trend over time"
+      evidence_pattern: "Increasing suppression count in version history"
+      explanation: |
+        Growing suppressions indicate ongoing friction with
+        analysis tools that should be addressed.
+      remediation: "Audit recent suppressions; recalibrate rules"
+
+  medium:
+    - id: "FPR-MED-001"
+      signal: "Rules disabled without documented justification"
+      remediation: "Require comments explaining suppression rationale"
+
+    - id: "FPR-MED-002"
+      signal: "Same rule suppressed repeatedly across codebase"
+      remediation: "Consider disabling rule globally or fixing root cause"
+
+  low:
+    - id: "FPR-LOW-001"
+      signal: "Occasional justified suppressions present"
+
+  positive:
+    - id: "FPR-POS-001"
+      signal: "Low suppression rate with documented justifications"
+    - id: "FPR-POS-002"
+      signal: "Rules tuned for low false positive rate"
+
+# ============================================================
+# SECTION 9: EXECUTION PROCEDURE
+# ============================================================
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Count inline suppressions"
+      description: |
+        Identify and count all inline suppression comments
+        across the codebase.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Count ESLint suppressions"
+          command: "grep -rn 'eslint-disable' . --include='*.js' --include='*.ts' --include='*.tsx' 2>/dev/null | wc -l"
+        - purpose: "Count Python suppressions"
+          command: "grep -rn '# noqa\\|# type: ignore\\|# pylint: disable' . --include='*.py' 2>/dev/null | wc -l"
+      expected_findings:
+        - "Total suppression counts by tool"
+        - "Suppression density"
+
+    - id: "2"
+      name: "Categorize suppression reasons"
+      description: |
+        Analyze which rules are most commonly suppressed
+        to identify problematic rules.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Extract suppressed rule names"
+          command: "grep -rohn 'eslint-disable-next-line [a-z-]*\\|eslint-disable [a-z-]*' . --include='*.js' --include='*.ts' 2>/dev/null | sort | uniq -c | sort -rn | head -20"
+      expected_findings:
+        - "Most frequently suppressed rules"
+        - "Patterns in suppressions"
+
+    - id: "3"
+      name: "Check for blanket suppressions"
+      description: |
+        Identify file-level or overly broad suppressions
+        that disable multiple rules.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find file-level suppressions"
+          command: "grep -rn 'eslint-disable$\\|# noqa$\\|# type: ignore$' . --include='*.js' --include='*.ts' --include='*.py' 2>/dev/null | head -20"
+      expected_findings:
+        - "Blanket suppression locations"
+        - "Files with extensive suppressions"
+
+    - id: "4"
+      name: "Calculate suppression ratio"
+      description: |
+        Calculate the ratio of suppressions to total code
+        or to total findings.
+      duration_estimate: "15 min"
+      expected_findings:
+        - "Suppression percentage"
+        - "Comparison to industry benchmarks"
+
+    - id: "5"
+      name: "Review rule configuration"
+      description: |
+        Examine rules with high suppression rates to determine
+        if configuration changes would reduce false positives.
+      duration_estimate: "25 min"
+      expected_findings:
+        - "Rules needing reconfiguration"
+        - "Potential configuration improvements"
+
+# ============================================================
+# SECTION 10: OUTPUT SPECIFICATION
+# ============================================================
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Suppression Analysis"
+        - "Problematic Rules"
+        - "Tuning Recommendations"
+
+    - type: "metrics"
+      format: "table"
+      fields:
+        - "total_suppressions"
+        - "suppression_rate"
+        - "most_suppressed_rules"
+        - "blanket_suppression_count"
+
+  confidence_guidance:
+    high: "Suppressions counted, rules analyzed"
+    medium: "Partial suppression data available"
+    low: "Estimated based on sampling"
+
+# ============================================================
+# SECTION 11: OFFLINE SUPPORT
+# ============================================================
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "eslint-disable"
+        priority: "recommended"
+
+# ============================================================
+# SECTION 12: PROFILES
+# ============================================================
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Detailed analysis requires time"
+    full:
+      included: true
+      priority: 3
+
+# ============================================================
+# SECTION 13: DETERMINISTIC VERIFICATION
+# ============================================================
+
+closeout_checklist:
+  - id: "false-positive-001"
+    item: "No blanket file-level suppressions"
+    level: "WARNING"
+    verification: "grep -rq 'eslint-disable$' . --include='*.js' --include='*.ts' && echo FAIL || echo PASS"
+    expected: "PASS"
+
+  - id: "false-positive-002"
+    item: "Suppression rate below 5%"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Calculate suppression ratio and verify threshold"
+    expected: "Confirmed by reviewer"
+
+  - id: "false-positive-003"
+    item: "High-suppression rules reviewed and tuned"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Review rules with >10 suppressions for tuning opportunities"
+    expected: "Confirmed by reviewer"
+
+# ============================================================
+# SECTION 14: GOVERNANCE
+# ============================================================
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability"]
+
+# ============================================================
+# SECTION 15: RELATIONSHIPS
+# ============================================================
+
+relationships:
+  commonly_combined:
+    - "code-quality.static-analysis.linting-coverage"
+    - "code-quality.static-analysis.custom-rule-coverage"

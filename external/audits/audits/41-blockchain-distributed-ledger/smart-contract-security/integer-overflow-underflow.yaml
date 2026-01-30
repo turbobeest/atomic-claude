@@ -1,0 +1,265 @@
+audit:
+  id: blockchain-distributed-ledger.smart-contract-security.integer-overflow-underflow
+  name: Integer Overflow/Underflow Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: blockchain-distributed-ledger
+  category_number: 41
+  subcategory: smart-contract-security
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: software
+  default_profiles:
+  - full
+  - blockchain
+  - security
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates smart contracts for integer overflow and
+    underflow vulnerabilities that can corrupt calculations. It examines:
+    - Solidity version and built-in overflow checks
+    - Unchecked arithmetic blocks
+    - SafeMath usage in older contracts
+    - Type casting vulnerabilities
+    - Loop counter overflow potential
+    - Token balance manipulation
+  why_it_matters: |
+    Integer overflow/underflow can devastate smart contracts:
+    - BatchOverflow bug allowed unlimited token minting
+    - Underflow can create astronomical balances
+    - Pre-0.8.0 Solidity silently wraps on overflow
+    - Unchecked blocks bypass safety checks
+    - Type downcasting can truncate values
+
+    Arithmetic safety is fundamental to contract integrity.
+  when_to_run:
+  - Smart contract development
+  - Pre-deployment audit
+  - Code review
+  - Arithmetic-heavy contracts
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Smart contract source code
+  - type: compiler_version
+    description: Solidity compiler version used
+  access_requirements:
+  - Access to contract source
+  - Compiler configuration
+discovery:
+  code_patterns:
+  - pattern: unchecked\s*\{
+    type: regex
+    scope: source
+    purpose: Detect unchecked arithmetic blocks
+  - pattern: pragma solidity.*0\.[4-7]\.
+    type: regex
+    scope: source
+    purpose: Detect pre-0.8 Solidity versions
+  - pattern: (uint8|int8|uint16|int16)\(
+    type: regex
+    scope: source
+    purpose: Detect type downcasting
+  file_patterns:
+  - glob: '**/*.sol'
+    purpose: Solidity contracts
+  - glob: '**/contracts/**/*.sol'
+    purpose: Contract directory
+knowledge_sources:
+  specifications:
+  - id: swc-101
+    name: 'SWC-101: Integer Overflow and Underflow'
+    url: https://swcregistry.io/docs/SWC-101
+    offline_cache: true
+    priority: required
+signals:
+  critical:
+  - id: INTOV-CRIT-001
+    signal: Pre-0.8 Solidity without SafeMath
+    evidence_indicators:
+    - Solidity version < 0.8.0
+    - Arithmetic without SafeMath
+    - Direct +, -, * operators on uint
+    explanation: |
+      Solidity versions before 0.8.0 do not check for overflow by
+      default. Direct arithmetic on integers silently wraps, enabling
+      overflow attacks.
+    remediation: |
+      - Upgrade to Solidity 0.8.0 or later
+      - Use OpenZeppelin SafeMath for older versions
+      - Replace all direct arithmetic with safe functions
+      - Audit all arithmetic operations
+    cwe: CWE-190
+  - id: INTOV-CRIT-002
+    signal: Unsafe unchecked block with external input
+    evidence_indicators:
+    - unchecked block with user-controlled values
+    - Token amounts in unchecked arithmetic
+    - Balance calculations without checks
+    explanation: |
+      Unchecked blocks bypass Solidity 0.8+ overflow protection.
+      Using unchecked arithmetic with external input enables
+      overflow attacks.
+    remediation: |
+      - Remove unchecked from external-input calculations
+      - Only use unchecked for proven-safe operations
+      - Add explicit bounds checking if needed
+      - Document why unchecked is safe
+    cwe: CWE-190
+  high:
+  - id: INTOV-HIGH-001
+    signal: Type downcast truncation risk
+    evidence_indicators:
+    - uint256 to uint128/uint96/uint64 cast
+    - No bounds check before cast
+    - External values being downcast
+    explanation: |
+      Downcasting larger types to smaller ones truncates the value
+      without error. This can silently corrupt values and enable
+      manipulation.
+    remediation: |
+      - Validate value fits in target type
+      - Use SafeCast from OpenZeppelin
+      - Avoid unnecessary downcasting
+      - Document maximum expected values
+  - id: INTOV-HIGH-002
+    signal: Multiplication before division risk
+    evidence_indicators:
+    - Large multiplications possible
+    - Division follows multiplication
+    - Intermediate overflow potential
+    explanation: |
+      Multiplication can overflow even if final result (after division)
+      would fit. This corrupts calculations even with overflow checks.
+    remediation: |
+      - Divide before multiply where possible
+      - Use mulDiv for safe multiplication-division
+      - Check multiplication won't overflow
+      - Use higher precision intermediates
+  medium:
+  - id: INTOV-MED-001
+    signal: Loop counter in unchecked block
+    evidence_indicators:
+    - for loop with unchecked increment
+    - i++ in unchecked for gas optimization
+    - No upper bound verification
+    explanation: |
+      While unchecked loop increments are common gas optimizations,
+      they assume the loop bound prevents overflow. Verify bounds
+      are properly constrained.
+    remediation: |
+      - Verify loop bound prevents overflow
+      - Use reasonable maximum array lengths
+      - Document overflow safety reasoning
+      - Consider checked arithmetic for critical loops
+  low:
+  - id: INTOV-LOW-001
+    signal: Overflow protection not tested
+    evidence_indicators:
+    - No overflow test cases
+    - Edge values not tested
+    - Type limits not covered
+    explanation: |
+      Untested overflow scenarios may harbor vulnerabilities.
+      Test edge cases including type maximums.
+    remediation: |
+      - Add overflow test cases
+      - Test with type maximum values
+      - Test underflow scenarios
+      - Use fuzzing for arithmetic
+  positive:
+  - id: INTOV-POS-001
+    signal: Robust arithmetic safety
+    evidence_indicators:
+    - Solidity 0.8+ with minimal unchecked
+    - SafeCast for downcasting
+    - Comprehensive arithmetic tests
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: security-auditor
+  steps:
+  - id: '1'
+    name: Arithmetic Safety Review
+    description: |
+      Analyze arithmetic operations for overflow/underflow risks.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check Solidity version
+      command: |
+        grep -rniE "pragma solidity" \
+          --include="*.sol" . 2>/dev/null | head -10
+    - purpose: Find unchecked blocks
+      command: |
+        grep -rniE "unchecked\s*\{" \
+          --include="*.sol" . 2>/dev/null | head -20
+    - purpose: Find type casts
+      command: |
+        grep -rniE "(uint8|uint16|uint32|uint64|uint128)\(" \
+          --include="*.sol" . 2>/dev/null | head -20
+    expected_findings:
+    - Solidity version
+    - Unchecked arithmetic
+    - Type conversions
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Arithmetic Analysis
+    - Risk Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 1
+    blockchain:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: intov-001
+  item: Solidity 0.8+ or SafeMath used
+  level: CRITICAL
+  verification: |
+    grep -rniE "pragma solidity.*0\.(8|9|[1-9][0-9])\." \
+      --include="*.sol" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "CHECK_SAFEMATH"
+  expected: PASS
+- id: intov-002
+  item: Unchecked blocks reviewed
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify all unchecked blocks are safe
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - blockchain
+    - defi
+    - token
+    - financial
+relationships:
+  commonly_combined:
+  - blockchain.smart-contract-security.reentrancy-vulnerability
+  - blockchain.smart-contract-quality.gas-optimization
+  - blockchain.token-economic.token-standard-compliance
+
+# Glossary of domain-specific terms:
+glossary:
+  "timelock": "Governance mechanism requiring delay between proposal and execution"
+  "reentrancy": "Vulnerability where external call allows re-entering function before completion"
+  "oracle": "External data feed providing off-chain information to smart contracts"

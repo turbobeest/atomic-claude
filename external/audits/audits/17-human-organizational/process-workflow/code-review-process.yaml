@@ -1,0 +1,312 @@
+audit:
+  id: human-organizational.process-workflow.code-review-process
+  name: Code Review Process Assessment
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: human-organizational
+  category_number: 17
+  subcategory: process-workflow
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: process
+  default_profiles:
+  - full
+  parallelizable: true
+description:
+  what: |
+    Assesses the code review process including review assignment, turnaround
+    time, quality of feedback, reviewer load distribution, and impact on
+    both code quality and developer experience. Examines whether reviews
+    serve as effective quality gates while avoiding becoming bottlenecks.
+  why_it_matters: |
+    Code review is one of the highest-leverage activities in software
+    development. Effective reviews catch bugs before production, spread
+    knowledge across the team, and mentor junior developers. However,
+    dysfunctional review processes create bottlenecks, breed resentment,
+    and paradoxically reduce quality as reviewers rubber-stamp to clear
+    queues. Google research shows that code review is the primary way
+    developers learn codebases and spread best practices.
+  when_to_run:
+  - Quarterly process health checks
+  - When PR queue consistently exceeds 1 week
+  - After team composition changes
+  - When developers report review frustration
+prerequisites:
+  required_artifacts:
+  - type: repository
+    description: Access to PR history and review comments
+  - type: documentation
+    description: Code review guidelines if they exist
+  access_requirements:
+  - Read access to PR comments and review history
+  - Access to review assignment configuration
+  - Availability of reviewers for interviews
+discovery:
+  interviews:
+  - role: Software Engineers (all levels)
+    questions:
+    - How are code reviewers assigned to your PRs?
+    - What makes a review comment helpful vs. unhelpful?
+    - How long do your PRs typically wait for review?
+    - Do you feel reviews improve your code? Your skills?
+    purpose: Understand review experience from author perspective
+  - role: Senior Engineers / Architects
+    questions:
+    - How do you prioritize reviews against feature work?
+    - What do you focus on when reviewing code?
+    - How do you handle disagreements in reviews?
+    purpose: Understand reviewer perspective and priorities
+  documents_to_review:
+  - type: Code review guidelines
+    purpose: Assess documented expectations for reviews
+  - type: CODEOWNERS configuration
+    purpose: Understand ownership and required reviewers
+  - type: Sample of recent PR review threads
+    purpose: Evaluate quality and tone of actual reviews
+  metrics_queries:
+  - system: Git/VCS
+    query: Time from PR open to first review comment (last 90 days)
+    purpose: Measure review responsiveness
+    threshold: < 4 hours for elite, < 24 hours for high performers
+  - system: Git/VCS
+    query: Review comments per PR distribution
+    purpose: Assess review thoroughness
+    threshold: 2-10 comments suggests engaged review
+  - system: Git/VCS
+    query: Reviews per reviewer (load distribution)
+    purpose: Identify review bottlenecks or imbalances
+    threshold: Relatively even distribution across senior team members
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/CODEOWNERS'
+    purpose: Code ownership files
+  - glob: '**/*.org'
+    purpose: Org structure files
+  - glob: '**/team*.yaml'
+    purpose: Team configuration
+  code_patterns:
+  - pattern: '@team|@owner|maintainer'
+    type: regex
+    scope: all
+    purpose: Ownership references
+knowledge_sources:
+  guides:
+  - id: google-code-review
+    name: Google Code Review Developer Guide
+    url: https://google.github.io/eng-practices/review/
+    offline_cache: true
+  - id: thoughtbot-review
+    name: Thoughtbot Code Review Guide
+    url: https://github.com/thoughtbot/guides/tree/main/code-review
+    offline_cache: true
+  papers:
+  - id: modern-code-review
+    title: 'Modern Code Review: A Case Study at Google'
+    url: https://research.google/pubs/pub47025/
+  learning_resources:
+  - id: code-review-love
+    title: How to Make Your Code Reviewer Fall in Love with You
+    type: article
+    reference: https://mtlynch.io/code-review-love/
+tooling:
+  infrastructure_tools:
+  - tool: gh CLI
+    purpose: Analyze PR review metrics
+    command: gh pr list --state merged --json reviews,reviewRequests,createdAt,mergedAt
+  assessment_tools:
+  - tool: Developer survey
+    purpose: Measure review satisfaction and pain points
+  scripts:
+  - id: review-load
+    language: bash
+    purpose: Calculate review load per team member
+    source: inline
+    code: |
+      # Requires gh CLI
+      gh api graphql -f query='
+      query {
+        repository(owner: "OWNER", name: "REPO") {
+          pullRequests(last: 100, states: MERGED) {
+            nodes {
+              reviews(first: 10) {
+                nodes { author { login } }
+              }
+            }
+          }
+        }
+      }' | jq '.data.repository.pullRequests.nodes[].reviews.nodes[].author.login' | sort | uniq -c | sort -rn
+signals:
+  critical:
+  - id: REVIEW-CRIT-001
+    signal: Reviews consistently take more than 1 week
+    evidence_indicators:
+    - Average time to first review > 5 business days
+    - PRs frequently closed stale without merge
+    - Developers report abandoning features due to review delay
+    explanation: |
+      Extremely slow reviews kill momentum, cause merge conflicts,
+      and signal that review is deprioritized vs. feature work.
+      This creates a downward spiral where reviews pile up.
+    remediation: Implement review SLAs, protected review time, and automatic reviewer assignment
+  - id: REVIEW-CRIT-002
+    signal: Reviews are rubber stamps with no substantive feedback
+    evidence_indicators:
+    - Average < 1 comment per PR
+    - Approvals within minutes of request
+    - Reviewers report not having time to review properly
+    explanation: |
+      Rubber-stamp reviews provide false confidence without
+      catching bugs or spreading knowledge. This defeats the
+      entire purpose of code review.
+    remediation: Reduce review load, provide review training, set minimum review expectations
+  high:
+  - id: REVIEW-HIGH-001
+    signal: Review load concentrated on 1-2 individuals
+    explanation: Review bottlenecks slow the team and burn out key individuals
+    remediation: Distribute ownership via CODEOWNERS, mentor more reviewers
+  - id: REVIEW-HIGH-002
+    signal: Review feedback is frequently confrontational or dismissive
+    explanation: Toxic review culture damages psychological safety and retention
+    remediation: Establish code review guidelines emphasizing constructive feedback; address specific
+      incidents
+  medium:
+  - id: REVIEW-MED-001
+    signal: No code review guidelines or expectations documented
+    remediation: Create and socialize code review guidelines covering scope, tone, and priorities
+  - id: REVIEW-MED-002
+    signal: Reviews focus only on style/formatting, missing logic issues
+    remediation: Automate style checks with formatters/linters; train reviewers on substantive review
+  low:
+  - id: REVIEW-LOW-001
+    signal: Inconsistent use of review request vs. assignee fields
+  positive:
+  - id: REVIEW-POS-001
+    signal: Reviews average < 4 hours to first comment with substantive feedback
+  - id: REVIEW-POS-002
+    signal: Developers report learning from review feedback
+  - id: REVIEW-POS-003
+    signal: Review load evenly distributed across senior team
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Guidelines Review
+    description: |
+      Examine existing code review guidelines, CODEOWNERS configuration,
+      and branch protection rules that govern the review process.
+    duration_estimate: 20 min
+    questions:
+    - Are review expectations documented?
+    - How are reviewers assigned?
+    - What must reviews cover?
+    expected_findings:
+    - Presence/absence of documented guidelines
+    - Review assignment mechanism
+  - id: '2'
+    name: Quantitative Analysis
+    description: |
+      Collect metrics on review turnaround time, comment volume,
+      and reviewer load distribution from the last 90 days.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Review turnaround times
+      command: gh pr list --state merged --json createdAt,reviews --limit 100
+    - purpose: Comments per PR
+      command: gh pr list --state merged --json comments,reviews --limit 100
+    expected_findings:
+    - Average time to first review
+    - Review load distribution
+    - Comment volume patterns
+  - id: '3'
+    name: Qualitative Review Thread Analysis
+    description: |
+      Read through 10-20 recent review threads to assess feedback
+      quality, tone, and effectiveness.
+    duration_estimate: 45 min
+    questions:
+    - Are comments specific and actionable?
+    - Is tone constructive and respectful?
+    - Do reviews catch substantive issues or just style?
+    expected_findings:
+    - Review feedback quality assessment
+    - Cultural health indicators
+  - id: '4'
+    name: Developer Interviews
+    description: |
+      Interview developers from both author and reviewer perspectives
+      to understand the lived experience of code review.
+    duration_estimate: 60 min
+    questions:
+    - How does code review help or hinder your work?
+    - What would improve the review process?
+    expected_findings:
+    - Pain points and friction in current process
+    - What's working well
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Review Process Analysis
+    - Metrics Findings
+    - Cultural Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Metrics verified; consistent themes across interviews; review threads analyzed
+    medium: Metrics available; some interview input; limited thread analysis
+    low: Limited data; conflicting accounts
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: google-code-review
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires interviews and qualitative analysis
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: review-001
+  item: Review guidelines examined
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm guidelines were reviewed or absence documented
+  expected: Confirmed by reviewer
+- id: review-002
+  item: Review turnaround metrics collected
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify time-to-first-review data was analyzed
+  expected: Confirmed by reviewer
+- id: review-003
+  item: Sample review threads analyzed for quality
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm at least 10 review threads were examined
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+relationships:
+  commonly_combined:
+  - human-organizational.process-workflow.development-workflow
+  - human-organizational.culture-practices.psychological-safety
+  - human-organizational.metrics-improvement.developer-experience

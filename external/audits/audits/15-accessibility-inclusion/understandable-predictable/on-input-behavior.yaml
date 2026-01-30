@@ -1,0 +1,400 @@
+audit:
+  id: accessibility-inclusion.understandable-predictable.on-input-behavior
+  name: On Input Behavior Predictability
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: accessibility-inclusion
+  category_number: 15
+  subcategory: understandable-predictable
+  tier: phd
+  estimated_duration: 2-4 hours  # median: 3h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines form controls and input elements to ensure that
+    changing their settings does not automatically trigger unexpected context
+    changes. Per WCAG Success Criterion 3.2.2 (On Input), changing the setting
+    of any user interface component should not automatically cause a change
+    of context unless the user has been advised of the behavior beforehand.
+
+    Context changes include:
+    - Navigation to a different page
+    - Opening new windows
+    - Submitting forms automatically
+    - Significantly changing page content
+    - Moving focus to a different component
+
+    The audit focuses on select elements, checkboxes, radio buttons, and text
+    inputs that may trigger automatic actions on change or input events.
+  why_it_matters: |
+    Unexpected context changes when interacting with form controls can:
+    - Prevent users from reviewing their selections before submission
+    - Cause accidental form submissions with incorrect data
+    - Disorient users who expect to complete forms before any action occurs
+    - Make interfaces unusable for screen reader users who may not realize
+      their selection triggered navigation
+    - Create particular difficulties for users with motor impairments who
+      may accidentally trigger selections
+
+    Users expect to have control over when their actions take effect. Automatic
+    context changes violate this expectation and can have serious consequences
+    like accidental purchases or unwanted navigation.
+  when_to_run:
+  - During form implementation reviews
+  - After adding or modifying input controls
+  - During accessibility compliance audits
+  - When implementing auto-save or real-time features
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Frontend source code containing forms and input elements
+  - type: running_application
+    description: Application instance for manual testing
+  access_requirements:
+  - Source code repository access
+  - Test environment access
+  - Screen reader for verification
+discovery:
+  code_patterns:
+  - pattern: onchange\s*=|addEventListener\s*\(['"]change['"]
+    type: regex
+    scope: source
+    purpose: Identify change event handlers in HTML/JavaScript
+  - pattern: oninput\s*=|addEventListener\s*\(['"]input['"]
+    type: regex
+    scope: source
+    purpose: Identify input event handlers
+  - pattern: onChange\s*=|onChange:\s*
+    type: regex
+    scope: source
+    purpose: Identify React/JSX change handlers
+  - pattern: '@change|v-on:change|@input|v-on:input'
+    type: regex
+    scope: source
+    purpose: Identify Vue change/input handlers
+  - pattern: \$\([^)]+\)\.change\(|\$\([^)]+\)\.on\(['"]change['"]
+    type: regex
+    scope: source
+    purpose: Identify jQuery change handlers
+  - pattern: <select[^>]*onchange
+    type: regex
+    scope: source
+    purpose: Identify select elements with automatic change behavior
+  file_patterns:
+  - glob: '**/*.{js,jsx,ts,tsx}'
+    purpose: JavaScript and TypeScript source files
+  - glob: '**/*.vue'
+    purpose: Vue single-file components
+  - glob: '**/*.html'
+    purpose: HTML files with forms
+  - glob: '**/forms/**'
+    purpose: Form-specific directories
+knowledge_sources:
+  specifications:
+  - id: wcag-3.2.2
+    name: 'WCAG 2.2 Success Criterion 3.2.2: On Input'
+    url: https://www.w3.org/WAI/WCAG22/Understanding/on-input.html
+    offline_cache: true
+    priority: required
+  - id: wcag-3.2
+    name: 'WCAG Guideline 3.2: Predictable'
+    url: https://www.w3.org/WAI/WCAG22/Understanding/predictable.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: w3c-forms
+    name: 'W3C WAI: Forms Tutorial'
+    url: https://www.w3.org/WAI/tutorials/forms/
+    offline_cache: true
+  - id: webaim-forms
+    name: 'WebAIM: Creating Accessible Forms'
+    url: https://webaim.org/techniques/forms/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: axe-core
+    purpose: Automated accessibility testing for forms
+    offline_capable: true
+  - tool: eslint-plugin-jsx-a11y
+    purpose: Lint React form components
+    offline_capable: true
+  scripts:
+  - id: change-handler-analyzer
+    language: bash
+    purpose: Find change handlers and analyze their behavior
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Select Elements with onChange ==="
+      grep -rn --include="*.js" --include="*.jsx" --include="*.ts" --include="*.tsx" \
+        -E "<select[^>]*(onChange|onchange)" .
+
+      echo ""
+      echo "=== Change Handlers with Navigation ==="
+      grep -rn --include="*.js" --include="*.jsx" --include="*.ts" --include="*.tsx" \
+        -B5 -A10 "(onChange|onchange)" . | \
+        grep -E "(window\.(location|open)|navigate|redirect|history\.push)"
+
+      echo ""
+      echo "=== Change Handlers with Form Submission ==="
+      grep -rn --include="*.js" --include="*.jsx" --include="*.ts" --include="*.tsx" \
+        -B5 -A10 "(onChange|onchange)" . | grep -E "\.submit\("
+signals:
+  critical:
+  - id: A11Y-INPUT-CRIT-001
+    signal: Select element triggers navigation on change without warning
+    evidence_pattern: select.*onChange.*navigate|select.*onChange.*location
+    explanation: |
+      A select dropdown automatically navigates when user changes selection.
+      This is a common anti-pattern (e.g., "jump menus") that prevents users
+      from reviewing their selection and causes immediate context changes
+      that can disorient users relying on assistive technology.
+    remediation: |
+      Replace automatic navigation with a submit button. Pattern:
+      1. User selects option from dropdown
+      2. User clicks "Go" or similar button
+      3. Navigation occurs
+
+      If automatic behavior is truly necessary, provide clear advance warning
+      using aria-describedby or visible instructions.
+  - id: A11Y-INPUT-CRIT-002
+    signal: Form auto-submits on input change
+    evidence_pattern: onChange.*submit|onInput.*submit
+    explanation: |
+      Form automatically submits when user changes any input value. This
+      prevents users from reviewing their entries and can cause accidental
+      submissions with incomplete or incorrect data.
+    remediation: |
+      Always require explicit form submission via button. Auto-save features
+      should save drafts, not submit the form. If auto-submission is used,
+      provide clear warning and confirmation mechanism.
+  high:
+  - id: A11Y-INPUT-HIGH-001
+    signal: Radio buttons or checkboxes trigger immediate significant action
+    evidence_pattern: type=['"]?(radio|checkbox)['"]?.*onChange.*
+    explanation: |
+      Checking a radio button or checkbox triggers an immediate action beyond
+      simply recording the selection. Users expect to complete a form before
+      actions occur.
+    remediation: |
+      Ensure radio buttons and checkboxes only record selections. Actions
+      should require a separate submit or confirm step. If instant effect
+      is desired (like a settings toggle), clearly indicate this behavior.
+  - id: A11Y-INPUT-HIGH-002
+    signal: Input change opens modal or dialog
+    evidence_pattern: onChange.*modal|onChange.*dialog|onChange.*popup
+    explanation: |
+      Changing an input value automatically opens a modal or dialog,
+      interrupting user workflow and potentially trapping focus unexpectedly.
+    remediation: |
+      Opening dialogs should be triggered by explicit actions like button
+      clicks, not passive input changes. If additional input is needed based
+      on selection, use inline expandable sections instead of modals.
+  medium:
+  - id: A11Y-INPUT-MED-001
+    signal: Input change triggers significant page content updates
+    evidence_pattern: onChange.*(innerHTML|replaceWith|setState.*\{)
+    explanation: |
+      Changing input values triggers significant updates to page content,
+      which may confuse users about what changed and why.
+    remediation: |
+      If content must update based on input, ensure changes are:
+      1. Clearly announced to screen readers via live regions
+      2. Visually indicated
+      3. Do not move focus unexpectedly
+      4. Documented in advance if behavior is unusual
+  - id: A11Y-INPUT-MED-002
+    signal: Autocomplete selection triggers navigation
+    evidence_pattern: autocomplete.*select.*navigate|typeahead.*select.*redirect
+    explanation: |
+      Selecting an autocomplete suggestion immediately navigates without
+      allowing users to confirm their selection.
+    remediation: |
+      Autocomplete selection should populate the field, allowing users to
+      submit the form explicitly. If navigation is desired, provide a
+      separate "Go" action or clearly document the behavior.
+  low:
+  - id: A11Y-INPUT-LOW-001
+    signal: Missing warning about automatic behavior
+    evidence_indicators:
+    - Auto-action exists but no aria-describedby or visible warning
+    - No instructions near control explaining immediate effect
+    explanation: |
+      Automatic behavior exists but users are not warned in advance, violating
+      the alternative compliance approach of WCAG 3.2.2.
+    remediation: |
+      Add clear instructions before the control explaining that changing
+      the value will trigger an automatic action. Use aria-describedby
+      to ensure screen reader users receive this information.
+  positive:
+  - id: A11Y-INPUT-POS-001
+    signal: Forms use explicit submit buttons
+    evidence_indicators:
+    - All forms have visible submit buttons
+    - No automatic form submission on input change
+  - id: A11Y-INPUT-POS-002
+    signal: Automatic behaviors clearly documented
+    evidence_indicators:
+    - Warning text precedes controls with automatic behavior
+    - aria-describedby links controls to behavior descriptions
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify input event handlers
+    description: |
+      Search for all change and input event handlers, particularly on
+      form controls like select, checkbox, and radio inputs.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find change handlers
+      command: |
+        grep -rn --include="*.js" --include="*.jsx" --include="*.ts" --include="*.tsx" \
+          -E "(onChange|onchange|@change|v-on:change)" .
+    - purpose: Find input handlers
+      command: |
+        grep -rn --include="*.js" --include="*.jsx" --include="*.ts" --include="*.tsx" \
+          -E "(onInput|oninput|@input|v-on:input)" .
+    expected_findings:
+    - Complete list of input/change handlers
+    - File locations for review
+  - id: '2'
+    name: Analyze handler behavior for context changes
+    description: |
+      Review each handler to determine what actions it triggers and whether
+      any constitute context changes.
+    duration_estimate: 45 min
+    questions:
+    - Does the handler navigate to a different page?
+    - Does the handler submit a form?
+    - Does the handler open new windows or dialogs?
+    - Does the handler significantly alter page content?
+    - Does the handler move focus to another element?
+    expected_findings:
+    - Classification of handlers by context-change risk
+    - Specific instances of problematic patterns
+  - id: '3'
+    name: Check for advance warnings
+    description: |
+      For any handlers that do trigger context changes, verify that users
+      are warned in advance about the behavior.
+    duration_estimate: 30 min
+    questions:
+    - Is there visible instruction text explaining the automatic behavior?
+    - Is aria-describedby used to associate warnings with controls?
+    - Are warnings positioned before the control (read first)?
+    expected_findings:
+    - Inventory of automatic behaviors with/without warnings
+  - id: '4'
+    name: Manual testing with keyboard and screen reader
+    description: |
+      Navigate forms using keyboard only and verify with screen reader
+      that behavior is predictable and properly announced.
+    duration_estimate: 45 min
+    questions:
+    - Can users navigate all form controls without triggering actions?
+    - Are automatic behaviors announced appropriately?
+    - Can users complete and review forms before submission?
+    expected_findings:
+    - Documented form interaction patterns
+    - Any unexpected behaviors
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Form Control Analysis
+    - Context Change Inventory
+    - Manual Testing Results
+    - Recommendations
+  confidence_guidance:
+    high: Code analysis verified with manual testing including screen reader
+    medium: Code analysis with limited manual testing
+    low: Pattern matching without behavioral verification
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: wcag-3.2.2
+      priority: required
+    - source_id: wcag-3.2
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed form analysis and manual testing
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: on-input-001
+  item: No automatic navigation on select change
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.js" --include="*.jsx" --include="*.ts" --include="*.tsx" \
+      -E "select.*onChange.*(navigate|location|history\.push)" . | wc -l | \
+      xargs -I {} sh -c '[ {} -eq 0 ] && echo "PASS" || echo "FAIL"'
+  expected: PASS
+- id: on-input-002
+  item: No automatic form submission on input change
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.js" --include="*.jsx" --include="*.ts" --include="*.tsx" \
+      -E "onChange.*\.submit\(|onInput.*\.submit\(" . | wc -l | \
+      xargs -I {} sh -c '[ {} -eq 0 ] && echo "PASS" || echo "FAIL"'
+  expected: PASS
+- id: on-input-003
+  item: All forms have explicit submit buttons
+  level: BLOCKING
+  verification: manual
+  verification_notes: Reviewer confirms all forms require explicit submission action
+  expected: Confirmed by reviewer
+- id: on-input-004
+  item: Automatic behaviors include advance warning
+  level: WARNING
+  verification: manual
+  verification_notes: If automatic behaviors exist, verify warnings are present
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - web-application
+    - spa
+    - e-commerce
+    - forms-heavy
+  compliance_frameworks:
+  - framework: WCAG 2.2
+    controls:
+    - 3.2.2
+  - framework: Section 508
+    controls:
+    - 1194.22(l)
+  - framework: EN 301 549
+    controls:
+    - 9.3.2.2
+relationships:
+  commonly_combined:
+  - accessibility-inclusion.understandable-predictable.on-focus-behavior
+  - accessibility-inclusion.understandable-predictable.navigation-consistency
+  - accessibility-inclusion.cognitive-accessibility.error-recovery-support

@@ -1,0 +1,389 @@
+# ============================================================
+# AUDIT FILE: Cloud Audit Logging
+# ============================================================
+
+audit:
+  id: "cloud-infrastructure.cloud-security.cloud-audit-logging"
+  name: "Cloud Audit Logging"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "cloud-infrastructure"
+  category_number: 12
+  subcategory: "cloud-security"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates cloud audit logging configuration including API logging (CloudTrail,
+    Cloud Audit Logs, Azure Activity Logs), data access logging, log retention,
+    log integrity protection, centralized log aggregation, and alerting on
+    security-relevant events. Verifies comprehensive audit coverage for security
+    investigation and compliance.
+
+  why_it_matters: |
+    Audit logs are essential for security investigation, compliance, and forensics.
+    Without proper logging, security incidents cannot be detected, investigated,
+    or attributed. Gaps in logging create blind spots that attackers exploit.
+    Compliance frameworks universally require audit logging of privileged
+    activities.
+
+  when_to_run:
+    - "During initial cloud account setup"
+    - "Regular security audits (quarterly minimum)"
+    - "After security incidents to verify coverage"
+    - "Before compliance assessments"
+
+prerequisites:
+  required_artifacts:
+    - type: "cloud-account"
+      description: "Access to cloud account logging configuration"
+    - type: "logging-config"
+      description: "Audit log configuration and storage"
+
+  access_requirements:
+    - "Permissions to view logging configurations"
+    - "Access to log storage (S3, GCS, Blob Storage)"
+    - "Ability to query audit logs"
+
+discovery:
+  file_patterns:
+    - glob: "**/cloudtrail*.json"
+      purpose: "CloudTrail configurations"
+    - glob: "**/audit-log*.yaml"
+      purpose: "Audit logging configurations"
+    - glob: "**/logging*.tf"
+      purpose: "Terraform logging configurations"
+
+  code_patterns:
+    - pattern: "IsMultiRegionTrail.*true"
+      type: "regex"
+      scope: "config"
+      purpose: "Check multi-region trail enablement"
+    - pattern: "EnableLogFileValidation.*true"
+      type: "regex"
+      scope: "config"
+      purpose: "Check log integrity validation"
+    - pattern: "includeGlobalServiceEvents"
+      type: "keyword"
+      scope: "config"
+      purpose: "Check global service event logging"
+
+knowledge_sources:
+  specifications:
+    - id: "aws-cloudtrail"
+      name: "AWS CloudTrail Best Practices"
+      url: "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/best-practices-security.html"
+      offline_cache: true
+      priority: "required"
+    - id: "cis-logging"
+      name: "CIS Benchmark Logging Controls"
+      url: "https://www.cisecurity.org/benchmark/amazon_web_services"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "gcp-audit"
+      name: "GCP Cloud Audit Logs"
+      url: "https://cloud.google.com/logging/docs/audit"
+      offline_cache: true
+    - id: "azure-audit"
+      name: "Azure Activity Logs"
+      url: "https://docs.microsoft.com/en-us/azure/azure-monitor/essentials/activity-log"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws-cli"
+      purpose: "Query CloudTrail configuration"
+      command: "aws cloudtrail describe-trails"
+    - tool: "gcloud"
+      purpose: "Query GCP audit logging"
+      command: "gcloud logging sinks list"
+    - tool: "az-cli"
+      purpose: "Query Azure diagnostic settings"
+      command: "az monitor diagnostic-settings list"
+    - tool: "prowler"
+      purpose: "Cloud security audit"
+      command: "prowler aws --service cloudtrail"
+
+  scripts:
+    - id: "audit-log-check"
+      language: "bash"
+      purpose: "Audit logging verification"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== CloudTrail Status ==="
+        aws cloudtrail describe-trails --query 'trailList[*].[Name,IsMultiRegionTrail,IsLogging,S3BucketName]' --output table
+        echo "=== Log File Validation ==="
+        aws cloudtrail describe-trails --query 'trailList[*].[Name,LogFileValidationEnabled]' --output table
+        echo "=== Trail Status ==="
+        for trail in $(aws cloudtrail describe-trails --query 'trailList[*].Name' --output text); do
+          aws cloudtrail get-trail-status --name $trail --query '{Trail: "'$trail'", IsLogging: IsLogging, LatestDeliveryTime: LatestDeliveryTime}'
+        done
+
+signals:
+  critical:
+    - id: "AUDIT-LOG-CRIT-001"
+      signal: "No audit trail configured"
+      evidence_pattern: "No CloudTrail, GCP Audit Logs, or equivalent"
+      explanation: |
+        Without audit logging, there is no record of API activity.
+        Security incidents cannot be detected, investigated, or
+        attributed. This is a fundamental security requirement.
+      remediation: "Enable audit logging for all regions and services"
+    - id: "AUDIT-LOG-CRIT-002"
+      signal: "Audit logging disabled"
+      evidence_pattern: "Trail exists but logging is stopped"
+      explanation: |
+        Disabled logging creates gaps in audit records that attackers
+        can exploit. Any period without logging is a blind spot.
+      remediation: "Re-enable logging immediately and investigate why it was stopped"
+    - id: "AUDIT-LOG-CRIT-003"
+      signal: "Logs can be deleted or modified"
+      evidence_pattern: "No MFA delete, no log validation, bucket not locked"
+      explanation: |
+        Attackers can cover tracks by deleting or modifying logs.
+        Log integrity protection is essential for forensic value.
+      remediation: "Enable log validation, MFA delete, and object lock on log bucket"
+
+  high:
+    - id: "AUDIT-LOG-HIGH-001"
+      signal: "Not logging all regions"
+      evidence_pattern: "Single-region trail only"
+      explanation: |
+        Attackers can operate in unmonitored regions. All regions
+        should be covered regardless of where resources are deployed.
+      remediation: "Enable multi-region trail"
+    - id: "AUDIT-LOG-HIGH-002"
+      signal: "Data events not logged"
+      evidence_pattern: "S3/Lambda data events not in trail"
+      explanation: |
+        Data events show actual resource access. Without them,
+        data exfiltration goes undetected.
+      remediation: "Enable data events for sensitive resources"
+    - id: "AUDIT-LOG-HIGH-003"
+      signal: "Log retention too short"
+      evidence_pattern: "Logs retained < 1 year"
+      explanation: |
+        Short retention limits historical investigation capability.
+        Compliance often requires longer retention periods.
+      remediation: "Configure retention per compliance requirements (1+ year)"
+
+  medium:
+    - id: "AUDIT-LOG-MED-001"
+      signal: "Logs not encrypted"
+      evidence_pattern: "S3 bucket without default encryption"
+      remediation: "Enable KMS encryption for log bucket"
+    - id: "AUDIT-LOG-MED-002"
+      signal: "No log alerting configured"
+      evidence_pattern: "No CloudWatch alarms or event rules"
+      remediation: "Configure alerts for security-relevant events"
+    - id: "AUDIT-LOG-MED-003"
+      signal: "Logs not centralized"
+      evidence_pattern: "Multiple trails without organization trail"
+      remediation: "Use organization trail for centralized logging"
+
+  low:
+    - id: "AUDIT-LOG-LOW-001"
+      signal: "Log delivery errors occurring"
+      remediation: "Investigate and resolve delivery issues"
+    - id: "AUDIT-LOG-LOW-002"
+      signal: "No log analysis tooling"
+      remediation: "Implement log analysis with Athena, SIEM, or equivalent"
+
+  positive:
+    - id: "AUDIT-LOG-POS-001"
+      signal: "Multi-region trail with log validation enabled"
+    - id: "AUDIT-LOG-POS-002"
+      signal: "Log bucket secured with MFA delete and object lock"
+    - id: "AUDIT-LOG-POS-003"
+      signal: "Alerting configured for security events"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory audit logging configuration"
+      description: |
+        Identify all audit logging configurations across the cloud
+        environment.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "List CloudTrails"
+          command: "aws cloudtrail describe-trails --query 'trailList[*].[Name,IsMultiRegionTrail,S3BucketName]' --output table"
+        - purpose: "Check logging status"
+          command: "aws cloudtrail get-trail-status --name <trail-name>"
+      expected_findings:
+        - "Audit logging inventory"
+        - "Coverage assessment"
+
+    - id: "2"
+      name: "Verify logging coverage"
+      description: |
+        Ensure all regions and services are covered by audit logging.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check multi-region coverage"
+          command: "aws cloudtrail describe-trails --query 'trailList[*].[Name,IsMultiRegionTrail,IncludeGlobalServiceEvents]' --output table"
+        - purpose: "Check management events"
+          command: "aws cloudtrail get-event-selectors --trail-name <trail>"
+      expected_findings:
+        - "Regional coverage"
+        - "Event type coverage"
+
+    - id: "3"
+      name: "Assess log integrity protection"
+      description: |
+        Verify logs are protected from tampering and deletion.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check log validation"
+          command: "aws cloudtrail describe-trails --query 'trailList[*].[Name,LogFileValidationEnabled]' --output table"
+        - purpose: "Check bucket versioning"
+          command: "aws s3api get-bucket-versioning --bucket <log-bucket>"
+        - purpose: "Check MFA delete"
+          command: "aws s3api get-bucket-versioning --bucket <log-bucket> --query MFADelete"
+      expected_findings:
+        - "Log validation status"
+        - "Bucket protection status"
+
+    - id: "4"
+      name: "Review log retention and lifecycle"
+      description: |
+        Verify log retention meets requirements and lifecycle policies
+        are appropriate.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check lifecycle policy"
+          command: "aws s3api get-bucket-lifecycle-configuration --bucket <log-bucket>"
+        - purpose: "Check log group retention"
+          command: "aws logs describe-log-groups --query 'logGroups[*].[logGroupName,retentionInDays]'"
+      expected_findings:
+        - "Retention configuration"
+        - "Lifecycle policy assessment"
+
+    - id: "5"
+      name: "Verify alerting configuration"
+      description: |
+        Check that security-relevant events trigger alerts.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "List CloudWatch alarms"
+          command: "aws cloudwatch describe-alarms --query 'MetricAlarms[*].[AlarmName,MetricName,Namespace]'"
+        - purpose: "List EventBridge rules"
+          command: "aws events list-rules --query 'Rules[*].[Name,State,EventPattern]'"
+      expected_findings:
+        - "Alert coverage"
+        - "Security event alerting"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Logging Coverage Analysis"
+        - "Log Integrity Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct API query results, configuration verification"
+    medium: "Inferred from partial configuration"
+    low: "Based on missing elements"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-cloudtrail"
+        priority: "required"
+      - source_id: "cis-logging"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive logging analysis"
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "cloud-audit-logging-001"
+    item: "Audit logging enabled for all regions"
+    level: "CRITICAL"
+    verification: "aws cloudtrail describe-trails --query 'trailList[?IsMultiRegionTrail==`true`]' | jq 'length' | awk '{print ($1>0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "cloud-audit-logging-002"
+    item: "Log file validation enabled"
+    level: "CRITICAL"
+    verification: "aws cloudtrail describe-trails --query 'trailList[?LogFileValidationEnabled==`true`]' | jq 'length' | awk '{print ($1>0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "cloud-audit-logging-003"
+    item: "Logging currently active"
+    level: "CRITICAL"
+    verification: "aws cloudtrail get-trail-status --name <trail> --query IsLogging | awk '{print ($1==\"true\")?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "cloud-audit-logging-004"
+    item: "Log bucket protected"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify bucket has versioning, MFA delete, or object lock"
+    expected: "Confirmed by reviewer"
+  - id: "cloud-audit-logging-005"
+    item: "Security alerts configured"
+    level: "WARNING"
+    verification: "aws cloudwatch describe-alarms --query 'MetricAlarms' | jq 'length' | awk '{print ($1>0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.2", "CC7.3"]
+    - framework: "PCI-DSS"
+      controls: ["10.1", "10.2", "10.3", "10.5", "10.7"]
+    - framework: "HIPAA"
+      controls: ["164.312(b)"]
+    - framework: "CIS"
+      controls: ["3.1-3.14"]
+
+relationships:
+  commonly_combined:
+    - "cloud-infrastructure.cloud-security.iam-configuration"
+    - "cloud-infrastructure.cloud-security.security-monitoring"
+    - "cloud-infrastructure.containers.container-logging"

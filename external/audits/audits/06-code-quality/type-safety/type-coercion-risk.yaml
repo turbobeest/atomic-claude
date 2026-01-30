@@ -1,0 +1,311 @@
+audit:
+  id: code-quality.type-safety.type-coercion-risk
+  name: Type Coercion Risk Analysis Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: type-safety
+  tier: expert
+  estimated_duration: 30 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - quality
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Identifies risky implicit type coercions, unsafe type casts, and
+    conversions that may lose data or produce unexpected results. Analyzes
+    numeric conversions, string-to-number coercion, truthy/falsy comparisons,
+    and explicit casts that bypass type safety.
+  why_it_matters: |
+    Type coercion bugs are subtle and often escape testing. JavaScript's
+    "0" == 0 equaling true, or Python's int("1.5") raising an exception,
+    cause production incidents. In security-sensitive contexts, type
+    confusion can lead to authentication bypasses and injection attacks.
+    Studies show type coercion errors account for 8-10% of production bugs.
+  when_to_run:
+  - Security audits
+  - Code reviews
+  - Before releases
+  - Language migration
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  access_requirements:
+  - Read access to source code
+discovery:
+  code_patterns:
+  - pattern: ==\s|!=\s
+    type: regex
+    scope: source
+    purpose: Loose equality (JavaScript)
+  - pattern: int\(|float\(|str\(
+    type: regex
+    scope: source
+    purpose: Type conversion functions
+  - pattern: \(\w+\)\s*\w+
+    type: regex
+    scope: source
+    purpose: C-style casts
+  - pattern: as\s+\w+|<\w+>
+    type: regex
+    scope: source
+    purpose: Type assertions
+  file_patterns:
+  - glob: '**/*.{js,ts,py,java,c,cpp,go}'
+    purpose: Source code files
+knowledge_sources:
+  specifications:
+  - id: cwe-704
+    name: 'CWE-704: Incorrect Type Conversion'
+    url: https://cwe.mitre.org/data/definitions/704.html
+    offline_cache: true
+    priority: required
+  - id: cwe-681
+    name: 'CWE-681: Incorrect Conversion between Numeric Types'
+    url: https://cwe.mitre.org/data/definitions/681.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: js-equality
+    name: JavaScript Equality Table
+    url: https://dorey.github.io/JavaScript-Equality-Table/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: eslint
+    purpose: JavaScript type coercion rules (eqeqeq)
+    offline_capable: true
+  - tool: typescript
+    purpose: TypeScript strict type checking
+    offline_capable: true
+  - tool: mypy
+    purpose: Python type checking
+    offline_capable: true
+  - tool: cppcheck
+    purpose: C/C++ type conversion analysis
+    offline_capable: true
+  scripts:
+  - id: coercion-scan
+    language: bash
+    purpose: Detect type coercion risks
+    source: inline
+    code: |
+      # Find loose equality in JavaScript
+      grep -rn --include="*.js" "[^!=]==[^=]\|[^!]!=[^=]" . 2>/dev/null | head -20
+      # Find type casting in Python
+      grep -rn --include="*.py" "int(\|float(\|str(\|bool(" . 2>/dev/null | head -20
+      # Find unsafe casts in TypeScript
+      grep -rn --include="*.ts" "as any\|as unknown\|<any>" . 2>/dev/null | head -20
+signals:
+  critical:
+  - id: TCR-CRIT-001
+    signal: Type coercion in authentication/authorization logic
+    evidence_pattern: Type conversion in auth checks
+    cwe: CWE-704
+    explanation: |
+      Type coercion in security contexts can lead to authentication
+      bypasses. For example, PHP's "0e123" == 0 magic hash vulnerability
+      affected many authentication systems.
+    remediation: Use strict equality and explicit validation
+  - id: TCR-CRIT-002
+    signal: Numeric overflow possible in type conversion
+    evidence_pattern: Large number to smaller type
+    cwe: CWE-681
+    explanation: |
+      Converting between numeric types can cause overflow or truncation.
+      A 64-bit value truncated to 32 bits can wrap to negative or small
+      positive values, causing security vulnerabilities.
+    remediation: Add range validation before conversion
+  high:
+  - id: TCR-HIGH-001
+    signal: Loose equality comparison (== instead of ===)
+    evidence_pattern: == or != without strict mode
+    cwe: CWE-1024
+    explanation: |
+      Loose equality in JavaScript performs type coercion, leading to
+      unexpected results: "" == 0 is true, "0" == false is true. This
+      causes logic bugs and potential security issues.
+    remediation: Use strict equality (=== and !==)
+  - id: TCR-HIGH-002
+    signal: Type assertion to any or unknown
+    evidence_pattern: as any or as unknown casts
+    explanation: |
+      Type assertions to any or unknown bypass TypeScript's type system
+      entirely. Values cast this way can flow through the code without
+      any type checking, defeating the purpose of TypeScript.
+    remediation: Use proper type narrowing instead of assertions
+  medium:
+  - id: TCR-MED-001
+    signal: Implicit string-to-number conversion
+    evidence_pattern: parseInt without radix, Number() on user input
+    remediation: Use explicit parsing with validation
+  - id: TCR-MED-002
+    signal: Truthy/falsy comparison instead of explicit check
+    evidence_pattern: if (variable) instead of if (variable !== null)
+    remediation: Use explicit comparisons
+  low:
+  - id: TCR-LOW-001
+    signal: Implicit boolean coercion
+    evidence_pattern: Boolean() wrapper or double negation (!!)
+    remediation: Consider explicit comparison
+  positive:
+  - id: TCR-POS-001
+    signal: Strict equality used consistently
+  - id: TCR-POS-002
+    signal: ESLint eqeqeq rule enforced
+  - id: TCR-POS-003
+    signal: Type validation before conversion
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Detect Loose Equality
+    description: |
+      Find uses of loose equality operators that perform
+      implicit type coercion.
+    duration_estimate: 8 min
+    commands:
+    - purpose: Find loose equality in JavaScript
+      command: |
+        grep -rn --include="*.js" "[^!=]==[^=]\|[^!]!=[^=]" . 2>/dev/null | grep -v "===" | head -20
+    - purpose: Count loose vs strict equality
+      command: |
+        loose=$(grep -roh --include="*.js" "[^!=]==[^=]\|[^!]!=[^=]" . 2>/dev/null | wc -l)
+        strict=$(grep -roh --include="*.js" "===\|!==" . 2>/dev/null | wc -l)
+        echo "Loose: $loose, Strict: $strict"
+    expected_findings:
+    - Loose equality count
+    - Comparison ratio
+  - id: '2'
+    name: Analyze Type Conversions
+    description: |
+      Find explicit type conversion calls that may be risky.
+    duration_estimate: 8 min
+    commands:
+    - purpose: Find Python type conversions
+      command: |
+        grep -rn --include="*.py" "int(\|float(\|str(\|bool(" . 2>/dev/null | head -25
+    - purpose: Find JavaScript type conversions
+      command: |
+        grep -rn --include="*.js" "Number(\|String(\|Boolean(\|parseInt\|parseFloat" . 2>/dev/null | head -20
+    - purpose: Find user input conversions
+      command: |
+        grep -rn --include="*.py" "int(request\|float(request\|int(input\|float(input" . 2>/dev/null | head -10
+    expected_findings:
+    - Conversion locations
+    - Risky conversion patterns
+  - id: '3'
+    name: Find Type Assertions
+    description: |
+      Identify type assertions and casts that bypass type safety.
+    duration_estimate: 8 min
+    commands:
+    - purpose: Find TypeScript type assertions
+      command: |
+        grep -rn --include="*.ts" "as any\|as unknown\|<any>" . 2>/dev/null | head -20
+    - purpose: Find Python type ignores
+      command: |
+        grep -rn --include="*.py" "# type: ignore\|cast(" . 2>/dev/null | head -15
+    - purpose: Find C-style casts
+      command: |
+        grep -rn --include="*.c" --include="*.cpp" "(\w\+\s*\*\?)\s*\w" . 2>/dev/null | head -15
+    expected_findings:
+    - Type assertion locations
+    - Cast patterns
+  - id: '4'
+    name: Check Linting Rules
+    description: |
+      Verify that linting rules prevent unsafe coercion.
+    duration_estimate: 6 min
+    commands:
+    - purpose: Check for eqeqeq rule
+      command: |
+        grep -r "eqeqeq" .eslintrc* 2>/dev/null
+    - purpose: Check for strict mode
+      command: |
+        grep -rn --include="*.js" "'use strict'\|\"use strict\"" . 2>/dev/null | head -5
+    expected_findings:
+    - Linting rule status
+    - Strict mode usage
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - loose_equality_instances
+    - risky_conversions
+    - unsafe_assertions
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Coercion Risk Analysis
+    - Security Implications
+    - Recommendations
+  confidence_guidance:
+    high: Full linting analysis with security review
+    medium: Pattern matching without context
+    low: Grep-based sampling
+offline:
+  capability: full
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    quality:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: tcr-001
+  item: No loose equality in security code
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.js" "[^!=]==[^=]" . 2>/dev/null | grep -i "auth\|password\|login\|permission" | wc -l | awk '{print ($1 == 0) ? "PASS" : "FAIL"}'
+  expected: PASS
+- id: tcr-002
+  item: Limited type assertions to any
+  level: WARNING
+  verification: |
+    grep -rn --include="*.ts" "as any" . 2>/dev/null | wc -l | awk '{print ($1 < 10) ? "PASS" : "FAIL"}'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-704
+    - CWE-681
+    - CWE-1024
+  - framework: ISO 25010
+    controls:
+    - Reliability
+    - Security
+relationships:
+  commonly_combined:
+  - code-quality.type-safety.type-coverage
+  - code-quality.type-safety.null-safety
+  - security.input-validation.input-sanitization

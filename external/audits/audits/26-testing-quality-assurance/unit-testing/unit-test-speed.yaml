@@ -1,0 +1,304 @@
+audit:
+  id: testing-quality-assurance.unit-testing.unit-test-speed
+  name: Unit Test Speed
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: testing-quality-assurance
+  category_number: 26
+  subcategory: unit-testing
+  tier: expert
+  estimated_duration: 30-60 min
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: medium
+  scope: testing
+  default_profiles:
+  - full
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates unit test execution speed including total suite runtime,
+    individual test duration, test startup overhead, and parallelization
+    effectiveness. Identifies slow tests that impair developer productivity
+    and CI pipeline efficiency.
+  why_it_matters: |
+    Fast tests encourage frequent execution - developers run them before
+    commits, during development, and on every save. Slow tests get run
+    less often, reducing their value as a safety net. Long CI pipelines
+    delay feedback and slow development velocity.
+  when_to_run:
+  - Test suite maintenance
+  - CI pipeline optimization
+  - Developer experience improvements
+  - After test suite growth
+prerequisites:
+  required_artifacts:
+  - type: test_suite
+    description: Executable unit test suite
+  access_requirements:
+  - Ability to run test suite
+  - Test timing metrics
+discovery:
+  metrics_queries:
+  - system: CI/CD
+    query: test_duration_seconds
+    purpose: Total test execution time
+    threshold: < 60 seconds for unit tests
+  - system: Test Runner
+    query: individual_test_duration
+    purpose: Per-test execution time
+    threshold: < 100ms per unit test
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: fast-tests
+    name: Fast Test, Slow Test
+    url: https://www.youtube.com/watch?v=RAxiiRPHS9k
+    offline_cache: true
+  - id: test-performance
+    name: Improving Test Performance
+    url: https://jestjs.io/docs/troubleshooting#tests-are-extremely-slow-on-docker-or-continuous-integration
+    offline_cache: true
+  learning_resources:
+  - id: effective-testing
+    title: Effective Software Testing
+    type: book
+    reference: ISBN 978-1633439931
+tooling:
+  static_analysis:
+  - tool: jest --verbose
+    purpose: JavaScript test timing
+    offline_capable: true
+  - tool: pytest --durations
+    purpose: Python test timing
+    offline_capable: true
+  - tool: gradle --profile
+    purpose: Java test profiling
+    offline_capable: true
+  scripts:
+  - id: test-timing
+    language: bash
+    purpose: Measure test execution time
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Unit Test Speed Analysis ==="
+
+      start=$(date +%s.%N)
+
+      # Run tests with timing
+      if [ -f "package.json" ]; then
+        npx jest --ci 2>&1 | tail -20
+      elif [ -f "pyproject.toml" ] || [ -f "setup.py" ]; then
+        pytest --durations=10 2>&1 | tail -30
+      fi
+
+      end=$(date +%s.%N)
+      duration=$(echo "$end - $start" | bc)
+      echo ""
+      echo "Total execution time: ${duration}s"
+signals:
+  critical:
+  - id: TESTSPEED-CRIT-001
+    signal: Unit test suite takes more than 5 minutes
+    evidence_threshold: Total unit test time > 300 seconds
+    explanation: |
+      A 5+ minute unit test suite is unusable for rapid development.
+      Developers will skip running tests locally, only discovering
+      issues in CI, significantly slowing development velocity.
+    remediation: |
+      Analyze and optimize slow tests:
+      1. Run --durations report to find slowest tests
+      2. Move slow tests to integration suite
+      3. Optimize setup/teardown
+      4. Enable parallel execution
+      5. Profile and fix actual bottlenecks
+  - id: TESTSPEED-CRIT-002
+    signal: Individual unit tests take more than 1 second
+    evidence_threshold: Any single unit test > 1000ms
+    explanation: |
+      Unit tests over 1 second likely aren't true unit tests - they
+      probably access external systems, perform I/O, or have
+      unnecessary setup. These slow the entire suite.
+    remediation: |
+      For tests over 1 second:
+      - Mock I/O and network calls
+      - Reduce test data volume
+      - Split into focused tests
+      - Move to integration test suite if truly needed
+  high:
+  - id: TESTSPEED-HIGH-001
+    signal: Test suite parallelization not enabled
+    evidence_pattern: Single-threaded test execution despite multi-core availability
+    explanation: |
+      Modern test frameworks support parallel execution. Not using
+      parallelization wastes available compute resources and
+      unnecessarily extends test duration.
+    remediation: |
+      Enable parallel execution:
+      - Jest: --maxWorkers flag (default is auto)
+      - pytest: pytest-xdist plugin
+      - JUnit: parallel execution configuration
+  - id: TESTSPEED-HIGH-002
+    signal: Expensive setup repeated per test
+    evidence_pattern: Same heavy initialization in multiple beforeEach blocks
+    explanation: |
+      Repeated expensive setup multiplies total test time. Setup
+      that doesn't change between tests can be hoisted to beforeAll
+      or shared fixtures.
+    remediation: |
+      Optimize setup:
+      - Use beforeAll for immutable shared state
+      - Create fixtures for common test data
+      - Use factory functions for lightweight object creation
+  medium:
+  - id: TESTSPEED-MED-001
+    signal: Test startup overhead is significant
+    evidence_threshold: Framework initialization > 5 seconds
+    remediation: Investigate test runner configuration and module loading
+  - id: TESTSPEED-MED-002
+    signal: Large test data impacts performance
+    evidence_pattern: Tests processing large datasets unnecessarily
+    remediation: Use minimal test data sufficient to verify behavior
+  low:
+  - id: TESTSPEED-LOW-001
+    signal: Watch mode not utilized
+    evidence_pattern: Developers run full suite instead of affected tests
+  positive:
+  - id: TESTSPEED-POS-001
+    signal: Unit tests complete in under 60 seconds
+    evidence_threshold: Total suite time < 60s
+  - id: TESTSPEED-POS-002
+    signal: Fast feedback with watch mode
+    evidence_pattern: Watch mode configured and used
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Measure total suite time
+    description: |
+      Run the full unit test suite and measure total duration.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Time full test run
+      command: time npm test 2>&1 || time pytest 2>&1
+    expected_findings:
+    - Total suite duration
+    - Pass/fail count
+  - id: '2'
+    name: Identify slow tests
+    description: |
+      Find individual tests that take longest to execute.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Jest slowest tests
+      command: npx jest --verbose 2>&1 | grep -E '[0-9]+ ms' | sort -t'm' -k1 -nr | head -20
+    - purpose: pytest durations
+      command: pytest --durations=20 2>&1 | grep -E 'seconds|PASSED|FAILED'
+    expected_findings:
+    - Top 10 slowest tests
+    - Distribution of test times
+  - id: '3'
+    name: Analyze parallelization
+    description: |
+      Check if parallel execution is enabled and effective.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Check Jest workers
+      command: cat jest.config.js 2>/dev/null | grep -E 'maxWorkers|parallel'
+    - purpose: Check pytest-xdist
+      command: pip show pytest-xdist 2>/dev/null || echo 'pytest-xdist not installed'
+    expected_findings:
+    - Parallelization configuration
+    - Worker utilization
+  - id: '4'
+    name: Profile test overhead
+    description: |
+      Measure startup time and setup/teardown overhead.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Measure startup
+      command: time (npm test -- --bail 2>&1 | head -10)
+    expected_findings:
+    - Startup time
+    - Setup overhead
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: timing_report
+    format: table
+    sections:
+    - Total Suite Duration
+    - Slowest Tests
+    - Parallelization Status
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Performance Analysis
+    - Optimization Recommendations
+  confidence_guidance:
+    high: Direct timing measurements
+    medium: Sample-based analysis
+    low: Estimated from CI logs
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: test-performance
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: Fast to measure, high impact
+    full:
+      included: true
+      priority: 3
+closeout_checklist:
+- id: testspeed-001
+  item: Total suite time measured
+  level: CRITICAL
+  verification: time npm test 2>&1 | grep real || time pytest 2>&1 | grep real
+  expected: Time documented
+- id: testspeed-002
+  item: Slow tests identified
+  level: BLOCKING
+  verification: manual
+  verification_notes: List tests > 500ms
+  expected: Confirmed by reviewer
+- id: testspeed-003
+  item: Parallelization verified
+  level: WARNING
+  verification: manual
+  verification_notes: Document parallelization configuration
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: DevOps Metrics
+    controls:
+    - Lead Time
+    - CI Duration
+relationships:
+  commonly_combined:
+  - testing-quality-assurance.unit-testing.unit-test-isolation
+  - testing-quality-assurance.unit-testing.unit-test-presence
+  - cicd-pipeline.build-performance.build-time

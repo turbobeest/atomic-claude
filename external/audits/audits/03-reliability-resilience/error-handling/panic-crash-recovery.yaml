@@ -1,0 +1,316 @@
+audit:
+  id: reliability-resilience.error-handling.panic-crash-recovery
+  name: Panic/Crash Recovery Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: error-handling
+  tier: phd
+  estimated_duration: 2-4 hours  # median: 3h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Examines how applications handle unrecoverable errors including panics,
+    segmentation faults, out-of-memory conditions, and unexpected crashes.
+    Reviews panic recovery handlers, crash logging, process supervision,
+    state persistence, and restart strategies. Ensures systems can recover
+    gracefully from crashes without data loss or extended downtime.
+  why_it_matters: |
+    Panics and crashes are inevitable in production systems. Without proper
+    recovery mechanisms, crashes lead to data loss, inconsistent state, and
+    cascading failures. Well-implemented crash recovery minimizes blast radius,
+    preserves debugging information, and enables rapid service restoration.
+  when_to_run:
+  - Before production deployment
+  - After adding critical processing logic
+  - During chaos engineering exercises
+  - After crash-related incidents
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  - type: deployment_config
+    description: Kubernetes, systemd, or other supervisor configuration
+  access_requirements:
+  - Read access to source code
+  - Access to deployment/orchestration configuration
+  - Access to crash logging/reporting systems
+discovery:
+  code_patterns:
+  - pattern: panic|recover|defer
+    type: keyword
+    scope: source
+    purpose: Find Go panic/recover patterns
+  - pattern: process\.exit|os\.Exit|sys\.exit
+    type: regex
+    scope: source
+    purpose: Find explicit process exit calls
+  - pattern: uncaughtException|unhandledRejection
+    type: keyword
+    scope: source
+    purpose: Find Node.js uncaught error handlers
+  - pattern: SIGTERM|SIGKILL|SIGINT
+    type: keyword
+    scope: source
+    purpose: Find signal handling code
+  - pattern: atexit|shutdown_hook|ShutdownHook
+    type: regex
+    scope: source
+    purpose: Find shutdown handlers
+  file_patterns:
+  - glob: '**/*.go'
+    purpose: Go source for panic/recover patterns
+  - glob: '**/Dockerfile'
+    purpose: Container configuration for signal handling
+  - glob: '**/k8s/**/*.yaml'
+    purpose: Kubernetes deployment configurations
+  - glob: '**/*.service'
+    purpose: Systemd service configurations
+knowledge_sources:
+  guides:
+  - id: k8s-termination
+    name: Kubernetes Pod Termination
+    url: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination
+    offline_cache: true
+  - id: go-panic
+    name: Go Panic and Recover
+    url: https://go.dev/blog/defer-panic-and-recover
+    offline_cache: true
+  - id: release-it
+    name: Michael Nygard - Release It!
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+    offline_cache: true
+  learning_resources:
+  - id: release-it
+    title: Release It! - Stability Patterns
+    type: book
+    reference: 'ISBN: 978-1680502398'
+tooling:
+  static_analysis:
+  - tool: errcheck
+    purpose: Find unchecked errors in Go code
+    offline_capable: true
+  - tool: staticcheck
+    purpose: Find panicking code paths
+    offline_capable: true
+  infrastructure_tools:
+  - tool: kubectl
+    purpose: Check pod restart policies
+    command: kubectl get deployment -o jsonpath='{.spec.template.spec.restartPolicy}'
+  scripts:
+  - id: analyze-crash-handling
+    language: bash
+    purpose: Find crash handling patterns
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Go Panic/Recover Usage ==="
+      grep -rn "panic\\|recover()" --include="*.go" . 2>/dev/null | head -30
+      echo ""
+      echo "=== Signal Handlers ==="
+      grep -rn "SIGTERM\\|SIGINT\\|signal\\.Notify\\|os\\.Signal" --include="*.go" --include="*.java" --include="*.py" . 2>/dev/null | head -20
+      echo ""
+      echo "=== Process Exit Calls ==="
+      grep -rn "os\\.Exit\\|process\\.exit\\|sys\\.exit" --include="*.go" --include="*.js" --include="*.py" . 2>/dev/null | head -20
+      echo ""
+      echo "=== Uncaught Exception Handlers ==="
+      grep -rn "uncaughtException\\|unhandledRejection\\|setUncaughtExceptionHandler" --include="*.js" --include="*.ts" --include="*.java" . 2>/dev/null | head -20
+signals:
+  critical:
+  - id: CRASH-CRIT-001
+    signal: Unhandled panics can crash the entire process
+    evidence_pattern: panic\((?!.*recover)
+    explanation: |
+      Panics without recovery handlers will terminate the process,
+      potentially causing data loss and service unavailability.
+    remediation: Add recovery handlers at critical boundaries (HTTP handlers, goroutine roots)
+  - id: CRASH-CRIT-002
+    signal: No graceful shutdown handling for SIGTERM
+    evidence_indicators:
+    - No signal handling code found
+    - Container terminated with SIGKILL after timeout
+    explanation: |
+      Without graceful shutdown, containers are killed forcefully,
+      leading to incomplete requests and data corruption.
+    remediation: Implement SIGTERM handler with graceful connection draining
+  high:
+  - id: CRASH-HIGH-001
+    signal: Crash information not captured for debugging
+    explanation: |
+      Without crash dumps or stack traces, debugging production crashes
+      becomes extremely difficult.
+    remediation: Implement crash reporting with full stack traces and context
+  - id: CRASH-HIGH-002
+    signal: No process supervision or automatic restart
+    explanation: |
+      Without automatic restart, a crashed process stays down until
+      manual intervention.
+    remediation: Configure process supervisor (systemd, Kubernetes, etc.) with restart policy
+  medium:
+  - id: CRASH-MED-001
+    signal: State not persisted before crash
+    remediation: Implement periodic state checkpointing or transaction logging
+  - id: CRASH-MED-002
+    signal: Long graceful shutdown timeout
+    remediation: Ensure shutdown completes within Kubernetes terminationGracePeriodSeconds
+  - id: CRASH-MED-003
+    signal: Panic recovery swallows errors silently
+    evidence_pattern: recover.*nil|recover()\s*$
+    remediation: Log recovered panics with full context before continuing
+  low:
+  - id: CRASH-LOW-001
+    signal: Inconsistent exit codes for different failure modes
+  positive:
+  - id: CRASH-POS-001
+    signal: Comprehensive panic recovery with logging
+  - id: CRASH-POS-002
+    signal: Graceful shutdown with connection draining
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify panic/crash points
+    description: |
+      Search for explicit panic calls, potential crash sources, and
+      places where unrecoverable errors can occur.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find panic/crash patterns
+      command: grep -rn 'panic\|fatal\|os\.Exit\|process\.exit' --include='*.go' --include='*.java' --include='*.py'
+        --include='*.js' . 2>/dev/null | head -40
+    expected_findings:
+    - Panic/crash locations
+    - Exit call patterns
+  - id: '2'
+    name: Analyze recovery handlers
+    description: |
+      Review panic recovery and exception handling at critical boundaries
+      like HTTP handlers and goroutine entry points.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find recovery handlers
+      command: grep -rn -B5 -A10 'recover()' --include='*.go' . 2>/dev/null | head -60
+    expected_findings:
+    - Recovery handler coverage
+    - Recovery handler quality
+  - id: '3'
+    name: Check graceful shutdown
+    description: |
+      Verify SIGTERM handling and graceful shutdown implementation
+      including connection draining and cleanup.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find signal handlers
+      command: grep -rn 'signal\|SIGTERM\|shutdown\|graceful' --include='*.go' --include='*.java' --include='*.py'
+        . 2>/dev/null | head -40
+    expected_findings:
+    - Signal handling implementation
+    - Shutdown procedure
+  - id: '4'
+    name: Review process supervision
+    description: |
+      Check deployment configuration for restart policies and
+      supervision settings.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find restart policies
+      command: grep -rn 'restart\|Restart' --include='*.yaml' --include='*.yml' --include='*.service'
+        . 2>/dev/null | head -20
+    expected_findings:
+    - Restart policy configuration
+    - Supervision settings
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Crash Risk Analysis
+    - Recovery Mechanism Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Direct evidence of crash handling patterns
+    medium: Pattern suggests potential gaps
+    low: Requires chaos testing to confirm behavior
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: k8s-termination
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires thorough code analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: panic-crash-recovery-001
+  item: Panic recovery handlers at HTTP/gRPC boundaries
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify recovery middleware exists for all API handlers
+  expected: Confirmed by reviewer
+- id: panic-crash-recovery-002
+  item: SIGTERM handler implements graceful shutdown
+  level: CRITICAL
+  verification: grep -rn 'SIGTERM\|signal' --include='*.go' --include='*.java' --include='*.py' . 2>/dev/null
+    | wc -l | xargs -I{} sh -c 'if [ {} -gt 0 ]; then echo PASS; else echo FAIL; fi'
+  expected: PASS
+- id: panic-crash-recovery-003
+  item: Crash information logged for debugging
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify panics/crashes are logged with stack traces
+  expected: Confirmed by reviewer
+- id: panic-crash-recovery-004
+  item: Kubernetes/systemd restart policy configured
+  level: BLOCKING
+  verification: grep -rn 'restartPolicy\|Restart=' --include='*.yaml' --include='*.service' . 2>/dev/null
+    | wc -l | xargs -I{} sh -c 'if [ {} -gt 0 ]; then echo PASS; else echo FAIL; fi'
+  expected: PASS
+- id: panic-crash-recovery-005
+  item: Graceful shutdown completes within timeout
+  level: WARNING
+  verification: manual
+  verification_notes: Verify shutdown completes before terminationGracePeriodSeconds
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SRE Best Practices
+    controls:
+    - Graceful Degradation
+    - Crash Recovery
+relationships:
+  commonly_combined:
+  - reliability-resilience.error-handling.exception-handling
+  - reliability-resilience.error-handling.error-logging

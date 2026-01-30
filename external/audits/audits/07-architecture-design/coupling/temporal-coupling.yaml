@@ -1,0 +1,395 @@
+# ============================================================
+# AUDIT: Temporal Coupling Detection
+# ============================================================
+# Identifies hidden dependencies where components must be called
+# in specific sequences to function correctly.
+# ============================================================
+
+audit:
+  id: "architecture-design.coupling.temporal-coupling"
+  name: "Temporal Coupling Detection"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "architecture-design"
+  category_number: 7
+  subcategory: "coupling"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit detects temporal coupling - hidden dependencies where
+    methods or components must be called in a specific order to work
+    correctly. It identifies patterns like required initialization
+    sequences, state-dependent method calls, and two-phase construction
+    that create fragile, error-prone code.
+
+  why_it_matters: |
+    Temporal coupling creates:
+    - Hidden preconditions that developers must remember
+    - Runtime errors when calling order is violated
+    - Difficult debugging when state is incorrect
+    - Parallel execution hazards
+    - Testing complexity due to setup requirements
+    The coupling is invisible in the type system, making it dangerous.
+
+  when_to_run:
+    - "During code review of new APIs"
+    - "When investigating intermittent bugs"
+    - "Before parallelizing existing code"
+    - "When onboarding developers to complex codebases"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Complete source code"
+    - type: "test_suite"
+      description: "Tests may reveal required calling sequences"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Access to documentation describing API usage"
+
+discovery:
+  code_patterns:
+    - pattern: "init(ialize)?\\(|setup\\(|configure\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Detect initialization methods that must be called first"
+
+    - pattern: "must.*call.*before|call.*first|requires.*initialization"
+      type: "regex"
+      scope: "source"
+      purpose: "Find comments warning about call order"
+
+    - pattern: "if\\s*\\(!?\\s*(initialized|configured|ready|setup)"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect state checks for initialization"
+
+    - pattern: "throw.*NotInitialized|IllegalState"
+      type: "regex"
+      scope: "source"
+      purpose: "Find runtime checks for temporal violations"
+
+    - pattern: "@PostConstruct|@BeforeEach|@Before"
+      type: "regex"
+      scope: "source"
+      purpose: "Framework-managed initialization sequences"
+
+  file_patterns:
+    - glob: "**/*Builder*.{java,ts,py}"
+      purpose: "Builders often have temporal coupling in build sequence"
+    - glob: "**/*Factory*.{java,ts,py}"
+      purpose: "Factories may require ordered configuration"
+    - glob: "**/*Config*.{java,ts,py}"
+      purpose: "Configuration often has order dependencies"
+
+knowledge_sources:
+  specifications:
+    - id: "temporal-coupling-patterns"
+      name: "Temporal Coupling Patterns - Martin Fowler"
+      url: "https://martinfowler.com/ieeeSoftware/temporalCoupling.pdf"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "refactoring-catalog"
+      name: "Refactoring Catalog"
+      url: "https://refactoring.com/catalog/"
+      offline_cache: true
+
+    - id: "ddd-evans"
+      name: "Domain-Driven Design Reference"
+      url: "https://www.domainlanguage.com/ddd/reference/"
+      offline_cache: true
+
+    - id: "clean-architecture"
+      name: "Clean Architecture"
+      url: "https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html"
+      offline_cache: true
+
+    - id: "pragmatic-programmer"
+      name: "Pragmatic Programmer Tips"
+      url: "https://pragprog.com/tips/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "clean-code"
+      title: "Clean Code"
+      type: "book"
+      reference: "Robert C. Martin - Chapter on Function Arguments"
+
+    - id: "pragmatic-programmer"
+      title: "The Pragmatic Programmer"
+      type: "book"
+      reference: "Hunt & Thomas - Section on Temporal Coupling"
+
+tooling:
+  static_analysis:
+    - tool: "SonarQube"
+      purpose: "Detect initialization patterns and state checks"
+      offline_capable: false
+
+    - tool: "IntelliJ IDEA Inspections"
+      purpose: "Detect nullable fields and initialization issues"
+      offline_capable: true
+
+    - tool: "ErrorProne"
+      purpose: "Detect two-phase initialization patterns in Java"
+      offline_capable: true
+
+  scripts:
+    - id: "temporal-coupling-detector"
+      language: "bash"
+      purpose: "Find temporal coupling indicators"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Initialization Methods ==="
+        grep -rn "def init\|void init\|initialize()" --include="*.java" --include="*.py" --include="*.ts"
+
+        echo "=== State Check Patterns ==="
+        grep -rn "if.*initialized\|if.*configured\|isReady()" --include="*.java" --include="*.py" --include="*.ts"
+
+        echo "=== Warning Comments ==="
+        grep -rn "must.*call\|call.*before\|call.*first" --include="*.java" --include="*.py" --include="*.ts"
+
+signals:
+  critical:
+    - id: "TEMPORAL-CRIT-001"
+      signal: "Two-phase construction requiring explicit initialization"
+      evidence_pattern: "Constructor creates incomplete object; init() must be called"
+      explanation: |
+        Objects that require initialization after construction are error-prone.
+        Clients can easily forget to call init(), leading to NullPointerExceptions
+        or undefined behavior when using the incompletely constructed object.
+      remediation: "Move initialization into constructor or use factory method"
+
+    - id: "TEMPORAL-CRIT-002"
+      signal: "Method sequence coupling with no compile-time enforcement"
+      evidence_pattern: "Method A must be called before Method B, documented only in comments"
+      explanation: |
+        Relying on documentation for call order is fragile. New developers
+        or refactoring can easily violate the sequence, causing runtime failures.
+      remediation: "Use builder pattern, state machine, or method chaining to enforce order"
+
+  high:
+    - id: "TEMPORAL-HIGH-001"
+      signal: "Setter injection creating temporal coupling"
+      evidence_pattern: "Class has setters that must be called before use"
+      explanation: |
+        Setter-based dependency injection allows partially configured objects
+        to exist, violating the principle of complete construction.
+      remediation: "Switch to constructor injection for required dependencies"
+
+    - id: "TEMPORAL-HIGH-002"
+      signal: "Lifecycle methods without framework enforcement"
+      evidence_pattern: "start()/stop() or open()/close() pairs without try-with-resources"
+      explanation: |
+        Lifecycle methods create temporal coupling between start and stop.
+        Manual management often leads to resource leaks.
+      remediation: "Implement AutoCloseable/Closeable; use try-with-resources"
+
+  medium:
+    - id: "TEMPORAL-MED-001"
+      signal: "State-dependent behavior with implicit preconditions"
+      evidence_pattern: "Method behavior changes based on internal state"
+      remediation: "Make state explicit in API; consider state pattern"
+
+    - id: "TEMPORAL-MED-002"
+      signal: "Builder with non-obvious required fields"
+      evidence_pattern: "Builder.build() throws if certain setters not called"
+      remediation: "Use required constructor parameters or compile-time checks"
+
+  low:
+    - id: "TEMPORAL-LOW-001"
+      signal: "Configuration object with many optional fields"
+      remediation: "Consider providing sensible defaults"
+
+  positive:
+    - id: "TEMPORAL-POS-001"
+      signal: "Immutable objects with complete construction"
+    - id: "TEMPORAL-POS-002"
+      signal: "Fluent builders with compile-time required field enforcement"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify initialization patterns"
+      description: |
+        Search for explicit initialization methods and two-phase
+        construction patterns.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find init/setup methods"
+          command: "grep -rn 'void init\\|def init\\|initialize(' --include='*.java' --include='*.py' --include='*.ts' | head -30"
+        - purpose: "Find state flags"
+          command: "grep -rn 'isInitialized\\|_initialized\\|initialized =' --include='*.java' --include='*.py' --include='*.ts' | head -30"
+      expected_findings:
+        - "Classes requiring explicit initialization"
+        - "Initialization state tracking patterns"
+
+    - id: "2"
+      name: "Detect sequence-dependent APIs"
+      description: |
+        Find methods that must be called in specific order,
+        indicated by comments or runtime checks.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find order-dependent comments"
+          command: "grep -rn -B2 -A2 'must.*call\\|before calling\\|after calling' --include='*.java' --include='*.py' --include='*.ts' | head -40"
+        - purpose: "Find IllegalStateException throws"
+          command: "grep -rn 'IllegalStateException\\|NotInitializedException\\|InvalidStateError' --include='*.java' --include='*.py' --include='*.ts' | head -20"
+      expected_findings:
+        - "Documented sequence requirements"
+        - "Runtime enforcement of sequence"
+
+    - id: "3"
+      name: "Analyze setter injection patterns"
+      description: |
+        Find classes using setter injection for required dependencies,
+        creating temporal coupling.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find required setter patterns"
+          command: "grep -rn '@Required\\|@Autowired.*void set' --include='*.java' | head -20"
+        - purpose: "Find late-bound dependencies"
+          command: "grep -rn 'set[A-Z].*=\\|this\\.[a-z]* = ' --include='*.java' --include='*.ts' | head -30"
+      expected_findings:
+        - "Setter-injected dependencies"
+        - "Mutable configuration patterns"
+
+    - id: "4"
+      name: "Review lifecycle management"
+      description: |
+        Check for proper lifecycle management and resource cleanup
+        patterns.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find lifecycle methods"
+          command: "grep -rn 'void start\\|void stop\\|void open\\|void close\\|def start\\|def close' --include='*.java' --include='*.py' | head -30"
+        - purpose: "Check for AutoCloseable"
+          command: "grep -rn 'implements.*Closeable\\|implements.*AutoCloseable' --include='*.java' | head -20"
+      expected_findings:
+        - "Lifecycle method pairs"
+        - "Resource management patterns"
+
+    - id: "5"
+      name: "Evaluate builder patterns"
+      description: |
+        Assess builders for proper enforcement of required fields
+        and construction order.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find builder classes"
+          command: "find . -name '*Builder*.java' -o -name '*Builder*.ts' | head -20"
+        - purpose: "Check build() validation"
+          command: "grep -rn 'def build\\|build()' -A5 --include='*.java' --include='*.py' --include='*.ts' | grep -E 'throw|require|assert' | head -20"
+      expected_findings:
+        - "Builder validation logic"
+        - "Required field enforcement"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Temporal Coupling Patterns Found"
+        - "Risk Assessment"
+        - "Refactoring Recommendations"
+
+  confidence_guidance:
+    high: "Pattern clearly visible in code with explicit state checks"
+    medium: "Pattern inferred from naming and structure"
+    low: "Temporal coupling suspected but not confirmed"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "temporal-coupling-patterns"
+        priority: "required"
+      - source_id: "refactoring-catalog"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed code analysis"
+    full:
+      included: true
+      priority: 2
+    architecture:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "temporal-coupling-001"
+    item: "Two-phase construction patterns identified and documented"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "All classes requiring init() calls are listed"
+    expected: "Confirmed by reviewer"
+
+  - id: "temporal-coupling-002"
+    item: "No undocumented method sequence requirements"
+    level: "CRITICAL"
+    verification: "grep -rn 'IllegalStateException' --include='*.java' | grep -v test | wc -l"
+    expected: "Count documented and justified"
+
+  - id: "temporal-coupling-003"
+    item: "Lifecycle methods properly paired and documented"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "start/stop, open/close pairs have clear contracts"
+    expected: "Confirmed by reviewer"
+
+  - id: "temporal-coupling-004"
+    item: "Builder patterns enforce required fields"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Builders fail fast on missing required fields"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Reliability", "Usability"]
+
+relationships:
+  commonly_combined:
+    - "architecture-design.coupling.tight-coupling-detection"
+    - "architecture-design.design-principles.single-responsibility"
+    - "architecture-design.cohesion.class-cohesion"

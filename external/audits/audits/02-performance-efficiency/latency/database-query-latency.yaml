@@ -1,0 +1,326 @@
+# ============================================================
+# DATABASE QUERY LATENCY AUDIT
+# ============================================================
+# Analyzes query execution times and database performance.
+
+audit:
+  id: "performance-efficiency.latency.database-query-latency"
+  name: "Database Query Latency Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "latency"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "metrics"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit measures database query execution times, identifies slow
+    queries, and analyzes query patterns that contribute to latency.
+    It examines query logs, slow query logs, execution plans, and
+    database performance metrics to identify optimization opportunities
+    and anti-patterns like N+1 queries or missing indexes.
+
+  why_it_matters: |
+    Database queries are often the primary bottleneck in application
+    performance. Slow queries can lock tables, exhaust connection pools,
+    and cause cascading failures across the application. According to
+    industry studies, 80% of application latency issues trace back to
+    database performance problems.
+
+  when_to_run:
+    - "After schema changes or new query patterns"
+    - "When database CPU or I/O utilization spikes"
+    - "During performance degradation investigations"
+    - "As part of database scaling decisions"
+
+prerequisites:
+  required_artifacts:
+    - type: "database_access"
+      description: "Read access to database for EXPLAIN queries"
+    - type: "slow_query_log"
+      description: "Access to slow query logs or query insights"
+    - type: "apm_system"
+      description: "APM with database query tracing (optional but recommended)"
+
+  access_requirements:
+    - "Database read access with EXPLAIN privileges"
+    - "Access to slow query logs"
+    - "Access to database performance dashboards"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus"
+      query: "histogram_quantile(0.99, rate(db_query_duration_seconds_bucket[5m]))"
+      purpose: "Identify P99 query latency"
+      threshold: "< 100ms for OLTP workloads"
+
+    - system: "MySQL"
+      query: "SELECT * FROM mysql.slow_log ORDER BY query_time DESC LIMIT 20"
+      purpose: "Find slowest queries"
+      threshold: "No queries > 1s for user-facing operations"
+
+    - system: "PostgreSQL"
+      query: |
+        SELECT query, calls, mean_time, max_time
+        FROM pg_stat_statements
+        ORDER BY mean_time DESC LIMIT 20
+      purpose: "Identify queries with highest mean execution time"
+      threshold: "mean_time < 100ms"
+
+  code_patterns:
+    - pattern: "SELECT.*FROM.*WHERE(?!.*=)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find potential full table scans"
+
+    - pattern: "for.*in.*\\n.*\\.query\\(|for.*in.*\\n.*\\.execute\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Detect N+1 query patterns"
+
+knowledge_sources:
+  guides:
+    - id: "use-the-index-luke"
+      name: "Use The Index, Luke - SQL Indexing and Tuning"
+      url: "https://use-the-index-luke.com/"
+      offline_cache: true
+
+    - id: "percona-query-optimization"
+      name: "Percona Query Optimization Guide"
+      url: "https://www.percona.com/blog/query-optimization/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "high-performance-mysql"
+      title: "High Performance MySQL"
+      type: "book"
+      reference: "O'Reilly, ISBN 978-1492080510"
+
+tooling:
+  infrastructure_tools:
+    - tool: "EXPLAIN"
+      purpose: "Analyze query execution plan"
+      command: "EXPLAIN ANALYZE SELECT * FROM users WHERE email = 'test@example.com'"
+
+    - tool: "pt-query-digest"
+      purpose: "Analyze slow query log"
+      command: "pt-query-digest /var/log/mysql/slow.log --limit 20"
+
+    - tool: "pgbadger"
+      purpose: "PostgreSQL log analyzer"
+      command: "pgbadger /var/log/postgresql/postgresql.log -o report.html"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        rate(mysql_global_status_slow_queries[5m])
+      purpose: "Track slow query rate over time"
+
+    - system: "CloudWatch"
+      query: "SELECT AVG(ReadLatency) FROM AWS/RDS WHERE DBInstanceIdentifier='prod-db'"
+      purpose: "Monitor RDS read latency"
+
+signals:
+  critical:
+    - id: "DB-CRIT-001"
+      signal: "Queries taking longer than 10 seconds in production"
+      evidence_threshold: "max_query_time > 10s"
+      explanation: |
+        Queries this slow will cause request timeouts, connection pool
+        exhaustion, and likely indicate missing indexes or full table
+        scans on large tables. This is an immediate production risk.
+      remediation: "EXPLAIN ANALYZE the query; add appropriate indexes; consider query rewrite"
+
+    - id: "DB-CRIT-002"
+      signal: "N+1 query pattern detected in hot code path"
+      evidence_pattern: "for.*query|for.*execute.*in loop"
+      explanation: |
+        N+1 queries multiply database round trips, causing latency that
+        scales linearly with data size. A page showing 100 items could
+        make 101 database calls instead of 1-2.
+      remediation: "Implement eager loading/JOINs; use batch queries"
+
+  high:
+    - id: "DB-HIGH-001"
+      signal: "Average query time exceeds 50ms"
+      evidence_threshold: "avg_query_time > 50ms"
+      explanation: |
+        For OLTP workloads, average query times above 50ms indicate
+        systemic performance issues that will compound under load.
+      remediation: "Profile and optimize top queries by total time; add connection pooling"
+
+    - id: "DB-HIGH-002"
+      signal: "Slow query log shows full table scans on large tables"
+      evidence_indicators:
+        - "EXPLAIN shows 'type: ALL'"
+        - "Rows examined >> rows returned"
+      explanation: |
+        Full table scans on tables with millions of rows cause
+        unpredictable latency and can lock resources for extended periods.
+      remediation: "Add appropriate indexes for query WHERE clauses"
+
+  medium:
+    - id: "DB-MED-001"
+      signal: "Slow query log not enabled"
+      remediation: "Enable slow query logging with threshold of 100ms"
+
+    - id: "DB-MED-002"
+      signal: "Query metrics not labeled by query type/table"
+      remediation: "Add query classification to metrics for better analysis"
+
+  low:
+    - id: "DB-LOW-001"
+      signal: "No query performance dashboard configured"
+
+  positive:
+    - id: "DB-POS-001"
+      signal: "P99 query latency consistently under 50ms"
+    - id: "DB-POS-002"
+      signal: "Automated slow query alerting configured"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Review Slow Query Logs"
+      description: |
+        Analyze slow query logs to identify the most problematic queries
+        by frequency and total execution time.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "View recent slow queries (MySQL)"
+          command: "mysql -e 'SELECT * FROM mysql.slow_log ORDER BY query_time DESC LIMIT 20'"
+        - purpose: "Analyze with pt-query-digest"
+          command: "pt-query-digest /var/log/mysql/slow.log --limit 10"
+      expected_findings:
+        - "Top 10 slow queries by total time"
+        - "Query patterns causing issues"
+
+    - id: "2"
+      name: "Analyze Query Execution Plans"
+      description: |
+        Run EXPLAIN ANALYZE on identified slow queries to understand
+        execution plans and identify optimization opportunities.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Example EXPLAIN ANALYZE"
+          command: "mysql -e 'EXPLAIN ANALYZE SELECT * FROM orders WHERE user_id = 123'"
+      expected_findings:
+        - "Queries using full table scans"
+        - "Missing index opportunities"
+        - "Join order issues"
+
+    - id: "3"
+      name: "Check for N+1 Patterns"
+      description: |
+        Search codebase for common N+1 query patterns that cause
+        latency proportional to data size.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find loop-based queries in Python"
+          command: "grep -rn 'for.*in.*:' --include='*.py' -A 3 . | grep -E '\\.query\\(|\\.execute\\('"
+      expected_findings:
+        - "Code locations with potential N+1 queries"
+
+    - id: "4"
+      name: "Review Database Metrics"
+      description: |
+        Analyze database performance metrics for trends and anomalies
+        in query latency.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Query Prometheus for database metrics"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=histogram_quantile(0.99,rate(db_query_duration_seconds_bucket[1h]))'
+      expected_findings:
+        - "Query latency trends"
+        - "Peak latency periods"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Slow Query Analysis"
+        - "Index Recommendations"
+        - "N+1 Query Findings"
+        - "Performance Improvement Plan"
+
+  confidence_guidance:
+    high: "EXPLAIN ANALYZE results from production-like data"
+    medium: "Analysis based on slow query logs alone"
+    low: "Code pattern analysis without runtime verification"
+
+offline:
+  capability: "partial"
+  cache_manifest:
+    knowledge:
+      - source_id: "use-the-index-luke"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires database access and query analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "db-query-001"
+    item: "Slow query logging is enabled"
+    level: "CRITICAL"
+    verification: "mysql -e \"SHOW VARIABLES LIKE 'slow_query_log'\" | grep -q ON && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "db-query-002"
+    item: "No queries exceed 5 seconds in slow query log"
+    level: "BLOCKING"
+    verification: "mysql -e 'SELECT COUNT(*) FROM mysql.slow_log WHERE query_time > 5' | tail -1"
+    threshold: "0"
+
+  - id: "db-query-003"
+    item: "P99 query latency under 100ms"
+    level: "WARNING"
+    verification: |
+      curl -s 'http://prometheus:9090/api/v1/query?query=histogram_quantile(0.99,rate(db_query_duration_seconds_bucket[5m]))' | \
+        jq '.data.result[0].value[1] | tonumber < 0.1'
+    threshold: "< 0.1"
+
+governance:
+  applicable_to:
+    archetypes: ["database-backed", "data-intensive"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.latency.end-to-end-latency"
+    - "performance-efficiency.database-performance.query-optimization"

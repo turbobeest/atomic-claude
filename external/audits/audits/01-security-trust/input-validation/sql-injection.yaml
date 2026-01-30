@@ -1,0 +1,478 @@
+audit:
+  id: security-trust.input-validation.sql-injection
+  name: SQL Injection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: input-validation
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  - quick
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    This audit examines the codebase for SQL injection vulnerabilities - instances
+    where user-controlled input is incorporated into SQL queries without proper
+    sanitization or parameterization. It identifies dynamic query construction,
+    string concatenation in SQL statements, and missing prepared statement usage.
+  why_it_matters: |
+    SQL injection (CWE-89) remains one of the most critical web vulnerabilities.
+    OWASP ranks Injection as #5 in the 2025 Top 10, with 100% of applications
+    tested for some form of injection. SQL injection can lead to unauthorized
+    data access, data modification, data deletion, authentication bypass, and
+    in some cases, complete server compromise. Over 14,000 CVEs are attributed
+    to SQL injection, demonstrating its prevalence and impact.
+  when_to_run:
+  - Initial security audit of any database-connected application
+  - Code review for database-related changes
+  - Before production deployment
+  - After adding new database queries
+  - When integrating new data sources
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Source code including all database access layers
+  - type: configuration
+    description: Database configuration and ORM setup files
+  access_requirements:
+  - Read access to source code repositories
+  - Access to database schema documentation
+discovery:
+knowledge_sources:
+  specifications:
+  - id: cwe-89
+    name: 'CWE-89: Improper Neutralization of Special Elements used in an SQL Command'
+    url: https://cwe.mitre.org/data/definitions/89.html
+    offline_cache: true
+    priority: required
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-sqli-prevention
+    name: OWASP SQL Injection Prevention Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-query-parameterization
+    name: OWASP Query Parameterization Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-sqli-attack
+    name: OWASP SQL Injection Attack
+    url: https://owasp.org/www-community/attacks/SQL_Injection
+    offline_cache: true
+  - id: owasp-top10-injection
+    name: OWASP Top 10:2025 - A05 Injection
+    url: https://owasp.org/Top10/2025/A05_2025-Injection/
+    offline_cache: true
+  - id: openssf-python-cwe89
+    name: 'OpenSSF Secure Coding Guide for Python: CWE-89'
+    url: https://best.openssf.org/Secure-Coding-Guide-for-Python/CWE-707/CWE-89/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect SQL injection patterns across languages
+    offline_capable: true
+  - tool: bandit
+    purpose: Python security linting including SQL injection detection
+    offline_capable: true
+  - tool: sqlmap
+    purpose: Dynamic SQL injection testing
+    offline_capable: false
+  - tool: sonarqube
+    purpose: Code quality and security analysis with SQL injection rules
+    offline_capable: true
+  - tool: eslint-plugin-security
+    purpose: JavaScript SQL injection detection
+    offline_capable: true
+  scripts:
+  - id: detect-sql-injection
+    language: bash
+    purpose: Detect potential SQL injection vulnerabilities
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== SQL Injection Detection ==="
+
+      echo "--- Python f-string/format SQL ---"
+      grep -rn --include="*.py" -E "(f[\"'].*SELECT|f[\"'].*INSERT|\\.format\\(.*SELECT)" . 2>/dev/null | head -30 || echo "None found"
+
+      echo "--- Python concatenation in SQL ---"
+      grep -rn --include="*.py" -E "(execute|cursor).*\\+" . 2>/dev/null | grep -i "select\|insert\|update\|delete" | head -20 || echo "None found"
+
+      echo "--- JavaScript template SQL ---"
+      grep -rn --include="*.js" --include="*.ts" -E "\`(SELECT|INSERT|UPDATE|DELETE).*\\$\\{" . 2>/dev/null | head -20 || echo "None found"
+
+      echo "--- Java Statement (non-prepared) ---"
+      grep -rn --include="*.java" -E "createStatement\\(\\)|executeQuery\\(.*\\+" . 2>/dev/null | head -20 || echo "None found"
+
+      echo "--- PHP dynamic queries ---"
+      grep -rn --include="*.php" -E "(mysql_query|mysqli_query).*\\$" . 2>/dev/null | head -20 || echo "None found"
+
+      echo "--- Raw SQL methods ---"
+      grep -rn --include="*.py" --include="*.js" --include="*.rb" -E "(\\.raw\\(|rawQuery|raw_sql)" . 2>/dev/null | head -20 || echo "None found"
+signals:
+  critical:
+  - id: SQLI-CRIT-001
+    signal: User input directly concatenated into SQL query
+    cwe: CWE-89
+    evidence_pattern: (request|user|input|param).*\+.*(SELECT|INSERT|UPDATE|DELETE)|f["'].*(SELECT|INSERT|UPDATE|DELETE).*\{.*request
+    explanation: |
+      Direct concatenation of user input into SQL queries is the classic
+      SQL injection vulnerability. An attacker can inject malicious SQL
+      to extract data, modify records, or even execute system commands.
+      This is exploitable with simple payloads like `' OR '1'='1`.
+    remediation: |
+      Use parameterized queries (prepared statements) instead of string
+      concatenation. All major database libraries support this:
+      - Python: cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+      - Java: PreparedStatement with setString/setInt
+      - Node.js: connection.query("SELECT * FROM users WHERE id = ?", [userId])
+  - id: SQLI-CRIT-002
+    signal: Dynamic SQL with string formatting
+    cwe: CWE-89
+    evidence_pattern: \.format\(.*SELECT|%s.*%.*SELECT|f["']SELECT.*\{|\`SELECT.*\$\{
+    explanation: |
+      Using string formatting (format(), f-strings, template literals)
+      to build SQL queries is equivalent to concatenation and equally
+      vulnerable to injection. The formatted values are not escaped.
+    remediation: |
+      Replace string formatting with parameterized queries:
+      - BAD: query = f"SELECT * FROM users WHERE name = '{name}'"
+      - GOOD: cursor.execute("SELECT * FROM users WHERE name = ?", (name,))
+  - id: SQLI-CRIT-003
+    signal: executescript() with user input
+    cwe: CWE-89
+    evidence_pattern: executescript\s*\(.*\+|executescript.*format|executescript.*\$
+    explanation: |
+      Python's SQLite executescript() executes multiple SQL statements,
+      making it extremely dangerous with user input. Attackers can inject
+      additional statements like DROP TABLE or data exfiltration queries.
+    remediation: |
+      Never use executescript() with any user-influenced data. Use
+      execute() with parameterized queries instead, which is limited
+      to single statements.
+  - id: SQLI-CRIT-004
+    signal: Java Statement used instead of PreparedStatement
+    cwe: CWE-89
+    evidence_pattern: createStatement\(\).*execute|Statement.*\+.*execute
+    explanation: |
+      Java's Statement interface does not support parameterization.
+      Any SQL built with Statement and string concatenation is vulnerable
+      to injection. PreparedStatement must be used instead.
+    remediation: |
+      Replace Statement with PreparedStatement:
+      - BAD: stmt.executeQuery("SELECT * FROM users WHERE id = " + id);
+      - GOOD: PreparedStatement ps = conn.prepareStatement("SELECT * FROM users WHERE id = ?");
+              ps.setInt(1, id);
+  high:
+  - id: SQLI-HIGH-001
+    signal: ORM raw query with user input
+    cwe: CWE-89
+    evidence_pattern: (\.raw\(|\.extra\(|rawQuery|RawSQL|Sequelize\.literal|knex\.raw).*request|user
+    explanation: |
+      ORM raw query methods bypass the protection that ORMs normally
+      provide. If user input reaches these methods, SQL injection
+      is possible even when using an ORM.
+    remediation: |
+      When raw queries are necessary, use the ORM's parameterization:
+      - Django: Model.objects.raw("SELECT * FROM t WHERE id = %s", [user_id])
+      - SQLAlchemy: text("SELECT * FROM t WHERE id = :id").bindparams(id=user_id)
+      - Sequelize: Use replacements with ?
+  - id: SQLI-HIGH-002
+    signal: Dynamic table or column names from user input
+    cwe: CWE-89
+    evidence_pattern: (table|column|field).*request.*SELECT|SELECT.*\{.*table
+    explanation: |
+      Parameterized queries cannot protect identifiers (table/column names).
+      If these are derived from user input, whitelist validation is required.
+    remediation: |
+      Validate table/column names against an allowlist of permitted values.
+      Never directly use user input for SQL identifiers:
+      allowed_tables = {"users", "products", "orders"}
+      if table_name not in allowed_tables:
+          raise ValueError("Invalid table")
+  - id: SQLI-HIGH-003
+    signal: LIKE query with unescaped wildcards
+    cwe: CWE-89
+    evidence_pattern: LIKE.*%.*request|LIKE.*\+.*%|LIKE.*\{.*%
+    explanation: |
+      LIKE queries with user input can be vulnerable if wildcards (%, _)
+      are not properly escaped. While less severe than full injection,
+      attackers can manipulate search patterns or cause DoS.
+    remediation: |
+      Escape LIKE wildcards in user input:
+      - search_term = search_term.replace("%", "\\%").replace("_", "\\_")
+      Then use parameterized query with the escaped value.
+  medium:
+  - id: SQLI-MED-001
+    signal: SQL query string built across multiple lines
+    cwe: CWE-89
+    evidence_pattern: query\s*\+=|sql\s*\+=|query\s*=\s*query\s*\+
+    explanation: |
+      Building SQL queries by appending strings across multiple statements
+      often indicates dynamic construction that may include user input.
+      This pattern is difficult to audit and prone to injection.
+    remediation: |
+      Use query builders or ORMs that handle parameterization automatically.
+      If building complex queries, use parameterized query construction.
+  - id: SQLI-MED-002
+    signal: SQL error messages exposed to users
+    cwe: CWE-209
+    evidence_pattern: (SQLException|QueryException|DatabaseError).*response|render.*sql.*error
+    explanation: |
+      Exposing SQL error messages reveals database structure and can
+      aid attackers in crafting injection payloads. Error-based SQL
+      injection relies on these messages.
+    remediation: |
+      Never expose raw SQL errors to users. Log detailed errors
+      server-side and return generic messages to clients.
+  - id: SQLI-MED-003
+    signal: No parameterized query in database module
+    evidence_pattern: execute\s*\(["'][^?%:][^"']*["']\s*\)
+    explanation: |
+      Execute calls with static strings (no parameters) may indicate
+      that parameterization is not being used consistently.
+    remediation: |
+      Ensure all queries that could ever include dynamic data use
+      parameterization, even if currently static.
+  low:
+  - id: SQLI-LOW-001
+    signal: SQL comments in code
+    evidence_pattern: --.*SELECT|/\*.*\*/.*SELECT
+    explanation: |
+      SQL comments in application code may indicate debugging of
+      injection attempts or incomplete query construction.
+    remediation: |
+      Remove SQL comments from production code. Ensure queries
+      are properly structured without comment workarounds.
+  positive:
+  - id: SQLI-POS-001
+    signal: Parameterized queries consistently used
+    evidence_pattern: execute\s*\([^,]+,\s*\[|execute\s*\([^,]+,\s*\(|prepareStatement
+    explanation: |
+      The codebase uses parameterized queries, the primary defense
+      against SQL injection.
+  - id: SQLI-POS-002
+    signal: ORM used for database access
+    evidence_pattern: (Django|SQLAlchemy|Sequelize|Prisma|ActiveRecord|GORM).*Model|objects\.
+    explanation: |
+      ORMs generally protect against SQL injection when used correctly
+      by parameterizing queries automatically.
+  - id: SQLI-POS-003
+    signal: Input validation before database queries
+    evidence_pattern: (validate|sanitize|escape).*before.*query|(validate|sanitize).*input.*db
+    explanation: |
+      Input validation provides defense-in-depth alongside
+      parameterized queries.
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify all database access points
+    description: |
+      Find all locations where the application interacts with databases,
+      including direct queries, ORM usage, and stored procedure calls.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find database query code
+      command: |
+        grep -rn --include="*.py" --include="*.js" --include="*.java" --include="*.php" \
+          -E "(execute|query|SELECT|INSERT|UPDATE|DELETE|cursor)" . 2>/dev/null | head -100
+    - purpose: Find ORM usage
+      command: |
+        grep -rn --include="*.py" --include="*.js" --include="*.java" \
+          -E "(Model|Repository|objects\.|findBy|findAll)" . 2>/dev/null | head -50
+    expected_findings:
+    - Inventory of all database access points
+    - Classification by access method (raw SQL, ORM, etc.)
+  - id: '2'
+    name: Detect string concatenation in SQL
+    description: |
+      Search for patterns where SQL queries are constructed using
+      string concatenation or formatting.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find SQL concatenation patterns
+      command: |
+        grep -rn --include="*.py" --include="*.js" --include="*.java" --include="*.php" \
+          -E "(SELECT|INSERT|UPDATE|DELETE).*\\+|\\+.*(SELECT|INSERT|UPDATE|DELETE)" . 2>/dev/null | head -50
+    - purpose: Find string formatting in SQL
+      command: |
+        grep -rn --include="*.py" -E "f[\"'].*(SELECT|INSERT)|\.format.*SELECT" . 2>/dev/null | head -30
+    - purpose: Find template literals in SQL
+      command: |
+        grep -rn --include="*.js" --include="*.ts" -E "\`(SELECT|INSERT|UPDATE|DELETE).*\\$\\{" . 2>/dev/null | head -30
+    expected_findings:
+    - List of potential SQL injection vulnerabilities
+    - Context for each finding (user input involved?)
+  - id: '3'
+    name: Verify parameterized query usage
+    description: |
+      Confirm that queries use parameterization correctly.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find parameterized Python queries
+      command: |
+        grep -rn --include="*.py" "execute.*,.*\\[\\|execute.*,.*\\(" . 2>/dev/null | head -30
+    - purpose: Find Java PreparedStatement
+      command: |
+        grep -rn --include="*.java" "PreparedStatement\|prepareStatement" . 2>/dev/null | head -30
+    expected_findings:
+    - Confirmation of parameterized query usage
+    - Gaps in parameterization
+  - id: '4'
+    name: Check ORM raw query usage
+    description: |
+      Identify ORM methods that bypass automatic parameterization.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find ORM raw methods
+      command: |
+        grep -rn --include="*.py" --include="*.js" --include="*.rb" \
+          -E "\.raw\\(|\.extra\\(|rawQuery|RawSQL|Sequelize\.literal|knex\.raw" . 2>/dev/null | head -30
+    expected_findings:
+    - Raw ORM query usage identified
+    - Risk assessment for each raw query
+  - id: '5'
+    name: Run static analysis
+    description: |
+      Execute security-focused static analysis tools for SQL injection.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Run Semgrep SQL injection rules
+      command: |
+        semgrep --config=p/sql-injection . 2>/dev/null | head -100 || echo "Semgrep not available"
+    - purpose: Run Bandit for Python
+      command: |
+        bandit -r . -f json 2>/dev/null | jq '.results[] | select(.test_id | contains("B608") or contains("sql"))' | head -50 || echo "Bandit not available"
+    expected_findings:
+    - Static analysis SQL injection findings
+    - Additional patterns from tooling
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Critical Injection Vulnerabilities
+    - Query Construction Patterns
+    - ORM Usage Assessment
+    - Remediation Roadmap
+  confidence_guidance:
+    high: Direct evidence of user input in SQL with no parameterization
+    medium: String concatenation in SQL, user input source unclear
+    low: Potential issues based on patterns, needs data flow analysis
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-89
+      priority: required
+    - source_id: owasp-sqli-prevention
+      priority: required
+    - source_id: owasp-query-parameterization
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: SQL injection is critical and frequently exploited
+      priority: 1
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: sqli-001
+  item: No string concatenation in SQL queries
+  level: CRITICAL
+  verification: |
+    ! grep -rn --include="*.py" --include="*.js" --include="*.java" --include="*.php" \
+      -E "(SELECT|INSERT|UPDATE|DELETE).*\\+.*request" . 2>/dev/null | grep -v test && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: sqli-002
+  item: No f-strings or template literals in SQL
+  level: CRITICAL
+  verification: |
+    ! grep -rn --include="*.py" -E "f[\"'].*(SELECT|INSERT|UPDATE|DELETE)" . 2>/dev/null | grep -v test && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: sqli-003
+  item: Parameterized queries used for all database access
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.py" "execute.*,.*\\[\\|execute.*,.*\\(" . 2>/dev/null | wc -l | \
+      awk '{if ($1 > 0) print "PASS"; else print "NEEDS_REVIEW"}'
+  expected: PASS
+- id: sqli-004
+  item: No executescript() with dynamic data
+  level: CRITICAL
+  verification: |
+    ! grep -rn --include="*.py" "executescript.*\\+\\|executescript.*format\\|executescript.*\\{" . 2>/dev/null && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: sqli-005
+  item: ORM raw queries properly parameterized
+  level: BLOCKING
+  verification: manual
+  verification_notes: Review all .raw() and similar ORM methods for proper parameterization
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP Top 10
+    controls:
+    - A03:2021 - Injection
+    - A05:2025 - Injection
+  - framework: CWE
+    controls:
+    - CWE-89
+    - CWE-564
+    - CWE-943
+  - framework: SANS Top 25
+    controls:
+    - CWE-89
+  - framework: PCI DSS
+    controls:
+    - 6.5.1
+  - framework: OWASP ASVS
+    controls:
+    - V5.3.4
+relationships:
+  commonly_combined:
+  - security-trust.input-validation.command-injection
+  - security-trust.input-validation.ldap-injection
+  - security-trust.input-validation.path-traversal

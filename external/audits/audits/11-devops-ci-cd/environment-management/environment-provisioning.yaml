@@ -1,0 +1,344 @@
+# ============================================================
+# AUDIT FILE: Environment Provisioning
+# ============================================================
+# Evaluates the speed, reliability, and repeatability of
+# environment provisioning processes.
+# ============================================================
+
+audit:
+  id: "devops-ci-cd.environment-management.environment-provisioning"
+  name: "Environment Provisioning Assessment"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "environment-management"
+
+  tier: "expert"
+  estimated_duration: "4 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines the environment provisioning process including
+    Infrastructure as Code practices, provisioning automation, time-to-ready
+    metrics, and reproducibility of environment creation. It evaluates whether
+    environments can be reliably created on-demand for development, testing,
+    and disaster recovery scenarios.
+
+  why_it_matters: |
+    Slow or unreliable environment provisioning creates bottlenecks in
+    development, delays testing, and compromises disaster recovery capabilities.
+    Organizations that can rapidly provision environments gain agility for
+    feature development, incident response, and scaling operations.
+
+  when_to_run:
+    - "When establishing new environment provisioning workflows"
+    - "After provisioning failures or delays"
+    - "During disaster recovery planning"
+    - "Quarterly infrastructure reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "iac_repository"
+      description: "Infrastructure as Code repository (Terraform, Pulumi, CloudFormation)"
+    - type: "provisioning_scripts"
+      description: "Environment bootstrapping and configuration scripts"
+
+  access_requirements:
+    - "Read access to IaC repositories"
+    - "Access to provisioning logs and metrics"
+    - "Permission to review cloud provider configurations"
+
+discovery:
+  file_patterns:
+    - glob: "**/terraform/**/*.tf"
+      purpose: "Terraform configurations"
+    - glob: "**/pulumi/**/*.ts"
+      purpose: "Pulumi TypeScript configurations"
+    - glob: "**/cloudformation/**/*.yaml"
+      purpose: "CloudFormation templates"
+    - glob: "**/ansible/**/*.yaml"
+      purpose: "Ansible playbooks"
+    - glob: "**/scripts/bootstrap*"
+      purpose: "Bootstrap scripts"
+    - glob: "**/Makefile"
+      purpose: "Make targets for provisioning"
+
+  code_patterns:
+    - pattern: "terraform\\s+(init|plan|apply)"
+      type: "regex"
+      scope: "config"
+      purpose: "Terraform execution commands"
+    - pattern: "aws\\s+cloudformation"
+      type: "regex"
+      scope: "config"
+      purpose: "CloudFormation CLI usage"
+    - pattern: "pulumi\\s+(up|preview)"
+      type: "regex"
+      scope: "config"
+      purpose: "Pulumi execution commands"
+
+knowledge_sources:
+  guides:
+    - id: "terraform-best-practices"
+      name: "Terraform Best Practices"
+      url: "https://www.terraform-best-practices.com/"
+      offline_cache: true
+    - id: "aws-well-architected"
+      name: "AWS Well-Architected Framework"
+      url: "https://aws.amazon.com/architecture/well-architected/"
+      offline_cache: true
+
+  specifications:
+    - id: "cncf-gitops"
+      name: "CNCF GitOps Principles"
+      url: "https://opengitops.dev/"
+      offline_cache: true
+      priority: "recommended"
+
+tooling:
+  infrastructure_tools:
+    - tool: "terraform"
+      purpose: "Infrastructure provisioning and state management"
+      command: "terraform plan -out=tfplan"
+    - tool: "terragrunt"
+      purpose: "Terraform wrapper for DRY configurations"
+      command: "terragrunt run-all plan"
+    - tool: "ansible"
+      purpose: "Configuration management and provisioning"
+      command: "ansible-playbook -i inventory provision.yaml --check"
+
+  scripts:
+    - id: "provision-time-check"
+      language: "bash"
+      purpose: "Measure provisioning time"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Measure time to provision an environment
+        START=$(date +%s)
+        terraform apply -auto-approve
+        END=$(date +%s)
+        echo "Provisioning completed in $((END-START)) seconds"
+
+signals:
+  critical:
+    - id: "ENVPRO-CRIT-001"
+      signal: "No Infrastructure as Code - environments provisioned manually"
+      evidence_indicators:
+        - "No Terraform, Pulumi, or CloudFormation files in repository"
+        - "Console-based provisioning documented in runbooks"
+        - "Environments cannot be recreated from code"
+      explanation: |
+        Manual environment provisioning is error-prone, undocumented, and
+        impossible to audit. It creates single points of failure and
+        makes disaster recovery extremely difficult.
+      remediation: "Implement Infrastructure as Code for all environment components"
+
+    - id: "ENVPRO-CRIT-002"
+      signal: "IaC state stored locally or in unprotected storage"
+      evidence_pattern: "backend.*\"local\"|terraform\\.tfstate"
+      explanation: |
+        Local or unprotected state files create state conflicts, data loss
+        risk, and security vulnerabilities. Lost state can orphan cloud
+        resources causing cost and security issues.
+      remediation: "Use remote state backend with encryption and locking (S3+DynamoDB, Terraform Cloud)"
+
+  high:
+    - id: "ENVPRO-HIGH-001"
+      signal: "Environment provisioning takes more than 30 minutes"
+      evidence_indicators:
+        - "CI/CD logs show provisioning steps exceeding 30 minutes"
+        - "Team reports long wait times for new environments"
+      explanation: |
+        Slow provisioning delays development, increases costs from
+        long-running environments, and compromises incident response.
+      remediation: "Optimize provisioning with parallelization, caching, and pre-built images"
+
+    - id: "ENVPRO-HIGH-002"
+      signal: "Provisioning failures require manual intervention to recover"
+      evidence_pattern: "terraform.*-target|manual.*cleanup"
+      explanation: |
+        Non-idempotent provisioning creates recovery burden and increases
+        risk of resource leaks and inconsistent states.
+      remediation: "Ensure all provisioning is idempotent with proper error handling"
+
+  medium:
+    - id: "ENVPRO-MED-001"
+      signal: "No provisioning documentation or runbooks"
+      remediation: "Create comprehensive provisioning documentation with troubleshooting guides"
+
+    - id: "ENVPRO-MED-002"
+      signal: "Hardcoded values in IaC instead of variables"
+      evidence_pattern: "\"[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+\""
+      remediation: "Extract all environment-specific values to variables"
+
+  low:
+    - id: "ENVPRO-LOW-001"
+      signal: "Inconsistent naming conventions across IaC modules"
+
+  positive:
+    - id: "ENVPRO-POS-001"
+      signal: "Environment provisioning fully automated in CI/CD pipeline"
+    - id: "ENVPRO-POS-002"
+      signal: "Provisioning completes in under 10 minutes with high reliability"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Assess IaC coverage"
+      description: |
+        Determine what percentage of infrastructure is managed through
+        Infrastructure as Code versus manual configuration.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find all IaC files"
+          command: "find . -type f \\( -name '*.tf' -o -name '*.yaml' -path '*cloudformation*' -o -name '*.ts' -path '*pulumi*' \\) 2>/dev/null | wc -l"
+        - purpose: "Check for Terraform backend configuration"
+          command: "grep -r 'backend' --include='*.tf' . 2>/dev/null | head -10"
+      expected_findings:
+        - "Inventory of IaC coverage"
+        - "Identification of manually managed components"
+
+    - id: "2"
+      name: "Evaluate state management"
+      description: |
+        Review how infrastructure state is stored, protected, and
+        synchronized across team members.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check backend configuration"
+          command: "grep -rA5 'backend' --include='*.tf' . 2>/dev/null | head -20"
+        - purpose: "Look for local state files"
+          command: "find . -name 'terraform.tfstate*' 2>/dev/null"
+      expected_findings:
+        - "State storage location and security"
+        - "State locking configuration"
+
+    - id: "3"
+      name: "Measure provisioning time and reliability"
+      description: |
+        Review provisioning metrics and CI/CD logs to assess
+        time-to-ready and success rates.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Check CI/CD pipeline configuration"
+          command: "find . -name '*.yml' -path '*github/workflows*' -o -name '*.yaml' -path '*gitlab-ci*' 2>/dev/null | head -10"
+      expected_findings:
+        - "Average provisioning time"
+        - "Provisioning success rate"
+        - "Common failure modes"
+
+    - id: "4"
+      name: "Test reproducibility"
+      description: |
+        Evaluate whether environments can be reliably recreated
+        from scratch using existing IaC.
+      duration_estimate: "60 min"
+      questions:
+        - "Can a complete environment be provisioned from a clean slate?"
+        - "Are there undocumented manual steps required?"
+        - "Is the provisioning process idempotent?"
+      expected_findings:
+        - "Reproducibility assessment"
+        - "List of manual dependencies"
+
+    - id: "5"
+      name: "Review self-service capabilities"
+      description: |
+        Assess whether developers can provision environments
+        without infrastructure team involvement.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Self-service capabilities inventory"
+        - "Guardrails and cost controls"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "IaC Coverage Assessment"
+        - "Provisioning Metrics"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct measurement of provisioning times and success rates"
+    medium: "Analysis of IaC and CI/CD configurations"
+    low: "Interview-based assessment without metrics"
+
+offline:
+  capability: "partial"
+  cache_manifest:
+    knowledge:
+      - source_id: "terraform-best-practices"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive infrastructure review"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "envpro-001"
+    item: "All infrastructure defined in version-controlled IaC"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify no manual console-based provisioning is required"
+    expected: "Confirmed by reviewer"
+
+  - id: "envpro-002"
+    item: "Remote state backend with locking configured"
+    level: "CRITICAL"
+    verification: "grep -r 'backend.*s3\\|backend.*gcs\\|backend.*azurerm\\|cloud.*{' --include='*.tf' . 2>/dev/null && echo 'PASS' || echo 'FAIL'"
+    expected: "PASS"
+
+  - id: "envpro-003"
+    item: "Provisioning completes within acceptable time threshold"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review CI/CD logs for provisioning duration"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC6.1", "CC7.2"]
+    - framework: "ISO27001"
+      controls: ["A.12.1.2"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.environment-management.environment-parity"
+    - "devops-ci-cd.environment-management.environment-cleanup"

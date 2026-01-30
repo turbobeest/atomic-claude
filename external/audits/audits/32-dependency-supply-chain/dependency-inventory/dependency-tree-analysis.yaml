@@ -1,0 +1,246 @@
+audit:
+  id: dependency-supply-chain.dependency-inventory.dependency-tree-analysis
+  name: Dependency Tree Analysis Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: dependency-supply-chain
+  category_number: 32
+  subcategory: dependency-inventory
+  tier: phd
+  estimated_duration: 2-4 hours  # median: 3h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: medium
+  scope: dependencies
+  default_profiles:
+  - full
+  - detailed
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit performs deep analysis of the complete dependency tree,
+    examining the hierarchy of direct and transitive dependencies, identifying
+    depth issues, circular dependencies, and overall tree health. It provides
+    insights into dependency complexity and potential optimization opportunities.
+  why_it_matters: |
+    Deep dependency trees increase build times, bundle sizes, and security
+    exposure. Understanding the full dependency graph helps identify packages
+    pulling in excessive transitive dependencies, find opportunities for
+    consolidation, and assess overall project complexity and maintainability.
+  when_to_run:
+  - During performance optimization efforts
+  - Before major dependency updates
+  - When bundle size is a concern
+  - Quarterly health assessments
+prerequisites:
+  required_artifacts:
+  - type: dependency_manifest
+    description: package.json, go.mod, Cargo.toml, etc.
+  - type: lock_file
+    description: Lock files for accurate tree resolution
+  access_requirements:
+  - Read access to dependency files
+  - Package manager CLI access
+discovery:
+  file_patterns:
+  - glob: '**/package.json'
+    purpose: Find npm dependency roots
+  - glob: '**/node_modules'
+    purpose: Find installed npm trees
+  - glob: '**/go.mod'
+    purpose: Find Go module roots
+  - glob: '**/Cargo.toml'
+    purpose: Find Rust dependency roots
+  - glob: '**/pom.xml'
+    purpose: Find Maven dependency roots
+knowledge_sources:
+  guides:
+  - id: npm-dependency-resolution
+    name: npm Dependency Resolution
+    url: https://docs.npmjs.com/cli/v9/configuring-npm/package-lock-json#dependency-resolution
+  standards:
+  - id: graph-analysis
+    name: Software Dependency Graph Analysis
+    relevance: Understanding dependency relationships
+tooling:
+  analysis_tools:
+  - tool: npm ls
+    purpose: Display npm dependency tree
+  - tool: npm explain
+    purpose: Explain why a package is installed
+  - tool: pipdeptree
+    purpose: Display Python dependency tree
+  - tool: cargo tree
+    purpose: Display Rust dependency tree
+  - tool: go mod graph
+    purpose: Display Go module graph
+  - tool: mvn dependency:tree
+    purpose: Display Maven dependency tree
+  - tool: depcruise
+    purpose: Visualize JavaScript dependencies
+signals:
+  critical:
+  - id: DEP-TREE-CRIT-001
+    signal: Circular dependencies detected
+    evidence_indicators:
+    - Package A depends on B which depends on A
+    - Dependency cycle warnings from package manager
+    explanation: |
+      Circular dependencies can cause initialization order issues,
+      infinite loops during resolution, and make code difficult to
+      understand and maintain.
+    remediation: Refactor to break circular dependency chains
+  high:
+  - id: DEP-TREE-HIGH-001
+    signal: Extremely deep dependency tree (depth > 20)
+    evidence_indicators:
+    - npm ls shows deeply nested packages
+    - Extended resolution times
+    remediation: Evaluate direct dependencies bringing deep trees
+  - id: DEP-TREE-HIGH-002
+    signal: Same package present at many different versions
+    evidence_indicators:
+    - Multiple major versions of same package
+    - Significant version duplication
+    remediation: Consolidate to single version where possible
+  medium:
+  - id: DEP-TREE-MED-001
+    signal: Single dependency pulling in excessive transitive dependencies
+    evidence_indicators:
+    - One package brings 100+ transitive dependencies
+    - Large portion of tree from single direct dependency
+    remediation: Evaluate if dependency is worth the transitive cost
+  - id: DEP-TREE-MED-002
+    signal: Duplicate functionality from multiple packages
+    evidence_indicators:
+    - Multiple lodash-like utility libraries
+    - Several HTTP client libraries
+    remediation: Standardize on single package for each purpose
+  low:
+  - id: DEP-TREE-LOW-001
+    signal: Moderate tree depth (10-20 levels)
+    evidence_indicators:
+    - Common in npm ecosystems
+    - May indicate normal complexity
+    remediation: Monitor and optimize where practical
+  - id: DEP-TREE-LOW-002
+    signal: Many leaf dependencies with minimal use
+    evidence_indicators:
+    - Transitive dependencies used for single function
+    - Micro-packages in tree
+    remediation: Consider if direct dependencies could be simplified
+  positive:
+  - id: DEP-TREE-POS-001
+    signal: Shallow, well-organized dependency tree
+  - id: DEP-TREE-POS-002
+    signal: Minimal version duplication across tree
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Generate Full Dependency Tree
+    description: Create complete dependency tree visualization
+    commands:
+    - purpose: Generate npm dependency tree
+      command: npm ls --all 2>/dev/null | head -500 || echo 'npm not applicable'
+    - purpose: Generate Python dependency tree
+      command: pipdeptree 2>/dev/null | head -500 || echo 'pipdeptree not applicable'
+    - purpose: Generate Go dependency graph
+      command: go mod graph 2>/dev/null | head -500 || echo 'go mod not applicable'
+    - purpose: Generate Rust dependency tree
+      command: cargo tree 2>/dev/null | head -500 || echo 'cargo not applicable'
+  - id: '2'
+    name: Analyze Tree Depth
+    description: Measure maximum dependency depth
+    commands:
+    - purpose: Check npm tree depth
+      command: npm ls --all 2>/dev/null | grep -E '^[| ]+' | awk '{print gsub(/[|+\\`-]/, "&")}' | sort
+        -rn | head -1 || echo 'depth analysis not applicable'
+  - id: '3'
+    name: Identify Version Duplicates
+    description: Find packages with multiple versions
+    commands:
+    - purpose: Find duplicate npm packages
+      command: npm ls --all 2>/dev/null | grep -oE '@[a-zA-Z0-9./-]+@' | sort | uniq -d | head -50 ||
+        echo 'duplicate check not applicable'
+  - id: '4'
+    name: Check for Circular Dependencies
+    description: Detect circular dependency patterns
+    commands:
+    - purpose: Check npm for circular references
+      command: npm ls 2>&1 | grep -i 'circular' || echo 'No circular dependencies detected'
+    - purpose: Check with madge for JS
+      command: npx madge --circular . 2>/dev/null | head -50 || echo 'madge not applicable'
+  - id: '5'
+    name: Analyze Heaviest Dependencies
+    description: Identify dependencies with most transitive deps
+    commands:
+    - purpose: Count sub-dependencies per direct dep
+      command: 'for pkg in $(npm ls --depth=0 --json 2>/dev/null | jq -r ''.dependencies | keys[]'' 2>/dev/null
+        | head -20); do echo -n "$pkg: "; npm ls "$pkg" --all 2>/dev/null | wc -l; done | sort -t: -k2
+        -rn | head -10 || echo ''analysis not applicable'''
+  - id: '6'
+    name: Explain Dependency Paths
+    description: Understand why specific packages are included
+    commands:
+    - purpose: Explain a common transitive dependency
+      command: npm explain lodash 2>/dev/null | head -30 || echo 'npm explain not applicable'
+output:
+  deliverables:
+  - type: tree_visualization
+    format: text
+    description: Full dependency tree structure
+  - type: analysis_report
+    format: structured
+    description: Tree depth, duplication, and complexity metrics
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Tree Depth Analysis
+    - Version Duplication Report
+    - Circular Dependency Analysis
+    - Heavy Dependency Identification
+    - Optimization Recommendations
+closeout_checklist:
+- id: dep-tree-001
+  item: No circular dependencies present
+  level: CRITICAL
+  verification: madge --circular or equivalent shows none
+- id: dep-tree-002
+  item: Tree depth analyzed and documented
+  level: REQUIRED
+  verification: Maximum depth recorded
+- id: dep-tree-003
+  item: Version duplicates identified and justified
+  level: REQUIRED
+  verification: Duplicate list reviewed
+- id: dep-tree-004
+  item: Heavy dependencies evaluated
+  level: RECOMMENDED
+  verification: Top transitive contributors assessed
+governance:
+  applicable_to:
+    archetypes:
+    - all-software-projects
+  compliance_mappings:
+  - framework: SOC 2
+    control: CC6.1
+    description: Understanding system components
+  - framework: ISO 27001
+    control: A.14.2.5
+    description: Secure system engineering principles
+relationships:
+  commonly_combined:
+  - dependency-supply-chain.transitive-dependencies.transitive-analysis
+  depends_on:
+  - dependency-supply-chain.dependency-inventory.dependency-enumeration
+  feeds_into:
+  - performance-efficiency.bundle-optimization

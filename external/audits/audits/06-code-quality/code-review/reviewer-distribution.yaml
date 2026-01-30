@@ -1,0 +1,225 @@
+audit:
+  id: code-quality.code-review.reviewer-distribution
+  name: Reviewer Distribution Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: code-review
+  tier: expert
+  estimated_duration: 30 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: medium
+  scope: repository
+  default_profiles:
+  - full
+  - quality
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Analyzes how review workload is distributed across team members. Identifies
+    review bottlenecks, knowledge silos, and bus factor risks by examining who
+    reviews which components, reviewer load balancing, and cross-team review
+    patterns. Measures reviewer diversity per PR and component.
+  why_it_matters: |
+    Concentrated review responsibility creates bottlenecks, burns out key
+    contributors, and produces knowledge silos. Research shows teams with
+    even reviewer distribution have 30% faster review cycles and better
+    knowledge sharing. Single-reviewer dependencies create bus factor risks
+    and reduce code quality through limited perspectives.
+  when_to_run:
+  - Quarterly team health assessments
+  - When review bottlenecks occur
+  - During team restructuring
+  - Onboarding planning
+prerequisites:
+  required_artifacts:
+  - type: pr_metadata
+    description: Pull request records with reviewer assignments
+  - type: team_data
+    description: Team membership information
+  access_requirements:
+  - Access to PR/MR platform API
+  - Organization member data access
+discovery:
+  code_patterns:
+  - pattern: requested.*review.*from
+    type: regex
+    scope: pr_events
+    purpose: Identify review assignment patterns
+  file_patterns:
+  - glob: .github/CODEOWNERS
+    purpose: Automatic reviewer assignment rules
+  - glob: OWNERS
+    purpose: Component ownership files
+knowledge_sources:
+  guides:
+  - id: bus-factor-guide
+    name: Understanding and Managing Bus Factor
+    url: https://martinfowler.com/bliki/TruckFactor.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: gh
+    purpose: Extract reviewer assignment data
+    offline_capable: false
+  scripts:
+  - id: reviewer-distribution
+    language: bash
+    purpose: Calculate reviewer workload distribution
+    source: inline
+    code: |
+      gh pr list --state merged --limit 100 --json number,reviews \
+        --jq '[.[] | .reviews[].author.login] | group_by(.) | map({reviewer: .[0], count: length}) | sort_by(-.count)'
+signals:
+  critical:
+  - id: RDIST-CRIT-001
+    signal: Single reviewer handles >50% of all reviews
+    evidence_pattern: top_reviewer_share > 50%
+    explanation: |
+      Extreme concentration of review responsibility creates critical
+      bottleneck and bus factor risk. Team velocity depends entirely
+      on one person's availability.
+    remediation: Actively redistribute review load and train backup reviewers
+  high:
+  - id: RDIST-HIGH-001
+    signal: Top 20% of reviewers handle >80% of reviews
+    evidence_pattern: pareto_ratio > 80/20
+    explanation: |
+      Highly skewed distribution indicates review burden falls on
+      few team members, leading to burnout and knowledge silos.
+    remediation: Implement reviewer rotation and load balancing
+  - id: RDIST-HIGH-002
+    signal: Components with single assigned reviewer
+    evidence_pattern: single_reviewer_components > 0
+    explanation: |
+      Components with only one qualified reviewer create availability
+      bottlenecks and knowledge concentration risks.
+    remediation: Cross-train reviewers on critical components
+  medium:
+  - id: RDIST-MED-001
+    signal: Low cross-team review rate (<10%)
+    evidence_pattern: cross_team_reviews < 10%
+    remediation: Encourage cross-team reviews for knowledge sharing
+  - id: RDIST-MED-002
+    signal: New team members rarely participate in reviews
+    evidence_pattern: new_member_reviews < 5%
+    remediation: Include new members in reviews as learning opportunity
+  low:
+  - id: RDIST-LOW-001
+    signal: Reviewer load metrics not tracked
+    evidence_pattern: no_metrics_available
+    remediation: Implement reviewer workload dashboards
+  positive:
+  - id: RDIST-POS-001
+    signal: Even reviewer distribution (Gini < 0.3)
+    evidence_pattern: gini_coefficient < 0.3
+  - id: RDIST-POS-002
+    signal: Multiple qualified reviewers per component
+    evidence_pattern: min_reviewers_per_component >= 2
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Extract Reviewer Assignment Data
+    description: |
+      Collect all review assignments and completions for PRs in the
+      analysis period, including reviewer identities and components.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Get reviewer data for merged PRs
+      command: |
+        gh pr list --state merged --limit 100 --json number,files,reviews
+    expected_findings:
+    - Reviewer identity per PR
+    - Component/file coverage per reviewer
+  - id: '2'
+    name: Calculate Distribution Metrics
+    description: |
+      Compute statistical measures of reviewer load distribution
+      including Gini coefficient and percentile analysis.
+    duration_estimate: 10 min
+    expected_findings:
+    - Reviews per team member
+    - Distribution evenness metrics
+    - Top reviewer concentration
+  - id: '3'
+    name: Analyze Component Coverage
+    description: |
+      Determine how many qualified reviewers exist for each
+      component or area of the codebase.
+    duration_estimate: 10 min
+    expected_findings:
+    - Reviewer count per component
+    - Single-point-of-failure components
+    - Coverage gaps
+output:
+  deliverables:
+  - type: metrics
+    format: structured
+    content:
+    - reviews_per_member
+    - gini_coefficient
+    - top_reviewer_percentage
+    - reviewers_per_component
+    - cross_team_review_rate
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Distribution Analysis
+    - Risk Areas
+    - Recommendations
+  confidence_guidance:
+    high: Complete reviewer data with team membership
+    medium: Reviewer data without team context
+    low: Limited to approval counts without identities
+offline:
+  capability: minimal
+  cache_manifest:
+    knowledge:
+    - source_id: bus-factor-guide
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 3
+    full:
+      included: true
+      priority: 2
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: rdist-001
+  item: Reviewer distribution calculated
+  level: BLOCKING
+  verification: Distribution metrics available
+  expected: Gini coefficient or equivalent metric
+- id: rdist-002
+  item: Single-reviewer components identified
+  level: WARNING
+  verification: List of at-risk components
+  expected: Components with bus factor = 1
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 27001
+    controls:
+    - A.7.2
+relationships:
+  commonly_combined:
+  - code-quality.code-review.pr-review-coverage
+  - code-quality.code-review.codeowner-coverage
+  - code-quality.code-review.review-turnaround-time

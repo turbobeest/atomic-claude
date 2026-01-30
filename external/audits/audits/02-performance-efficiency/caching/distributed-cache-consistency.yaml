@@ -1,0 +1,334 @@
+# ============================================================
+# DISTRIBUTED CACHE CONSISTENCY AUDIT
+# ============================================================
+# Evaluates consistency guarantees and synchronization mechanisms
+# across distributed cache nodes and multi-region deployments.
+
+audit:
+  id: "performance-efficiency.caching.distributed-cache-consistency"
+  name: "Distributed Cache Consistency Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "caching"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes consistency mechanisms in distributed cache deployments including
+    Redis Cluster, multi-region replication, cache coherence protocols, and
+    conflict resolution strategies. Reviews eventual consistency implications
+    and data divergence scenarios.
+
+  why_it_matters: |
+    Distributed caches face CAP theorem tradeoffs. Inconsistent data across
+    cache nodes causes users to see different data based on which node they
+    hit, leading to race conditions, data corruption, and business logic
+    failures. Financial and security implications can be severe.
+
+  when_to_run:
+    - "Multi-region cache deployment"
+    - "Data inconsistency incidents"
+    - "Cache cluster configuration changes"
+    - "High availability architecture review"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure_config"
+      description: "Cache cluster configuration"
+    - type: "architecture_docs"
+      description: "Distributed cache architecture documentation"
+
+  access_requirements:
+    - "Cache cluster admin access"
+    - "Replication topology visibility"
+    - "Network configuration access"
+
+discovery:
+  metrics_queries:
+    - system: "Redis"
+      query: "INFO replication"
+      purpose: "Check replication status and lag"
+      threshold: "master_repl_offset - slave_repl_offset < 1000"
+
+    - system: "Prometheus"
+      query: "redis_master_link_down_since_seconds"
+      purpose: "Detect replication failures"
+      threshold: "Should be 0"
+
+    - system: "Redis"
+      query: "CLUSTER INFO"
+      purpose: "Check cluster health and slot coverage"
+      threshold: "cluster_state:ok"
+
+  file_patterns:
+    - glob: "**/redis*.conf"
+      purpose: "Redis cluster configuration"
+    - glob: "**/sentinel*.conf"
+      purpose: "Redis Sentinel configuration"
+    - glob: "**/terraform/**/*redis*.tf"
+      purpose: "Infrastructure-as-code for cache"
+
+knowledge_sources:
+  specifications:
+    - id: "redis-cluster-spec"
+      name: "Redis Cluster Specification"
+      url: "https://redis.io/docs/reference/cluster-spec/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "redis-replication"
+      name: "Redis Replication"
+      url: "https://redis.io/docs/management/replication/"
+      offline_cache: true
+
+  papers:
+    - id: "cap-theorem"
+      title: "Brewer's Conjecture and the Feasibility of Consistent, Available, Partition-Tolerant Web Services"
+      url: "https://www.comp.nus.edu.sg/~gilbert/pubs/BresewrConsistent.pdf"
+
+tooling:
+  infrastructure_tools:
+    - tool: "redis-cli"
+      purpose: "Check replication status"
+      command: "redis-cli INFO replication"
+
+    - tool: "redis-cli"
+      purpose: "Check cluster status"
+      command: "redis-cli CLUSTER INFO"
+
+    - tool: "redis-cli"
+      purpose: "Check replication lag"
+      command: "redis-cli DEBUG sleep 0; redis-cli INFO replication | grep offset"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "redis_connected_slaves"
+      purpose: "Verify replica connectivity"
+
+    - system: "Prometheus"
+      query: "redis_master_repl_offset - redis_slave_repl_offset"
+      purpose: "Measure replication lag"
+
+signals:
+  critical:
+    - id: "DIST-CACHE-CRIT-001"
+      signal: "Replication lag exceeds acceptable threshold"
+      evidence_threshold: "replication_lag > 5 seconds"
+      explanation: |
+        High replication lag means reads from replicas return stale data.
+        In a financial system, this could mean processing transactions
+        against outdated balances.
+      remediation: "Investigate network issues, increase replica resources, or route critical reads to primary"
+
+    - id: "DIST-CACHE-CRIT-002"
+      signal: "Split-brain condition in cache cluster"
+      evidence_pattern: "Multiple nodes claiming to be master"
+      explanation: |
+        Split-brain causes both partitions to accept writes independently,
+        leading to data divergence that may be unrecoverable without
+        manual intervention.
+      remediation: "Implement proper fencing, use quorum-based systems, review network partitioning"
+
+  high:
+    - id: "DIST-CACHE-HIGH-001"
+      signal: "No read-after-write consistency for critical operations"
+      evidence_pattern: "Write to primary, immediate read from replica"
+      explanation: |
+        Reading from replica immediately after writing to primary may
+        return stale data due to replication delay.
+      remediation: "Route critical reads to primary or implement read-your-writes consistency"
+
+    - id: "DIST-CACHE-HIGH-002"
+      signal: "Cross-region cache without conflict resolution"
+      evidence_pattern: "Multi-master replication without CRDT or LWW"
+      explanation: |
+        Writes to the same key in different regions without conflict
+        resolution strategy will result in data loss.
+      remediation: "Implement last-writer-wins, CRDTs, or single-region write routing"
+
+  medium:
+    - id: "DIST-CACHE-MED-001"
+      signal: "Inconsistent read preferences across application"
+      evidence_pattern: "Mixed primary/replica read routing without strategy"
+      remediation: "Standardize read preferences by operation type"
+
+    - id: "DIST-CACHE-MED-002"
+      signal: "No monitoring for replication lag"
+      evidence_pattern: "Missing replication lag metrics"
+      remediation: "Add alerting for replication lag thresholds"
+
+  low:
+    - id: "DIST-CACHE-LOW-001"
+      signal: "Failover not tested regularly"
+      remediation: "Implement regular failover drills"
+
+  positive:
+    - id: "DIST-CACHE-POS-001"
+      signal: "Read-your-writes consistency implemented"
+
+    - id: "DIST-CACHE-POS-002"
+      signal: "Proper quorum configuration for writes"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map cache topology"
+      description: |
+        Document the distributed cache topology including primary/replica
+        relationships, regions, and network paths.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Get replication topology"
+          command: "redis-cli INFO replication"
+        - purpose: "Get cluster nodes"
+          command: "redis-cli CLUSTER NODES"
+
+      expected_findings:
+        - "Cache topology documented"
+        - "Replication relationships mapped"
+
+    - id: "2"
+      name: "Measure replication lag"
+      description: |
+        Collect replication lag metrics across all replica relationships
+        under various load conditions.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Check replication offset"
+          command: "redis-cli INFO replication | grep -E 'offset|lag'"
+        - purpose: "Monitor lag over time"
+          command: "for i in {1..10}; do redis-cli INFO replication | grep offset; sleep 1; done"
+
+      expected_findings:
+        - "Baseline lag measurements"
+        - "Lag variance under load"
+
+    - id: "3"
+      name: "Review consistency configuration"
+      description: |
+        Examine configuration for read preferences, write concerns,
+        and consistency guarantees.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Check cluster configuration"
+          command: "redis-cli CONFIG GET cluster*"
+        - purpose: "Check replication settings"
+          command: "redis-cli CONFIG GET replica*"
+
+      expected_findings:
+        - "Consistency configuration assessment"
+        - "Read/write routing strategy"
+
+    - id: "4"
+      name: "Test failure scenarios"
+      description: |
+        Review or simulate failure scenarios to understand consistency
+        implications during partitions and failovers.
+      duration_estimate: "45 min"
+
+      expected_findings:
+        - "Failure mode analysis"
+        - "Recovery behavior assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Topology Analysis"
+        - "Consistency Assessment"
+        - "Failure Mode Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct measurement with failure testing"
+    medium: "Configuration review with metrics analysis"
+    low: "Documentation review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "redis-cluster-spec"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed infrastructure analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "dist-cache-001"
+    item: "Replication lag is within acceptable limits"
+    level: "CRITICAL"
+    verification: "redis-cli INFO replication | awk -F: '/lag/{if($2>5)print \"FAIL\"; else print \"PASS\"}'"
+    expected: "PASS"
+
+  - id: "dist-cache-002"
+    item: "Cluster state is healthy"
+    level: "CRITICAL"
+    verification: "redis-cli CLUSTER INFO | grep -q 'cluster_state:ok' && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "dist-cache-003"
+    item: "Read-your-writes consistency for critical paths"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Critical operations route reads to primary after writes"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Data Consistency"
+      controls: ["Distributed Systems Consistency"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.caching.cache-invalidation"
+    - "performance-efficiency.caching.multi-layer-cache"
+    - "reliability.high-availability.failover-testing"

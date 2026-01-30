@@ -1,0 +1,370 @@
+audit:
+  id: observability-instrumentation.metrics.four-golden-signals
+  name: Four Golden Signals Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: metrics
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates whether services implement Google's Four Golden Signals framework
+    for monitoring: latency, traffic, errors, and saturation. This audit verifies
+    that each signal is properly instrumented, has appropriate thresholds, and
+    provides actionable visibility into service health. The assessment covers
+    metric collection, aggregation methods, and alerting integration.
+  why_it_matters: |
+    The Four Golden Signals represent the minimum viable monitoring for any
+    user-facing system. Without these signals, teams cannot detect degradation,
+    capacity issues, or failures before users are impacted. Services lacking
+    these fundamentals operate blind, leading to extended incidents, missed
+    SLAs, and customer churn. The framework provides a universal language for
+    discussing service health across teams.
+  when_to_run:
+  - New service deployment to production
+  - Observability platform migration
+  - Post-incident review revealing monitoring gaps
+  - Quarterly reliability reviews
+prerequisites:
+  required_artifacts:
+  - type: metrics-system
+    description: Access to Prometheus, Datadog, or equivalent metrics platform
+  - type: service-inventory
+    description: List of services and their criticality tiers
+  access_requirements:
+  - Read access to metrics platform and dashboards
+  - Service architecture documentation
+  - SLO/SLA documentation for threshold validation
+discovery:
+  code_patterns:
+  - pattern: histogram_observe|summary_observe|counter_inc
+    type: regex
+    scope: source
+    purpose: Identify latency and request instrumentation
+  - pattern: request_duration|latency|response_time
+    type: keyword
+    scope: source
+    purpose: Find latency metric definitions
+  - pattern: requests_total|http_requests|rpc_calls
+    type: keyword
+    scope: source
+    purpose: Identify traffic counters
+  - pattern: errors_total|failures|5xx|4xx
+    type: keyword
+    scope: source
+    purpose: Find error rate instrumentation
+  file_patterns:
+  - glob: '**/prometheus.yml'
+    purpose: Prometheus configuration for scrape targets
+  - glob: '**/metrics/**/*.go'
+    purpose: Metrics package implementation
+  - glob: '**/alerts/*.yaml'
+    purpose: Alert rule definitions
+  metrics_queries:
+  - system: Prometheus
+    query: count by (service) (rate(http_request_duration_seconds_bucket[5m]))
+    purpose: Services with latency histograms
+    threshold: All critical services present
+  - system: Prometheus
+    query: count by (service) (rate(http_requests_total[5m]))
+    purpose: Services with traffic counters
+    threshold: All critical services present
+knowledge_sources:
+  specifications:
+  - id: google-sre-book
+    name: 'Google SRE Book - Chapter 6: Monitoring Distributed Systems'
+    url: https://sre.google/sre-book/monitoring-distributed-systems/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: prometheus-best-practices
+    name: Prometheus Monitoring Best Practices
+    url: https://prometheus.io/docs/practices/instrumentation/
+    offline_cache: true
+  - id: golden-signals-guide
+    name: The Four Golden Signals of Monitoring
+    url: https://sre.google/sre-book/monitoring-distributed-systems/#xref_monitoring_golden-signals
+    offline_cache: true
+  papers:
+  - id: dapper-paper
+    title: Dapper, a Large-Scale Distributed Systems Tracing Infrastructure
+    url: https://research.google/pubs/pub36356/
+tooling:
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      # Latency signal check
+      histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, service))
+    purpose: Verify latency percentile instrumentation
+  - system: Prometheus
+    query: |
+      # Traffic signal check
+      sum(rate(http_requests_total[5m])) by (service)
+    purpose: Verify traffic rate instrumentation
+  - system: Prometheus
+    query: |
+      # Error signal check
+      sum(rate(http_requests_total{status=~"5.."}[5m])) by (service) / sum(rate(http_requests_total[5m])) by (service)
+    purpose: Verify error rate calculation
+  - system: Prometheus
+    query: |
+      # Saturation signal check
+      avg(container_memory_usage_bytes / container_spec_memory_limit_bytes) by (service)
+    purpose: Verify saturation metric availability
+  scripts:
+  - id: golden-signals-coverage
+    language: python
+    purpose: Calculate golden signals coverage percentage
+    source: inline
+    code: |
+      import requests
+      import json
+
+      def check_golden_signals(prometheus_url, services):
+          signals = {
+              'latency': 'http_request_duration_seconds_bucket',
+              'traffic': 'http_requests_total',
+              'errors': 'http_requests_total{status=~"5.."}',
+              'saturation': 'container_memory_usage_bytes'
+          }
+          coverage = {}
+          for service in services:
+              coverage[service] = {}
+              for signal, metric in signals.items():
+                  query = f'{metric}{{service="{service}"}}'
+                  # Check if metric exists
+                  coverage[service][signal] = check_metric_exists(prometheus_url, query)
+          return coverage
+signals:
+  critical:
+  - id: GOLDEN-CRIT-001
+    signal: No latency instrumentation for user-facing service
+    evidence_pattern: Missing http_request_duration histogram for critical service
+    evidence_threshold: 0 latency metrics for tier-1 service
+    explanation: |
+      Without latency instrumentation, teams cannot detect performance degradation
+      until users complain. This is foundational for SLO compliance and incident
+      detection. Critical services must have p50, p95, and p99 latency visibility.
+    remediation: Instrument request handlers with histogram metrics capturing duration
+  - id: GOLDEN-CRIT-002
+    signal: Error rate not instrumented or not alerting
+    evidence_pattern: No error counter or missing alert rule
+    explanation: |
+      Error rate is the most immediate indicator of service health issues.
+      Without this signal, failures accumulate silently until catastrophic
+      impact occurs.
+    remediation: Add error counters with status code labels and configure alerts
+  high:
+  - id: GOLDEN-HIGH-001
+    signal: Traffic metrics missing or incomplete
+    evidence_pattern: No requests_total counter or missing endpoint breakdown
+    explanation: |
+      Traffic metrics enable capacity planning and anomaly detection.
+      Missing this signal prevents understanding load patterns and detecting
+      traffic-based attacks or cascading failures.
+    remediation: Instrument all entry points with request counters including method and endpoint labels
+  - id: GOLDEN-HIGH-002
+    signal: Saturation metrics not collected
+    evidence_pattern: No CPU, memory, or queue depth metrics
+    explanation: |
+      Saturation indicates how close a service is to its limits. Without
+      this, capacity issues manifest as latency spikes or failures rather
+      than being caught proactively.
+    remediation: Collect CPU, memory, connection pool, and queue depth metrics
+  medium:
+  - id: GOLDEN-MED-001
+    signal: Inconsistent metric naming across services
+    evidence_pattern: request_duration vs http_latency vs response_time
+    remediation: Standardize on Prometheus naming conventions across all services
+  - id: GOLDEN-MED-002
+    signal: Missing dimensional breakdown on golden signals
+    evidence_pattern: Metrics lack endpoint, method, or status labels
+    remediation: Add consistent labels for endpoint, method, status code, and service
+  low:
+  - id: GOLDEN-LOW-001
+    signal: Dashboard not visualizing all four signals
+    remediation: Create standard dashboard template showing all signals per service
+  positive:
+  - id: GOLDEN-POS-001
+    signal: All four golden signals instrumented with alerts
+  - id: GOLDEN-POS-002
+    signal: Consistent naming and labeling across service fleet
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory critical services
+    description: |
+      Identify all tier-1 and tier-2 services that require golden signals
+      monitoring. Prioritize user-facing services and critical dependencies.
+    duration_estimate: 30 min
+    questions:
+    - Which services directly serve user traffic?
+    - What are the critical internal dependencies?
+    - Are there defined SLOs that require these signals?
+    expected_findings:
+    - Service inventory with criticality tiers
+    - Current monitoring coverage gaps
+  - id: '2'
+    name: Evaluate latency instrumentation
+    description: |
+      For each critical service, verify latency histogram or summary metrics
+      exist with appropriate bucket boundaries and percentile calculations.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find latency metrics
+      command: curl -s 'http://prometheus:9090/api/v1/label/__name__/values' | jq '.data[]' | grep -i
+        'duration\|latency'
+    expected_findings:
+    - Services with latency histograms
+    - Appropriate bucket boundaries for SLO targets
+  - id: '3'
+    name: Evaluate traffic instrumentation
+    description: |
+      Verify request counters exist for all entry points with appropriate
+      dimensional labels for traffic analysis.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find traffic counters
+      command: curl -s 'http://prometheus:9090/api/v1/label/__name__/values' | jq '.data[]' | grep -i
+        'requests_total\|calls_total'
+    expected_findings:
+    - Traffic counters per service
+    - Label consistency across services
+  - id: '4'
+    name: Evaluate error instrumentation
+    description: |
+      Verify error rates can be calculated from existing metrics, either
+      through status labels or dedicated error counters.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find error metrics
+      command: curl -s 'http://prometheus:9090/api/v1/label/__name__/values' | jq '.data[]' | grep -i
+        'errors\|failures'
+    expected_findings:
+    - Error rate calculation methodology
+    - Alert rules for error thresholds
+  - id: '5'
+    name: Evaluate saturation instrumentation
+    description: |
+      Verify resource utilization metrics exist for CPU, memory, connections,
+      and any service-specific bottleneck resources.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find saturation metrics
+      command: curl -s 'http://prometheus:9090/api/v1/label/__name__/values' | jq '.data[]' | grep -i
+        'utilization\|usage\|queue'
+    expected_findings:
+    - Resource metrics availability
+    - Saturation thresholds and alerts
+  - id: '6'
+    name: Validate alert coverage
+    description: |
+      Verify that each golden signal has corresponding alert rules with
+      appropriate thresholds tied to SLOs.
+    duration_estimate: 45 min
+    commands:
+    - purpose: List alert rules
+      command: curl -s 'http://prometheus:9090/api/v1/rules' | jq '.data.groups[].rules[] | select(.type=="alerting")'
+    expected_findings:
+    - Alert rules mapped to golden signals
+    - Threshold alignment with SLOs
+output:
+  deliverables:
+  - type: coverage_matrix
+    format: structured
+    description: Service x Golden Signal coverage matrix
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Signal Coverage Analysis
+    - Critical Gaps
+    - Recommendations
+  confidence_guidance:
+    high: Metrics verified in production system with alert rules confirmed
+    medium: Metrics exist but threshold alignment or alert coverage uncertain
+    low: Based on code review without production verification
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: google-sre-book
+      priority: required
+    - source_id: prometheus-best-practices
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires runtime metrics system access
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: golden-signals-001
+  item: All tier-1 services have latency histograms
+  level: CRITICAL
+  verification: manual
+  verification_notes: Confirm histogram metrics exist for all critical services
+  expected: Confirmed by reviewer
+- id: golden-signals-002
+  item: All tier-1 services have traffic counters
+  level: CRITICAL
+  verification: manual
+  verification_notes: Confirm request counters exist with appropriate labels
+  expected: Confirmed by reviewer
+- id: golden-signals-003
+  item: Error rate calculation possible for all services
+  level: CRITICAL
+  verification: manual
+  verification_notes: Confirm error metrics or status labels enable error rate
+  expected: Confirmed by reviewer
+- id: golden-signals-004
+  item: Saturation metrics exist for key resources
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm CPU, memory, connection metrics available
+  expected: Confirmed by reviewer
+- id: golden-signals-005
+  item: Alert rules exist for each golden signal
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify alert rules tied to SLO thresholds
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.1
+    - CC7.2
+relationships:
+  commonly_combined:
+  - observability-instrumentation.alerting.alert-fatigue
+  - observability-instrumentation.metrics.sli-definition
+  - observability-instrumentation.visualization-dashboards.dashboard-effectiveness
