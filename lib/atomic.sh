@@ -54,10 +54,26 @@ PROVIDER_ROLE_MAP[heavyweight]="${PROVIDER_ROLE_HEAVYWEIGHT:-max}"
 # CSV columns: name,path,tier,model,model_fallbacks,category,subcategory,description,grade,composite_score,role
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Resolve agent repo path with embedded fallback
+# Priority: 1. ATOMIC_AGENT_REPO env var, 2. embedded external/agents, 3. repos/agents
+_atomic_resolve_agent_repo() {
+    local repo="${ATOMIC_AGENT_REPO:-}"
+    if [[ -z "$repo" || ! -d "$repo" ]]; then
+        # Check for embedded repo (monorepo deployment)
+        if [[ -f "$ATOMIC_ROOT/external/agents/agent-inventory.csv" ]]; then
+            repo="$ATOMIC_ROOT/external/agents"
+        else
+            repo="$ATOMIC_ROOT/repos/agents"
+        fi
+    fi
+    echo "$repo"
+}
+
 # Get path to the agent inventory CSV
 # Usage: local csv_path=$(atomic_get_agent_inventory)
 atomic_get_agent_inventory() {
-    local agent_repo="${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}"
+    local agent_repo
+    agent_repo=$(_atomic_resolve_agent_repo)
     local csv_path="$agent_repo/agent-inventory.csv"
 
     if [[ -f "$csv_path" ]]; then
@@ -73,7 +89,7 @@ atomic_get_agent_inventory() {
 # Returns: CSV line for the agent (name,path,tier,model,...)
 atomic_csv_lookup_agent() {
     local agent_name="$1"
-    local agent_repo="${2:-${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}}"
+    local agent_repo="${2:-$(_atomic_resolve_agent_repo)}"
     local csv_path="$agent_repo/agent-inventory.csv"
 
     if [[ ! -f "$csv_path" ]]; then
@@ -88,7 +104,8 @@ atomic_csv_lookup_agent() {
 # Usage: atomic_csv_search_agents "test" "validation" [agent_repo]
 # Returns: Matching CSV lines (one per line)
 atomic_csv_search_agents() {
-    local agent_repo="${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}"
+    local agent_repo
+    agent_repo=$(_atomic_resolve_agent_repo)
     local csv_path="$agent_repo/agent-inventory.csv"
 
     if [[ ! -f "$csv_path" ]]; then
@@ -114,7 +131,7 @@ atomic_csv_search_agents() {
 # Returns: CSV lines for agents in that category
 atomic_csv_get_phase_agents() {
     local phase_category="$1"
-    local agent_repo="${2:-${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}}"
+    local agent_repo="${2:-$(_atomic_resolve_agent_repo)}"
     local csv_path="$agent_repo/agent-inventory.csv"
 
     if [[ ! -f "$csv_path" ]]; then
@@ -181,7 +198,7 @@ atomic_csv_get_description() {
 # Returns: Markdown-formatted list of agents suitable for LLM selection
 atomic_csv_format_agents_for_prompt() {
     local phase_category="$1"
-    local agent_repo="${2:-${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}}"
+    local agent_repo="${2:-$(_atomic_resolve_agent_repo)}"
     local csv_path="$agent_repo/agent-inventory.csv"
 
     if [[ ! -f "$csv_path" ]]; then
@@ -232,7 +249,7 @@ atomic_csv_format_agents_for_prompt() {
 # Returns: JSON array of agents
 atomic_csv_agents_json() {
     local category_filter="$1"
-    local agent_repo="${2:-${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}}"
+    local agent_repo="${2:-$(_atomic_resolve_agent_repo)}"
     local csv_path="$agent_repo/agent-inventory.csv"
 
     if [[ ! -f "$csv_path" ]]; then
@@ -354,7 +371,7 @@ atomic_resolve_agent_alias() {
 # Returns: Full path to agent file, or empty string if not found
 atomic_find_agent() {
     local agent_name="$1"
-    local agent_repo="${2:-${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}}"
+    local agent_repo="${2:-$(_atomic_resolve_agent_repo)}"
     local csv_path="$agent_repo/agent-inventory.csv"
 
     # Resolve any backward-compatibility aliases
@@ -433,7 +450,7 @@ atomic_strip_frontmatter() {
 # Usage: local prompt=$(atomic_load_agent "spec-writer" [agent_repo_path])
 atomic_load_agent() {
     local agent_name="$1"
-    local agent_repo="${2:-${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}}"
+    local agent_repo="${2:-$(_atomic_resolve_agent_repo)}"
 
     local agent_path
     agent_path=$(atomic_find_agent "$agent_name" "$agent_repo")
@@ -451,7 +468,7 @@ atomic_load_agent() {
 # Usage: atomic_list_agents "spec" [agent_repo_path]
 atomic_list_agents() {
     local pattern="${1:-*}"
-    local agent_repo="${2:-${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}}"
+    local agent_repo="${2:-$(_atomic_resolve_agent_repo)}"
 
     find "$agent_repo" -name "*${pattern}*.md" -type f 2>/dev/null | \
         grep -v "README\|GUIDE\|CLAUDE\|TIER" | \
@@ -1525,6 +1542,21 @@ atomic_invoke_api() {
     local model="${1:-sonnet}"
     shift
     atomic_invoke "$@" --provider=api --model="$model"
+}
+
+# atomic_llm_call - Simple LLM call that returns response via stdout
+# Usage: local response=$(atomic_llm_call "$prompt_file" "sonnet")
+# For: Quick LLM calls where only the response text is needed
+atomic_llm_call() {
+    local prompt_file="$1"
+    local model="${2:-sonnet}"
+    local temp_output
+    temp_output=$(mktemp)
+
+    if atomic_invoke "$prompt_file" "$temp_output" "LLM call" --model="$model" >/dev/null 2>&1; then
+        cat "$temp_output"
+    fi
+    rm -f "$temp_output"
 }
 
 # ============================================================================

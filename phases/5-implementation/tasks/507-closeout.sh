@@ -50,6 +50,7 @@ task_507_closeout() {
         passing_tests=$(jq -r '.test_quality.passing_tests // 0' "$validation_file")
         total_tests=$(jq -r '.test_quality.total_tests // 0' "$validation_file")
         critical_issues=$(jq -r '.security.critical // 0' "$validation_file")
+    fi
 
     # Check TDD completion
     if [[ "$completed_tasks" -ge "$total_tasks" && "$total_tasks" -gt 0 ]]; then
@@ -59,6 +60,7 @@ task_507_closeout() {
         echo -e "  ${RED}[CRIT]${NC} ${RED}✗${NC} TDD cycles incomplete ($completed_tasks / $total_tasks)"
         checklist+=("TDD cycles complete:FAIL")
         all_passed=false
+    fi
 
     # Check coverage
     if [[ "$unit_coverage" -ge 80 ]]; then
@@ -71,6 +73,7 @@ task_507_closeout() {
         echo -e "  ${RED}[CRIT]${NC} ${RED}✗${NC} Coverage below 70% (${unit_coverage}%)"
         checklist+=("Coverage:FAIL")
         all_passed=false
+    fi
 
     # Check all tests passing
     if [[ "$passing_tests" -eq "$total_tests" && "$total_tests" -gt 0 ]]; then
@@ -80,6 +83,7 @@ task_507_closeout() {
         echo -e "  ${RED}[CRIT]${NC} ${RED}✗${NC} Tests failing ($((total_tests - passing_tests)) of $total_tests)"
         checklist+=("All tests passing:FAIL")
         all_passed=false
+    fi
 
     # Check VERIFY scans
     if [[ "$critical_issues" -eq 0 ]]; then
@@ -88,6 +92,7 @@ task_507_closeout() {
     else
         echo -e "  ${RED}[BLCK]${NC} ${RED}✗${NC} $critical_issues critical security issues"
         checklist+=("VERIFY scans:FAIL")
+    fi
 
     # Check audit
     if [[ -f "$audit_file" ]]; then
@@ -118,17 +123,20 @@ task_507_closeout() {
     else
         echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Audit not completed"
         checklist+=("Audit:SKIP")
+    fi
 
     # Check no flaky tests
     local flaky_tests=0
     if [[ -f "$validation_file" ]]; then
         flaky_tests=$(jq -r '.test_quality.flaky_tests // 0' "$validation_file")
+    fi
     if [[ "$flaky_tests" -eq 0 ]]; then
         echo -e "  ${GREEN}[BLCK]${NC} ${GREEN}✓${NC} No flaky tests"
         checklist+=("No flaky tests:PASS")
     else
         echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} $flaky_tests flaky tests detected"
         checklist+=("No flaky tests:WARN")
+    fi
 
     echo -e "  ${GREEN}[PASS]${NC} ${GREEN}✓${NC} Ready for Code Review"
     echo ""
@@ -143,6 +151,7 @@ task_507_closeout() {
     if [[ "$all_passed" == false ]]; then
         echo -e "  ${YELLOW}Some critical items need attention before closeout.${NC}"
         echo ""
+    fi
 
     echo -e "  ${CYAN}Closeout options:${NC}"
     echo ""
