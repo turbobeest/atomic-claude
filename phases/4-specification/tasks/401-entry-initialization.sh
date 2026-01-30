@@ -8,7 +8,7 @@ task_401_entry_initialization() {
     local tasks_file="$ATOMIC_ROOT/.taskmaster/tasks/tasks.json"
     local packages_file="$ATOMIC_ROOT/.taskmaster/reports/work-packages.json"
     local specs_dir="$ATOMIC_ROOT/.claude/specs"
-    local phase3_closeout="$ATOMIC_ROOT/.claude/closeout/phase-03-closeout.json"
+    local phase3_closeout=$(atomic_find_closeout "3-tasking")
 
     # ═══════════════════════════════════════════════════════════════════════════
     # PHASE 4 WELCOME
@@ -131,7 +131,7 @@ EOF
     mkdir -p "$specs_dir"
 
     # Check for existing specs
-    local existing_specs=$(find "$specs_dir" -name "spec-*.json" 2>/dev/null | wc -l)
+    local existing_specs=$(find "$specs_dir" -name "spec-*.json" 2>/dev/null | wc -l | tr -d ' ')
     if [[ "$existing_specs" -gt 0 ]]; then
         echo -e "  ${YELLOW}!${NC} Found $existing_specs existing spec files"
         echo ""
@@ -142,7 +142,8 @@ EOF
         echo -e "    ${RED}[abort]${NC}    Abort and review manually"
         echo ""
 
-        read -p "  Choice [keep]: " spec_choice
+    atomic_drain_stdin
+        read -e -p "  Choice [keep]: " spec_choice || true
         spec_choice=${spec_choice:-keep}
 
         case "$spec_choice" in
@@ -188,7 +189,7 @@ EOF
     echo -e "  ${DIM}Each subtask depends on the previous: RED→GREEN→REFACTOR→VERIFY${NC}"
     echo ""
 
-    read -p "  Press Enter to continue..."
+    read -e -p "  Press Enter to continue..." || true
 
     # Save initialization state
     local init_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/initialization.json"

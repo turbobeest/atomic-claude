@@ -11,7 +11,6 @@
 
 task_101_entry_validation() {
     local setup_dir="$ATOMIC_OUTPUT_DIR/0-setup"
-    local closeout_dir="$ATOMIC_ROOT/.claude/closeout"
 
     # ═══════════════════════════════════════════════════════════════════════════
     # PHASE 1 WELCOME
@@ -43,19 +42,14 @@ EOF
     # CHECK 1: Phase 0 Closeout
     # ═══════════════════════════════════════════════════════════════════════════
 
-    local closeout_file="$closeout_dir/phase-00-closeout.md"
-    if [[ -f "$closeout_file" ]]; then
-        echo -e "  ${GREEN}✓${NC} phase-00-closeout.md found"
+    local closeout_file=$(atomic_find_closeout "0-setup")
+
+    if [[ -n "$closeout_file" ]]; then
+        echo -e "  ${GREEN}✓${NC} Phase 0 closeout found"
     else
-        # Try JSON format
-        closeout_file="$closeout_dir/phase-00-closeout.json"
-        if [[ -f "$closeout_file" ]]; then
-            echo -e "  ${GREEN}✓${NC} phase-00-closeout.json found"
-        else
-            echo -e "  ${RED}✗${NC} Phase 0 closeout not found"
-            issues+=("Phase 0 closeout missing - run Phase 0 first")
-            validation_passed=false
-        fi
+        echo -e "  ${RED}✗${NC} Phase 0 closeout not found"
+        issues+=("Phase 0 closeout missing - run Phase 0 first")
+        validation_passed=false
     fi
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -68,13 +62,30 @@ EOF
         if jq -e . "$config_file" &>/dev/null; then
             echo -e "  ${GREEN}✓${NC} project-config.json valid"
 
-            # Check required fields
+            # Check if config was flattened (Task 003 approval)
+            # If .project.name is null but .extracted.project.name exists,
+            # the approval step failed — auto-flatten now
             local project_name=$(jq -r '.project.name // empty' "$config_file")
-            local project_type=$(jq -r '.project.type // empty' "$config_file")
-
             if [[ -z "$project_name" ]]; then
-                echo -e "  ${YELLOW}!${NC} project.name not set"
-                issues+=("Project name not configured")
+                local extracted_name=$(jq -r '.extracted.project.name // empty' "$config_file")
+                if [[ -n "$extracted_name" ]]; then
+                    echo -e "  ${YELLOW}!${NC} Config not flattened - auto-flattening from extracted data"
+                    local tmp=$(atomic_mktemp)
+                    jq '.project = .extracted.project //  .project |
+                        .repository = .extracted.repository // .repository |
+                        .sandbox = .extracted.sandbox // .sandbox |
+                        .mcp = .extracted.mcp // .mcp |
+                        .pipeline = .extracted.pipeline // .pipeline |
+                        .agents = .extracted.agents // .agents |
+                        .llm = .extracted.llm // .llm |
+                        .config_approved = true |
+                        .approved_at = (now | todate)' "$config_file" > "$tmp" && mv "$tmp" "$config_file"
+                    project_name="$extracted_name"
+                    echo -e "  ${GREEN}✓${NC} Config flattened: $project_name"
+                else
+                    echo -e "  ${YELLOW}!${NC} project.name not set"
+                    issues+=("Project name not configured")
+                fi
             fi
         else
             echo -e "  ${RED}✗${NC} project-config.json invalid JSON"

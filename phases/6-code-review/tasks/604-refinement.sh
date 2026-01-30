@@ -39,9 +39,9 @@ task_604_refinement() {
     if [[ -f "$agents_selection_file" ]]; then
         local refiner_agent=$(jq -r '.review_agents.refiner.name // ""' "$agents_selection_file")
         if [[ -n "$refiner_agent" ]]; then
-            local agent_file="$agent_repo/pipeline-agents/$refiner_agent.md"
+            agent_file=$(atomic_find_agent "$refiner_agent" "$agent_repo")
             if [[ -f "$agent_file" ]]; then
-                _604_REFINER_AGENT_PROMPT=$(cat "$agent_file")
+                _604_REFINER_AGENT_PROMPT=$(cat "$agent_file" | atomic_strip_frontmatter)
                 echo -e "  ${GREEN}✓${NC} Loaded agent: $refiner_agent"
                 echo ""
             fi
@@ -96,9 +96,48 @@ task_604_refinement() {
     echo -e "  ${BOLD}- REFINEMENT STRATEGY${NC}"
     echo ""
 
+    echo -e "  ${DIM}What would you like the code-refiner agent to address?${NC}"
+    echo ""
+    echo -e "    ${GREEN}[critical]${NC}    Address critical issues only (fastest)"
+    echo -e "    ${YELLOW}[major]${NC}       Address critical + major issues (recommended)"
+    echo -e "    ${CYAN}[minor]${NC}       Address critical + major + minor issues"
+    echo -e "    ${MAGENTA}[all]${NC}         Address all issues including suggestions (thorough)"
+    echo -e "    ${DIM}[skip]${NC}        Skip refinement entirely"
+    echo ""
+
+    atomic_drain_stdin
+    local refinement_scope
+    read -e -p "  Refinement scope [major]: " refinement_scope || true
+    refinement_scope=${refinement_scope:-major}
+
+    if [[ "$refinement_scope" == "skip" ]]; then
+        echo ""
+        echo -e "  ${YELLOW}!${NC} Skipping refinement - no changes will be made"
+        echo ""
+        atomic_success "Refinement skipped by user choice"
+        return 0
+    fi
+
+    # Export scope for use in refinement execution
+    export REFINEMENT_SCOPE="$refinement_scope"
+
+    echo ""
     echo -e "  ${DIM}The code-refiner agent will:${NC}"
     echo ""
-    echo -e "    ${CYAN}1.${NC} Address all critical and major findings"
+    case "$refinement_scope" in
+        critical)
+            echo -e "    ${CYAN}1.${NC} Address ${RED}critical${NC} findings only"
+            ;;
+        major)
+            echo -e "    ${CYAN}1.${NC} Address ${RED}critical${NC} and ${YELLOW}major${NC} findings"
+            ;;
+        minor)
+            echo -e "    ${CYAN}1.${NC} Address ${RED}critical${NC}, ${YELLOW}major${NC}, and ${CYAN}minor${NC} findings"
+            ;;
+        all)
+            echo -e "    ${CYAN}1.${NC} Address ${BOLD}all findings${NC} including suggestions"
+            ;;
+    esac
     echo -e "    ${CYAN}2.${NC} Apply targeted fixes without changing unrelated code"
     echo -e "    ${CYAN}3.${NC} Run tests after each change to ensure no regressions"
     echo -e "    ${CYAN}4.${NC} Document changes made for each finding"
@@ -117,7 +156,7 @@ task_604_refinement() {
     echo -e "  ──────────────────────────────────────────────────────────────────────────────────────────────────────────"
     echo ""
 
-    read -p "  Press Enter to begin refinement..."
+    read -e -p "  Press Enter to begin refinement..." || true
     echo ""
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -139,9 +178,11 @@ task_604_refinement() {
         echo ""
 
         # Extract critical findings from all review dimensions
+        # Filter out process failures that can't be code-fixed (max turns, blocked, etc.)
         local critical_findings=$(jq -c '
             [.deep_code.findings[]?, .architecture.findings[]?, .performance.findings[]?, .documentation.findings[]?]
             | map(select(.severity == "critical"))
+            | map(select(.description | (contains("max turns") or contains("blocked") or contains("does not exist")) | not))
         ' "$findings_file" 2>/dev/null)
 
         local i=0
@@ -176,9 +217,11 @@ task_604_refinement() {
         echo -e "  ${YELLOW}Addressing Major Issues${NC}"
         echo ""
 
+        # Filter out process failures that can't be code-fixed
         local major_findings=$(jq -c '
             [.deep_code.findings[]?, .architecture.findings[]?, .performance.findings[]?, .documentation.findings[]?]
             | map(select(.severity == "major"))
+            | map(select(.description | (contains("max turns") or contains("blocked") or contains("does not exist")) | not))
         ' "$findings_file" 2>/dev/null)
 
         local i=0
@@ -204,11 +247,45 @@ task_604_refinement() {
         done
     fi
 
-    # Optional minor fixes
-    echo -e "  ${DIM}Minor Issues${NC}"
-    echo ""
-    echo -e "    ${DIM}Minor issues are optional. Skipping for now.${NC}"
-    echo -e "    ${DIM}Re-run with --include-minor to address them.${NC}"
+    # Minor fixes (if scope includes them)
+    if [[ "$REFINEMENT_SCOPE" == "minor" || "$REFINEMENT_SCOPE" == "all" ]]; then
+        if [[ "$total_minor" -gt 0 ]]; then
+            echo -e "  ${CYAN}Addressing Minor Issues${NC}"
+            echo ""
+
+            # Filter out process failures that can't be code-fixed
+            local minor_findings=$(jq -c '
+                [.deep_code.findings[]?, .architecture.findings[]?, .performance.findings[]?, .documentation.findings[]?]
+                | map(select(.severity == "minor"))
+                | map(select(.description | (contains("max turns") or contains("blocked") or contains("does not exist")) | not))
+            ' "$findings_file" 2>/dev/null)
+
+            local i=0
+            echo "$minor_findings" | jq -c '.[]' 2>/dev/null | while read -r finding; do
+                ((i++))
+                local desc=$(echo "$finding" | jq -r '.description // "No description"')
+
+                echo -e "    ${DIM}[$i/$total_minor]${NC} $desc"
+
+                if _604_apply_fix "$finding" "$fixes_dir/minor-$i" "$ATOMIC_ROOT"; then
+                    echo -e "             ${GREEN}✓${NC} Fixed"
+                    ((fixed_minor++))
+                else
+                    echo -e "             ${YELLOW}!${NC} Manual fix recommended"
+                fi
+                echo ""
+            done
+        fi
+    else
+        echo -e "  ${DIM}Minor Issues${NC}"
+        echo ""
+        echo -e "    ${DIM}$total_minor minor issues skipped (select 'minor' or 'all' scope to address)${NC}"
+        echo ""
+    fi
+
+    # Note about process failures
+    echo -e "  ${DIM}Note: Process failures (max turns, blocked tasks) are automatically filtered.${NC}"
+    echo -e "  ${DIM}These require re-running Phase 5, not code fixes.${NC}"
     echo ""
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────

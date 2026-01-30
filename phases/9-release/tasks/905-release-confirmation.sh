@@ -139,7 +139,8 @@ task_905_release_confirmation() {
     echo -e "    ${YELLOW}[investigate]${NC} Investigate issues"
     echo ""
 
-    read -p "  Choice [confirm]: " confirm_choice
+    atomic_drain_stdin
+    read -e -p "  Choice [confirm]: " confirm_choice || true
     confirm_choice=${confirm_choice:-confirm}
 
     case "$confirm_choice" in
@@ -156,7 +157,7 @@ task_905_release_confirmation() {
             echo ""
             echo -e "  ${DIM}Execution log: .claude/release/execution.json${NC}"
             echo ""
-            read -p "  Press Enter after investigation..."
+            read -e -p "  Press Enter after investigation..." || true
             echo ""
             echo -e "  ${DIM}Returning to confirmation...${NC}"
             task_905_release_confirmation
@@ -176,7 +177,7 @@ task_905_release_confirmation() {
             ;;
         confirm)
             echo ""
-            read -p "  Confirmer name: " confirmer_name
+            read -e -p "  Confirmer name: " confirmer_name || true
             confirmer_name=${confirmer_name:-"Human Operator"}
             echo ""
             ;;

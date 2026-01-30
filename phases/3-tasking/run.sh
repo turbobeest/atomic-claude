@@ -159,6 +159,9 @@ main() {
 
     phase_complete
 
+    # Chain to Phase 4: Specification
+    phase_chain "3" "$ROOT_DIR/phases/4-specification/run.sh" "Specification"
+
     return 0
 }
 

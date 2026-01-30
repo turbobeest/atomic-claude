@@ -82,7 +82,7 @@ task_007_environment_setup() {
 
         # Loop until all required tools are installed
         while [[ $missing -gt 0 ]]; do
-            read -p "  Press Enter to re-check environment... " _
+            read -e -p "  Press Enter to re-check environment... " _ || true
             echo ""
 
             # Re-check required tools
@@ -102,7 +102,7 @@ task_007_environment_setup() {
     else
         echo -e "  ${GREEN}All required tools installed.${NC}"
         echo ""
-        read -p "  Press Enter to continue... " _
+        read -e -p "  Press Enter to continue... " _ || true
     fi
 
     # Record to context

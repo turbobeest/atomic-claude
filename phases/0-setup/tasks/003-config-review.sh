@@ -108,7 +108,8 @@ _003_prompt_action() {
     echo ""
 
     while true; do
-        read -p "  Choice [a]: " choice
+    atomic_drain_stdin
+        read -e -p "  Choice [a]: " choice || true
         choice=${choice:-a}
 
         case "$choice" in
@@ -155,7 +156,7 @@ _003_approve_config() {
         .agents = .extracted.agents |
         .llm = .extracted.llm |
         .config_approved = true |
-        .approved_at = now | todate' "$config_file" > "$tmp" && mv "$tmp" "$config_file"
+        .approved_at = (now | todate)' "$config_file" > "$tmp" && mv "$tmp" "$config_file"
 
     # Record approval to context
     local project_name=$(jq -r '.project.name // "unnamed"' "$config_file")
@@ -176,7 +177,7 @@ _003_view_json() {
     echo ""
     echo -e "${DIM}  ────────────────────────────────────────────────${NC}"
     echo ""
-    read -p "  Press Enter to continue..." _
+    read -e -p "  Press Enter to continue..." _ || true
 }
 
 # Edit a specific field
@@ -193,14 +194,14 @@ _003_edit_field() {
     echo -e "    6. Network Access"
     echo -e "    7. Command Approval Mode"
     echo ""
-    read -p "  Field [1-7]: " field_choice
+    read -e -p "  Field [1-7]: " field_choice || true
 
     local extracted=$(jq '.extracted' "$config_file")
 
     case "$field_choice" in
         1)
             local old_val=$(echo "$extracted" | jq -r '.project.name // "not set"')
-            read -p "  New project name [$old_val]: " new_name
+            read -e -p "  New project name [$old_val]: " new_name || true
             new_name=${new_name:-$old_val}
             if atomic_validate_project_name "$new_name" >/dev/null 2>&1; then
                 local tmp=$(atomic_mktemp)
@@ -212,7 +213,7 @@ _003_edit_field() {
             ;;
         2)
             local old_val=$(echo "$extracted" | jq -r '.project.description // "not set"')
-            read -p "  New description: " new_desc
+            read -e -p "  New description: " new_desc || true
             new_desc=${new_desc:-$old_val}
             local tmp=$(atomic_mktemp)
             jq --arg val "$new_desc" '.extracted.project.description = $val' "$config_file" > "$tmp" && mv "$tmp" "$config_file"
@@ -220,7 +221,7 @@ _003_edit_field() {
             ;;
         3)
             local old_val=$(echo "$extracted" | jq -r '.repository.url // "not set"')
-            read -p "  New repository URL [$old_val]: " new_url
+            read -e -p "  New repository URL [$old_val]: " new_url || true
             new_url=${new_url:-$old_val}
             local tmp=$(atomic_mktemp)
             jq --arg val "$new_url" '.extracted.repository.url = $val' "$config_file" > "$tmp" && mv "$tmp" "$config_file"
@@ -233,7 +234,7 @@ _003_edit_field() {
             echo -e "    ${DIM}2.${NC} full       ${DIM}- Full application${NC}"
             echo -e "    ${DIM}3.${NC} library    ${DIM}- Reusable library/package${NC}"
             echo -e "    ${DIM}4.${NC} prototype  ${DIM}- Quick prototype (fewer gates)${NC}"
-            read -p "  Mode [1-4]: " mode
+            read -e -p "  Mode [1-4]: " mode || true
             local new_mode="$old_val"
             case "$mode" in
                 1) new_mode="component" ;;
@@ -252,7 +253,7 @@ _003_edit_field() {
             echo -e "    ${DIM}2.${NC} openai     ${DIM}- GPT models${NC}"
             echo -e "    ${DIM}3.${NC} google     ${DIM}- Gemini models${NC}"
             echo -e "    ${DIM}4.${NC} local      ${DIM}- Local LLM (ollama, etc)${NC}"
-            read -p "  Provider [1-4]: " prov
+            read -e -p "  Provider [1-4]: " prov || true
             local new_provider="$old_val"
             case "$prov" in
                 1) new_provider="anthropic" ;;
@@ -270,7 +271,7 @@ _003_edit_field() {
             echo -e "    ${DIM}1.${NC} none       ${DIM}- No network access${NC}"
             echo -e "    ${DIM}2.${NC} fetch-only ${DIM}- HTTP GET only (recommended)${NC}"
             echo -e "    ${DIM}3.${NC} full       ${DIM}- Full network access${NC}"
-            read -p "  Network access [1-3]: " net
+            read -e -p "  Network access [1-3]: " net || true
             local new_network="$old_val"
             case "$net" in
                 1) new_network="none" ;;
@@ -287,7 +288,7 @@ _003_edit_field() {
             echo -e "    ${DIM}1.${NC} ask-always ${DIM}- Prompt before every command${NC}"
             echo -e "    ${DIM}2.${NC} cautious   ${DIM}- Prompt for risky commands (recommended)${NC}"
             echo -e "    ${DIM}3.${NC} auto       ${DIM}- Auto-approve safe commands${NC}"
-            read -p "  Command approval [1-3]: " cmd
+            read -e -p "  Command approval [1-3]: " cmd || true
             local new_cmd="$old_val"
             case "$cmd" in
                 1) new_cmd="ask-always" ;;

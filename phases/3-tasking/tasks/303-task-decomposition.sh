@@ -46,11 +46,11 @@ task_303_task_decomposition() {
         local decomposition_agents=$(jq -r '.decomposition_agents[]?' "$agents_file" 2>/dev/null)
 
         for agent in $decomposition_agents; do
-            local agent_file="$agent_repo/pipeline-agents/$agent.md"
+            agent_file=$(atomic_find_agent "$agent" "$agent_repo")
             if [[ -f "$agent_file" ]]; then
                 case "$agent" in
                     *task-decomposer*)
-                        decomposer_prompt=$(cat "$agent_file")
+                        decomposer_prompt=$(cat "$agent_file" | atomic_strip_frontmatter)
                         echo -e "  ${GREEN}✓${NC} Loaded agent: $agent"
                         ;;
                     *dependency-mapper*)
@@ -66,11 +66,11 @@ task_303_task_decomposition() {
         # Load validation agents
         local validation_agents=$(jq -r '.validation_agents[]?' "$agents_file" 2>/dev/null)
         for agent in $validation_agents; do
-            local agent_file="$agent_repo/pipeline-agents/$agent.md"
+            agent_file=$(atomic_find_agent "$agent" "$agent_repo")
             if [[ -f "$agent_file" ]]; then
                 case "$agent" in
                     *task-validator*)
-                        validator_prompt=$(cat "$agent_file")
+                        validator_prompt=$(cat "$agent_file" | atomic_strip_frontmatter)
                         echo -e "  ${GREEN}✓${NC} Loaded agent: $agent"
                         ;;
                 esac

@@ -91,6 +91,9 @@ task_803_agent_selection() {
     echo -e "  ${DIM}Select agents for each role:${NC}"
     echo ""
 
+    # Drain any buffered stdin before agent selection
+    atomic_drain_stdin
+
     local selected_agents=()
 
     # Release Packager selection
@@ -99,15 +102,15 @@ task_803_agent_selection() {
     echo -e "    ${DIM}[2]${NC} release-packager (haiku) - Fast, standard"
     echo -e "    ${YELLOW}[c]${NC} Custom agent"
     echo ""
-    read -p "  Select [1]: " packager_choice
+    read -e -p "  Select [1]: " packager_choice || true
     packager_choice=${packager_choice:-1}
 
     case "$packager_choice" in
         1) selected_agents+=("release-packager-phd:sonnet") ;;
         2) selected_agents+=("release-packager:haiku") ;;
         c|C)
-            read -p "  Custom agent name: " custom_name
-            read -p "  Custom agent model [sonnet]: " custom_model
+            read -e -p "  Custom agent name: " custom_name || true
+            read -e -p "  Custom agent model [sonnet]: " custom_model || true
             custom_model=${custom_model:-sonnet}
             selected_agents+=("$custom_name:$custom_model")
             ;;
@@ -121,15 +124,15 @@ task_803_agent_selection() {
     echo -e "    ${DIM}[2]${NC} changelog-writer (haiku) - Fast, standard"
     echo -e "    ${YELLOW}[c]${NC} Custom agent"
     echo ""
-    read -p "  Select [1]: " changelog_choice
+    read -e -p "  Select [1]: " changelog_choice || true
     changelog_choice=${changelog_choice:-1}
 
     case "$changelog_choice" in
         1) selected_agents+=("changelog-writer-phd:sonnet") ;;
         2) selected_agents+=("changelog-writer:haiku") ;;
         c|C)
-            read -p "  Custom agent name: " custom_name
-            read -p "  Custom agent model [sonnet]: " custom_model
+            read -e -p "  Custom agent name: " custom_name || true
+            read -e -p "  Custom agent model [sonnet]: " custom_model || true
             custom_model=${custom_model:-sonnet}
             selected_agents+=("$custom_name:$custom_model")
             ;;
@@ -143,15 +146,15 @@ task_803_agent_selection() {
     echo -e "    ${DIM}[2]${NC} documentation-generator (sonnet) - Standard"
     echo -e "    ${YELLOW}[c]${NC} Custom agent"
     echo ""
-    read -p "  Select [1]: " docs_choice
+    read -e -p "  Select [1]: " docs_choice || true
     docs_choice=${docs_choice:-1}
 
     case "$docs_choice" in
         1) selected_agents+=("documentation-generator-phd:opus") ;;
         2) selected_agents+=("documentation-generator:sonnet") ;;
         c|C)
-            read -p "  Custom agent name: " custom_name
-            read -p "  Custom agent model [opus]: " custom_model
+            read -e -p "  Custom agent name: " custom_name || true
+            read -e -p "  Custom agent model [opus]: " custom_model || true
             custom_model=${custom_model:-opus}
             selected_agents+=("$custom_name:$custom_model")
             ;;
@@ -165,15 +168,15 @@ task_803_agent_selection() {
     echo -e "    ${DIM}[2]${NC} installation-guide-writer (haiku) - Fast, standard"
     echo -e "    ${YELLOW}[c]${NC} Custom agent"
     echo ""
-    read -p "  Select [1]: " install_choice
+    read -e -p "  Select [1]: " install_choice || true
     install_choice=${install_choice:-1}
 
     case "$install_choice" in
         1) selected_agents+=("installation-guide-writer-phd:sonnet") ;;
         2) selected_agents+=("installation-guide-writer:haiku") ;;
         c|C)
-            read -p "  Custom agent name: " custom_name
-            read -p "  Custom agent model [sonnet]: " custom_model
+            read -e -p "  Custom agent name: " custom_name || true
+            read -e -p "  Custom agent model [sonnet]: " custom_model || true
             custom_model=${custom_model:-sonnet}
             selected_agents+=("$custom_name:$custom_model")
             ;;

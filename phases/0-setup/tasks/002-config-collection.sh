@@ -47,12 +47,15 @@ task_002_config_document() {
             done
         fi
 
+        # Drain any buffered stdin
+        while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
+
         while true; do
             if [[ -n "$default_path" ]]; then
-                read -p "  Setup file path [$default_path]: " SETUP_FILE_PATH
+                read -e -p "  Setup file path [$default_path]: " SETUP_FILE_PATH || true
                 SETUP_FILE_PATH=${SETUP_FILE_PATH:-$default_path}
             else
-                read -p "  Setup file path: " SETUP_FILE_PATH
+                read -e -p "  Setup file path: " SETUP_FILE_PATH || true
             fi
 
             if [[ -z "$SETUP_FILE_PATH" ]]; then
@@ -300,7 +303,7 @@ PROMPT_SCHEMA
     atomic_waiting "Claude is extracting configuration..."
 
     # Invoke Claude to extract
-    if atomic_invoke "$prompt_file" "$extracted_file" "Extract configuration from setup" --model=sonnet; then
+    if atomic_invoke "$prompt_file" "$extracted_file" "Extract configuration from setup" --model=opus; then
         # Try to validate JSON
         if jq . "$extracted_file" > /dev/null 2>&1; then
             atomic_success "Configuration extracted successfully"
@@ -337,7 +340,8 @@ PROMPT_SCHEMA
         echo -e "  ${GREEN}[g]${NC} Switch to guided mode"
         echo -e "  ${RED}[q]${NC} Quit"
         echo ""
-        read -p "  Choice [r]: " fallback_choice
+    atomic_drain_stdin
+        read -e -p "  Choice [r]: " fallback_choice || true
         fallback_choice=${fallback_choice:-r}
 
         case "$fallback_choice" in
@@ -389,7 +393,7 @@ task_002_config_guided() {
     echo -e "${DIM}    Max 24 chars, alphanumeric + hyphens/underscores${NC}"
     local project_name=""
     while true; do
-        read -p "    Name [$detected_name]: " project_name
+        read -e -p "    Name [$detected_name]: " project_name || true
         project_name=${project_name:-$detected_name}
         if atomic_validate_project_name "$project_name" >/dev/null 2>&1; then
             break
@@ -402,7 +406,7 @@ task_002_config_guided() {
     # --- Description ---
     echo -e "${CYAN}  Description${NC}"
     echo -e "${DIM}    One-line summary of what this project does${NC}"
-    read -p "    Description: " description
+    read -e -p "    Description: " description || true
     description=${description:-"A new software component"}
     echo ""
 
@@ -418,7 +422,7 @@ task_002_config_guided() {
     echo -e "    ${DIM}8.${NC} migration      - Technology migration"
     local project_type=""
     while true; do
-        read -p "    Type [1]: " type_choice
+        read -e -p "    Type [1]: " type_choice || true
         type_choice=${type_choice:-1}
         case "$type_choice" in
             1) project_type="new-component" ;;
@@ -438,7 +442,7 @@ task_002_config_guided() {
     # --- Primary Goal ---
     echo -e "${CYAN}  Primary Goal${NC}"
     echo -e "${DIM}    What is the main objective of this project?${NC}"
-    read -p "    Goal: " primary_goal
+    read -e -p "    Goal: " primary_goal || true
     primary_goal=${primary_goal:-"Build a production-ready component"}
     echo ""
 
@@ -448,7 +452,7 @@ task_002_config_guided() {
     if [[ -n "$detected_repo" ]]; then
         echo -e "${DIM}    Detected: $detected_repo${NC}"
     fi
-    read -p "    URL [$detected_repo]: " repo_url
+    read -e -p "    URL [$detected_repo]: " repo_url || true
     repo_url=${repo_url:-$detected_repo}
     echo ""
 
@@ -460,7 +464,7 @@ task_002_config_guided() {
     echo -e "    ${DIM}4.${NC} prototype  - Quick validation only"
     local pipeline_mode=""
     while true; do
-        read -p "    Mode [1]: " mode_choice
+        read -e -p "    Mode [1]: " mode_choice || true
         mode_choice=${mode_choice:-1}
         case "$mode_choice" in
             1) pipeline_mode="component" ;;
@@ -483,7 +487,7 @@ task_002_config_guided() {
     echo -e "    ${DIM}6.${NC} azure        - Azure OpenAI"
     local llm_provider=""
     while true; do
-        read -p "    Provider [1]: " provider_choice
+        read -e -p "    Provider [1]: " provider_choice || true
         provider_choice=${provider_choice:-1}
         case "$provider_choice" in
             1) llm_provider="anthropic" ;;
@@ -590,7 +594,7 @@ task_002_config_quick() {
     echo -e "${CYAN}  Project Name${NC} ${DIM}(required)${NC}"
     local project_name=""
     while true; do
-        read -p "    Name [$detected_name]: " project_name
+        read -e -p "    Name [$detected_name]: " project_name || true
         project_name=${project_name:-$detected_name}
         if atomic_validate_project_name "$project_name" >/dev/null 2>&1; then
             break
@@ -602,7 +606,7 @@ task_002_config_quick() {
 
     # --- Optional Goal ---
     echo -e "${CYAN}  Primary Goal${NC} ${DIM}(optional, press Enter to skip)${NC}"
-    read -p "    Goal: " primary_goal
+    read -e -p "    Goal: " primary_goal || true
     primary_goal=${primary_goal:-"Build a production-ready component"}
     echo ""
 

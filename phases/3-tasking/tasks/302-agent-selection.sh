@@ -266,7 +266,8 @@ task_302_agent_selection() {
 
         local agent_choice=""
         while [[ ! "$agent_choice" =~ ^(approve|core|custom)$ ]]; do
-            read -p "  Choice [approve]: " agent_choice
+    atomic_drain_stdin
+            read -e -p "  Choice [approve]: " agent_choice || true
             agent_choice=${agent_choice:-approve}
             if [[ ! "$agent_choice" =~ ^(approve|core|custom)$ ]]; then
                 echo -e "  ${RED}Invalid choice.${NC} Enter: approve, core, or custom"
@@ -286,7 +287,7 @@ task_302_agent_selection() {
                     echo -e "    $((i+1)). ${recommendations[$i]}"
                 done
                 echo ""
-                read -p "  > " custom_selection
+                read -e -p "  > " custom_selection || true
 
                 if [[ "$custom_selection" != "none" && -n "$custom_selection" ]]; then
                     for num in $custom_selection; do
@@ -305,7 +306,8 @@ task_302_agent_selection() {
 
         local agent_choice=""
         while [[ ! "$agent_choice" =~ ^(approve|custom)$ ]]; do
-            read -p "  Choice [approve]: " agent_choice
+    atomic_drain_stdin
+            read -e -p "  Choice [approve]: " agent_choice || true
             agent_choice=${agent_choice:-approve}
             if [[ ! "$agent_choice" =~ ^(approve|custom)$ ]]; then
                 echo -e "  ${RED}Invalid choice.${NC} Enter: approve or custom"
@@ -321,7 +323,7 @@ task_302_agent_selection() {
             echo -e "    4. data-task-architect"
             echo -e "    5. integration-task-specialist"
             echo ""
-            read -p "  Select (space-separated numbers): " custom_selection
+            read -e -p "  Select (space-separated numbers): " custom_selection || true
 
             for num in $custom_selection; do
                 case "$num" in

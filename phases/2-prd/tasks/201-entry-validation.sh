@@ -12,7 +12,6 @@
 
 task_201_entry_validation() {
     local phase1_dir="$ATOMIC_OUTPUT_DIR/1-discovery"
-    local closeout_dir="$ATOMIC_ROOT/.claude/closeout"
 
     # ═══════════════════════════════════════════════════════════════════════════
     # PHASE 2 WELCOME
@@ -52,17 +51,18 @@ EOF
 
     # Check Phase 1 closeout
     echo -e "  ${CYAN}Phase 1 Closeout:${NC}"
-    if [[ -f "$closeout_dir/phase-01-closeout.json" ]]; then
-        local status=$(jq -r '.status // "unknown"' "$closeout_dir/phase-01-closeout.json")
+    local closeout_file=$(atomic_find_closeout "1-discovery")
+    if [[ -n "$closeout_file" ]]; then
+        local status=$(jq -r '.status // "unknown"' "$closeout_file")
         if [[ "$status" == "complete" ]]; then
-            echo -e "    ${GREEN}✓${NC} phase-01-closeout.json (status: complete)"
+            echo -e "    ${GREEN}✓${NC} Phase 1 closeout found (status: complete)"
         else
-            echo -e "    ${YELLOW}!${NC} phase-01-closeout.json (status: $status)"
+            echo -e "    ${YELLOW}!${NC} Phase 1 closeout (status: $status)"
             all_valid=false
         fi
     else
-        echo -e "    ${RED}✗${NC} phase-01-closeout.json - NOT FOUND"
-        missing+=("phase-01-closeout.json")
+        echo -e "    ${RED}✗${NC} Phase 1 closeout - NOT FOUND"
+        missing+=("Phase 1 closeout")
         all_valid=false
     fi
 
@@ -117,7 +117,8 @@ EOF
         echo -e "    ${DIM}[c]${NC} Continue anyway (not recommended)"
         echo ""
 
-        read -p "  Choice [b]: " choice
+    atomic_drain_stdin
+        read -e -p "  Choice [b]: " choice || true
         choice=${choice:-b}
 
         case "$choice" in

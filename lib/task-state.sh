@@ -42,13 +42,38 @@ _task_state_lock() {
         TASK_STATE_LOCK_FILE="${TASK_STATE_FILE}.lock"
     fi
 
-    # Use flock if available, otherwise skip locking
+    # Use flock if available, otherwise use mkdir-based lock
     if command -v flock &>/dev/null; then
         exec 200>"$TASK_STATE_LOCK_FILE"
         if ! flock -w 10 200; then
             echo "ERROR: Failed to acquire state file lock after 10s" >&2
             return 1
         fi
+    else
+        # Fallback: mkdir is atomic on all POSIX systems
+        local lock_dir="${TASK_STATE_LOCK_FILE}.d"
+        local max_wait=10
+        local waited=0
+        while ! mkdir "$lock_dir" 2>/dev/null; do
+            sleep 1
+            ((waited++))
+            if [[ $waited -ge $max_wait ]]; then
+                # Check if lock holder is still alive (stale lock cleanup)
+                local lock_pid_file="$lock_dir/pid"
+                if [[ -f "$lock_pid_file" ]]; then
+                    local lock_pid
+                    lock_pid=$(cat "$lock_pid_file" 2>/dev/null || echo "")
+                    if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
+                        # Lock holder is dead, remove stale lock
+                        rm -rf "$lock_dir" 2>/dev/null
+                        continue
+                    fi
+                fi
+                echo "ERROR: Failed to acquire state file lock after ${max_wait}s" >&2
+                return 1
+            fi
+        done
+        echo "$$" > "$lock_dir/pid" 2>/dev/null || true
     fi
     return 0
 }
@@ -56,8 +81,14 @@ _task_state_lock() {
 # Release lock on state file
 # Usage: _task_state_unlock
 _task_state_unlock() {
-    if command -v flock &>/dev/null && [[ -n "$TASK_STATE_LOCK_FILE" ]]; then
+    if [[ -z "$TASK_STATE_LOCK_FILE" ]]; then
+        return
+    fi
+    if command -v flock &>/dev/null; then
         flock -u 200 2>/dev/null || true
+    else
+        # Remove mkdir-based lock
+        rm -rf "${TASK_STATE_LOCK_FILE}.d" 2>/dev/null || true
     fi
 }
 
@@ -145,6 +176,9 @@ EOF
             }
         else . end
     ' --arg phase "$phase_id"
+
+    # Recover any tasks stuck in in_progress from previous interrupted sessions
+    task_state_recover_stuck
 }
 
 # ============================================================================
@@ -239,7 +273,7 @@ task_state_get_resume_point() {
 # TASK STATE UPDATES
 # ============================================================================
 
-# Mark a task as in-progress
+# Mark a task as in-progress (idempotent - won't overwrite if already in_progress)
 # Usage: task_state_start "101" "Entry Validation"
 task_state_start() {
     local task_id="$1"
@@ -251,13 +285,17 @@ task_state_start() {
 
     _task_state_jq_update '
         .current_task = $task |
-        .phases[$phase].tasks[$task] = {
-            "name": $name,
-            "status": "in_progress",
-            "started_at": (now | todate),
-            "completed_at": null,
-            "artifacts": []
-        }
+        if (.phases[$phase].tasks[$task].status == "in_progress") then
+            .phases[$phase].tasks[$task].name = $name
+        else
+            .phases[$phase].tasks[$task] = {
+                "name": $name,
+                "status": "in_progress",
+                "started_at": (now | todate),
+                "completed_at": null,
+                "artifacts": []
+            }
+        end
     ' --arg phase "$phase_id" --arg task "$task_id" --arg name "$task_name"
 }
 
@@ -602,6 +640,43 @@ task_state_show() {
 }
 
 # ============================================================================
+# STUCK TASK RECOVERY
+# ============================================================================
+
+# Detect and reset tasks stuck in "in_progress" state
+# Called automatically during task_state_init to recover from interrupted sessions
+# Usage: task_state_recover_stuck
+task_state_recover_stuck() {
+    [[ ! -f "$TASK_STATE_FILE" ]] && return 0
+
+    local phase_id
+    phase_id=$(jq -r '.current_phase // ""' "$TASK_STATE_FILE")
+    [[ -z "$phase_id" ]] && return 0
+
+    # Find tasks stuck in in_progress
+    local stuck_tasks
+    stuck_tasks=$(jq -r --arg phase "$phase_id" '
+        .phases[$phase].tasks // {} | to_entries[] |
+        select(.value.status == "in_progress") | .key
+    ' "$TASK_STATE_FILE" 2>/dev/null)
+
+    if [[ -n "$stuck_tasks" ]]; then
+        echo -e "  ${YELLOW}!${NC} Recovering stuck tasks from previous interrupted session:" >&2
+        while IFS= read -r task_id; do
+            local task_name
+            task_name=$(jq -r --arg phase "$phase_id" --arg task "$task_id" \
+                '.phases[$phase].tasks[$task].name // "unknown"' "$TASK_STATE_FILE")
+            echo -e "    ${YELLOW}→${NC} Task $task_id ($task_name): in_progress → pending" >&2
+            _task_state_jq_update '
+                .phases[$phase].tasks[$task].status = "pending" |
+                .phases[$phase].tasks[$task].completed_at = null
+            ' --arg phase "$phase_id" --arg task "$task_id"
+        done <<< "$stuck_tasks"
+        echo "" >&2
+    fi
+}
+
+# ============================================================================
 # CLI INTERFACE
 # ============================================================================
 
@@ -653,6 +728,15 @@ task_state_parse_args() {
             --status)
                 task_state_show
                 exit 0
+                ;;
+            -h|--help|--skip-intro)
+                # Known flags handled elsewhere — pass through silently
+                shift
+                ;;
+            --*)
+                echo "Warning: Unknown flag '$1' ignored" >&2
+                echo "  Supported: --resume-at=N, --redo, --reset-from=N, --clear, --status, --pipeline-status, --pipeline-reset=N" >&2
+                shift
                 ;;
             *)
                 shift

@@ -36,7 +36,8 @@ task_203_prd_interview() {
     echo -e "    ${DIM}[skip]${NC}      Skip entirely (no interview data)"
     echo ""
 
-    read -p "  Choice [continue]: " skip_choice
+    atomic_drain_stdin
+    read -e -p "  Choice [continue]: " skip_choice || true
     skip_choice=${skip_choice:-continue}
 
     case "$skip_choice" in
@@ -86,7 +87,8 @@ task_203_prd_interview() {
     echo -e "    ${YELLOW}[adjust]${NC}   Add or modify stakeholders"
     echo ""
 
-    read -p "  Choice [confirm]: " stake_choice
+    atomic_drain_stdin
+    read -e -p "  Choice [confirm]: " stake_choice || true
     stake_choice=${stake_choice:-confirm}
 
     if [[ "$stake_choice" == "adjust" ]]; then
@@ -94,7 +96,7 @@ task_203_prd_interview() {
         echo -e "  ${DIM}Enter stakeholders (one per line, empty line to finish):${NC}"
         stakeholders=()
         while true; do
-            read -p "    > " stakeholder
+            read -e -p "    > " stakeholder || true
             [[ -z "$stakeholder" ]] && break
             stakeholders+=("$stakeholder")
         done
@@ -124,7 +126,8 @@ task_203_prd_interview() {
     echo -e "    ${YELLOW}[adjust]${NC}   Define specific metrics"
     echo ""
 
-    read -p "  Choice [confirm]: " success_choice
+    atomic_drain_stdin
+    read -e -p "  Choice [confirm]: " success_choice || true
     success_choice=${success_choice:-confirm}
 
     if [[ "$success_choice" == "adjust" ]]; then
@@ -132,7 +135,7 @@ task_203_prd_interview() {
         echo -e "  ${DIM}Enter success criteria (one per line, empty line to finish):${NC}"
         success_criteria=()
         while true; do
-            read -p "    > " criterion
+            read -e -p "    > " criterion || true
             [[ -z "$criterion" ]] && break
             success_criteria+=("$criterion")
         done
@@ -162,7 +165,8 @@ task_203_prd_interview() {
     echo -e "    ${YELLOW}[adjust]${NC}   Define specific non-goals"
     echo ""
 
-    read -p "  Choice [confirm]: " nongoal_choice
+    atomic_drain_stdin
+    read -e -p "  Choice [confirm]: " nongoal_choice || true
     nongoal_choice=${nongoal_choice:-confirm}
 
     if [[ "$nongoal_choice" == "adjust" ]]; then
@@ -170,7 +174,7 @@ task_203_prd_interview() {
         echo -e "  ${DIM}Enter non-goals (one per line, empty line to finish):${NC}"
         non_goals=()
         while true; do
-            read -p "    > " nongoal
+            read -e -p "    > " nongoal || true
             [[ -z "$nongoal" ]] && break
             non_goals+=("$nongoal")
         done
@@ -196,7 +200,7 @@ task_203_prd_interview() {
 
     mvp_scope=()
     while true; do
-        read -p "    > " mvp_item
+        read -e -p "    > " mvp_item || true
         [[ -z "$mvp_item" ]] && break
         mvp_scope+=("$mvp_item")
     done

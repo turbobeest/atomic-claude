@@ -134,7 +134,11 @@ task_906_closeout() {
     echo -e "    ${RED}[hold]${NC}    Hold closeout for now"
     echo ""
 
-    read -p "  Choice [approve]: " closeout_choice
+    # Drain any buffered stdin from previous interactions
+    while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
+
+    # Handle EOF gracefully - default to approve
+    read -e -p "  Choice [approve]: " closeout_choice || true
     closeout_choice=${closeout_choice:-approve}
 
     case "$closeout_choice" in
@@ -148,7 +152,7 @@ task_906_closeout() {
             echo ""
             ls -la "$release_dir"/ 2>/dev/null | head -10
             echo ""
-            read -p "  Press Enter to continue to closeout..."
+            read -e -p "  Press Enter to continue to closeout..." || true
             ;;
         hold)
             echo ""

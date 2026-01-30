@@ -11,7 +11,9 @@ task_707_closeout() {
     local integration_dir="$ATOMIC_ROOT/.claude/integration"
     local report_file="$integration_dir/integration-report.json"
     local approval_file="$integration_dir/approval.json"
-    local audit_file="$ATOMIC_ROOT/.claude/audit/phase-07-audit.json"
+    # Audit file - check new path first, then legacy
+    local audit_file="$ATOMIC_ROOT/.outputs/audits/phase-7-report.json"
+    [[ ! -f "$audit_file" ]] && audit_file="$ATOMIC_ROOT/.claude/audit/phase-07-audit.json"
 
     atomic_step "Phase Closeout"
 
@@ -100,15 +102,33 @@ task_707_closeout() {
     fi
 
     # Check audit
-    if [[ "$audit_status" == "PASS" ]]; then
-        echo -e "  ${GREEN}[BLCK]${NC} ${GREEN}✓${NC} Integration audit passed"
-        checklist+=("Integration audit:PASS")
-    elif [[ "$audit_status" == "DEFERRED" ]]; then
-        echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Integration audit deferred"
-        checklist+=("Integration audit:DEFERRED")
+    if [[ -f "$audit_file" ]]; then
+        # Check summary.passed/failed/warnings (new format) or overall_status (legacy)
+        local passed=$(jq -r '.summary.passed // 0' "$audit_file" 2>/dev/null)
+        local failed=$(jq -r '.summary.failed // 0' "$audit_file" 2>/dev/null)
+        local warnings=$(jq -r '.summary.warnings // 0' "$audit_file" 2>/dev/null)
+        local total=$((passed + failed + warnings))
+
+        if [[ $total -eq 0 ]]; then
+            # Try legacy format (audit_status already read above)
+            case "$audit_status" in
+                PASS) echo -e "  ${GREEN}[BLCK]${NC} ${GREEN}✓${NC} Integration audit passed"; checklist+=("Integration audit:PASS") ;;
+                WARNING|DEFERRED) echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Integration audit: $audit_status"; checklist+=("Integration audit:WARN") ;;
+                *) echo -e "  ${RED}[BLCK]${NC} ${RED}✗${NC} Integration audit failed"; checklist+=("Integration audit:FAIL") ;;
+            esac
+        elif [[ $failed -eq 0 && $warnings -eq 0 ]]; then
+            echo -e "  ${GREEN}[BLCK]${NC} ${GREEN}✓${NC} Integration audit passed ($passed passed)"
+            checklist+=("Integration audit:PASS")
+        elif [[ $failed -eq 0 ]]; then
+            echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Integration audit has warnings ($warnings warnings)"
+            checklist+=("Integration audit:WARN")
+        else
+            echo -e "  ${RED}[BLCK]${NC} ${RED}✗${NC} Integration audit has failures ($failed failed)"
+            checklist+=("Integration audit:FAIL")
+        fi
     else
-        echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Integration audit: $audit_status"
-        checklist+=("Integration audit:WARN")
+        echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Integration audit not completed"
+        checklist+=("Integration audit:SKIP")
     fi
 
     echo ""
@@ -133,7 +153,11 @@ task_707_closeout() {
     echo -e "    ${RED}[hold]${NC}    Hold closeout for now"
     echo ""
 
-    read -p "  Choice [approve]: " closeout_choice
+    # Drain any buffered stdin from previous interactions
+    while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
+
+    # Prompt for choice
+    read -e -p "  Choice [approve]: " closeout_choice || true
     closeout_choice=${closeout_choice:-approve}
 
     case "$closeout_choice" in
@@ -149,7 +173,7 @@ task_707_closeout() {
             echo ""
             ls -la "$integration_dir"/ 2>/dev/null | head -10
             echo ""
-            read -p "  Press Enter to continue to closeout..."
+            read -e -p "  Press Enter to continue to closeout..." || true
             ;;
         hold)
             echo ""

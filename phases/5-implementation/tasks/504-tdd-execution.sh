@@ -47,9 +47,9 @@ task_504_tdd_execution() {
         # Load RED agent (test-writer)
         local red_agent=$(jq -r '.tdd_agents.red.name // ""' "$agents_file")
         if [[ -n "$red_agent" ]]; then
-            local agent_file="$agent_repo/pipeline-agents/$red_agent.md"
+            agent_file=$(atomic_find_agent "$red_agent" "$agent_repo")
             if [[ -f "$agent_file" ]]; then
-                _504_RED_AGENT_PROMPT=$(cat "$agent_file")
+                _504_RED_AGENT_PROMPT=$(cat "$agent_file" | atomic_strip_frontmatter)
                 echo -e "  ${RED}✓${NC} Loaded RED agent: $red_agent"
             else
                 echo -e "  ${YELLOW}!${NC} RED agent file not found: $agent_file"
@@ -59,9 +59,9 @@ task_504_tdd_execution() {
         # Load GREEN agent (code-implementer)
         local green_agent=$(jq -r '.tdd_agents.green.name // ""' "$agents_file")
         if [[ -n "$green_agent" ]]; then
-            local agent_file="$agent_repo/pipeline-agents/$green_agent.md"
+            agent_file=$(atomic_find_agent "$green_agent" "$agent_repo")
             if [[ -f "$agent_file" ]]; then
-                _504_GREEN_AGENT_PROMPT=$(cat "$agent_file")
+                _504_GREEN_AGENT_PROMPT=$(cat "$agent_file" | atomic_strip_frontmatter)
                 echo -e "  ${GREEN}✓${NC} Loaded GREEN agent: $green_agent"
             else
                 echo -e "  ${YELLOW}!${NC} GREEN agent file not found: $agent_file"
@@ -71,9 +71,9 @@ task_504_tdd_execution() {
         # Load REFACTOR agent (code-reviewer)
         local refactor_agent=$(jq -r '.tdd_agents.refactor.name // ""' "$agents_file")
         if [[ -n "$refactor_agent" ]]; then
-            local agent_file="$agent_repo/pipeline-agents/$refactor_agent.md"
+            agent_file=$(atomic_find_agent "$refactor_agent" "$agent_repo")
             if [[ -f "$agent_file" ]]; then
-                _504_REFACTOR_AGENT_PROMPT=$(cat "$agent_file")
+                _504_REFACTOR_AGENT_PROMPT=$(cat "$agent_file" | atomic_strip_frontmatter)
                 echo -e "  ${CYAN}✓${NC} Loaded REFACTOR agent: $refactor_agent"
             else
                 echo -e "  ${YELLOW}!${NC} REFACTOR agent file not found: $agent_file"
@@ -83,9 +83,9 @@ task_504_tdd_execution() {
         # Load VERIFY agent (security-scanner)
         local verify_agent=$(jq -r '.tdd_agents.verify.name // ""' "$agents_file")
         if [[ -n "$verify_agent" ]]; then
-            local agent_file="$agent_repo/pipeline-agents/$verify_agent.md"
+            agent_file=$(atomic_find_agent "$verify_agent" "$agent_repo")
             if [[ -f "$agent_file" ]]; then
-                _504_VERIFY_AGENT_PROMPT=$(cat "$agent_file")
+                _504_VERIFY_AGENT_PROMPT=$(cat "$agent_file" | atomic_strip_frontmatter)
                 echo -e "  ${MAGENTA}✓${NC} Loaded VERIFY agent: $verify_agent"
             else
                 echo -e "  ${YELLOW}!${NC} VERIFY agent file not found: $agent_file"
@@ -100,15 +100,48 @@ task_504_tdd_execution() {
 
     # Load setup configuration
     local exec_mode="sequential"
+    local parallel_workers=2  # Keep low - each task runs 4 LLM phases
     if [[ -f "$setup_file" ]]; then
         exec_mode=$(jq -r '.execution_mode // "sequential"' "$setup_file")
+    fi
+
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # EXECUTION MODE SELECTION
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    echo -e "${DIM}─────────────────────────────────────────────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    echo -e "  ${BOLD}EXECUTION MODE${NC}"
+    echo ""
+    echo -e "  ${CYAN}How would you like to execute TDD cycles?${NC}"
+    echo ""
+    echo -e "    ${GREEN}[sequential]${NC}  Process tasks one at a time (default)"
+    echo -e "    ${YELLOW}[guided]${NC}      Pause between tasks for review"
+    echo -e "    ${BOLD}[parallel]${NC}    Process independent tasks concurrently (DAG-aware)"
+    echo ""
+
+    atomic_drain_stdin
+    read -e -p "  Choice [sequential]: " mode_choice || true
+    mode_choice=${mode_choice:-sequential}
+
+    # Handle parallel mode with optional worker count
+    if [[ "$mode_choice" =~ ^parallel ]]; then
+        if [[ "$mode_choice" =~ ^parallel[[:space:]]*([0-9]+)$ ]]; then
+            parallel_workers="${BASH_REMATCH[1]}"
+        fi
+        exec_mode="parallel"
+        echo ""
+        echo -e "  ${DIM}Parallel mode: $parallel_workers concurrent workers (respecting DAG)${NC}"
+    else
+        exec_mode="$mode_choice"
     fi
 
     # Load tech stack from PRD
     local tech_stack=""
     local test_framework=""
-    if [[ -f "$ATOMIC_ROOT/docs/prd/PRD.md" ]]; then
-        tech_stack=$(sed -n '/### 2\.1 Tech Stack/,/### 2\.2/p' "$ATOMIC_ROOT/docs/prd/PRD.md" | head -30)
+    local prd_file="$ATOMIC_ROOT/docs/prd/PRD.md"
+    if [[ -f "$prd_file" && -r "$prd_file" ]]; then
+        tech_stack=$(sed -n '/### 2\.1 Tech Stack/,/### 2\.2/p' "$prd_file" 2>/dev/null | head -30)
         # Detect test framework
         if echo "$tech_stack" | grep -qi "pytest\|python"; then
             test_framework="pytest"
@@ -118,6 +151,22 @@ task_504_tdd_execution() {
             test_framework="go test"
         else
             test_framework="unknown"
+        fi
+    elif [[ -f "$prd_file" ]]; then
+        echo -e "  ${YELLOW}!${NC} PRD file exists but is not readable - check permissions"
+        test_framework="unknown"
+    fi
+
+    # If still unknown, try to detect from project files
+    if [[ "$test_framework" == "unknown" ]]; then
+        if [[ -f "$ATOMIC_ROOT/pytest.ini" || -f "$ATOMIC_ROOT/pyproject.toml" ]]; then
+            test_framework="pytest"
+        elif [[ -f "$ATOMIC_ROOT/package.json" ]]; then
+            if grep -q "jest" "$ATOMIC_ROOT/package.json" 2>/dev/null; then
+                test_framework="jest"
+            fi
+        elif [[ -f "$ATOMIC_ROOT/go.mod" ]]; then
+            test_framework="go test"
         fi
     fi
 
@@ -146,7 +195,7 @@ task_504_tdd_execution() {
     echo -e "  ${DIM}Test framework: $test_framework${NC}"
     echo ""
 
-    read -p "  Press Enter to begin TDD execution..."
+    read -e -p "  Press Enter to begin TDD execution..." || true
     echo ""
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -157,7 +206,238 @@ task_504_tdd_execution() {
     local failed=0
     local skipped=0
 
-    for task_id in $task_ids; do
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # PARALLEL EXECUTION (DAG-aware)
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    if [[ "$exec_mode" == "parallel" ]]; then
+        echo -e "  ${DIM}Building dependency graph...${NC}"
+        echo ""
+
+        # Create status tracking file
+        local status_dir="$testing_dir/parallel-status"
+        mkdir -p "$status_dir"
+
+        # Initialize task status - preserve completed tasks for resume
+        local resumed_count=0
+        for tid in $task_ids; do
+            local status_file="$status_dir/task-$tid.status"
+            if [[ -f "$status_file" ]]; then
+                local existing=$(cat "$status_file")
+                if [[ "$existing" == "completed" ]]; then
+                    ((resumed_count++))
+                    continue  # Keep completed status
+                fi
+            fi
+            # Reset non-completed tasks to pending
+            echo "pending" > "$status_file"
+        done
+
+        if [[ $resumed_count -gt 0 ]]; then
+            echo -e "  ${GREEN}✓${NC} Resuming: $resumed_count tasks already completed"
+            echo ""
+        fi
+
+        # Extract dependencies for each task
+        local deps_file="$status_dir/dependencies.json"
+        jq '[.tasks[] | select(.subtasks | length >= 4) | {id: .id, deps: (.dependencies // [])}]' "$tasks_file" > "$deps_file"
+
+        # Function to check if a task's dependencies are all completed
+        _504_deps_satisfied() {
+            local tid="$1"
+            local deps=$(jq -r ".[] | select(.id == $tid) | .deps[]?" "$deps_file")
+            for dep in $deps; do
+                local dep_status_file="$status_dir/task-$dep.status"
+                if [[ -f "$dep_status_file" ]]; then
+                    local dep_status=$(cat "$dep_status_file")
+                    if [[ "$dep_status" != "completed" ]]; then
+                        return 1
+                    fi
+                fi
+            done
+            return 0
+        }
+
+        # Function to execute a single task's TDD cycle (writes results to files)
+        _504_parallel_execute_task() {
+            local tid="$1"
+            local result_file="$status_dir/task-$tid.result"
+            local log_file="$status_dir/task-$tid.log"
+
+            # Ensure files created in subshell have proper permissions
+            umask 022
+
+            # Mark as running
+            echo "running" > "$status_dir/task-$tid.status"
+
+            # Redirect all output to log file for this task
+            exec > "$log_file" 2>&1
+
+            local task_title=$(jq -r ".tasks[] | select(.id == $tid) | .title" "$tasks_file")
+            local spec_file="$specs_dir/spec-t${tid}.json"
+
+            # Check for existing spec
+            if [[ ! -f "$spec_file" ]]; then
+                echo "skipped:no_spec" > "$result_file"
+                echo "skipped" > "$status_dir/task-$tid.status"
+                return 0
+            fi
+
+            # Initialize error context
+            local error_context_file="$testing_dir/tdd-t${tid}-errors.json"
+            echo '{"task_id": '$tid', "phases": {}, "accumulated_errors": [], "retry_count": 0}' > "$error_context_file"
+
+            # Execute TDD phases - capture JSON results to files
+            local red_json="$status_dir/task-$tid.red.json"
+            local green_json="$status_dir/task-$tid.green.json"
+
+            # RED phase - capture only the JSON output (last line)
+            _504_execute_red "$tid" "$spec_file" "$prompts_dir" "$testing_dir" "$test_framework" "$error_context_file" | tail -1 > "$red_json"
+            local red_status=$(jq -r '.status // "failed"' "$red_json" 2>/dev/null || echo "failed")
+
+            if [[ "$red_status" != "completed" ]]; then
+                echo "failed:red" > "$result_file"
+                echo "failed" > "$status_dir/task-$tid.status"
+                return 1
+            fi
+
+            # GREEN phase
+            local test_file=$(jq -r '.test_file // ""' "$red_json" 2>/dev/null)
+            _504_execute_green "$tid" "$spec_file" "$test_file" "$prompts_dir" "$src_dir" "$test_framework" "$error_context_file" | tail -1 > "$green_json"
+            local green_status=$(jq -r '.status // "failed"' "$green_json" 2>/dev/null || echo "failed")
+
+            if [[ "$green_status" != "completed" ]]; then
+                echo "failed:green" > "$result_file"
+                echo "failed" > "$status_dir/task-$tid.status"
+                return 1
+            fi
+
+            # REFACTOR phase
+            local impl_file=$(jq -r '.impl_file // ""' "$green_json" 2>/dev/null)
+            _504_execute_refactor "$tid" "$impl_file" "$test_file" "$prompts_dir" "$test_framework" "$error_context_file" >/dev/null
+
+            # VERIFY phase
+            _504_execute_verify "$tid" "$impl_file" "$prompts_dir" "$error_context_file" >/dev/null
+
+            # Update task status in tasks.json (use flock for atomic update)
+            (
+                flock -x 200
+                local temp_file=$(mktemp)
+                jq --argjson task_id "$tid" \
+                    '(.tasks[] | select(.id == $task_id) | .status) = "done" |
+                     (.tasks[] | select(.id == $task_id) | .subtasks[0].status) = "completed" |
+                     (.tasks[] | select(.id == $task_id) | .subtasks[1].status) = "completed" |
+                     (.tasks[] | select(.id == $task_id) | .subtasks[2].status) = "completed" |
+                     (.tasks[] | select(.id == $task_id) | .subtasks[3].status) = "completed"' \
+                    "$tasks_file" > "$temp_file" && mv "$temp_file" "$tasks_file"
+            ) 200>"$status_dir/.tasks.lock"
+
+            # Save TDD record
+            jq -n \
+                --argjson task_id "$tid" \
+                --arg title "$task_title" \
+                --arg test_file "$test_file" \
+                --arg impl_file "$impl_file" \
+                '{
+                    "task_id": $task_id,
+                    "title": $title,
+                    "test_file": $test_file,
+                    "impl_file": $impl_file,
+                    "red": "completed",
+                    "green": "completed",
+                    "refactor": "completed",
+                    "verify": "completed",
+                    "completed_at": (now | todate)
+                }' > "$testing_dir/tdd-t${tid}.json"
+
+            echo "completed" > "$result_file"
+            echo "completed" > "$status_dir/task-$tid.status"
+            return 0
+        }
+
+        # Main parallel execution loop
+        local running_jobs=0
+        local total_done=$resumed_count  # Start with already-completed tasks
+        completed=$resumed_count          # Update the completed counter too
+        declare -A running_pids
+
+        echo -e "  ${DIM}Starting parallel TDD execution with $parallel_workers workers...${NC}"
+        echo ""
+
+        # Sort task IDs numerically for predictable processing order
+        local sorted_task_ids=$(echo "$task_ids" | tr ' ' '\n' | sort -n | tr '\n' ' ')
+
+        while [[ $total_done -lt $task_count ]]; do
+            # Find ready tasks (pending with satisfied dependencies) - process in ID order
+            for tid in $sorted_task_ids; do
+                local status=$(cat "$status_dir/task-$tid.status" 2>/dev/null || echo "pending")
+
+                if [[ "$status" == "pending" ]] && _504_deps_satisfied "$tid"; then
+                    if [[ $running_jobs -lt $parallel_workers ]]; then
+                        # Launch task in background
+                        (
+                            _504_parallel_execute_task "$tid"
+                        ) &
+                        running_pids[$tid]=$!
+                        ((running_jobs++))
+                        # Print newline first to move past the progress line, then the message
+                        echo -e "\n  ${CYAN}▶${NC} Started task $tid"
+                    fi
+                fi
+            done
+
+            # Wait for at least one job to complete
+            if [[ $running_jobs -gt 0 ]]; then
+                wait -n 2>/dev/null || {
+                    # Fallback for older bash: just sleep briefly
+                    # Don't remove PIDs here - let the detection loop handle everything
+                    sleep 0.5
+                }
+
+                # Check completed jobs
+                for tid in "${!running_pids[@]}"; do
+                    if ! kill -0 "${running_pids[$tid]}" 2>/dev/null; then
+                        local result=$(cat "$status_dir/task-$tid.result" 2>/dev/null || echo "unknown")
+                        case "$result" in
+                            completed)
+                                echo -e "\n  ${GREEN}✓${NC} Task $tid completed"
+                                ((completed++))
+                                ;;
+                            skipped*)
+                                echo -e "\n  ${YELLOW}○${NC} Task $tid skipped"
+                                ((skipped++))
+                                ;;
+                            failed*)
+                                echo -e "\n  ${RED}✗${NC} Task $tid failed (${result#failed:})"
+                                ((failed++))
+                                ;;
+                        esac
+                        ((total_done++))
+                        unset running_pids[$tid]
+                        ((running_jobs--))
+                    fi
+                done
+            else
+                # No running jobs and not all done - check for deadlock
+                sleep 0.5
+            fi
+
+            # Clear line and print progress (using \r to overwrite previous progress, \033[K to clear to end of line)
+            printf "\r\033[K  ${DIM}Progress: %d/%d tasks (running: %d)${NC}" "$total_done" "$task_count" "$running_jobs"
+        done
+
+        # Wait for any remaining jobs
+        wait
+
+        echo ""
+        echo ""
+
+        # Cleanup
+        rm -rf "$status_dir"
+
+    else
+        # Sequential or guided mode
+        for task_id in $task_ids; do
         local task_title=$(jq -r ".tasks[] | select(.id == $task_id) | .title" "$tasks_file")
         local spec_file="$specs_dir/spec-t${task_id}.json"
 
@@ -309,9 +589,11 @@ task_504_tdd_execution() {
             }' > "$testing_dir/tdd-t${task_id}.json"
 
         if [[ "$exec_mode" == "guided" ]]; then
-            read -p "  Press Enter to continue to next task..."
+            read -e -p "  Press Enter to continue to next task..." || true
         fi
     done
+
+    fi  # End of sequential/guided else block
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # EXECUTION SUMMARY
@@ -536,6 +818,14 @@ PROMPT
             cp "$output_file" "$test_file"
         fi
 
+        # Check for error messages in output (don't save errors as test code)
+        if grep -qE "^Error:|Reached max turns|error:" "$test_file" 2>/dev/null; then
+            echo -e "  ${RED}✗${NC} LLM output contains error, not valid test code"
+            rm -f "$test_file"
+            echo "{\"status\": \"failed\", \"error\": \"output_contains_error\"}"
+            return 1
+        fi
+
         if [[ -s "$test_file" ]]; then
             echo -e "  ${GREEN}✓${NC} Tests written to $(basename "$test_file")"
 
@@ -655,11 +945,26 @@ PROMPT
     echo -e "  ${DIM}Generating implementation with LLM...${NC}"
 
     if atomic_invoke "$prompt_file" "$output_file" "GREEN T$task_id" --model=opus; then
+        # Check for error messages in output (don't save errors as code)
+        if grep -qE "^Error:|Reached max turns|error:" "$output_file" 2>/dev/null; then
+            echo -e "  ${RED}✗${NC} LLM output contains error, not valid code"
+            echo "{\"status\": \"failed\", \"error\": \"output_contains_error\"}"
+            return 1
+        fi
+
         # Extract code and save
         if grep -q '```' "$output_file"; then
             sed -n '/```/,/```/p' "$output_file" | sed '1d;$d' > "$impl_file"
         else
             cp "$output_file" "$impl_file"
+        fi
+
+        # Verify the extracted content looks like code (not error messages)
+        if grep -qE "^Error:|Reached max turns" "$impl_file" 2>/dev/null; then
+            echo -e "  ${RED}✗${NC} Extracted content is error message, not code"
+            rm -f "$impl_file"
+            echo "{\"status\": \"failed\", \"error\": \"extracted_error_not_code\"}"
+            return 1
         fi
 
         if [[ -s "$impl_file" ]]; then
@@ -783,6 +1088,13 @@ PROMPT
             refactored_content=$(sed -n '/```/,/```/p' "$output_file" | sed '1d;$d')
         else
             refactored_content=$(cat "$output_file")
+        fi
+
+        # Check for error messages in output (don't save errors as code)
+        if echo "$refactored_content" | grep -qE "^Error:|Reached max turns|error:"; then
+            echo -e "  ${YELLOW}!${NC} LLM output contains error, skipping refactor"
+            echo "{\"status\": \"completed\", \"warning\": \"refactor_skipped_error\"}"
+            return 0
         fi
 
         if [[ -n "$refactored_content" ]]; then

@@ -28,7 +28,9 @@ task_004_api_keys() {
         existing=$(echo "$existing" | head -3 | tr '\n' ', ' | sed 's/,$//')
         if [[ -n "$existing" ]]; then
             atomic_substep "Existing credentials found: $existing"
-            read -p "  Reconfigure? [y/N]: " reconfigure
+            # Drain stdin before prompt
+            while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
+            read -e -p "  Reconfigure? [y/N]: " reconfigure || true
             if [[ ! "$reconfigure" =~ ^[Yy] ]]; then
                 atomic_info "Keeping existing credentials"
                 atomic_context_decision "API credentials: kept existing configuration" "configuration"
@@ -51,7 +53,9 @@ task_004_api_keys() {
     echo -e "  ${CYAN}4.${NC} Ollama (local/LAN models)"
     echo ""
     echo -e "  ${DIM}Enter numbers separated by spaces (e.g., \"1 4\" for Max + Ollama)${NC}"
-    read -p "  Configure [1 4]: " provider_choices
+    # Drain stdin before prompt
+    while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
+    read -e -p "  Configure [1 4]: " provider_choices || true
     provider_choices=${provider_choices:-"1 4"}
 
     for choice in $provider_choices; do
@@ -107,7 +111,7 @@ _004_collect_max() {
     else
         echo -e "  ${YELLOW}!${NC} Not logged in"
         echo -e "  ${DIM}Run 'claude' to login first, then re-run setup${NC}"
-        read -p "    Skip Max for now? [Y/n]: " skip_max
+        read -e -p "    Skip Max for now? [Y/n]: " skip_max || true
         if [[ "$skip_max" =~ ^[Nn] ]]; then
             atomic_warn "Please login with 'claude' command first"
             return 1
@@ -128,7 +132,7 @@ _004_collect_anthropic() {
     if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
         local masked=$(_004_mask_key "$ANTHROPIC_API_KEY")
         echo -e "  ${GREEN}✓${NC} Found in environment: ${DIM}$masked${NC}"
-        read -p "    Use this key? [Y/n]: " use_env
+        read -e -p "    Use this key? [Y/n]: " use_env || true
         if [[ ! "$use_env" =~ ^[Nn] ]]; then
             local tmp=$(atomic_mktemp)
             jq --arg key "$key_name" --arg val "$ANTHROPIC_API_KEY" '.[$key] = $val' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
@@ -151,7 +155,7 @@ _004_collect_anthropic() {
     echo -e "    Entered: ${DIM}$masked${NC}"
 
     # Offer validation
-    read -p "    Validate key with API test? [y/N]: " do_validate
+    read -e -p "    Validate key with API test? [y/N]: " do_validate || true
     if [[ "$do_validate" =~ ^[Yy] ]]; then
         if _004_validate_anthropic "$api_key"; then
             atomic_success "Key validated successfully"
@@ -176,7 +180,7 @@ _004_collect_openai() {
     if [[ -n "${OPENAI_API_KEY:-}" ]]; then
         local masked=$(_004_mask_key "$OPENAI_API_KEY")
         echo -e "  ${GREEN}✓${NC} Found in environment: ${DIM}$masked${NC}"
-        read -p "    Use this key? [Y/n]: " use_env
+        read -e -p "    Use this key? [Y/n]: " use_env || true
         if [[ ! "$use_env" =~ ^[Nn] ]]; then
             local tmp=$(atomic_mktemp)
             jq --arg key "$key_name" --arg val "$OPENAI_API_KEY" '.[$key] = $val' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
@@ -197,7 +201,7 @@ _004_collect_openai() {
     local masked=$(_004_mask_key "$api_key")
     echo -e "    Entered: ${DIM}$masked${NC}"
 
-    read -p "    Validate key with API test? [y/N]: " do_validate
+    read -e -p "    Validate key with API test? [y/N]: " do_validate || true
     if [[ "$do_validate" =~ ^[Yy] ]]; then
         if _004_validate_openai "$api_key"; then
             atomic_success "Key validated successfully"
@@ -222,7 +226,7 @@ _004_collect_google() {
     if [[ -n "${GOOGLE_API_KEY:-}" ]]; then
         local masked=$(_004_mask_key "$GOOGLE_API_KEY")
         echo -e "  ${GREEN}✓${NC} Found in environment: ${DIM}$masked${NC}"
-        read -p "    Use this key? [Y/n]: " use_env
+        read -e -p "    Use this key? [Y/n]: " use_env || true
         if [[ ! "$use_env" =~ ^[Nn] ]]; then
             local tmp=$(atomic_mktemp)
             jq --arg key "$key_name" --arg val "$GOOGLE_API_KEY" '.[$key] = $val' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
@@ -280,7 +284,7 @@ _004_collect_ollama() {
     echo -e "  ${DIM}Add additional Ollama hosts? (LAN servers, etc.)${NC}"
     echo -e "  ${DIM}Enter hosts one per line, blank line to finish:${NC}"
     while true; do
-        read -p "    Host: " custom_host
+        read -e -p "    Host: " custom_host || true
         [[ -z "$custom_host" ]] && break
 
         # Add http:// if missing
@@ -321,9 +325,9 @@ _004_collect_bedrock() {
         atomic_warn "No AWS credentials detected"
     fi
 
-    read -p "    AWS Region [us-east-1]: " aws_region
+    read -e -p "    AWS Region [us-east-1]: " aws_region || true
     aws_region=${aws_region:-us-east-1}
-    read -p "    AWS Profile [default]: " aws_profile
+    read -e -p "    AWS Profile [default]: " aws_profile || true
     aws_profile=${aws_profile:-default}
 
     local tmp=$(atomic_mktemp)
@@ -338,8 +342,8 @@ _004_collect_azure() {
 
     echo -e "  ${CYAN}Azure OpenAI${NC}"
 
-    read -p "    Endpoint URL: " azure_endpoint
-    read -p "    Deployment Name: " azure_deployment
+    read -e -p "    Endpoint URL: " azure_endpoint || true
+    read -e -p "    Deployment Name: " azure_deployment || true
     read -s -p "    API Key: " azure_key
     echo ""
 

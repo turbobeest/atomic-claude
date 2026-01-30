@@ -15,7 +15,7 @@
 task_301_entry_initialization() {
     local prd_file="$ATOMIC_ROOT/docs/prd/PRD.md"
     local approval_file="$ATOMIC_OUTPUT_DIR/2-prd/prd-approved.json"
-    local closeout_file="$ATOMIC_ROOT/.claude/closeout/phase-02-closeout.json"
+    local closeout_file=$(atomic_find_closeout "2-prd")
     local validation_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/entry-validation.json"
     local taskmaster_dir="$ATOMIC_ROOT/.taskmaster"
 
@@ -208,7 +208,8 @@ EOF
         echo -e "    ${RED}abort${NC}     Return to Phase 2"
         echo ""
 
-        read -p "  Choice [abort]: " entry_choice
+    atomic_drain_stdin
+        read -e -p "  Choice [abort]: " entry_choice || true
         entry_choice=${entry_choice:-abort}
 
         if [[ "$entry_choice" != "continue" ]]; then

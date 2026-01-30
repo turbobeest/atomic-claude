@@ -90,7 +90,8 @@ task_304_dependency_analysis() {
         echo -e "    ${RED}[abort]${NC}    Return to task decomposition"
         echo ""
 
-        read -p "  Choice [fix]: " fix_choice
+    atomic_drain_stdin
+        read -e -p "  Choice [fix]: " fix_choice || true
         fix_choice=${fix_choice:-fix}
 
         if [[ "$fix_choice" == "abort" ]]; then
@@ -112,8 +113,11 @@ task_304_dependency_analysis() {
 
     # Compute topological levels with task details
     local levels_json=$(jq '
+        # Save tasks array before pipeline transforms context
+        .tasks as $all_tasks |
+
         # Build task lookup
-        .tasks | map({key: (.id | tostring), value: .}) | from_entries as $task_map |
+        $all_tasks | map({key: (.id | tostring), value: .}) | from_entries as $task_map |
 
         # Compute level for each task (iterative approach)
         (reduce range(20) as $iter (
@@ -134,8 +138,8 @@ task_304_dependency_analysis() {
             )
         )) as $levels |
 
-        # Group tasks by level with full details
-        [.tasks[] | . + {level: $levels[.id | tostring]}] |
+        # Group tasks by level with full details (use saved $all_tasks)
+        [$all_tasks[] | . + {level: $levels[.id | tostring]}] |
         group_by(.level) |
         map({
             level: .[0].level,
@@ -150,6 +154,13 @@ task_304_dependency_analysis() {
     ' "$tasks_file")
 
     local max_level=$(echo "$levels_json" | jq '[.[].level] | max // 0')
+
+    # Validate levels computation succeeded
+    if [[ -z "$max_level" || ! "$max_level" =~ ^[0-9]+$ ]]; then
+        echo -e "  ${YELLOW}⚠${NC} Could not compute dependency levels. Using flat structure."
+        max_level=0
+        levels_json='[{"level":0,"tasks":[]}]'
+    fi
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # COMPLEXITY DISTRIBUTION

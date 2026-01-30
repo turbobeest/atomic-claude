@@ -57,7 +57,8 @@ task_902_release_setup() {
     echo -e "    ${RED}[abort]${NC}        Cancel release"
     echo ""
 
-    read -p "  Choice [yes]: " proceed_choice
+    atomic_drain_stdin
+    read -e -p "  Choice [yes]: " proceed_choice || true
     proceed_choice=${proceed_choice:-yes}
 
     case "$proceed_choice" in
@@ -68,7 +69,7 @@ task_902_release_setup() {
             echo -e "    dist/"
             echo -e "    docs/"
             echo ""
-            read -p "  Press Enter after review..."
+            read -e -p "  Press Enter after review..." || true
             echo ""
             ;;
         abort)
@@ -112,12 +113,12 @@ task_902_release_setup() {
 
     echo -e "  ${DIM}Are the release notes acceptable?${NC}"
     echo ""
-    read -p "  Accept [y/n]: " notes_confirm
+    read -e -p "  Accept [y/n]: " notes_confirm || true
     notes_confirm=${notes_confirm:-y}
 
     if [[ "$notes_confirm" != "y" && "$notes_confirm" != "Y" ]]; then
         echo ""
-        read -p "  Notes for modification: " notes_feedback
+        read -e -p "  Notes for modification: " notes_feedback || true
         echo ""
     fi
 

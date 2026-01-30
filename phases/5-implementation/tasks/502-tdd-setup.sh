@@ -60,7 +60,7 @@ task_502_tdd_setup() {
     echo -e "      ${DIM}[70]${NC}  Relaxed  ${DIM}- Prototypes, internal tools, MVPs${NC}"
     echo ""
 
-    read -p "    Unit test coverage target [80]: " unit_coverage
+    read -e -p "    Unit test coverage target [80]: " unit_coverage || true
     unit_coverage=${unit_coverage:-80}
 
     echo ""
@@ -71,7 +71,7 @@ task_502_tdd_setup() {
     echo -e "      ${DIM}[60]${NC}  Relaxed  ${DIM}- Monoliths with strong unit tests${NC}"
     echo ""
 
-    read -p "    Integration test coverage target [70]: " integration_coverage
+    read -e -p "    Integration test coverage target [70]: " integration_coverage || true
     integration_coverage=${integration_coverage:-70}
 
     echo ""
@@ -126,7 +126,7 @@ task_502_tdd_setup() {
     echo -e "    ${CYAN}[integration]${NC}    40% unit, 45% integration, 15% E2E"
     echo ""
 
-    read -p "  Pyramid profile [unit-heavy]: " pyramid_profile
+    read -e -p "  Pyramid profile [unit-heavy]: " pyramid_profile || true
     pyramid_profile=${pyramid_profile:-unit-heavy}
 
     echo ""
@@ -262,7 +262,7 @@ task_502_tdd_setup() {
     fi
     echo ""
 
-    read -p "  Press Enter to continue (or edit tdd-tools.json first)..."
+    read -e -p "  Press Enter to continue (or edit tdd-tools.json first)..." || true
     echo ""
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────

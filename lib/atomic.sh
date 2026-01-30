@@ -21,9 +21,9 @@ ATOMIC_OUTPUT_DIR="${ATOMIC_OUTPUT_DIR:-$ATOMIC_ROOT/.outputs}"
 ATOMIC_LOG_DIR="${ATOMIC_LOG_DIR:-$ATOMIC_ROOT/.logs}"
 
 # Claude configuration
-CLAUDE_MODEL="${CLAUDE_MODEL:-sonnet}"
-CLAUDE_MAX_TURNS="${CLAUDE_MAX_TURNS:-1}"
-CLAUDE_TIMEOUT="${CLAUDE_TIMEOUT:-300}"
+CLAUDE_MODEL="${CLAUDE_MODEL:-opus}"
+CLAUDE_MAX_TURNS="${CLAUDE_MAX_TURNS:-30}"
+CLAUDE_TIMEOUT="${CLAUDE_TIMEOUT:-1200}"  # 20 minutes for large prompts
 
 # Claude-local wrapper configuration
 CLAUDE_LOCAL_PATH="${CLAUDE_LOCAL_PATH:-$ATOMIC_ROOT/../claude-local}"
@@ -37,6 +37,427 @@ PROVIDER_ROLE_MAP[primary]="${PROVIDER_ROLE_PRIMARY:-max}"
 PROVIDER_ROLE_MAP[fast]="${PROVIDER_ROLE_FAST:-ollama}"
 PROVIDER_ROLE_MAP[gardener]="${PROVIDER_ROLE_GARDENER:-ollama}"
 PROVIDER_ROLE_MAP[heavyweight]="${PROVIDER_ROLE_HEAVYWEIGHT:-max}"
+
+# ============================================================================
+# AGENT DISCOVERY & MAPPING
+# ============================================================================
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AGENT INVENTORY (CSV-based source of truth)
+# ─────────────────────────────────────────────────────────────────────────────
+# The agent-inventory.csv in the agents repo is the authoritative source for:
+#   - Agent names and paths
+#   - Phase/category assignments
+#   - Agent descriptions and capabilities
+#   - Model preferences and fallbacks
+#
+# CSV columns: name,path,tier,model,model_fallbacks,category,subcategory,description,grade,composite_score,role
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Get path to the agent inventory CSV
+# Usage: local csv_path=$(atomic_get_agent_inventory)
+atomic_get_agent_inventory() {
+    local agent_repo="${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}"
+    local csv_path="$agent_repo/agent-inventory.csv"
+
+    if [[ -f "$csv_path" ]]; then
+        echo "$csv_path"
+        return 0
+    fi
+
+    return 1
+}
+
+# Search agent inventory by exact name
+# Usage: atomic_csv_lookup_agent "specification-agent" [agent_repo]
+# Returns: CSV line for the agent (name,path,tier,model,...)
+atomic_csv_lookup_agent() {
+    local agent_name="$1"
+    local agent_repo="${2:-${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}}"
+    local csv_path="$agent_repo/agent-inventory.csv"
+
+    if [[ ! -f "$csv_path" ]]; then
+        return 1
+    fi
+
+    # Search for exact name match (first column)
+    grep "^${agent_name}," "$csv_path" 2>/dev/null | head -1
+}
+
+# Search agent inventory by description keywords
+# Usage: atomic_csv_search_agents "test" "validation" [agent_repo]
+# Returns: Matching CSV lines (one per line)
+atomic_csv_search_agents() {
+    local agent_repo="${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}"
+    local csv_path="$agent_repo/agent-inventory.csv"
+
+    if [[ ! -f "$csv_path" ]]; then
+        return 1
+    fi
+
+    # Build grep pattern from all arguments
+    local pattern=""
+    for keyword in "$@"; do
+        if [[ -n "$pattern" ]]; then
+            pattern="$pattern.*$keyword"
+        else
+            pattern="$keyword"
+        fi
+    done
+
+    # Search description column (8th field) case-insensitively
+    grep -i "$pattern" "$csv_path" 2>/dev/null
+}
+
+# Get agents for a specific pipeline phase category
+# Usage: atomic_csv_get_phase_agents "06-09-implementation" [agent_repo]
+# Returns: CSV lines for agents in that category
+atomic_csv_get_phase_agents() {
+    local phase_category="$1"
+    local agent_repo="${2:-${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}}"
+    local csv_path="$agent_repo/agent-inventory.csv"
+
+    if [[ ! -f "$csv_path" ]]; then
+        return 1
+    fi
+
+    # Search category column (6th field)
+    awk -F',' -v cat="$phase_category" '$6 == cat' "$csv_path" 2>/dev/null
+}
+
+# Get agent path from CSV line
+# Usage: local path=$(echo "$csv_line" | atomic_csv_get_path)
+atomic_csv_get_path() {
+    cut -d',' -f2
+}
+
+# Get agent model from CSV line
+# Usage: local model=$(echo "$csv_line" | atomic_csv_get_model)
+atomic_csv_get_model() {
+    cut -d',' -f4
+}
+
+# Get agent tier from CSV line
+# Usage: local tier=$(echo "$csv_line" | atomic_csv_get_tier)
+atomic_csv_get_tier() {
+    cut -d',' -f3
+}
+
+# Get agent role from CSV line
+# Usage: local role=$(echo "$csv_line" | atomic_csv_get_role)
+atomic_csv_get_role() {
+    cut -d',' -f11
+}
+
+# Get agent description from CSV line (field 8, may contain commas in quotes)
+# Usage: local desc=$(echo "$csv_line" | atomic_csv_get_description)
+atomic_csv_get_description() {
+    # Description is field 8, but may contain commas within quotes
+    # Use awk to properly parse CSV with quoted fields
+    awk -F',' '{
+        # Rebuild fields accounting for quoted commas
+        out=""
+        in_quotes=0
+        field=0
+        for(i=1; i<=NF; i++) {
+            if(in_quotes) {
+                out = out "," $i
+                if(match($i, /"$/)) in_quotes=0
+            } else {
+                field++
+                if(field == 8) {
+                    out = $i
+                    if(match($i, /^"/) && !match($i, /"$/)) in_quotes=1
+                }
+            }
+        }
+        gsub(/^"|"$/, "", out)
+        print out
+    }'
+}
+
+# Format agents from CSV for inclusion in LLM prompts
+# Usage: atomic_csv_format_agents_for_prompt "06-09-implementation" [agent_repo]
+# Returns: Markdown-formatted list of agents suitable for LLM selection
+atomic_csv_format_agents_for_prompt() {
+    local phase_category="$1"
+    local agent_repo="${2:-${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}}"
+    local csv_path="$agent_repo/agent-inventory.csv"
+
+    if [[ ! -f "$csv_path" ]]; then
+        echo "Agent inventory not found at $csv_path"
+        return 1
+    fi
+
+    echo "## Available Agents for Phase: $phase_category"
+    echo ""
+    echo "| Agent Name | Tier | Model | Role | Description |"
+    echo "|------------|------|-------|------|-------------|"
+
+    # Parse CSV and format as markdown table
+    awk -F',' -v cat="$phase_category" '
+    NR > 1 && $6 == cat {
+        name = $1
+        tier = $3
+        model = $4
+        role = $11
+
+        # Extract description (field 8, handling quoted commas)
+        desc = ""
+        in_quotes = 0
+        field = 0
+        for(i=1; i<=NF; i++) {
+            if(in_quotes) {
+                desc = desc "," $i
+                if(match($i, /"$/)) in_quotes = 0
+            } else {
+                field++
+                if(field == 8) {
+                    desc = $i
+                    if(match($i, /^"/) && !match($i, /"$/)) in_quotes = 1
+                }
+            }
+        }
+        gsub(/^"|"$/, "", desc)
+
+        # Truncate description for table display
+        if(length(desc) > 80) desc = substr(desc, 1, 77) "..."
+
+        printf "| %s | %s | %s | %s | %s |\n", name, tier, model, role, desc
+    }' "$csv_path"
+}
+
+# Get all pipeline agents as JSON for LLM consumption
+# Usage: atomic_csv_agents_json [category_filter] [agent_repo]
+# Returns: JSON array of agents
+atomic_csv_agents_json() {
+    local category_filter="$1"
+    local agent_repo="${2:-${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}}"
+    local csv_path="$agent_repo/agent-inventory.csv"
+
+    if [[ ! -f "$csv_path" ]]; then
+        echo "[]"
+        return 1
+    fi
+
+    # Build JSON array from CSV
+    local first=true
+    echo "["
+
+    while IFS=',' read -r name path tier model fallbacks category subcategory desc grade score role; do
+        # Skip header
+        [[ "$name" == "name" ]] && continue
+
+        # Apply category filter if specified
+        if [[ -n "$category_filter" ]] && [[ "$category" != "$category_filter" ]]; then
+            continue
+        fi
+
+        # Only include pipeline-agents
+        [[ "$path" != pipeline-agents/* ]] && continue
+
+        # Clean up description (remove surrounding quotes)
+        desc="${desc#\"}"
+        desc="${desc%\"}"
+
+        if [[ "$first" == "true" ]]; then
+            first=false
+        else
+            echo ","
+        fi
+
+        cat << AGENT
+  {
+    "name": "$name",
+    "tier": "$tier",
+    "model": "$model",
+    "category": "$category",
+    "role": "$role",
+    "description": "$desc"
+  }
+AGENT
+    done < "$csv_path"
+
+    echo "]"
+}
+
+# Map ATOMIC-CLAUDE phase numbers to agent CSV categories
+# ATOMIC-CLAUDE phases:     CSV categories:
+#   0: Setup              → 00-orchestration
+#   1: Discovery          → 02-discovery
+#   2: PRD                → 02-discovery
+#   3: Tasking            → 05-task-decomposition
+#   4: Specification      → 06-09-implementation
+#   5: Implementation     → 06-09-implementation
+#   6: Code Review        → 06-09-implementation
+#   7: Integration        → 10-testing
+#   8: Deployment Prep    → 11-12-deployment
+#   9: Release            → 11-12-deployment
+#
+# Usage: local cat=$(atomic_phase_to_category 4)
+atomic_phase_to_category() {
+    local phase_num="$1"
+
+    case "$phase_num" in
+        0) echo "00-orchestration" ;;
+        1) echo "02-discovery" ;;
+        2) echo "02-discovery" ;;
+        3) echo "05-task-decomposition" ;;
+        4) echo "06-09-implementation" ;;
+        5) echo "06-09-implementation" ;;
+        6) echo "06-09-implementation" ;;
+        7) echo "10-testing" ;;
+        8) echo "11-12-deployment" ;;
+        9) echo "11-12-deployment" ;;
+        *) echo "00-orchestration" ;;
+    esac
+}
+
+# Backward compatibility: map old logical names to CSV agent names
+# This allows existing rosters with old names to still work
+atomic_resolve_agent_alias() {
+    local name="$1"
+    case "$name" in
+        # Phase 4 (Specification)
+        spec-writer) echo "specification-agent" ;;
+        tdd-structurer) echo "tdd-implementation-agent" ;;
+        interface-definer) echo "specification-agent" ;;
+        test-strategist) echo "test-strategist" ;;
+        security-specifier) echo "code-review-gate" ;;
+        edge-case-hunter) echo "test-strategist" ;;
+        # Phase 5 (Implementation)
+        test-writer-phd) echo "test-strategist" ;;
+        code-implementer-phd) echo "tdd-implementation-agent" ;;
+        code-reviewer-phd) echo "code-review-gate" ;;
+        security-scanner) echo "code-review-gate" ;;
+        # Phase 6 (Code Review)
+        deep-code-reviewer-phd) echo "code-review-gate" ;;
+        arch-compliance-phd) echo "plan-guardian" ;;
+        code-refiner-phd) echo "code-review-gate" ;;
+        # Phase 7 (Integration)
+        e2e-test-runner-phd|e2e-test-runner) echo "e2e-testing-gate" ;;
+        acceptance-validator-phd|acceptance-validator) echo "integration-testing-gate" ;;
+        performance-tester-phd|performance-tester-deep) echo "integration-testing-gate" ;;
+        integration-reporter-phd|integration-reporter-detailed) echo "integration-testing-gate" ;;
+        # Phase 8/9 (Deployment/Release)
+        release-packager-phd|release-packager) echo "deployment-gate" ;;
+        changelog-generator-phd|changelog-generator) echo "prd-writer" ;;
+        docs-generator-phd|docs-generator) echo "prd-writer" ;;
+        announcement-writer-phd|announcement-writer) echo "prd-writer" ;;
+        # No alias - return original
+        *) echo "$name" ;;
+    esac
+}
+
+# Find an agent file by name using CSV inventory
+# Usage: atomic_find_agent "specification-agent" [agent_repo_path]
+# Returns: Full path to agent file, or empty string if not found
+atomic_find_agent() {
+    local agent_name="$1"
+    local agent_repo="${2:-${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}}"
+    local csv_path="$agent_repo/agent-inventory.csv"
+
+    # Resolve any backward-compatibility aliases
+    local resolved_name
+    resolved_name=$(atomic_resolve_agent_alias "$agent_name")
+
+    # First, try CSV lookup (authoritative source)
+    if [[ -f "$csv_path" ]]; then
+        local csv_line
+        csv_line=$(atomic_csv_lookup_agent "$resolved_name" "$agent_repo")
+
+        if [[ -n "$csv_line" ]]; then
+            local rel_path
+            rel_path=$(echo "$csv_line" | atomic_csv_get_path)
+            local full_path="$agent_repo/$rel_path"
+
+            if [[ -f "$full_path" ]]; then
+                echo "$full_path"
+                return 0
+            fi
+        fi
+    fi
+
+    # Fallback: direct file search for agents not in CSV or missing paths
+    local found_path
+
+    # Try pipeline-agents subdirectories with resolved name
+    found_path=$(find "$agent_repo/pipeline-agents" -name "${resolved_name}.md" -type f 2>/dev/null | head -1)
+    if [[ -n "$found_path" ]]; then
+        echo "$found_path"
+        return 0
+    fi
+
+    # Try expert-agents as fallback
+    found_path=$(find "$agent_repo/expert-agents" -name "${resolved_name}.md" -type f 2>/dev/null | head -1)
+    if [[ -n "$found_path" ]]; then
+        echo "$found_path"
+        return 0
+    fi
+
+    # Not found
+    return 1
+}
+
+# Strip YAML frontmatter from agent file content
+# Agent files have frontmatter like:
+#   ---
+#   name: agent-name
+#   description: ...
+#   ---
+#   # Agent content here
+#
+# This function removes everything from start until (and including) the second ---
+# Only strips if first line is exactly "---"
+atomic_strip_frontmatter() {
+    local first_line
+    IFS= read -r first_line
+
+    if [[ "$first_line" == "---" ]]; then
+        # Skip until we find the closing ---
+        while IFS= read -r line; do
+            if [[ "$line" == "---" ]]; then
+                break
+            fi
+        done
+        # Output the rest
+        cat
+    else
+        # No frontmatter, output everything including first line
+        printf '%s\n' "$first_line"
+        cat
+    fi
+}
+
+# Load an agent prompt by name (strips YAML frontmatter)
+# Usage: local prompt=$(atomic_load_agent "spec-writer" [agent_repo_path])
+atomic_load_agent() {
+    local agent_name="$1"
+    local agent_repo="${2:-${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}}"
+
+    local agent_path
+    agent_path=$(atomic_find_agent "$agent_name" "$agent_repo")
+
+    if [[ -n "$agent_path" ]] && [[ -f "$agent_path" ]]; then
+        # Strip YAML frontmatter before returning
+        cat "$agent_path" | atomic_strip_frontmatter
+        return 0
+    fi
+
+    return 1
+}
+
+# List available agents matching a pattern
+# Usage: atomic_list_agents "spec" [agent_repo_path]
+atomic_list_agents() {
+    local pattern="${1:-*}"
+    local agent_repo="${2:-${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}}"
+
+    find "$agent_repo" -name "*${pattern}*.md" -type f 2>/dev/null | \
+        grep -v "README\|GUIDE\|CLAUDE\|TIER" | \
+        sed 's|.*/||; s|\.md$||' | \
+        sort -u
+}
 
 # ============================================================================
 # CONFIGURATION LOADER
@@ -105,6 +526,42 @@ _atomic_ensure_config() {
     if [[ "$_ATOMIC_CONFIG_LOADED" != "true" ]]; then
         _atomic_load_provider_config
     fi
+}
+
+# ============================================================================
+# STDIN UTILITIES
+# ============================================================================
+
+# Drain any buffered stdin to prevent stale input from affecting prompts.
+# Call this before any interactive read that follows a busy sequence
+# (e.g., after streaming, loops with fast user input, or LLM output).
+atomic_drain_stdin() {
+    # Drain from stdin
+    while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
+    # Also drain from tty if available (handles cases where stdin is redirected)
+    while read -t 0.01 -n 1 _discard </dev/tty 2>/dev/null; do :; done
+}
+
+# Interactive read that ensures prompt is visible and reads from terminal.
+# Usage: atomic_read_choice "prompt" varname [default]
+atomic_read_choice() {
+    local prompt="$1"
+    local -n _result="$2"
+    local default="${3:-}"
+
+    atomic_drain_stdin
+
+    # Ensure prompt goes to terminal
+    if [[ -t 0 ]]; then
+        # stdin is a terminal
+        read -e -p "$prompt" _result
+    else
+        # stdin is redirected, use /dev/tty
+        printf "%s" "$prompt" >/dev/tty
+        read -e _result </dev/tty 2>/dev/null || read -e -p "$prompt" _result
+    fi
+
+    [[ -z "$_result" ]] && _result="$default"
 }
 
 # ============================================================================
@@ -214,6 +671,7 @@ declare -a _ATOMIC_TEMP_FILES=()
 
 # Cleanup function called on EXIT/ERR
 _atomic_cleanup_temp_files() {
+    # Clean up temp files
     local file
     for file in "${_ATOMIC_TEMP_FILES[@]:-}"; do
         [[ -f "$file" ]] && rm -f "$file" 2>/dev/null
@@ -459,147 +917,84 @@ atomic_closeout_banner() {
 }
 
 # ============================================================================
-# STICKY MODE INDICATOR BAR
+# UNIFIED TASK HEADER
 # ============================================================================
 
-# Track if sticky bar is active
-_ATOMIC_STICKY_BAR_ACTIVE=false
+# Print a unified task header block before each LLM invocation
+# All text in light blue; green/red status dot for online/offline
+# No global state, no cleanup needed
+#
+# Usage: atomic_task_header <description> <provider> <model> <role> <timeout> <prompt_source> <output_file> [ollama_host]
+atomic_task_header() {
+    local description="$1"
+    local provider="$2"
+    local model="$3"
+    local role="${4:-}"
+    local timeout="$5"
+    local prompt_source="$6"
+    local output_file="$7"
+    local ollama_host="${8:-}"
 
-# Check if tput is available and functional
-_atomic_has_tput() {
-    command -v tput >/dev/null 2>&1 && tput cols >/dev/null 2>&1
-}
+    local LB=$'\033[94m'   # Light blue
+    local RST=$'\033[0m'   # Reset
+    local GRN=$'\033[32m'  # Green
+    local RD=$'\033[31m'   # Red
 
-# Initialize sticky mode bar (reserves line 0 for the bar)
-# Call once at start of LLM task
-atomic_mode_bar_init() {
-    local provider="${1:-$CLAUDE_PROVIDER}"
-    local model="${2:-$CLAUDE_MODEL}"
-
-    _ATOMIC_STICKY_BAR_ACTIVE=true
-    _ATOMIC_STICKY_PROVIDER="$provider"
-    _ATOMIC_STICKY_MODEL="$model"
-
-    # Set up scroll region to leave line 0 for the bar (requires tput)
-    if _atomic_has_tput; then
-        tput sc              # Save cursor
-        tput cup 0 0         # Move to top
-        tput el              # Clear line
-        _atomic_render_mode_bar "$provider" "$model"
-        tput csr 1 $(($(tput lines) - 1))  # Set scroll region (line 1 to bottom)
-        tput rc              # Restore cursor
-        tput cup 1 0         # Move to line 1
-    else
-        # Fallback: just print the mode indicator
-        _atomic_render_mode_bar "$provider" "$model"
-        echo ""
-    fi
-}
-
-# Update the sticky mode bar (call when status changes)
-atomic_mode_bar_update() {
-    local provider="${1:-$_ATOMIC_STICKY_PROVIDER}"
-    local model="${2:-$_ATOMIC_STICKY_MODEL}"
-
-    [[ "$_ATOMIC_STICKY_BAR_ACTIVE" != "true" ]] && return
-
-    if _atomic_has_tput; then
-        tput sc              # Save cursor
-        tput cup 0 0         # Move to top
-        _atomic_render_mode_bar "$provider" "$model"
-        tput rc              # Restore cursor
-    fi
-    # No-op fallback: mode bar was printed inline initially
-}
-
-# Remove sticky mode bar and restore normal scrolling
-atomic_mode_bar_clear() {
-    [[ "$_ATOMIC_STICKY_BAR_ACTIVE" != "true" ]] && return
-
-    _ATOMIC_STICKY_BAR_ACTIVE=false
-    if _atomic_has_tput; then
-        tput csr 0 $(($(tput lines) - 1))  # Reset scroll region to full screen
-        tput sc
-        tput cup 0 0
-        tput el              # Clear the bar line
-        tput rc
-    fi
-    # No-op fallback: inline mode bar stays visible (acceptable)
-}
-
-# Render the mode bar content (internal)
-_atomic_render_mode_bar() {
-    local provider="${1:-$CLAUDE_PROVIDER}"
-    local model="${2:-$CLAUDE_MODEL}"
-    local width="${COLUMNS:-80}"
-    # Try to get terminal width if tput available
-    if _atomic_has_tput; then
-        width=$(tput cols 2>/dev/null || echo 80)
-    fi
-
-    # Determine mode label, status, and color based on provider
-    local mode_label status_label bg_color fg_color
+    # Online/offline detection
     local is_online=false
-
     case "$provider" in
-        max)
-            mode_label="MAX MODE"
-            # Check if we have credentials
-            if [[ -f "$HOME/.claude/.credentials.json" ]]; then
-                is_online=true
-            fi
-            ;;
-        api)
-            mode_label="API MODE"
-            # Check if API key is set
-            if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
-                is_online=true
-            fi
-            ;;
-        ollama)
-            mode_label="OLLAMA MODE"
-            # Check if Ollama is reachable
-            if curl -s --connect-timeout 1 "${CLAUDE_OLLAMA_HOST:-http://localhost:11434}/api/tags" &>/dev/null 2>&1; then
-                is_online=true
-            fi
-            ;;
-        *)
-            mode_label="LOCAL MODE"
-            ;;
+        max) [[ -f "$HOME/.claude/.credentials.json" ]] && is_online=true ;;
+        api) [[ -n "${ANTHROPIC_API_KEY:-}" ]] && is_online=true ;;
+        ollama) curl -s --connect-timeout 1 "${ollama_host:-http://localhost:11434}/api/tags" &>/dev/null && is_online=true ;;
     esac
 
-    # Set colors based on online/offline status
+    local status_indicator
     if $is_online; then
-        status_label="online"
-        bg_color='\033[42m'  # Green background
-        fg_color='\033[97m'  # Bright white text
+        status_indicator="${GRN}●${LB} online"
     else
-        status_label="OFFLINE"
-        bg_color='\033[41m'  # Red background
-        fg_color='\033[97m'  # Bright white text
+        status_indicator="${RD}●${LB} OFFLINE"
     fi
 
-    # Build the bar content
-    local content="  ${mode_label}   |   ${model}   |   ${status_label}  "
-    local content_len=${#content}
-    local padding left_pad right_pad
-    padding=$(( (width - content_len) / 2 ))
-    [[ $padding -lt 0 ]] && padding=0
-    left_pad=$(printf '%*s' "$padding" '')
-    right_pad=$(printf '%*s' "$((width - content_len - padding))" '')
+    # Context window + cost lookup from models.json
+    local context_window="?" cost_tier="?"
+    local config_file="$ATOMIC_ROOT/config/models.json"
+    if [[ -f "$config_file" ]]; then
+        local ctx cost
+        ctx=$(jq -r --arg m "$model" '.models.claude[$m].context_window // .models.ollama[$m].context_window // empty' "$config_file" 2>/dev/null)
+        cost=$(jq -r --arg m "$model" '.models.claude[$m].cost_tier // .models.ollama[$m].cost_tier // empty' "$config_file" 2>/dev/null)
+        [[ -n "$ctx" ]] && context_window="$ctx"
+        [[ -n "$cost" ]] && cost_tier="$cost"
+    fi
 
-    # Print the bar (no newline - we're on line 0)
-    echo -ne "${bg_color}${fg_color}${BOLD}${left_pad}${content}${right_pad}${NC}"
-}
+    # Format context window for display (200000 -> 200K)
+    if [[ "$context_window" =~ ^[0-9]+$ ]] && (( context_window >= 1000 )); then
+        context_window="$((context_window / 1000))K"
+    fi
 
-# Simple non-sticky mode bar (fallback for non-interactive)
-atomic_mode_bar_simple() {
-    local provider="${1:-$CLAUDE_PROVIDER}"
-    local model="${2:-$CLAUDE_MODEL}"
+    # Shorten paths relative to ATOMIC_ROOT
+    local short_prompt="${prompt_source#$ATOMIC_ROOT/}"
+    local short_output="${output_file#$ATOMIC_ROOT/}"
 
+    # Host type
+    local host_type
+    case "$provider" in
+        max|api) host_type="CLAUDECODE" ;;
+        ollama) host_type="OLLAMA" ;;
+        *) host_type="LOCAL" ;;
+    esac
+
+    # Print header block
     echo ""
-    _atomic_render_mode_bar "$provider" "$model"
-    echo ""
+    printf '%s  ╶─── %s ─────────────────────────────────%s\n' "$LB" "$description" "$RST"
+    printf '%s    %-10s%-15s%-10s%-16s%s%s\n' "$LB" "provider" "$provider" "model" "$model" "$status_indicator" "$RST"
+    printf '%s    %-10s%-15s%-10s%-16s%-6s%s%s\n' "$LB" "context" "$context_window" "cost" "$cost_tier" "role" "${role:-─}" "$RST"
+    printf '%s    %-10s%-15s%-10s%s%s\n' "$LB" "host" "$host_type" "timeout" "${timeout}s" "$RST"
+    if [[ "$provider" == "ollama" && -n "$ollama_host" ]]; then
+        printf '%s    %-10s%s%s\n' "$LB" "endpoint" "$ollama_host" "$RST"
+    fi
+    printf '%s    %-10s%s%s\n' "$LB" "prompt" "$short_prompt" "$RST"
+    printf '%s    %-10s%s%s\n' "$LB" "output" "$short_output" "$RST"
+    printf '%s  ╶──────────────────────────────────────────────────────%s\n' "$LB" "$RST"
 }
 
 # ============================================================================
@@ -646,6 +1041,44 @@ atomic_output_box() {
     echo -e "${LIGHT_GREY}─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─${NC}"
     echo "$1" | sed 's/^/  /'
     echo -e "${LIGHT_GREY}─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─${NC}"
+}
+
+# ============================================================================
+# PHASE CLOSEOUT HELPERS
+# ============================================================================
+
+# Find the closeout file for a given phase directory.
+# Checks the correct .outputs location first, falls back to legacy .claude/closeout/.
+# Usage: local closeout=$(atomic_find_closeout "1-discovery")
+#        if [[ -n "$closeout" ]]; then ...
+atomic_find_closeout() {
+    local phase_dir="$1"  # e.g., "0-setup", "1-discovery", "2-prd"
+    local phase_num="${phase_dir%%-*}"
+    local padded_num=$(printf "%02d" "$phase_num")
+
+    # Primary: .outputs/{phase-dir}/closeout.json (where phase_complete() writes)
+    local primary="$ATOMIC_OUTPUT_DIR/$phase_dir/closeout.json"
+    if [[ -f "$primary" ]]; then
+        echo "$primary"
+        return 0
+    fi
+
+    # Legacy: .claude/closeout/phase-NN-closeout.json
+    local legacy="$ATOMIC_ROOT/.claude/closeout/phase-${padded_num}-closeout.json"
+    if [[ -f "$legacy" ]]; then
+        echo "$legacy"
+        return 0
+    fi
+
+    # Legacy markdown format
+    local legacy_md="$ATOMIC_ROOT/.claude/closeout/phase-${padded_num}-closeout.md"
+    if [[ -f "$legacy_md" ]]; then
+        echo "$legacy_md"
+        return 0
+    fi
+
+    echo ""
+    return 1
 }
 
 # ============================================================================
@@ -781,7 +1214,15 @@ _atomic_build_invoke_cmd() {
         cmd="${cmd} --context-length '${CLAUDE_OLLAMA_CONTEXT:-8192}'"
     fi
 
-    # Add prompt
+    # Add prompt and max-turns for non-interactive mode
+    cmd="${cmd} --max-turns '${CLAUDE_MAX_TURNS:-1}'"
+    cmd="${cmd} --output-format text"
+
+    # Tool restriction: CLAUDE_TOOLS="" disables all tools (pure text generation)
+    if [[ -n "${CLAUDE_TOOLS+set}" ]]; then
+        cmd="${cmd} --tools '${CLAUDE_TOOLS}'"
+    fi
+
     cmd="${cmd} -p '${escaped_prompt}'"
 
     printf '%s\n' "$cmd"
@@ -884,7 +1325,6 @@ atomic_invoke() {
     # Role-based provider routing
     if [[ -n "$role" ]]; then
         provider="${PROVIDER_ROLE_MAP[$role]:-$provider}"
-        atomic_substep "Role '$role' → Provider '$provider'"
     fi
 
     # Model fallback resolution (for airgapped/offline environments)
@@ -902,15 +1342,11 @@ atomic_invoke() {
         fi
     fi
 
-    atomic_step "ATOMIC TASK: $description"
-
     # Determine prompt content
     local prompt_content
     if [[ -f "$prompt_source" ]]; then
-        atomic_substep "Prompt file: $prompt_source"
         prompt_content=$(cat "$prompt_source")
     else
-        atomic_substep "Prompt: inline string"
         prompt_content="$prompt_source"
     fi
 
@@ -925,24 +1361,14 @@ CONTEXT:
 $stdin_content"
     fi
 
-    atomic_substep "Output: $output_file"
-    atomic_substep "Model: $model"
-    atomic_substep "Provider: $provider"
-
     # Update state
     atomic_state_set "current_task" "\"$description\""
 
     # Create output directory if needed
     mkdir -p "$(dirname "$output_file")"
 
-    # Show sticky mode indicator bar (green=online, red=offline)
-    if [[ -t 1 ]]; then
-        # Interactive terminal - use sticky bar
-        atomic_mode_bar_init "$provider" "$model"
-    else
-        # Non-interactive - use simple bar
-        atomic_mode_bar_simple "$provider" "$model"
-    fi
+    # Unified task header
+    atomic_task_header "$description" "$provider" "$model" "$role" "$timeout" "$prompt_source" "$output_file" "$ollama_host"
 
     atomic_waiting "Invoking Claude..."
     echo ""
@@ -958,14 +1384,40 @@ $stdin_content"
     local attempt=1
     local total_duration=0
 
+    # Stream Claude output to terminal in real-time (default on, disable with ATOMIC_STREAM=false)
+    local stream_pid=""
+    local stream_enabled="${ATOMIC_STREAM:-true}"
+
     while [[ $attempt -le $((max_retries + 1)) ]]; do
         attempt_start=$(date +%s)
 
-        if timeout "$timeout" bash -c "$invoke_cmd" > "$output_file" 2>&1; then
+        # Start streaming if enabled and terminal is interactive
+        if [[ "$stream_enabled" == "true" && -t 2 ]]; then
+            : > "$output_file"  # ensure file exists
+            local _dim=$'\033[2m' _nc=$'\033[0m'
+            echo -e "${DIM}    ┌── Claude Code ──────────────────────────────────${NC}" >&2
+            tail -f "$output_file" 2>/dev/null | sed "s/^/    ${_dim}│${_nc} /" >&2 &
+            stream_pid=$!
+        fi
+
+        if timeout "$timeout" bash -c "$invoke_cmd" > "$output_file" 2>"${output_file}.err"; then
             exit_code=0
+            # Stop streaming
+            if [[ -n "$stream_pid" ]]; then
+                sleep 0.2  # let tail flush last output
+                kill "$stream_pid" 2>/dev/null; wait "$stream_pid" 2>/dev/null
+                stream_pid=""
+                echo -e "${DIM}    └──────────────────────────────────────────────────${NC}" >&2
+            fi
             break
         else
             exit_code=$?
+        fi
+
+        # Stop streaming on failure too
+        if [[ -n "$stream_pid" ]]; then
+            kill "$stream_pid" 2>/dev/null; wait "$stream_pid" 2>/dev/null
+            stream_pid=""
         fi
 
         attempt_end=$(date +%s)
@@ -994,9 +1446,6 @@ $stdin_content"
     mkdir -p "$(dirname "$log_file")"
     echo "[$(date -Iseconds)] task=\"$description\" provider=$provider model=$model duration=${duration}s exit=$exit_code output=$output_file" >> "$log_file"
 
-    # Clear sticky mode bar before reporting results
-    atomic_mode_bar_clear
-
     if [[ $exit_code -eq 0 ]]; then
         atomic_success "Claude completed task (${duration}s)"
         atomic_substep "Output written to: $output_file"
@@ -1005,11 +1454,11 @@ $stdin_content"
         if [[ "$format" == "json" ]]; then
             if jq . "$output_file" > /dev/null 2>&1; then
                 atomic_success "JSON output validated"
-            else
-                atomic_warn "Output is not valid JSON - may need extraction"
             fi
+            # If not valid JSON, caller handles extraction (e.g. markdown fences)
         fi
 
+        rm -f "${output_file}.err"
         atomic_state_increment "tasks_completed"
         return 0
     else
@@ -1017,6 +1466,9 @@ $stdin_content"
             atomic_error "Claude task timed out after $attempt attempt(s)"
         else
             atomic_error "Claude task failed (exit code: $exit_code)"
+        fi
+        if [[ -s "${output_file}.err" ]]; then
+            atomic_substep "Stderr: $(head -5 "${output_file}.err")"
         fi
         atomic_substep "Check output file for details: $output_file"
         atomic_state_increment "tasks_failed"
@@ -1129,7 +1581,7 @@ atomic_gate() {
     local prompt="Proceed? [y/N]: "
     [[ "$default" == "y" ]] && prompt="Proceed? [Y/n]: "
 
-    read -p "$prompt" response
+    read -e -p "$prompt" response
     response=${response:-$default}
 
     if [[ "$response" =~ ^[Yy] ]]; then
@@ -1164,27 +1616,31 @@ atomic_validate_files() {
 }
 
 # atomic_extract_json extracts JSON from mixed Claude output
+# Supports in-place extraction (same file for input and output)
 atomic_extract_json() {
     local input_file="$1"
     local output_file="$2"
+    local tmp_file="${output_file}.tmp.$$"
 
     # Try to find JSON block in output
     if grep -q '```json' "$input_file"; then
-        sed -n '/```json/,/```/p' "$input_file" | sed '1d;$d' > "$output_file"
+        sed -n '/```json/,/```/p' "$input_file" | sed '1d;$d' > "$tmp_file"
     elif grep -q '^{' "$input_file"; then
-        # Assume raw JSON
-        cp "$input_file" "$output_file"
+        cp "$input_file" "$tmp_file"
     else
         atomic_error "No JSON found in output"
+        rm -f "$tmp_file"
         return 1
     fi
 
     # Validate
-    if jq . "$output_file" > /dev/null 2>&1; then
+    if jq . "$tmp_file" > /dev/null 2>&1; then
+        mv "$tmp_file" "$output_file"
         atomic_success "JSON extracted and validated"
         return 0
     else
         atomic_error "Extracted content is not valid JSON"
+        rm -f "$tmp_file"
         return 1
     fi
 }
@@ -1580,9 +2036,59 @@ atomic_context_init() {
     ATOMIC_CONTEXT_DIR="$ATOMIC_OUTPUT_DIR/$phase_id/context"
     mkdir -p "$ATOMIC_CONTEXT_DIR"
 
-    # Initialize summary if doesn't exist
+    # Initialize summary if doesn't exist - try to inherit from previous phase first
     if [[ ! -f "$ATOMIC_CONTEXT_DIR/summary.md" ]]; then
-        cat > "$ATOMIC_CONTEXT_DIR/summary.md" << 'EOF'
+        local inherited=false
+
+        # Extract phase number from phase_id (e.g., "4-specification" -> 4)
+        local phase_num="${phase_id%%-*}"
+        if [[ "$phase_num" =~ ^[0-9]+$ ]] && [[ "$phase_num" -gt 0 ]]; then
+            # Try to find previous phase's summary
+            local prev_num=$((phase_num - 1))
+            for prev_dir in "$ATOMIC_OUTPUT_DIR"/${prev_num}-*/context/summary.md; do
+                if [[ -f "$prev_dir" ]]; then
+                    cp "$prev_dir" "$ATOMIC_CONTEXT_DIR/summary.md"
+                    inherited=true
+                    break
+                fi
+            done
+        fi
+
+        # If couldn't inherit, try to seed from project config or use default
+        if [[ "$inherited" == false ]]; then
+            local config_file="$ATOMIC_ROOT/.outputs/0-setup/project-config.json"
+            [[ ! -f "$config_file" ]] && config_file="$ATOMIC_ROOT/project-config.json"
+
+            if [[ -f "$config_file" ]]; then
+                # Seed summary with project configuration
+                local proj_name proj_type proj_goal
+                proj_name=$(jq -r '.project.name // "(not yet configured)"' "$config_file" 2>/dev/null)
+                proj_type=$(jq -r '.project.type // "(not yet configured)"' "$config_file" 2>/dev/null)
+                proj_goal=$(jq -r '.project.primary_goal // .project.description // "(not yet configured)"' "$config_file" 2>/dev/null)
+
+                cat > "$ATOMIC_CONTEXT_DIR/summary.md" << EOF
+# Project Context Summary
+
+*This file is automatically maintained. It provides rolling context for LLM tasks.*
+
+## Project
+- Name: $proj_name
+- Type: $proj_type
+- Goal: $proj_goal
+
+## Current Phase
+- Phase: $phase_id
+- Status: starting
+
+## Key Decisions
+(none yet)
+
+## Recent Activity
+(none yet)
+EOF
+            else
+                # Default placeholder summary
+                cat > "$ATOMIC_CONTEXT_DIR/summary.md" << 'EOF'
 # Project Context Summary
 
 *This file is automatically maintained. It provides rolling context for LLM tasks.*
@@ -1602,16 +2108,46 @@ atomic_context_init() {
 ## Recent Activity
 (none yet)
 EOF
+            fi
+        fi
     fi
 
-    # Initialize decisions log if doesn't exist
+    # Initialize decisions log if doesn't exist - inherit from previous phase
     if [[ ! -f "$ATOMIC_CONTEXT_DIR/decisions.json" ]]; then
-        echo '[]' > "$ATOMIC_CONTEXT_DIR/decisions.json"
+        local phase_num="${phase_id%%-*}"
+        local inherited_decisions=false
+
+        if [[ "$phase_num" =~ ^[0-9]+$ ]] && [[ "$phase_num" -gt 0 ]]; then
+            local prev_num=$((phase_num - 1))
+            for prev_dir in "$ATOMIC_OUTPUT_DIR"/${prev_num}-*/context/decisions.json; do
+                if [[ -f "$prev_dir" ]]; then
+                    cp "$prev_dir" "$ATOMIC_CONTEXT_DIR/decisions.json"
+                    inherited_decisions=true
+                    break
+                fi
+            done
+        fi
+
+        [[ "$inherited_decisions" == false ]] && echo '[]' > "$ATOMIC_CONTEXT_DIR/decisions.json"
     fi
 
-    # Initialize artifacts index if doesn't exist
+    # Initialize artifacts index if doesn't exist - inherit from previous phase
     if [[ ! -f "$ATOMIC_CONTEXT_DIR/artifacts.json" ]]; then
-        echo '{"artifacts": []}' > "$ATOMIC_CONTEXT_DIR/artifacts.json"
+        local phase_num="${phase_id%%-*}"
+        local inherited_artifacts=false
+
+        if [[ "$phase_num" =~ ^[0-9]+$ ]] && [[ "$phase_num" -gt 0 ]]; then
+            local prev_num=$((phase_num - 1))
+            for prev_dir in "$ATOMIC_OUTPUT_DIR"/${prev_num}-*/context/artifacts.json; do
+                if [[ -f "$prev_dir" ]]; then
+                    cp "$prev_dir" "$ATOMIC_CONTEXT_DIR/artifacts.json"
+                    inherited_artifacts=true
+                    break
+                fi
+            done
+        fi
+
+        [[ "$inherited_artifacts" == false ]] && echo '{"artifacts": []}' > "$ATOMIC_CONTEXT_DIR/artifacts.json"
     fi
 }
 
@@ -1893,12 +2429,13 @@ atomic_amend_context() {
     echo ""
 
     while true; do
-        read -p "  Choice [p]: " choice
+        atomic_drain_stdin
+        read -e -p "  Choice [p]: " choice
         choice=${choice:-p}
 
         case "$choice" in
             a|A)
-                read -p "  File path: " file_path
+                read -e -p "  File path: " file_path
                 if [[ -f "$file_path" ]]; then
                     TASK_AMENDED_CONTEXT+="
 ---
@@ -2013,10 +2550,41 @@ $prompt_content"
 # Update context summary (LLM task to refresh the rolling summary)
 # Usage: atomic_context_refresh
 atomic_context_refresh() {
+    # Ensure ATOMIC_CONTEXT_DIR is set
+    if [[ -z "$ATOMIC_CONTEXT_DIR" ]]; then
+        # Try to reconstruct from ATOMIC_OUTPUT_DIR and CURRENT_PHASE
+        if [[ -n "$ATOMIC_OUTPUT_DIR" && -n "$CURRENT_PHASE" ]]; then
+            ATOMIC_CONTEXT_DIR="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/context"
+            mkdir -p "$ATOMIC_CONTEXT_DIR"
+        else
+            atomic_warn "Context directory not available, skipping summary refresh"
+            return 0
+        fi
+    fi
+
     local summary_file="$ATOMIC_CONTEXT_DIR/summary.md"
     local decisions_file="$ATOMIC_CONTEXT_DIR/decisions.json"
     local artifacts_file="$ATOMIC_CONTEXT_DIR/artifacts.json"
     local refresh_output="$ATOMIC_CONTEXT_DIR/summary-new.md"
+
+    # Verify context files exist
+    if [[ ! -f "$summary_file" ]]; then
+        atomic_warn "Summary file not found at $summary_file, skipping refresh"
+        return 0
+    fi
+
+    # Find project configuration (try setup output, then root)
+    local project_config=""
+    local config_file="$ATOMIC_ROOT/.outputs/0-setup/project-config.json"
+    [[ ! -f "$config_file" ]] && config_file="$ATOMIC_ROOT/project-config.json"
+
+    if [[ -f "$config_file" ]]; then
+        project_config=$(jq -r '
+            "- Name: " + (.project.name // "(unknown)") + "\n" +
+            "- Type: " + (.project.type // "(unknown)") + "\n" +
+            "- Goal: " + (.project.primary_goal // .project.description // "(unknown)")
+        ' "$config_file" 2>/dev/null || echo "")
+    fi
 
     atomic_substep "Refreshing context summary..."
 
@@ -2026,6 +2594,13 @@ atomic_context_refresh() {
 
 You are maintaining a rolling context summary for a software development pipeline.
 Update the summary based on recent activity.
+
+## Project Configuration (from setup):
+${project_config:-"(not available)"}
+
+## Current Phase:
+- Phase: ${CURRENT_PHASE:-"(unknown)"}
+- Task: $(atomic_state_get current_task 2>/dev/null || echo "(unknown)")
 
 ## Current Summary:
 $(cat "$summary_file")
@@ -2038,10 +2613,11 @@ $(jq -r '.artifacts[-10:][] | "- \(.path): \(.description)"' "$artifacts_file" 2
 
 ## Instructions:
 1. Update the summary to reflect current project state
-2. Keep it concise (under 50 lines)
-3. Preserve the markdown structure
-4. Focus on information useful for subsequent LLM tasks
-5. Output ONLY the updated markdown summary, no explanations
+2. Replace any "(not yet configured)" placeholders with actual values from Project Configuration
+3. Keep it concise (under 50 lines)
+4. Preserve the markdown structure
+5. Focus on information useful for subsequent LLM tasks
+6. Output ONLY the updated markdown summary, no explanations
 
 Updated summary:
 EOF
@@ -2261,12 +2837,6 @@ atomic_gardener_config() {
     local key="$1"
     local project_config="$ATOMIC_OUTPUT_DIR/${CURRENT_PHASE:-0-setup}/project-config.json"
 
-    local defaults=(
-        ["threshold_percent"]=70
-        ["preserve_recent_exchanges"]=4
-        ["preserve_opening"]=true
-    )
-
     local value
     if [[ -f "$project_config" ]]; then
         value=$(jq -r ".extracted.gardener.${key} // empty" "$project_config" 2>/dev/null)
@@ -2461,11 +3031,34 @@ atomic_json_fix() {
         fi
     fi
 
-    # Try to find JSON object in the content
+    # Try to find JSON object starting at a line beginning with {
     json_start=$(echo "$json_content" | grep -n '^{' | head -1 | cut -d: -f1)
     if [[ -n "$json_start" ]]; then
         extracted=$(echo "$json_content" | tail -n +"$json_start")
         if echo "$extracted" | jq -e . &>/dev/null; then
+            echo "$extracted"
+            return 0
+        fi
+    fi
+
+    # Try Python-based extraction: find outermost { to last }
+    if command -v python3 &>/dev/null; then
+        extracted=$(python3 -c "
+import json, sys
+content = sys.stdin.read()
+start = content.find('{')
+end = content.rfind('}')
+if start >= 0 and end > start:
+    candidate = content[start:end+1]
+    try:
+        obj = json.loads(candidate)
+        print(json.dumps(obj))
+    except json.JSONDecodeError:
+        sys.exit(1)
+else:
+    sys.exit(1)
+" <<< "$json_content" 2>/dev/null)
+        if [[ $? -eq 0 ]] && echo "$extracted" | jq -e . &>/dev/null; then
             echo "$extracted"
             return 0
         fi
@@ -2549,8 +3142,8 @@ atomic_verify_context_handoff() {
     case "$phase_num" in
         1)
             # Phase 1 should have Phase 0 closeout
-            local closeout="$ATOMIC_ROOT/.claude/closeout/phase-00-closeout.json"
-            if [[ -f "$closeout" ]]; then
+            local closeout=$(atomic_find_closeout "0-setup")
+            if [[ -n "$closeout" ]]; then
                 echo "    ✓ Phase 0 closeout present"
             else
                 echo "    ✗ Phase 0 closeout missing"
@@ -3075,7 +3668,7 @@ atomic_context_adjudicate() {
         return 0
     fi
 
-    atomic_substep "Context threshold exceeded (~$estimated_tokens of $threshold tokens for $primary_model)"
+    atomic_substep "Context threshold exceeded (~$estimated_tokens of $threshold tokens for $primary_model)" >&2
 
     # STAGE 1: Try simple auto-gardening first (no LLM call)
     local gardened_json gardened_text gardened_tokens
@@ -3084,13 +3677,13 @@ atomic_context_adjudicate() {
     gardened_tokens=$(atomic_estimate_tokens "$gardened_text")
 
     if [[ $gardened_tokens -lt $threshold ]]; then
-        atomic_substep "Auto-gardening reduced context to ~$gardened_tokens tokens"
+        atomic_substep "Auto-gardening reduced context to ~$gardened_tokens tokens" >&2
         echo "$gardened_json"
         return 0
     fi
 
     # STAGE 2: Auto-gardening wasn't enough, invoke full LLM adjudication
-    atomic_substep "Auto-gardening insufficient (~$gardened_tokens tokens), invoking LLM context gardener..."
+    atomic_substep "Auto-gardening insufficient (~$gardened_tokens tokens), invoking LLM context gardener..." >&2
 
     # Build adjudication prompt
     local full_conversation prompt
@@ -3140,16 +3733,16 @@ ADJUDICATE_PROMPT
 
     local success=false
     for model in "${models_to_try[@]}"; do
-        atomic_substep "Trying gardener model: $model"
+        atomic_substep "Trying gardener model: $model" >&2
 
-        if atomic_invoke "$prompt" "$output_file" "Adjudicate context" --model="$model" --format=json 2>/dev/null; then
+        if atomic_invoke "$prompt" "$output_file" "Adjudicate context" --model="$model" --format=json 1>&2 2>/dev/null; then
             if jq -e '.level_set' "$output_file" &>/dev/null; then
                 success=true
-                atomic_success "Adjudication complete with $model"
+                atomic_success "Adjudication complete with $model" >&2
                 break
             fi
         fi
-        atomic_warn "Model $model failed, trying next..."
+        atomic_warn "Model $model failed, trying next..." >&2
     done
 
     if [[ "$success" == true ]]; then
@@ -3171,7 +3764,7 @@ ADJUDICATE_PROMPT
         '
     else
         # All models failed, use simple window fallback
-        atomic_warn "All gardener models failed, using simple window fallback"
+        atomic_warn "All gardener models failed, using simple window fallback" >&2
         atomic_context_window "$dialogue_json" "$((preserve_recent * 2))" "$preserve_opening"
     fi
 }

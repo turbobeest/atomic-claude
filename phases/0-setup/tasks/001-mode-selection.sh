@@ -71,8 +71,11 @@ task_001_mode_selection() {
     echo -e "  ${CYAN}3.${NC} ${BOLD}QUICK${NC}     - Sensible defaults, minimal input"
     echo ""
 
+    # Drain any buffered stdin from previous interactions
+    while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
+
     while true; do
-        read -p "  Select mode [$default_choice]: " choice
+        read -e -p "  Select mode [$default_choice]: " choice || true
         choice=${choice:-$default_choice}
 
         case "$choice" in
@@ -81,6 +84,24 @@ task_001_mode_selection() {
                 if [[ -z "$detected_setup" ]]; then
                     echo ""
                     atomic_warn "No setup.md detected. You'll be prompted for the path."
+                else
+                    echo ""
+                    echo -e "  ${BOLD}${YELLOW}──────────────────────────────────────────────────────${NC}"
+                    echo -e "  ${BOLD}  Before continuing, open and edit your setup file:${NC}"
+                    echo -e "  ${CYAN}  $detected_setup${NC}"
+                    echo ""
+                    echo -e "  ${DIM}  This file defines your entire project configuration.${NC}"
+                    echo -e "  ${DIM}  Fill in project name, description, type, constraints,${NC}"
+                    echo -e "  ${DIM}  and any fields you want Claude to use. Fields marked${NC}"
+                    echo -e "  ${DIM}  'infer' will be auto-populated from your reference${NC}"
+                    echo -e "  ${DIM}  materials. Leave 'default' for sensible defaults.${NC}"
+                    echo ""
+                    echo -e "  ${DIM}  Tip: Open the file in another terminal or editor now.${NC}"
+                    echo -e "  ${BOLD}${YELLOW}──────────────────────────────────────────────────────${NC}"
+                    echo ""
+                    # Drain stdin before prompt
+                    while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
+                    read -e -p "  Press Enter when setup.md is ready to parse... " || true
                 fi
                 break
                 ;;

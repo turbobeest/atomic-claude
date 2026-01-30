@@ -83,24 +83,24 @@ task_704_testing_execution() {
 
         for agent_entry in $agents_array; do
             local agent_name="${agent_entry%%:*}"
-            local agent_file="$agent_repo/pipeline-agents/$agent_name.md"
+            agent_file=$(atomic_find_agent "$agent_name" "$agent_repo")
 
             if [[ -f "$agent_file" ]]; then
                 case "$agent_name" in
                     *e2e*|*test-runner*)
-                        e2e_agent_prompt=$(cat "$agent_file")
+                        e2e_agent_prompt=$(cat "$agent_file" | atomic_strip_frontmatter)
                         echo -e "  ${CYAN}✓${NC} Loaded agent: $agent_name (E2E)"
                         ;;
                     *acceptance*|*validator*)
-                        acceptance_agent_prompt=$(cat "$agent_file")
+                        acceptance_agent_prompt=$(cat "$agent_file" | atomic_strip_frontmatter)
                         echo -e "  ${MAGENTA}✓${NC} Loaded agent: $agent_name (Acceptance)"
                         ;;
                     *performance*|*perf*)
-                        performance_agent_prompt=$(cat "$agent_file")
+                        performance_agent_prompt=$(cat "$agent_file" | atomic_strip_frontmatter)
                         echo -e "  ${YELLOW}✓${NC} Loaded agent: $agent_name (Performance)"
                         ;;
                     *reporter*|*integration-reporter*)
-                        reporter_agent_prompt=$(cat "$agent_file")
+                        reporter_agent_prompt=$(cat "$agent_file" | atomic_strip_frontmatter)
                         echo -e "  ${BLUE}✓${NC} Loaded agent: $agent_name (Reporter)"
                         ;;
                 esac
@@ -117,7 +117,7 @@ task_704_testing_execution() {
     # GATHER PROJECT CONTEXT
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    local prd_file="$ATOMIC_ROOT/.claude/prd/prd.md"
+    local prd_file="$ATOMIC_ROOT/docs/prd/PRD.md"
     local specs_dir="$ATOMIC_ROOT/.claude/specs"
     local testing_dir="$ATOMIC_ROOT/.claude/testing"
 
@@ -204,21 +204,31 @@ PROMPT
     echo ""
 
     # Call LLM for E2E testing
-    local e2e_response=$(atomic_llm_call "$e2e_prompt_file" "sonnet" 2>/dev/null)
-
-    # Parse E2E results (with fallback)
-    local e2e_total=8
-    local e2e_passed=8
+    local e2e_output="$prompts_dir/e2e-output.json"
+    local e2e_total=0
+    local e2e_passed=0
     local e2e_failed=0
 
-    if [[ -n "$e2e_response" ]]; then
-        local parsed_total=$(echo "$e2e_response" | jq -r '.total // empty' 2>/dev/null)
-        local parsed_passed=$(echo "$e2e_response" | jq -r '.passed // empty' 2>/dev/null)
-        local parsed_failed=$(echo "$e2e_response" | jq -r '.failed // empty' 2>/dev/null)
+    if atomic_invoke "$e2e_prompt_file" "$e2e_output" "E2E Testing" --model=sonnet; then
+        # Try to parse JSON from response
+        local e2e_response=""
+        if jq -e . "$e2e_output" &>/dev/null; then
+            e2e_response=$(cat "$e2e_output")
+        elif grep -q '```json' "$e2e_output"; then
+            e2e_response=$(sed -n '/```json/,/```/p' "$e2e_output" | sed '1d;$d')
+        fi
 
-        [[ -n "$parsed_total" ]] && e2e_total="$parsed_total"
-        [[ -n "$parsed_passed" ]] && e2e_passed="$parsed_passed"
-        [[ -n "$parsed_failed" ]] && e2e_failed="$parsed_failed"
+        if [[ -n "$e2e_response" ]]; then
+            local parsed_total=$(echo "$e2e_response" | jq -r '.total // empty' 2>/dev/null)
+            local parsed_passed=$(echo "$e2e_response" | jq -r '.passed // empty' 2>/dev/null)
+            local parsed_failed=$(echo "$e2e_response" | jq -r '.failed // empty' 2>/dev/null)
+
+            [[ -n "$parsed_total" ]] && e2e_total="$parsed_total"
+            [[ -n "$parsed_passed" ]] && e2e_passed="$parsed_passed"
+            [[ -n "$parsed_failed" ]] && e2e_failed="$parsed_failed"
+        fi
+    else
+        echo -e "  ${YELLOW}!${NC} E2E testing LLM call failed"
     fi
 
     echo -e "  ──────────────────────────────────────────────────────────────────────────────────────────────────────────"
@@ -229,16 +239,19 @@ PROMPT
     echo -e "    Failed:              ${RED}$e2e_failed${NC}"
     echo ""
 
-    # Show individual test results
+    # Show individual test results from LLM output
     echo -e "    ${DIM}Test Flow Results:${NC}"
-    echo -e "      User login flow                  ${GREEN}PASS${NC}"
-    echo -e "      Core functionality flow          ${GREEN}PASS${NC}"
-    echo -e "      Data persistence flow            ${GREEN}PASS${NC}"
-    echo -e "      External integration flow        ${GREEN}PASS${NC}"
-    echo -e "      Error handling flow              ${GREEN}PASS${NC}"
-    echo -e "      Edge case handling flow          ${GREEN}PASS${NC}"
-    echo -e "      Performance under load flow      ${GREEN}PASS${NC}"
-    echo -e "      Recovery flow                    ${GREEN}PASS${NC}"
+    if [[ -f "$e2e_output" ]] && [[ -n "$e2e_response" ]]; then
+        echo "$e2e_response" | jq -r '.flows[]? | "      \(.name | .[0:40])  \(.status)"' 2>/dev/null | while read -r line; do
+            if echo "$line" | grep -q "PASS"; then
+                echo -e "      ${line/PASS/${GREEN}PASS${NC}}"
+            else
+                echo -e "      ${line/FAIL/${RED}FAIL${NC}}"
+            fi
+        done
+    else
+        echo -e "      ${DIM}(No flow details available)${NC}"
+    fi
     echo ""
     echo -e "  ──────────────────────────────────────────────────────────────────────────────────────────────────────────"
     echo ""
@@ -325,28 +338,37 @@ PROMPT
     echo ""
 
     # Call LLM for performance testing
-    local perf_response=$(atomic_llm_call "$perf_prompt_file" "haiku" 2>/dev/null)
-
-    # Parse performance results (with fallback)
-    local response_time=45
+    local perf_output="$prompts_dir/perf-output.json"
+    local response_time=0
     local response_target=100
-    local startup_time=2300
+    local startup_time=0
     local startup_target=3000
-    local memory_usage=78
+    local memory_usage=0
     local memory_target=100
-    local error_rate="0.02"
+    local error_rate="0"
     local error_target="0.1"
 
-    if [[ -n "$perf_response" ]]; then
-        local parsed_rt=$(echo "$perf_response" | jq -r '.response_time.actual // empty' 2>/dev/null)
-        local parsed_st=$(echo "$perf_response" | jq -r '.startup_time.actual // empty' 2>/dev/null)
-        local parsed_mu=$(echo "$perf_response" | jq -r '.memory_usage.actual // empty' 2>/dev/null)
-        local parsed_er=$(echo "$perf_response" | jq -r '.error_rate.actual // empty' 2>/dev/null)
+    if atomic_invoke "$perf_prompt_file" "$perf_output" "Performance Testing" --model=haiku; then
+        local perf_response=""
+        if jq -e . "$perf_output" &>/dev/null; then
+            perf_response=$(cat "$perf_output")
+        elif grep -q '```json' "$perf_output"; then
+            perf_response=$(sed -n '/```json/,/```/p' "$perf_output" | sed '1d;$d')
+        fi
 
-        [[ -n "$parsed_rt" ]] && response_time="$parsed_rt"
-        [[ -n "$parsed_st" ]] && startup_time="$parsed_st"
-        [[ -n "$parsed_mu" ]] && memory_usage="$parsed_mu"
-        [[ -n "$parsed_er" ]] && error_rate="$parsed_er"
+        if [[ -n "$perf_response" ]]; then
+            local parsed_rt=$(echo "$perf_response" | jq -r '.response_time.actual // empty' 2>/dev/null)
+            local parsed_st=$(echo "$perf_response" | jq -r '.startup_time.actual // empty' 2>/dev/null)
+            local parsed_mu=$(echo "$perf_response" | jq -r '.memory_usage.actual // empty' 2>/dev/null)
+            local parsed_er=$(echo "$perf_response" | jq -r '.error_rate.actual // empty' 2>/dev/null)
+
+            [[ -n "$parsed_rt" ]] && response_time="$parsed_rt"
+            [[ -n "$parsed_st" ]] && startup_time="$parsed_st"
+            [[ -n "$parsed_mu" ]] && memory_usage="$parsed_mu"
+            [[ -n "$parsed_er" ]] && error_rate="$parsed_er"
+        fi
+    else
+        echo -e "  ${YELLOW}!${NC} Performance testing LLM call failed"
     fi
 
     echo -e "  ──────────────────────────────────────────────────────────────────────────────────────────────────────────"
@@ -471,44 +493,49 @@ PROMPT
     echo ""
 
     # Call LLM for acceptance validation
-    local accept_response=$(atomic_llm_call "$accept_prompt_file" "sonnet" 2>/dev/null)
-
-    # Parse acceptance results (with fallback)
-    local criteria_total=17
-    local criteria_passed=17
+    local accept_output="$prompts_dir/accept-output.json"
+    local criteria_total=0
+    local criteria_passed=0
     local criteria_failed=0
 
-    if [[ -n "$accept_response" ]]; then
-        local parsed_total=$(echo "$accept_response" | jq -r '.total // empty' 2>/dev/null)
-        local parsed_passed=$(echo "$accept_response" | jq -r '.passed // empty' 2>/dev/null)
-        local parsed_failed=$(echo "$accept_response" | jq -r '.failed // empty' 2>/dev/null)
+    if atomic_invoke "$accept_prompt_file" "$accept_output" "Acceptance Validation" --model=sonnet; then
+        local accept_response=""
+        if jq -e . "$accept_output" &>/dev/null; then
+            accept_response=$(cat "$accept_output")
+        elif grep -q '```json' "$accept_output"; then
+            accept_response=$(sed -n '/```json/,/```/p' "$accept_output" | sed '1d;$d')
+        fi
 
-        [[ -n "$parsed_total" ]] && criteria_total="$parsed_total"
-        [[ -n "$parsed_passed" ]] && criteria_passed="$parsed_passed"
-        [[ -n "$parsed_failed" ]] && criteria_failed="$parsed_failed"
+        if [[ -n "$accept_response" ]]; then
+            local parsed_total=$(echo "$accept_response" | jq -r '.total // empty' 2>/dev/null)
+            local parsed_passed=$(echo "$accept_response" | jq -r '.passed // empty' 2>/dev/null)
+            local parsed_failed=$(echo "$accept_response" | jq -r '.failed // empty' 2>/dev/null)
+
+            [[ -n "$parsed_total" ]] && criteria_total="$parsed_total"
+            [[ -n "$parsed_passed" ]] && criteria_passed="$parsed_passed"
+            [[ -n "$parsed_failed" ]] && criteria_failed="$parsed_failed"
+        fi
+    else
+        echo -e "  ${YELLOW}!${NC} Acceptance validation LLM call failed"
     fi
 
     echo -e "  ──────────────────────────────────────────────────────────────────────────────────────────────────────────"
     echo -e "  ${BOLD}ACCEPTANCE CRITERIA STATUS${NC}"
     echo ""
 
-    echo -e "    ${CYAN}Functional Requirements:${NC} ${DIM}(from E2E results)${NC}"
-    echo -e "      FR-1   Core functionality implemented          ${GREEN}[PASS]${NC}"
-    echo -e "      FR-2   Data persistence working                ${GREEN}[PASS]${NC}"
-    echo -e "      FR-3   User interface responsive               ${GREEN}[PASS]${NC}"
-    echo -e "      FR-4   External integrations functional        ${GREEN}[PASS]${NC}"
-    echo -e "      FR-5   Offline capability working              ${GREEN}[PASS]${NC}"
-    echo -e "      FR-6   Search functionality                    ${GREEN}[PASS]${NC}"
-    echo -e "      FR-7   Export/import features                  ${GREEN}[PASS]${NC}"
-    echo -e "      FR-8   Notification system                     ${GREEN}[PASS]${NC}"
-    echo -e "      ...    Additional criteria                     ${GREEN}[PASS]${NC}"
-    echo ""
-
-    echo -e "    ${CYAN}Non-Functional Requirements:${NC} ${DIM}(from performance results)${NC}"
-    echo -e "      NFR-1  Response time < 100ms                   ${GREEN}[PASS]${NC}"
-    echo -e "      NFR-2  Memory usage < 100MB                    ${GREEN}[PASS]${NC}"
-    echo -e "      NFR-3  Error rate < 0.1%                       ${GREEN}[PASS]${NC}"
-    echo -e "      NFR-4  99.9% uptime capable                    ${GREEN}[PASS]${NC}"
+    # Show acceptance criteria from LLM output
+    if [[ -f "$accept_output" ]] && [[ -n "$accept_response" ]]; then
+        echo -e "    ${CYAN}Acceptance Criteria:${NC}"
+        echo "$accept_response" | jq -r '.criteria[]? | "      \(.id // .name | .[0:40])  \(.status)"' 2>/dev/null | while read -r line; do
+            if echo "$line" | grep -q "PASS"; then
+                echo -e "      ${line/PASS/${GREEN}[PASS]${NC}}"
+            else
+                echo -e "      ${line/FAIL/${RED}[FAIL]${NC}}"
+            fi
+        done
+    else
+        echo -e "    ${DIM}(Acceptance criteria details from LLM not available)${NC}"
+    fi
     echo ""
 
     echo -e "    Total Criteria:   $criteria_total"
@@ -605,16 +632,26 @@ PROMPT
     echo ""
 
     # Call LLM for report generation
-    local report_response=$(atomic_llm_call "$report_prompt_file" "haiku" 2>/dev/null)
-
+    local report_output="$prompts_dir/report-output.json"
     local all_tests_pass=true
     [[ "$e2e_failed" -gt 0 ]] && all_tests_pass=false
     [[ "$criteria_failed" -gt 0 ]] && all_tests_pass=false
 
-    # Override with LLM analysis if available
-    if [[ -n "$report_response" ]]; then
-        local parsed_status=$(echo "$report_response" | jq -r '.overall_status // empty' 2>/dev/null)
-        [[ "$parsed_status" == "needs_work" ]] && all_tests_pass=false
+    if atomic_invoke "$report_prompt_file" "$report_output" "Integration Report" --model=haiku; then
+        local report_response=""
+        if jq -e . "$report_output" &>/dev/null; then
+            report_response=$(cat "$report_output")
+        elif grep -q '```json' "$report_output"; then
+            report_response=$(sed -n '/```json/,/```/p' "$report_output" | sed '1d;$d')
+        fi
+
+        # Override with LLM analysis if available
+        if [[ -n "$report_response" ]]; then
+            local parsed_status=$(echo "$report_response" | jq -r '.overall_status // empty' 2>/dev/null)
+            [[ "$parsed_status" == "needs_work" ]] && all_tests_pass=false
+        fi
+    else
+        echo -e "  ${YELLOW}!${NC} Report generation LLM call failed"
     fi
 
     echo -e "  ──────────────────────────────────────────────────────────────────────────────────────────────────────────"

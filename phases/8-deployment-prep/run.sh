@@ -3,13 +3,13 @@
 # PHASE 8: DEPLOYMENT PREP
 # Release Preparation + Documentation
 #
-# Tasks: 801-806 (8xx range)
+# Tasks: 801-807 (8xx range)
 #
 # This phase prepares the release artifacts, generates documentation,
 # and creates deployment packages ready for production release.
 #
 # ===================================================================
-# PHASE STRUCTURE (Tasks 801-806)
+# PHASE STRUCTURE (Tasks 801-807)
 # ===================================================================
 #
 # Entry:
@@ -19,10 +19,11 @@
 # Deployment:
 #   803 - Agent Selection - select deployment preparation agents
 #   804 - Artifact Generation - build release packages, documentation
-#   805 - Deployment Approval - HUMAN GATE for deployment sign-off
+#   805 - Phase Audit - verify phase artifacts and quality
+#   806 - Deployment Approval - HUMAN GATE for deployment sign-off
 #
 # Exit:
-#   806 - Closeout - prepare for Phase 9 (Release)
+#   807 - Closeout - prepare for Phase 9 (Release)
 #
 # Artifacts produced:
 #   - .claude/deployment/release-package/           - Release artifacts
@@ -128,8 +129,23 @@ main() {
     result=$?
     [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
 
-    # Task 805: Deployment Approval (Human Gate)
-    phase_task_interactive "805" "Deployment Approval" task_805_deployment_approval
+    # ===================================================================
+    # APPROVAL
+    # ===================================================================
+
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}  APPROVAL${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+
+    # Task 805: Phase Audit
+    phase_task_interactive "805" "Phase Audit" task_805_phase_audit
+    result=$?
+    [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
+
+    # Task 806: Deployment Approval (Human Gate)
+    phase_task_interactive "806" "Deployment Approval" task_806_deployment_approval
     result=$?
     [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
 
@@ -143,8 +159,8 @@ main() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 
-    # Task 806: Closeout
-    phase_task_interactive "806" "Closeout" task_806_closeout
+    # Task 807: Closeout
+    phase_task_interactive "807" "Closeout" task_807_closeout
     result=$?
     [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
 

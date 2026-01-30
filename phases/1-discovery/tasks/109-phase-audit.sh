@@ -48,7 +48,7 @@ task_109_phase_audit() {
     echo -e "        ${DIM}Proceed without audit (not recommended)${NC}"
     echo ""
 
-    read -p "  Mode [1]: " mode_choice
+    read -e -p "  Mode [1]: " mode_choice || true
     mode_choice=${mode_choice:-1}
 
     case "$mode_choice" in
@@ -124,7 +124,7 @@ _109_legacy_audit() {
     echo -e "    ${GREEN}[all]${NC}    All 9 dimensions (thorough)"
     echo ""
 
-    read -p "  Profile [quick]: " audit_profile
+    read -e -p "  Profile [quick]: " audit_profile || true
     audit_profile=${audit_profile:-quick}
 
     local selected_dims=()
@@ -136,7 +136,7 @@ _109_legacy_audit() {
         custom)
             echo ""
             echo -e "  ${DIM}Enter dimension IDs (space-separated):${NC}"
-            read -p "  > " custom_selection
+            read -e -p "  > " custom_selection || true
             selected_dims=($custom_selection)
             ;;
         all)
@@ -329,7 +329,7 @@ EOF
     atomic_waiting "auditor analyzing..."
 
     local audit_raw="$prompts_dir/audit-raw.json"
-    if atomic_invoke "$prompts_dir/phase-audit.md" "$audit_raw" "Phase 1 audit" --model=sonnet; then
+    if atomic_invoke "$prompts_dir/phase-audit.md" "$audit_raw" "Phase 1 audit"; then
         # Try to fix common JSON issues (markdown wrapping, etc.)
         local fixed_json=$(atomic_json_fix "$audit_raw")
         echo "$fixed_json" > "$audit_raw"
@@ -395,7 +395,8 @@ EOF
         echo -e "    ${BLUE}[defer]${NC}     Defer issues to later phases"
         echo ""
 
-        read -p "  Choice [accept]: " review_choice
+    atomic_drain_stdin
+        read -e -p "  Choice [accept]: " review_choice || true
         review_choice=${review_choice:-accept}
 
         case "$review_choice" in

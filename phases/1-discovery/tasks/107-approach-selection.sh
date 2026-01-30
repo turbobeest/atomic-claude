@@ -78,16 +78,16 @@ task_107_approach_selection() {
     fi
 
     echo -e "  ${GREEN}[enter]${NC} Accept  ${YELLOW}[edit]${NC} Modify"
-    read -p "  > " section1_action
+    read -e -p "  > " section1_action || true
 
     if [[ "${section1_action,,}" == "edit" ]]; then
         echo ""
         echo -e "  ${DIM}Enter new direction (or press enter to keep current):${NC}"
-        read -p "  Direction: " new_direction
+        read -e -p "  Direction: " new_direction || true
         [[ -n "$new_direction" ]] && direction="$new_direction"
 
         echo -e "  ${DIM}Enter new rationale (or press enter to keep current):${NC}"
-        read -p "  Rationale: " new_rationale
+        read -e -p "  Rationale: " new_rationale || true
         [[ -n "$new_rationale" ]] && rationale="$new_rationale"
 
         echo -e "  ${GREEN}✓${NC} Direction updated"
@@ -112,7 +112,7 @@ task_107_approach_selection() {
     echo ""
 
     echo -e "  ${GREEN}[enter]${NC} Accept  ${YELLOW}[add]${NC} Add decision  ${RED}[clear]${NC} Start fresh"
-    read -p "  > " section2_action
+    read -e -p "  > " section2_action || true
 
     case "${section2_action,,}" in
         add)
@@ -125,7 +125,7 @@ task_107_approach_selection() {
             done < <(echo "$key_decisions" | jq -r '.[]' 2>/dev/null)
             # Add new
             while true; do
-                read -p "  + " decision
+                read -e -p "  + " decision || true
                 [[ -z "$decision" ]] && break
                 new_decisions+=("$decision")
             done
@@ -137,7 +137,7 @@ task_107_approach_selection() {
             echo -e "  ${DIM}Enter decisions (one per line, empty to finish):${NC}"
             local fresh_decisions=()
             while true; do
-                read -p "  + " decision
+                read -e -p "  + " decision || true
                 [[ -z "$decision" ]] && break
                 fresh_decisions+=("$decision")
             done
@@ -169,7 +169,7 @@ task_107_approach_selection() {
     echo ""
 
     echo -e "  ${GREEN}[enter]${NC} Accept  ${YELLOW}[add]${NC} Add step  ${YELLOW}[reorder]${NC} Reprioritize  ${RED}[clear]${NC} Start fresh"
-    read -p "  > " section3_action
+    read -e -p "  > " section3_action || true
 
     case "${section3_action,,}" in
         add)
@@ -180,7 +180,7 @@ task_107_approach_selection() {
                 new_steps+=("$existing")
             done < <(echo "$next_steps" | jq -r '.[]' 2>/dev/null)
             while true; do
-                read -p "  + " step
+                read -e -p "  + " step || true
                 [[ -z "$step" ]] && break
                 new_steps+=("$step")
             done
@@ -190,7 +190,7 @@ task_107_approach_selection() {
         reorder)
             echo ""
             echo -e "  ${DIM}Enter step numbers in new order (e.g., '3 1 2'):${NC}"
-            read -p "  Order: " new_order
+            read -e -p "  Order: " new_order || true
             if [[ -n "$new_order" ]]; then
                 local reordered=()
                 local old_steps=()
@@ -211,7 +211,7 @@ task_107_approach_selection() {
             echo -e "  ${DIM}Enter steps in priority order (one per line, empty to finish):${NC}"
             local fresh_steps=()
             while true; do
-                read -p "  + " step
+                read -e -p "  + " step || true
                 [[ -z "$step" ]] && break
                 fresh_steps+=("$step")
             done
@@ -239,7 +239,7 @@ task_107_approach_selection() {
     echo ""
 
     echo -e "  ${GREEN}[enter]${NC} Accept  ${YELLOW}[add]${NC} Add item  ${YELLOW}[resolve]${NC} Mark resolved"
-    read -p "  > " section4_action
+    read -e -p "  > " section4_action || true
 
     case "${section4_action,,}" in
         add)
@@ -250,7 +250,7 @@ task_107_approach_selection() {
                 new_open+=("$existing")
             done < <(echo "$open_items" | jq -r '.[]' 2>/dev/null)
             while true; do
-                read -p "  + " item
+                read -e -p "  + " item || true
                 [[ -z "$item" ]] && break
                 new_open+=("$item")
             done
@@ -265,7 +265,7 @@ task_107_approach_selection() {
                 echo -e "    $j. $item"
                 ((j++))
             done
-            read -p "  Resolved: " resolved_nums
+            read -e -p "  Resolved: " resolved_nums || true
             if [[ -n "$resolved_nums" ]]; then
                 local kept=()
                 local old_items=()
@@ -315,7 +315,7 @@ task_107_approach_selection() {
     echo ""
 
     while true; do
-        read -p "  > " final_action
+        read -e -p "  > " final_action || true
 
         case "${final_action,,}" in
             approve|yes|y)

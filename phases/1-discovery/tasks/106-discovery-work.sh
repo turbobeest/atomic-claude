@@ -84,8 +84,10 @@ task_106_discovery_work() {
     # Add expert agents from selection
     if [[ -f "$agents_file" ]]; then
         while IFS= read -r expert; do
-            [[ -n "$expert" ]] && panel_agents+=("$expert")
-            agent_descriptions["$expert"]="Expert agent"
+            if [[ -n "$expert" ]]; then
+                panel_agents+=("$expert")
+                agent_descriptions["$expert"]="Expert agent"
+            fi
         done < <(jq -r '.selected_experts[]' "$agents_file" 2>/dev/null)
     fi
 
@@ -109,7 +111,7 @@ task_106_discovery_work() {
     echo -e "    ${RED}[remove]${NC} Remove an agent"
     echo ""
 
-    read -p "  > " panel_action
+    read -e -p "  > " panel_action || true
 
     while [[ -n "$panel_action" ]]; do
         case "${panel_action,,}" in
@@ -121,7 +123,7 @@ task_106_discovery_work() {
                 echo -e "    kubernetes-specialist, devops-engineer"
                 echo -e "    Or type any specialist name."
                 echo ""
-                read -p "  Agent to add: " new_agent
+                read -e -p "  Agent to add: " new_agent || true
                 if [[ -n "$new_agent" ]]; then
                     panel_agents+=("$new_agent")
                     echo -e "  ${GREEN}✓${NC} Added: $new_agent"
@@ -136,7 +138,7 @@ task_106_discovery_work() {
                     ((j++))
                 done
                 echo ""
-                read -p "  Number to remove: " remove_num
+                read -e -p "  Number to remove: " remove_num || true
                 if [[ "$remove_num" =~ ^[0-9]+$ ]] && [[ $remove_num -ge 1 ]] && [[ $remove_num -le ${#panel_agents[@]} ]]; then
                     local removed="${panel_agents[$((remove_num-1))]}"
                     unset 'panel_agents[$((remove_num-1))]'
@@ -149,7 +151,7 @@ task_106_discovery_work() {
                 ;;
         esac
         echo ""
-        read -p "  > " panel_action
+        read -e -p "  > " panel_action || true
     done
 
     echo ""
@@ -177,6 +179,34 @@ All agents share this context as their knowledge base.
 ---
 
 CONTEXT_HEADER
+
+    # Ingest project configuration from setup phase
+    local config_file="$ATOMIC_OUTPUT_DIR/0-setup/project-config.json"
+    if [[ -f "$config_file" ]]; then
+        echo "## Project Configuration" >> "$context_file"
+        echo "" >> "$context_file"
+
+        local p_name=$(jq -r '.project.name // .extracted.project.name // "Unknown"' "$config_file" 2>/dev/null)
+        local p_desc=$(jq -r '.project.description // .extracted.project.description // ""' "$config_file" 2>/dev/null)
+        local p_goals=$(jq -r '(.project.goals // .extracted.project.goals // []) | if type == "array" then map("- " + .) | join("\n") else . end' "$config_file" 2>/dev/null)
+        local p_constraints=$(jq -r '(.project.constraints // .extracted.project.constraints // []) | if type == "array" then map("- " + .) | join("\n") else . end' "$config_file" 2>/dev/null)
+        local p_stack=$(jq -r '(.project.tech_stack // .extracted.project.tech_stack // []) | if type == "array" then join(", ") else . end' "$config_file" 2>/dev/null)
+
+        cat >> "$context_file" << EOF
+**Project Name:** $p_name
+**Description:** $p_desc
+
+**Goals:**
+$p_goals
+
+**Constraints:**
+$p_constraints
+
+**Tech Stack:** $p_stack
+
+EOF
+        echo -e "  ${GREEN}✓${NC} Project configuration ingested ($p_name)"
+    fi
 
     # Ingest dialogue synthesis
     if [[ -f "$dialogue_file" ]]; then
@@ -217,19 +247,57 @@ EOF
         echo -e "  ${GREEN}✓${NC} Dialogue synthesis ingested"
     fi
 
-    # Ingest corpus materials
+    # Ingest corpus analysis (LLM analysis from task 102)
+    local corpus_analysis_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/corpus-analysis.md"
+    if [[ -f "$corpus_analysis_file" ]]; then
+        echo "## Corpus Analysis" >> "$context_file"
+        echo "" >> "$context_file"
+        cat "$corpus_analysis_file" >> "$context_file"
+        echo "" >> "$context_file"
+        echo -e "  ${GREEN}✓${NC} Corpus analysis ingested"
+    fi
+
+    # Ingest corpus materials (read actual file content, not missing .content field)
     if [[ -f "$corpus_file" ]]; then
-        echo "## Collected Materials" >> "$context_file"
-        echo "" >> "$context_file"
-
         local material_count=$(jq '.materials | length' "$corpus_file")
-        echo "Materials collected: $material_count" >> "$context_file"
-        echo "" >> "$context_file"
 
-        # Include summaries or excerpts from each material
-        jq -r '.materials[] | "### \(.name // .path)\n\n**Source:** \(.source)\n\n\(.content[:2000] // "No content")\n\n---\n"' "$corpus_file" >> "$context_file" 2>/dev/null
+        if [[ "$material_count" -gt 0 ]]; then
+            echo "## Collected Materials" >> "$context_file"
+            echo "" >> "$context_file"
+            echo "Materials collected: $material_count" >> "$context_file"
+            echo "" >> "$context_file"
 
-        echo -e "  ${GREEN}✓${NC} Corpus materials ingested ($material_count items)"
+            # Read actual file content from material paths
+            local files_ingested=0
+            local max_material_lines=200
+            while IFS= read -r mat_path; do
+                [[ -z "$mat_path" || "$mat_path" == "null" ]] && continue
+                [[ ! -f "$mat_path" ]] && continue
+
+                local mat_name
+                mat_name=$(basename "$mat_path")
+                local line_count
+                line_count=$(wc -l < "$mat_path" 2>/dev/null || echo "0")
+
+                echo "### $mat_name" >> "$context_file"
+                echo "" >> "$context_file"
+
+                if [[ $line_count -le $max_material_lines ]]; then
+                    cat "$mat_path" >> "$context_file" 2>/dev/null
+                else
+                    head -$max_material_lines "$mat_path" >> "$context_file" 2>/dev/null
+                    echo "" >> "$context_file"
+                    echo "[TRUNCATED: showing first $max_material_lines of $line_count lines]" >> "$context_file"
+                fi
+
+                echo "" >> "$context_file"
+                echo "---" >> "$context_file"
+                echo "" >> "$context_file"
+                ((files_ingested++))
+            done < <(jq -r '.materials[] | select(.type == "file") | .path // empty' "$corpus_file" 2>/dev/null)
+
+            echo -e "  ${GREEN}✓${NC} Corpus materials ingested ($files_ingested files from $material_count items)"
+        fi
     fi
 
     # Ingest any imported requirements
@@ -320,14 +388,16 @@ Keep it concise - 2-3 sentences max. Be warm but professional.
 EOF
 
     local opening_response="$prompts_dir/opening-response.txt"
-    if atomic_invoke "$opening_prompt" "$opening_response" "Orchestrator opening" --model=sonnet; then
+    if atomic_invoke "$opening_prompt" "$opening_response" "Orchestrator opening"; then
         local opening=$(cat "$opening_response")
         echo -e "  ${CYAN}orchestrator:${NC}"
         echo ""
-        echo "$opening" | fold -s -w 60 | while IFS= read -r line; do
-            echo -e "    $line"
-        done
-        echo ""
+        if [[ "${ATOMIC_STREAM:-true}" != "true" || ! -t 2 ]]; then
+            echo "$opening" | fold -s -w 60 | while IFS= read -r line; do
+                echo -e "    $line"
+            done
+            echo ""
+        fi
 
         # Log to deliberation
         echo "## Orchestrator (Opening)" >> "$deliberation_log"
@@ -336,7 +406,7 @@ EOF
         echo "" >> "$deliberation_log"
 
         conversation_json=$(echo "$conversation_json" | jq --arg agent "orchestrator" --arg msg "$opening" \
-            '.exchanges += [{"agent": $agent, "message": $msg, "timestamp": now | todate}]')
+            '.exchanges += [{"agent": $agent, "message": $msg, "timestamp": (now | todate)}]')
     fi
 
     # Main conversation loop
@@ -346,7 +416,7 @@ EOF
 
     while [[ "$deliberation_complete" == false ]]; do
         echo -e "  ${GREEN}You:${NC}"
-        read -p "    " user_input
+        read -e -p "    " user_input || true
 
         # Handle empty input
         [[ -z "$user_input" ]] && continue
@@ -358,7 +428,7 @@ EOF
         echo "" >> "$deliberation_log"
 
         conversation_json=$(echo "$conversation_json" | jq --arg msg "$user_input" \
-            '.exchanges += [{"agent": "human", "message": $msg, "timestamp": now | todate}]')
+            '.exchanges += [{"agent": "human", "message": $msg, "timestamp": (now | todate)}]')
 
         ((turn++))
 
@@ -481,7 +551,7 @@ EOF
 
     atomic_waiting "Generating consensus..."
 
-    if atomic_invoke "$prompts_dir/final-consensus.md" "$consensus_file" "Final consensus" --model=sonnet; then
+    if atomic_invoke "$prompts_dir/final-consensus.md" "$consensus_file" "Final consensus"; then
         if jq -e . "$consensus_file" &>/dev/null; then
             echo -e "  ${GREEN}✓${NC} Consensus captured"
             echo ""
@@ -567,9 +637,11 @@ EOF
     echo ""
     if atomic_invoke "$prompts_dir/synthesize.md" "$prompts_dir/synthesis.txt" "Synthesis" --model=haiku; then
         echo -e "  ${DIM}synthesis:${NC}"
-        cat "$prompts_dir/synthesis.txt" | fold -s -w 60 | while IFS= read -r line; do
-            echo -e "    ${DIM}$line${NC}"
-        done
+        if [[ "${ATOMIC_STREAM:-true}" != "true" || ! -t 2 ]]; then
+            cat "$prompts_dir/synthesis.txt" | fold -s -w 60 | while IFS= read -r line; do
+                echo -e "    ${DIM}$line${NC}"
+            done
+        fi
     fi
     echo ""
 }
@@ -625,7 +697,7 @@ EOF
     echo ""
     atomic_waiting "Generating approaches..."
 
-    if atomic_invoke "$prompts_dir/generate-approaches.md" "$approaches_file" "Generate approaches" --model=sonnet; then
+    if atomic_invoke "$prompts_dir/generate-approaches.md" "$approaches_file" "Generate approaches"; then
         if jq -e . "$approaches_file" &>/dev/null; then
             echo -e "  ${GREEN}✓${NC} Approaches generated"
             echo ""
@@ -669,12 +741,14 @@ Keep it to 3-5 key points. Plain text, not JSON.
 EOF
 
     echo ""
-    if atomic_invoke "$prompts_dir/first-principles.md" "$prompts_dir/fp-response.txt" "First principles" --model=sonnet; then
+    if atomic_invoke "$prompts_dir/first-principles.md" "$prompts_dir/fp-response.txt" "First principles"; then
         echo -e "  ${CYAN}first-principles-analyst:${NC}"
         echo ""
-        cat "$prompts_dir/fp-response.txt" | fold -s -w 60 | while IFS= read -r line; do
-            echo -e "    $line"
-        done
+        if [[ "${ATOMIC_STREAM:-true}" != "true" || ! -t 2 ]]; then
+            cat "$prompts_dir/fp-response.txt" | fold -s -w 60 | while IFS= read -r line; do
+                echo -e "    $line"
+            done
+        fi
     fi
     echo ""
 }
@@ -705,12 +779,14 @@ Respond as $challenger. 2-4 sentences. Plain text.
 EOF
 
     echo ""
-    if atomic_invoke "$prompts_dir/challenge.md" "$prompts_dir/challenge-response.txt" "Challenge" --model=sonnet; then
+    if atomic_invoke "$prompts_dir/challenge.md" "$prompts_dir/challenge-response.txt" "Challenge"; then
         echo -e "  ${CYAN}$challenger:${NC}"
         echo ""
-        cat "$prompts_dir/challenge-response.txt" | fold -s -w 60 | while IFS= read -r line; do
-            echo -e "    $line"
-        done
+        if [[ "${ATOMIC_STREAM:-true}" != "true" || ! -t 2 ]]; then
+            cat "$prompts_dir/challenge-response.txt" | fold -s -w 60 | while IFS= read -r line; do
+                echo -e "    $line"
+            done
+        fi
     fi
     echo ""
 }
@@ -753,9 +829,11 @@ EOF
     if atomic_invoke "$prompts_dir/consensus-check.md" "$prompts_dir/consensus-response.txt" "Consensus check" --model=haiku; then
         echo -e "  ${DIM}consensus check:${NC}"
         echo ""
-        cat "$prompts_dir/consensus-response.txt" | fold -s -w 60 | while IFS= read -r line; do
-            echo -e "    $line"
-        done
+        if [[ "${ATOMIC_STREAM:-true}" != "true" || ! -t 2 ]]; then
+            cat "$prompts_dir/consensus-response.txt" | fold -s -w 60 | while IFS= read -r line; do
+                echo -e "    $line"
+            done
+        fi
     fi
     echo ""
 }
@@ -805,12 +883,14 @@ Respond as $agent. Be helpful, specific, and draw on your expertise.
 EOF
 
     echo ""
-    if atomic_invoke "$prompts_dir/agent-direct.md" "$prompts_dir/agent-response.txt" "$agent response" --model=sonnet; then
+    if atomic_invoke "$prompts_dir/agent-direct.md" "$prompts_dir/agent-response.txt" "$agent response"; then
         echo -e "  ${CYAN}$agent:${NC}"
         echo ""
-        cat "$prompts_dir/agent-response.txt" | fold -s -w 60 | while IFS= read -r line; do
-            echo -e "    $line"
-        done
+        if [[ "${ATOMIC_STREAM:-true}" != "true" || ! -t 2 ]]; then
+            cat "$prompts_dir/agent-response.txt" | fold -s -w 60 | while IFS= read -r line; do
+                echo -e "    $line"
+            done
+        fi
 
         # Log to deliberation
         echo "## $agent" >> "$deliberation_log"

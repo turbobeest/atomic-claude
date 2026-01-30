@@ -50,7 +50,7 @@ _208_legacy_audit() {
     echo -e "    ${GREEN}[exhaustive]${NC} 60 dimensions - Full audit"
     echo ""
 
-    read -p "  Profile [standard]: " profile
+    read -e -p "  Profile [standard]: " profile || true
     profile=${profile:-standard}
 
     local dim_count=25
@@ -233,7 +233,9 @@ EOF
     atomic_waiting "PRD auditor analyzing..."
 
     local audit_raw="$prompts_dir/audit-raw.json"
-    if atomic_invoke "$prompts_dir/prd-audit.md" "$audit_raw" "PRD audit" --model=sonnet; then
+    local saved_turns="${CLAUDE_MAX_TURNS:-1}"
+    export CLAUDE_MAX_TURNS=15
+    if atomic_invoke "$prompts_dir/prd-audit.md" "$audit_raw" "PRD audit" --model=opus --timeout=1800; then
         if jq -e . "$audit_raw" &>/dev/null; then
             cp "$audit_raw" "$audit_file"
             atomic_success "Audit complete"
@@ -243,8 +245,10 @@ EOF
         fi
     else
         atomic_error "Audit failed"
+        export CLAUDE_MAX_TURNS="$saved_turns"
         return 1
     fi
+    export CLAUDE_MAX_TURNS="$saved_turns"
 
     # Display results
     _audit_display_results "$audit_file"

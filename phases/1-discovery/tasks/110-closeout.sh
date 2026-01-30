@@ -56,26 +56,38 @@ task_110_closeout() {
     else
         echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Diagrams not generated"
         checklist+=("diagrams:WARN")
-    fi
 
-    # Check audit
-    local audit_file="$ATOMIC_ROOT/.claude/audit/phase-01-audit.json"
+    # Check audit - look in .outputs/audits/ (current path) or .claude/audit/ (legacy)
+    local audit_file="$ATOMIC_ROOT/.outputs/audits/phase-1-report.json"
+    [[ ! -f "$audit_file" ]] && audit_file="$ATOMIC_ROOT/.claude/audit/phase-01-audit.json"
     if [[ -f "$audit_file" ]]; then
-        local audit_status=$(jq -r '.overall_status // "UNKNOWN"' "$audit_file")
-        if [[ "$audit_status" == "PASS" ]]; then
-            echo -e "  ${GREEN}[BLCK]${NC} ${GREEN}✓${NC} Audit passed"
+        # Check summary.passed/failed/warnings (new format) or overall_status (legacy)
+        local passed=$(jq -r '.summary.passed // 0' "$audit_file" 2>/dev/null)
+        local failed=$(jq -r '.summary.failed // 0' "$audit_file" 2>/dev/null)
+        local warnings=$(jq -r '.summary.warnings // 0' "$audit_file" 2>/dev/null)
+        local total=$((passed + failed + warnings))
+
+        if [[ $total -eq 0 ]]; then
+            # Try legacy format
+            local audit_status=$(jq -r '.overall_status // "UNKNOWN"' "$audit_file")
+            case "$audit_status" in
+                PASS) echo -e "  ${GREEN}[BLCK]${NC} ${GREEN}✓${NC} Audit passed"; checklist+=("audit:PASS") ;;
+                WARNING) echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Audit has warnings"; checklist+=("audit:WARN") ;;
+                *) echo -e "  ${RED}[BLCK]${NC} ${RED}✗${NC} Audit has critical issues"; checklist+=("audit:FAIL") ;;
+            esac
+        elif [[ $failed -eq 0 && $warnings -eq 0 ]]; then
+            echo -e "  ${GREEN}[BLCK]${NC} ${GREEN}✓${NC} Audit passed ($passed passed)"
             checklist+=("audit:PASS")
-        elif [[ "$audit_status" == "WARNING" ]]; then
-            echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Audit has warnings"
+        elif [[ $failed -eq 0 ]]; then
+            echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Audit has warnings ($warnings warnings)"
             checklist+=("audit:WARN")
         else
-            echo -e "  ${RED}[BLCK]${NC} ${RED}✗${NC} Audit has critical issues"
+            echo -e "  ${RED}[BLCK]${NC} ${RED}✗${NC} Audit has failures ($failed failed)"
             checklist+=("audit:FAIL")
         fi
     else
         echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Audit not completed"
         checklist+=("audit:SKIP")
-    fi
 
     # Additional checks
     echo -e "  ${GREEN}[PASS]${NC} ${GREEN}✓${NC} Ready for PRD"
@@ -92,7 +104,6 @@ task_110_closeout() {
     if [[ "$all_passed" == false ]]; then
         echo -e "  ${YELLOW}Some items need attention before closeout.${NC}"
         echo ""
-    fi
 
     echo -e "  ${CYAN}Closeout options:${NC}"
     echo ""
@@ -101,7 +112,11 @@ task_110_closeout() {
     echo -e "    ${RED}[hold]${NC}    Hold closeout for now"
     echo ""
 
-    read -p "  Choice [approve]: " closeout_choice
+    # Drain any buffered stdin from previous interactions
+    while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
+
+    # Handle EOF gracefully - default to approve
+    read -e -p "  Choice [approve]: " closeout_choice || true
     closeout_choice=${closeout_choice:-approve}
 
     case "$closeout_choice" in
@@ -110,7 +125,7 @@ task_110_closeout() {
             echo -e "  ${DIM}Artifacts in this phase:${NC}"
             ls -la "$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/"
             echo ""
-            read -p "  Press Enter to continue to closeout..."
+            read -e -p "  Press Enter to continue to closeout..." || true
             ;;
         hold)
             echo ""
@@ -288,5 +303,4 @@ _110_check_artifact() {
             echo -e "  ${YELLOW}[$level]${NC} ${YELLOW}!${NC} $name"
             checklist_ref+=("$name:WARN")
         fi
-    fi
 }

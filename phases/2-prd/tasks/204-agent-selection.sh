@@ -82,7 +82,8 @@ task_204_agent_selection() {
     echo -e "    ${MAGENTA}[list]${NC}      Browse available agents"
     echo ""
 
-    read -p "  Choice [approve]: " agent_choice
+    atomic_drain_stdin
+    read -e -p "  Choice [approve]: " agent_choice || true
     agent_choice=${agent_choice:-approve}
 
     local selected_agents='["requirements-engineer", "prd-writer", "prd-validator"]'
@@ -96,7 +97,7 @@ task_204_agent_selection() {
             echo -e "    2. api-requirements-engineer"
             echo -e "    3. ux-requirements-analyst"
             echo ""
-            read -p "  > " add_selection
+            read -e -p "  > " add_selection || true
 
             for num in $add_selection; do
                 case "$num" in
@@ -111,7 +112,7 @@ task_204_agent_selection() {
             echo -e "  ${DIM}Enter agent names (one per line, empty to finish):${NC}"
             selected_agents='[]'
             while true; do
-                read -p "    > " agent_name
+                read -e -p "    > " agent_name || true
                 [[ -z "$agent_name" ]] && break
                 selected_agents=$(echo "$selected_agents" | jq --arg a "$agent_name" '. += [$a]')
             done
@@ -119,7 +120,7 @@ task_204_agent_selection() {
         list)
             _204_list_agents
             echo ""
-            read -p "  Press Enter to continue with core agents..." _
+            read -e -p "  Press Enter to continue with core agents..." _ || true
             ;;
     esac
 

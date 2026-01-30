@@ -126,7 +126,7 @@ task_205_prd_authoring() {
 
     # Load Phase 1 closeout for summary metrics
     local closeout_context=""
-    local closeout_file="$ATOMIC_ROOT/.claude/closeout/phase-01-closeout.json"
+    local closeout_file=$(atomic_find_closeout "1-discovery")
     if [[ -f "$closeout_file" ]]; then
         closeout_context=$(jq -r '
             "Materials collected: " + (.corpus_count // 0 | tostring) + "\n" +
@@ -148,10 +148,14 @@ task_205_prd_authoring() {
         echo -e "  ${DIM}Loading selected agents...${NC}"
         local selected=$(jq -r '.selected[]' "$agents_file" 2>/dev/null)
 
-        # Load agent prompts from repository
+        # Load agent prompts from repository (search subdirectories)
         for agent in $selected; do
             local agent_file="$agent_repo/pipeline-agents/$agent.md"
-            if [[ -f "$agent_file" ]]; then
+            # If not at top level, search subdirectories
+            if [[ ! -f "$agent_file" ]]; then
+                agent_file=$(find "$agent_repo/pipeline-agents" -name "$agent.md" -type f 2>/dev/null | head -1)
+            fi
+            if [[ -n "$agent_file" && -f "$agent_file" ]]; then
                 case "$agent" in
                     *requirements-engineer*)
                         req_engineer_prompt=$(cat "$agent_file" | sed -n '/^---$/,/^---$/!p' | tail -n +2)
@@ -313,7 +317,9 @@ EOF
     atomic_waiting "requirements-engineer synthesizing..."
 
     local reqs_file="$prompts_dir/requirements.json"
-    if atomic_invoke "$prompts_dir/requirements-synthesis.md" "$reqs_file" "Requirements synthesis" --model=sonnet; then
+    local saved_turns_reqs="${CLAUDE_MAX_TURNS:-1}"
+    export CLAUDE_MAX_TURNS=15
+    if atomic_invoke "$prompts_dir/requirements-synthesis.md" "$reqs_file" "Requirements synthesis" --model=opus --timeout=1800; then
         if jq -e . "$reqs_file" &>/dev/null; then
             local fr_count=$(jq '.functional_requirements | length' "$reqs_file" 2>/dev/null || echo 0)
             local nfr_count=$(jq '.non_functional_requirements | length' "$reqs_file" 2>/dev/null || echo 0)
@@ -326,6 +332,7 @@ EOF
         atomic_warn "Requirements synthesis failed - using defaults"
         echo '{"functional_requirements":[],"non_functional_requirements":[],"constraints":[],"assumptions":[]}' > "$reqs_file"
     fi
+    export CLAUDE_MAX_TURNS="$saved_turns_reqs"
 
     echo ""
 
@@ -598,13 +605,19 @@ EOF
 
     atomic_waiting "prd-writer authoring document..."
 
-    if atomic_invoke "$prompts_dir/prd-writing.md" "$prd_file" "PRD authoring" --model=sonnet; then
+    local saved_retries="${ATOMIC_MAX_RETRIES:-2}"
+    local saved_turns="${CLAUDE_MAX_TURNS:-1}"
+    export ATOMIC_MAX_RETRIES=0
+    export CLAUDE_MAX_TURNS=30
+    if atomic_invoke "$prompts_dir/prd-writing.md" "$prd_file" "PRD authoring" --model=opus --timeout=7200; then
         local line_count=$(wc -l < "$prd_file")
         echo -e "  ${GREEN}✓${NC} PRD document created ($line_count lines)"
     else
         atomic_error "PRD writing failed"
         _205_create_fallback_prd "$prd_file"
     fi
+    export ATOMIC_MAX_RETRIES="$saved_retries"
+    export CLAUDE_MAX_TURNS="$saved_turns"
 
     echo ""
 

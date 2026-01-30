@@ -67,11 +67,16 @@ Provider routing is configured in `config/models.json`:
 └─────────────────────────────────────────────┘
 ```
 
-The **mode bar** displays the active provider and model during LLM invocations:
+Each LLM invocation displays a **task header** with provider, model, and connectivity status:
 
 ```
- MAX MODE │ sonnet │ online   ← green bar when connected
- OLLAMA   │ devstral:24b │ airgapped  ← when running offline
+  ╶─── Generate PRD section ─────────────────────────────────
+    provider  max            model     opus            ● online
+    context   200K           cost      high            role  heavyweight
+    host      CLAUDECODE     timeout   300s
+    prompt    .outputs/.../prompt.md
+    output    .outputs/.../response.txt
+  ╶──────────────────────────────────────────────────────────
 ```
 
 Fallback is automatic: if Claude Max is unavailable, the system tries Claude API, then Ollama with tier-appropriate model selection (opus → llama3.1:70b, sonnet → devstral:24b, haiku → llama3.2:3b).
@@ -82,7 +87,7 @@ Fallback is automatic: if Claude Max is unavailable, the system tries Claude API
 ATOMIC-CLAUDE/
 ├── main.sh              # CLI entry point
 ├── lib/
-│   ├── atomic.sh        # Core invocation: atomic_invoke(), mode bar UI
+│   ├── atomic.sh        # Core invocation: atomic_invoke(), task header UI
 │   ├── phase.sh         # Phase lifecycle management
 │   ├── provider.sh      # Multi-provider routing & health checks
 │   ├── llm-availability.sh  # Model discovery & fallback chains

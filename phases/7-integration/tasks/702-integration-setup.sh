@@ -5,8 +5,8 @@
 #
 
 task_702_integration_setup() {
-    local config_file="$ATOMIC_ROOT/project-config.json"
-    local prd_file="$ATOMIC_ROOT/docs/PRD.md"
+    local config_file="$ATOMIC_OUTPUT_DIR/0-setup/project-config.json"
+    local prd_file="$ATOMIC_ROOT/docs/prd/PRD.md"
     local specs_dir="$ATOMIC_ROOT/docs/specs"
     local integration_dir="$ATOMIC_ROOT/.claude/integration"
 
@@ -49,12 +49,12 @@ task_702_integration_setup() {
     echo -e "  ${DIM}Is this the correct integration environment?${NC}"
     echo ""
 
-    read -p "  Confirm [y/n]: " env_confirm
+    read -e -p "  Confirm [y/n]: " env_confirm || true
     env_confirm=${env_confirm:-y}
 
     if [[ "$env_confirm" != "y" && "$env_confirm" != "Y" ]]; then
         echo ""
-        read -p "  Enter environment notes: " env_notes
+        read -e -p "  Enter environment notes: " env_notes || true
         echo ""
     fi
 
@@ -111,7 +111,7 @@ task_702_integration_setup() {
     echo -e "  ──────────────────────────────────────────────────────────────────────────────────────────────────────────"
     echo ""
 
-    read -p "  Press Enter to proceed with agent selection..."
+    read -e -p "  Press Enter to proceed with agent selection..." || true
     echo ""
 
     # Save setup configuration

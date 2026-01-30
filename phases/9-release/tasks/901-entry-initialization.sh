@@ -5,9 +5,9 @@
 #
 
 task_901_entry_initialization() {
-    local closeout_file="$ATOMIC_ROOT/.claude/closeout/phase-08-closeout.json"
+    local closeout_file=$(atomic_find_closeout "8-deployment-prep")
     local deployment_dir="$ATOMIC_ROOT/.claude/deployment"
-    local config_file="$ATOMIC_ROOT/project-config.json"
+    local config_file="$ATOMIC_OUTPUT_DIR/0-setup/project-config.json"
 
     echo ""
     echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -104,7 +104,7 @@ task_901_entry_initialization() {
     echo -e "    ${DIM}(final check)    (create tag)       (registry)        (human gate)${NC}"
     echo ""
 
-    read -p "  Press Enter to continue..."
+    read -e -p "  Press Enter to continue..." || true
     echo ""
 
     atomic_context_decision "Phase 9 entry validated" "entry"

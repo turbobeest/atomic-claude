@@ -31,7 +31,7 @@ task_404_tdd_subtask_injection() {
         if [[ -n "$has_tdd_agent" ]]; then
             local agent_file="$agent_repo/pipeline-agents/tdd-structurer.md"
             if [[ -f "$agent_file" ]]; then
-                tdd_structurer_prompt=$(cat "$agent_file")
+                tdd_structurer_prompt=$(cat "$agent_file" | atomic_strip_frontmatter)
                 echo -e "  ${GREEN}✓${NC} Loaded agent: tdd-structurer"
                 echo ""
             fi
@@ -78,7 +78,7 @@ task_404_tdd_subtask_injection() {
     echo -e "       ${DIM}Tools: bandit, safety, npm audit${NC}"
     echo ""
 
-    read -p "  Press Enter to continue..."
+    read -e -p "  Press Enter to continue..." || true
     echo ""
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -121,7 +121,8 @@ task_404_tdd_subtask_injection() {
         echo -e "    ${RED}[abort]${NC}     Abort and review manually"
         echo ""
 
-        read -p "  Choice [skip]: " inject_mode
+    atomic_drain_stdin
+        read -e -p "  Choice [skip]: " inject_mode || true
         inject_mode=${inject_mode:-skip}
 
         if [[ "$inject_mode" == "abort" ]]; then

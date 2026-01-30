@@ -5,7 +5,7 @@
 #
 
 task_802_deployment_setup() {
-    local config_file="$ATOMIC_ROOT/project-config.json"
+    local config_file="$ATOMIC_OUTPUT_DIR/0-setup/project-config.json"
     local deployment_dir="$ATOMIC_ROOT/.claude/deployment"
     local setup_file="$deployment_dir/setup.json"
 
@@ -32,7 +32,7 @@ task_802_deployment_setup() {
     echo -e "    ${DIM}[3]${NC} Patch (0.0.x) - Bug fixes, minor improvements"
     echo ""
 
-    read -p "  Select [2]: " release_type_choice
+    read -e -p "  Select [2]: " release_type_choice || true
     release_type_choice=${release_type_choice:-2}
 
     local release_type="minor"
@@ -63,7 +63,7 @@ task_802_deployment_setup() {
 
     echo -e "  ${DIM}Enter version number (SemVer format):${NC}"
     echo ""
-    read -p "  Version [$default_version]: " version_number
+    read -e -p "  Version [$default_version]: " version_number || true
     version_number=${version_number:-$default_version}
 
     echo ""
@@ -85,7 +85,7 @@ task_802_deployment_setup() {
     echo -e "    ${GREEN}[1]${NC} Internal only"
     echo ""
 
-    read -p "  Select channel [1]: " channel_choice
+    read -e -p "  Select channel [1]: " channel_choice || true
     channel_choice=${channel_choice:-"1"}
 
     local channels=()
@@ -116,7 +116,7 @@ task_802_deployment_setup() {
 
     echo -e "  ${DIM}Confirm this configuration?${NC}"
     echo ""
-    read -p "  Confirm [y/n]: " config_confirm
+    read -e -p "  Confirm [y/n]: " config_confirm || true
     config_confirm=${config_confirm:-y}
 
     if [[ "$config_confirm" != "y" && "$config_confirm" != "Y" ]]; then

@@ -20,19 +20,34 @@ ATOMIC CLAUDE - Script-controlled LLM development pipeline
 Usage: $(basename "$0") <command> [options]
 
 Commands:
-  run <phase>       Run a specific phase (e.g., run 00-setup)
+  run <phase>       Run a specific phase (e.g., run 0)
   status            Show current pipeline status
   list              List available phases
   reset             Reset pipeline state
+
+Phase Flags (passed after phase number):
+  --resume-at=NNN   Resume from specific task (e.g., --resume-at=107)
+  --redo            Force redo of all tasks in the phase
+  --reset-from=NNN  Reset all tasks from NNN onward, then run
+  --pipeline-status Show full pipeline state across all phases
+  --pipeline-reset=NNN  Reset from task NNN across all phases
+  --status          Show task state for current phase
+
+Phase 0 Only:
+  --task=NNN        Resume Phase 0 from specific task
+  --mode=MODE       Set setup mode (document|guided|quick)
+  --skip-intro      Skip the intro animation
 
 Options:
   -h, --help        Show this help message
 
 Examples:
-  $(basename "$0") run 0            # Run Phase 0 (Setup)
-  $(basename "$0") run 1-discovery  # Run Phase 1 by name
-  $(basename "$0") status           # Check where you are
-  $(basename "$0") list             # See all phases
+  $(basename "$0") run 0                  # Run Phase 0 (Setup)
+  $(basename "$0") run 1                  # Run Phase 1 (Discovery)
+  $(basename "$0") run 1 --resume-at=107  # Resume Phase 1 from Task 107
+  $(basename "$0") run 1 --redo           # Redo all tasks in Phase 1
+  $(basename "$0") status                 # Check where you are
+  $(basename "$0") list                   # See all phases
 
 EOF
 }
@@ -153,13 +168,14 @@ cmd_run() {
         fi
     fi
 
-    # Run the phase
-    exec bash "$phase_dir/run.sh"
+    # Run the phase, passing through extra flags (--task=, --mode=, etc.)
+    shift
+    exec bash "$phase_dir/run.sh" "$@"
 }
 
 cmd_reset() {
     atomic_warn "This will reset all pipeline state!"
-    read -p "Type 'reset' to confirm: " confirm
+    read -e -p "Type 'reset' to confirm: " confirm
 
     if [[ "$confirm" == "reset" ]]; then
         rm -rf "$ATOMIC_STATE_DIR" "$ATOMIC_OUTPUT_DIR" "$ATOMIC_LOG_DIR"
@@ -177,7 +193,7 @@ main() {
     case "${1:-}" in
         run)
             [[ -z "${2:-}" ]] && { echo "Usage: $0 run <phase>"; exit 1; }
-            cmd_run "$2"
+            cmd_run "${@:2}"
             ;;
         status)
             cmd_status

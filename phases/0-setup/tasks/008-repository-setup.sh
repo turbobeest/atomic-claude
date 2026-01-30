@@ -63,7 +63,8 @@ task_008_repository_setup() {
         echo -e "  ${CYAN}3.${NC} Skip repositories (use built-in defaults only)"
         echo ""
 
-        read -p "  Choice [1]: " source_choice
+    atomic_drain_stdin
+        read -e -p "  Choice [1]: " source_choice || true
         source_choice=${source_choice:-1}
 
         case "$source_choice" in
@@ -74,8 +75,8 @@ task_008_repository_setup() {
             2)
                 echo ""
                 echo -e "  ${DIM}Enter full repository URLs (GitHub or GitLab):${NC}"
-                read -p "  Agents repo URL: " agents_url
-                read -p "  Audits repo URL: " audits_url
+                read -e -p "  Agents repo URL: " agents_url || true
+                read -e -p "  Audits repo URL: " audits_url || true
 
                 if [[ -z "$agents_url" ]]; then
                     agents_url="$default_agents_url"
@@ -113,7 +114,8 @@ task_008_repository_setup() {
     echo -e "  ${CYAN}3.${NC} Custom path"
     echo ""
 
-    read -p "  Choice [1]: " location_choice
+    atomic_drain_stdin
+    read -e -p "  Choice [1]: " location_choice || true
     location_choice=${location_choice:-1}
 
     local repo_base=""
@@ -121,7 +123,7 @@ task_008_repository_setup() {
         1) repo_base="$default_repo_base" ;;
         2) repo_base="$HOME/atomic-repos" ;;
         3)
-            read -p "  Custom path: " repo_base
+            read -e -p "  Custom path: " repo_base || true
             repo_base="${repo_base/#\~/$HOME}"  # Expand ~
             ;;
         *) repo_base="$default_repo_base" ;;
@@ -318,15 +320,28 @@ _008_parse_repo_url() {
     local repo_type="$2"  # "agents" or "audits"
 
     local section_name=""
+    local default_url=""
     case "$repo_type" in
-        agents) section_name="Agents Repository URL" ;;
-        audits) section_name="Audits Repository URL" ;;
+        agents)
+            section_name="Agents Repository URL"
+            default_url="https://github.com/turbobeest/agents"
+            ;;
+        audits)
+            section_name="Audits Repository URL"
+            default_url="https://github.com/turbobeest/audits"
+            ;;
     esac
 
     if [[ -f "$setup_file" ]]; then
-        local url=$(grep -A1 "## $section_name" "$setup_file" 2>/dev/null | tail -1 | tr -d '[:space:]')
-        if [[ "$url" =~ ^https?:// ]]; then
-            echo "$url"
+        local raw=$(grep -A1 "## $section_name" "$setup_file" 2>/dev/null | tail -1 | tr -d '[:space:]')
+        # Handle explicit URL
+        if [[ "$raw" =~ ^https?:// || "$raw" =~ ^git@ ]]; then
+            echo "$raw"
+            return 0
+        fi
+        # Handle "default" keyword → use default URL
+        if [[ "$raw" == "default" ]]; then
+            echo "$default_url"
             return 0
         fi
     fi
@@ -342,9 +357,12 @@ _008_setup_repository() {
     local target_path="$3"        # Where to clone
     local repo_url="$4"           # Git URL
 
+    # NOTE: This function is called via $() — all display output must go to
+    # stderr (>&2) so only the return path/status goes to stdout.
+
     # Check if already exists at target path
     if [[ -f "$target_path/$manifest_file" ]]; then
-        echo -e "  ${GREEN}✓${NC} Found existing repository: $target_path"
+        echo -e "  ${GREEN}✓${NC} Found existing repository: $target_path" >&2
         echo "$target_path"
         return 0
     fi
@@ -358,8 +376,8 @@ _008_setup_repository() {
 
     for path in "${search_paths[@]}"; do
         if [[ -f "$path/$manifest_file" ]]; then
-            echo -e "  ${GREEN}✓${NC} Found existing repository: $path"
-            read -p "  Use this location? [Y/n]: " use_existing
+            echo -e "  ${GREEN}✓${NC} Found existing repository: $path" >&2
+            read -e -p "  Use this location? [Y/n]: " use_existing || true
             if [[ ! "$use_existing" =~ ^[Nn] ]]; then
                 echo "$path"
                 return 0
@@ -368,22 +386,23 @@ _008_setup_repository() {
     done
 
     # Repository not found - offer options
-    echo -e "  ${YELLOW}!${NC} No $repo_name repository found."
-    echo ""
-    echo -e "  ${DIM}Source: $repo_url${NC}"
-    echo ""
-    echo -e "    ${GREEN}[1]${NC} Clone now ${DIM}(recommended)${NC}"
-    echo -e "    ${GREEN}[2]${NC} Specify existing path"
-    echo -e "    ${GREEN}[3]${NC} Skip"
-    echo ""
+    echo -e "  ${YELLOW}!${NC} No $repo_name repository found." >&2
+    echo "" >&2
+    echo -e "  ${DIM}Source: $repo_url${NC}" >&2
+    echo "" >&2
+    echo -e "    ${GREEN}[1]${NC} Clone now ${DIM}(recommended)${NC}" >&2
+    echo -e "    ${GREEN}[2]${NC} Specify existing path" >&2
+    echo -e "    ${GREEN}[3]${NC} Skip" >&2
+    echo "" >&2
 
-    read -p "  Choice [1]: " setup_choice
+    atomic_drain_stdin
+    read -e -p "  Choice [1]: " setup_choice || true
     setup_choice=${setup_choice:-1}
 
     case "$setup_choice" in
         1)
             # Clone from configured URL
-            echo ""
+            echo "" >&2
 
             # Create parent directory if needed
             local parent_dir=$(dirname "$target_path")
@@ -395,16 +414,16 @@ _008_setup_repository() {
                 }
             fi
 
-            echo -e "  ${DIM}Cloning $repo_url...${NC}"
-            echo ""
+            echo -e "  ${DIM}Cloning $repo_url...${NC}" >&2
+            echo "" >&2
 
-            if git clone --depth 1 "$repo_url" "$target_path" 2>&1; then
-                echo ""
-                echo -e "  ${GREEN}✓${NC} Successfully cloned $repo_name repository"
+            if git clone --depth 1 "$repo_url" "$target_path" >&2 2>&1; then
+                echo "" >&2
+                echo -e "  ${GREEN}✓${NC} Successfully cloned $repo_name repository" >&2
                 echo "$target_path"
                 return 0
             else
-                echo ""
+                echo "" >&2
                 atomic_error "Clone failed. Check URL and network connection."
                 atomic_error "URL: $repo_url"
                 echo "FAIL"
@@ -414,12 +433,12 @@ _008_setup_repository() {
 
         2)
             # User specifies path
-            echo ""
-            read -p "  Path to $repo_name repository: " custom_path
+            echo "" >&2
+            read -e -p "  Path to $repo_name repository: " custom_path || true
             custom_path="${custom_path/#\~/$HOME}"
 
             if [[ -f "$custom_path/$manifest_file" ]]; then
-                echo -e "  ${GREEN}✓${NC} Found $manifest_file"
+                echo -e "  ${GREEN}✓${NC} Found $manifest_file" >&2
                 echo "$custom_path"
                 return 0
             else
@@ -431,8 +450,8 @@ _008_setup_repository() {
 
         3)
             # Skip
-            echo ""
-            echo -e "  ${DIM}Skipping $repo_name repository.${NC}"
+            echo "" >&2
+            echo -e "  ${DIM}Skipping $repo_name repository.${NC}" >&2
             echo "SKIP"
             return 0
             ;;
@@ -450,7 +469,7 @@ _008_offer_web_ui() {
     fi
 
     echo -e "  ${DIM}This repository includes a local web UI for browsing.${NC}"
-    read -p "  Launch web UI now? [y/N]: " launch_ui
+    read -e -p "  Launch web UI now? [y/N]: " launch_ui || true
 
     if [[ ! "$launch_ui" =~ ^[Yy] ]]; then
         return 0
@@ -522,7 +541,7 @@ _008_offer_web_ui() {
     echo -e "  ${DIM}Edits can generate GitHub/GitLab issues for upstream improvements.${NC}"
 
     # Offer to open browser
-    read -p "  Open in browser? [Y/n]: " open_browser
+    read -e -p "  Open in browser? [Y/n]: " open_browser || true
     if [[ ! "$open_browser" =~ ^[Nn] ]]; then
         _008_open_browser "$url"
     fi

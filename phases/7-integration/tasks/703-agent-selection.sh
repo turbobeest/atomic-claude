@@ -88,6 +88,9 @@ task_703_agent_selection() {
     echo -e "  ${DIM}Select agents for each role:${NC}"
     echo ""
 
+    # Drain any buffered stdin before agent selection
+    atomic_drain_stdin
+
     local selected_agents=()
 
     # E2E Test Runner selection
@@ -96,15 +99,15 @@ task_703_agent_selection() {
     echo -e "    ${DIM}[2]${NC} e2e-test-runner (haiku) - Fast, standard"
     echo -e "    ${YELLOW}[c]${NC} Custom agent"
     echo ""
-    read -p "  Select [1]: " e2e_choice
+    read -e -p "  Select [1]: " e2e_choice || true
     e2e_choice=${e2e_choice:-1}
 
     case "$e2e_choice" in
         1) selected_agents+=("e2e-test-runner-phd:sonnet") ;;
         2) selected_agents+=("e2e-test-runner:haiku") ;;
         c|C)
-            read -p "  Custom agent name: " custom_name
-            read -p "  Custom agent model [sonnet]: " custom_model
+            read -e -p "  Custom agent name: " custom_name || true
+            read -e -p "  Custom agent model [sonnet]: " custom_model || true
             custom_model=${custom_model:-sonnet}
             selected_agents+=("$custom_name:$custom_model")
             ;;
@@ -118,15 +121,15 @@ task_703_agent_selection() {
     echo -e "    ${DIM}[2]${NC} acceptance-validator (haiku) - Fast, standard"
     echo -e "    ${YELLOW}[c]${NC} Custom agent"
     echo ""
-    read -p "  Select [1]: " accept_choice
+    read -e -p "  Select [1]: " accept_choice || true
     accept_choice=${accept_choice:-1}
 
     case "$accept_choice" in
         1) selected_agents+=("acceptance-validator-phd:sonnet") ;;
         2) selected_agents+=("acceptance-validator:haiku") ;;
         c|C)
-            read -p "  Custom agent name: " custom_name
-            read -p "  Custom agent model [sonnet]: " custom_model
+            read -e -p "  Custom agent name: " custom_name || true
+            read -e -p "  Custom agent model [sonnet]: " custom_model || true
             custom_model=${custom_model:-sonnet}
             selected_agents+=("$custom_name:$custom_model")
             ;;
@@ -140,15 +143,15 @@ task_703_agent_selection() {
     echo -e "    ${DIM}[2]${NC} performance-tester-deep (sonnet) - Thorough"
     echo -e "    ${YELLOW}[c]${NC} Custom agent"
     echo ""
-    read -p "  Select [1]: " perf_choice
+    read -e -p "  Select [1]: " perf_choice || true
     perf_choice=${perf_choice:-1}
 
     case "$perf_choice" in
         1) selected_agents+=("performance-tester-phd:haiku") ;;
         2) selected_agents+=("performance-tester-deep:sonnet") ;;
         c|C)
-            read -p "  Custom agent name: " custom_name
-            read -p "  Custom agent model [haiku]: " custom_model
+            read -e -p "  Custom agent name: " custom_name || true
+            read -e -p "  Custom agent model [haiku]: " custom_model || true
             custom_model=${custom_model:-haiku}
             selected_agents+=("$custom_name:$custom_model")
             ;;
@@ -162,15 +165,15 @@ task_703_agent_selection() {
     echo -e "    ${DIM}[2]${NC} integration-reporter-detailed (sonnet) - Comprehensive"
     echo -e "    ${YELLOW}[c]${NC} Custom agent"
     echo ""
-    read -p "  Select [1]: " report_choice
+    read -e -p "  Select [1]: " report_choice || true
     report_choice=${report_choice:-1}
 
     case "$report_choice" in
         1) selected_agents+=("integration-reporter-phd:haiku") ;;
         2) selected_agents+=("integration-reporter-detailed:sonnet") ;;
         c|C)
-            read -p "  Custom agent name: " custom_name
-            read -p "  Custom agent model [haiku]: " custom_model
+            read -e -p "  Custom agent name: " custom_name || true
+            read -e -p "  Custom agent model [haiku]: " custom_model || true
             custom_model=${custom_model:-haiku}
             selected_agents+=("$custom_name:$custom_model")
             ;;

@@ -148,6 +148,9 @@ main() {
 
     phase_complete
 
+    # Chain to Phase 5: TDD Implementation
+    phase_chain "4" "$ROOT_DIR/phases/5-implementation/run.sh" "TDD Implementation"
+
     return 0
 }
 

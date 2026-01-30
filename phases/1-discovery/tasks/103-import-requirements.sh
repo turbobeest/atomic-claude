@@ -74,14 +74,14 @@ task_103_import_requirements() {
     if [[ $rst_count -eq 0 ]]; then
         echo -e "  ${DIM}No RST files found.${NC}"
         echo ""
-        read -p "  Does your project use Sphinx-Needs? [y/N]: " use_needs
+        read -e -p "  Does your project use Sphinx-Needs? [y/N]: " use_needs || true
 
         if [[ "$use_needs" =~ ^[Yy] ]]; then
             echo ""
             echo -e "  ${DIM}Enter paths to RST files (one per line, empty to finish):${NC}"
             declare -A _103_SEEN_MANUAL  # Deduplication for manual paths
             while true; do
-                read -p "    Path: " manual_path
+                read -e -p "    Path: " manual_path || true
                 [[ -z "$manual_path" ]] && break
                 if [[ -f "$manual_path" ]]; then
                     local abs_path
@@ -149,7 +149,7 @@ task_103_import_requirements() {
     echo ""
 
     # Confirm parsing
-    read -p "  Parse these files? [Y/n]: " do_parse
+    read -e -p "  Parse these files? [Y/n]: " do_parse || true
     if [[ "$do_parse" =~ ^[Nn] ]]; then
         atomic_info "Sphinx-needs: Skipped by user"
         return 0

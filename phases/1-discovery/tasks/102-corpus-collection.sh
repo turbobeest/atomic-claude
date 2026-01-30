@@ -56,36 +56,82 @@ task_102_corpus_collection() {
 
     echo -e "  ${CYAN}Scanning for documents...${NC}"
 
-    # README files (safe while-read pattern)
+    # Framework directories to exclude from auto-discovery
+    # These contain ATOMIC-CLAUDE framework code, not project materials
+    local -a _find_excludes=(
+        -not -path "$ATOMIC_ROOT/phases/*"
+        -not -path "$ATOMIC_ROOT/lib/*"
+        -not -path "$ATOMIC_ROOT/.git/*"
+        -not -path "$ATOMIC_ROOT/.claude/*"
+        -not -path "$ATOMIC_ROOT/.outputs/*"
+        -not -path "$ATOMIC_ROOT/node_modules/*"
+    )
+
+    # Auto-include initialization/setup.md (project-specific config)
+    if [[ -f "$ATOMIC_ROOT/initialization/setup.md" ]]; then
+        if _102_add_material "$ATOMIC_ROOT/initialization/setup.md" "auto"; then
+            echo -e "    ${GREEN}✓${NC} setup.md ${DIM}(initialization)${NC}"
+            ((found_count++))
+        fi
+    fi
+
+    # README files (safe while-read pattern), excluding framework dirs
     while IFS= read -r -d '' readme; do
         if _102_add_material "$readme" "auto"; then
             local rel_path="${readme#$ATOMIC_ROOT/}"
             echo -e "    ${GREEN}✓${NC} $(basename "$readme") ${DIM}(${rel_path%/*})${NC}"
             ((found_count++))
         fi
-    done < <(find "$ATOMIC_ROOT" -maxdepth 3 -name "README*" -type f -print0 2>/dev/null | head -z -n 10)
+    done < <(find "$ATOMIC_ROOT" -maxdepth 3 -name "README*" -type f "${_find_excludes[@]}" -print0 2>/dev/null | head -z -n 10)
 
-    # PRD/spec documents (safe while-read pattern)
+    # PRD/spec documents (safe while-read pattern), excluding framework dirs
     while IFS= read -r -d '' doc; do
         if _102_add_material "$doc" "auto"; then
             echo -e "    ${GREEN}✓${NC} $(basename "$doc")"
             ((found_count++))
         fi
-    done < <(find "$ATOMIC_ROOT" -maxdepth 3 \( -name "*.md" -o -name "*.txt" -o -name "*.rst" \) -type f -print0 2>/dev/null | grep -zE -i "(prd|spec|design|architecture|requirements)" | head -z -n 10)
+    done < <(find "$ATOMIC_ROOT" -maxdepth 3 \( -name "*.md" -o -name "*.txt" -o -name "*.rst" \) -type f "${_find_excludes[@]}" -print0 2>/dev/null | grep -zE -i "(prd|spec|design|architecture|requirements)" | head -z -n 10)
 
     # docs/ directory
     if [[ -d "$ATOMIC_ROOT/docs" ]]; then
         local doc_count
-        doc_count=$(find "$ATOMIC_ROOT/docs" -type f \( -name "*.md" -o -name "*.txt" -o -name "*.rst" \) 2>/dev/null | wc -l)
+        doc_count=$(find "$ATOMIC_ROOT/docs" -type f \( -name "*.md" -o -name "*.txt" -o -name "*.rst" \) 2>/dev/null | wc -l | tr -d ' ')
         if [[ $doc_count -gt 0 ]]; then
             echo -e "    ${GREEN}✓${NC} docs/ directory: $doc_count files available"
+        fi
+    fi
+
+    # docs/reference/ directory (project-specific reference materials from setup)
+    if [[ -d "$ATOMIC_ROOT/docs/reference" ]]; then
+        # Scan for supported text files in reference/
+        while IFS= read -r -d '' ref_doc; do
+            # Skip macOS metadata files
+            [[ "$(basename "$ref_doc")" == ._* ]] && continue
+            if _102_add_material "$ref_doc" "auto"; then
+                local ref_rel="${ref_doc#$ATOMIC_ROOT/}"
+                echo -e "    ${GREEN}✓${NC} $(basename "$ref_doc") ${DIM}(${ref_rel%/*})${NC}"
+                ((found_count++))
+            fi
+        done < <(find "$ATOMIC_ROOT/docs/reference" -type f \( -name "*.md" -o -name "*.txt" -o -name "*.rst" -o -name "*.json" -o -name "*.yaml" -o -name "*.yml" \) -print0 2>/dev/null)
+
+        # Note any .docx files (can't read inline but worth tracking)
+        local docx_count
+        docx_count=$(find "$ATOMIC_ROOT/docs/reference" -type f -name "*.docx" -not -name "._*" 2>/dev/null | wc -l | tr -d ' ')
+        if [[ $docx_count -gt 0 ]]; then
+            echo -e "    ${YELLOW}!${NC} $docx_count .docx files found in docs/reference/ ${DIM}(binary - convert to .md for analysis)${NC}"
+            # Track docx files as reference notes so they appear in corpus
+            while IFS= read -r docx_file; do
+                [[ "$(basename "$docx_file")" == ._* ]] && continue
+                corpus=$(echo "$corpus" | jq --arg path "$docx_file" --arg name "$(basename "$docx_file")" \
+                    '.materials += [{"path": $path, "name": $name, "type": "binary_document", "note": "Word document - convert to .md or .txt for content analysis"}]')
+            done < <(find "$ATOMIC_ROOT/docs/reference" -type f -name "*.docx" -not -name "._*" 2>/dev/null)
         fi
     fi
 
     # Existing corpus
     if [[ -d "$corpus_dir" ]] && [[ "$(ls -A "$corpus_dir" 2>/dev/null)" ]]; then
         local existing_count
-        existing_count=$(find "$corpus_dir" -type f 2>/dev/null | wc -l)
+        existing_count=$(find "$corpus_dir" -type f 2>/dev/null | wc -l | tr -d ' ')
         echo -e "    ${GREEN}✓${NC} Existing corpus: $existing_count files"
     fi
 
@@ -113,7 +159,7 @@ task_102_corpus_collection() {
 
     local manual_count=0
     while true; do
-        read -p "  Add material: " material_input
+        read -e -p "  Add material: " material_input || true
 
         # Empty input means done
         [[ -z "$material_input" ]] && break
@@ -152,7 +198,7 @@ task_102_corpus_collection() {
             [[ ! -d "$dir_path" ]] && dir_path="$ATOMIC_ROOT/$material_input"
 
             local dir_files
-            dir_files=$(find "$dir_path" -type f \( -name "*.md" -o -name "*.txt" -o -name "*.rst" -o -name "*.pdf" -o -name "*.json" -o -name "*.yaml" -o -name "*.yml" \) 2>/dev/null | wc -l)
+            dir_files=$(find "$dir_path" -type f \( -name "*.md" -o -name "*.txt" -o -name "*.rst" -o -name "*.pdf" -o -name "*.json" -o -name "*.yaml" -o -name "*.yml" \) 2>/dev/null | wc -l | tr -d ' ')
 
             corpus=$(echo "$corpus" | jq --arg path "$dir_path" --argjson count "$dir_files" \
                 '.materials += [{"path": $path, "type": "directory", "file_count": $count}]')
@@ -162,7 +208,7 @@ task_102_corpus_collection() {
         else
             echo -e "    ${YELLOW}!${NC} Not found: $material_input"
             echo -e "      ${DIM}Store as a reference note? [y/N]${NC}"
-            read -p "      " store_note
+            read -e -p "      " store_note || true
             if [[ "${store_note,,}" == "y" ]]; then
                 corpus=$(echo "$corpus" | jq --arg note "$material_input" \
                     '.materials += [{"note": $note, "type": "reference"}]')
@@ -234,15 +280,51 @@ $(head -$max_lines "$path" 2>/dev/null)
         fi
 
         if [[ $files_read -gt 0 ]]; then
+            # Extract project context from config for the analysis prompt
+            local project_context=""
+            local config_file="$ATOMIC_OUTPUT_DIR/${CURRENT_PHASE:-0-setup}/project-config.json"
+            [[ ! -f "$config_file" ]] && config_file="$ATOMIC_OUTPUT_DIR/0-setup/project-config.json"
+
+            if [[ -f "$config_file" ]]; then
+                local p_name p_desc p_goals p_constraints p_stack
+                p_name=$(jq -r '.project.name // .extracted.project.name // "Unknown"' "$config_file" 2>/dev/null)
+                p_desc=$(jq -r '.project.description // .extracted.project.description // ""' "$config_file" 2>/dev/null)
+                p_goals=$(jq -r '(.project.goals // .extracted.project.goals // []) | if type == "array" then map("- " + .) | join("\n") else . end' "$config_file" 2>/dev/null)
+                p_constraints=$(jq -r '(.project.constraints // .extracted.project.constraints // []) | if type == "array" then map("- " + .) | join("\n") else . end' "$config_file" 2>/dev/null)
+                p_stack=$(jq -r '(.project.tech_stack // .extracted.project.tech_stack // []) | if type == "array" then join(", ") else . end' "$config_file" 2>/dev/null)
+
+                project_context="## Project Context (from setup configuration)
+
+**Project Name:** $p_name
+**Description:** $p_desc"
+                [[ -n "$p_goals" && "$p_goals" != "null" ]] && project_context+="
+**Goals:**
+$p_goals"
+                [[ -n "$p_constraints" && "$p_constraints" != "null" ]] && project_context+="
+**Constraints:**
+$p_constraints"
+                [[ -n "$p_stack" && "$p_stack" != "null" ]] && project_context+="
+**Tech Stack:** $p_stack"
+                project_context+="
+
+---
+"
+                echo -e "  ${GREEN}✓${NC} Injecting project context: $p_name"
+            fi
+
             # Create analysis prompt
             cat > "$prompts_dir/corpus-analysis.md" << EOF
 # Task: Analyze Project Corpus
 
 You are a **technical analyst** specializing in software project discovery. Your role is to synthesize scattered documentation into a coherent understanding that will guide the PRD authoring phase.
 
+**IMPORTANT:** Analyze these materials in the context of the project described below. These are the project's own documents, NOT the framework/tool that orchestrates development.
+
 ## Token Budget
 
 This analysis should be concise (500-800 words). Focus on actionable insights, not exhaustive summaries.
+
+$project_context
 
 ## Materials Collected
 
@@ -362,7 +444,7 @@ EOF
 
             atomic_waiting "Claude is analyzing corpus..."
 
-            if atomic_invoke "$prompts_dir/corpus-analysis.md" "$analysis_file" "Corpus analysis" --model=sonnet; then
+            if atomic_invoke "$prompts_dir/corpus-analysis.md" "$analysis_file" "Corpus analysis"; then
                 corpus=$(echo "$corpus" | jq --arg analysis "$analysis_file" '.analysis_file = $analysis')
                 atomic_success "Corpus analyzed"
             else
@@ -413,7 +495,7 @@ EOF
         fi
         echo ""
 
-        read -p "  > " human_feedback
+        read -e -p "  > " human_feedback || true
 
         if [[ -z "$human_feedback" ]] || [[ "${human_feedback,,}" =~ ^(yes|correct|accurate|good|ok|y)$ ]]; then
             echo ""

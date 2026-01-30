@@ -27,6 +27,31 @@ PHASE_START_TIME=""
 PHASE_TASKS_RUN=0
 PHASE_SNAPSHOT_DIR=""
 
+# Track current in-progress task for signal cleanup
+_PHASE_ACTIVE_TASK_ID=""
+_PHASE_ACTIVE_TASK_NAME=""
+
+# Signal handler: mark active task as failed on interruption
+_phase_signal_cleanup() {
+    local signal="${1:-UNKNOWN}"
+    if [[ -n "$_PHASE_ACTIVE_TASK_ID" ]]; then
+        echo "" >&2
+        echo -e "  ${YELLOW}!${NC} Interrupted (${signal}) — marking task $_PHASE_ACTIVE_TASK_ID as failed" >&2
+        task_state_fail "$_PHASE_ACTIVE_TASK_ID" "Interrupted by $signal" 2>/dev/null || true
+        _PHASE_ACTIVE_TASK_ID=""
+        _PHASE_ACTIVE_TASK_NAME=""
+    fi
+    # Re-raise signal for default handler
+    trap - "$signal" 2>/dev/null || true
+    kill -s "$signal" $$ 2>/dev/null || exit 1
+}
+
+# Register signal handlers (called once during phase_start)
+_phase_register_traps() {
+    trap '_phase_signal_cleanup INT' INT
+    trap '_phase_signal_cleanup TERM' TERM
+}
+
 # ============================================================================
 # CROSS-PLATFORM HELPERS
 # ============================================================================
@@ -253,6 +278,9 @@ phase_start() {
     # Initialize task state tracking
     task_state_init "$phase_id"
 
+    # Register signal handlers for clean interruption
+    _phase_register_traps
+
     # Get phase number from id (e.g., "0-setup" -> "0")
     local phase_num="${phase_id%%-*}"
 
@@ -280,8 +308,11 @@ phase_task() {
     PHASE_TASKS_RUN=$((PHASE_TASKS_RUN + 1))
 
     echo ""
+    # Use printf with precision for fixed-width (58 chars, truncate if longer)
+    local box_text
+    box_text=$(printf "%-58.58s" "TASK $PHASE_TASKS_RUN: $task_name")
     echo -e "${BOLD}${CYAN}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
-    echo -e "${BOLD}${CYAN}┃${NC} ${BOLD}TASK $PHASE_TASKS_RUN: $task_name${NC}"
+    echo -e "${BOLD}${CYAN}┃${NC} ${BOLD}${box_text}${NC} ${BOLD}${CYAN}┃${NC}"
     echo -e "${BOLD}${CYAN}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
 
     # Execute the task function/command passed
@@ -428,26 +459,36 @@ phase_task_interactive() {
     # Check if task should be skipped
     if task_state_should_skip "$task_id"; then
         echo ""
+        # Use printf with precision for fixed-width (58 chars, truncate if longer)
+        local skip_text
+        skip_text=$(printf "%-58.58s" "TASK $task_id: $task_name [COMPLETE - SKIPPED]")
         echo -e "${DIM}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
-        echo -e "${DIM}┃${NC} ${DIM}TASK $task_id: $task_name ${GREEN}[COMPLETE - SKIPPED]${NC}"
+        echo -e "${DIM}┃${NC} ${skip_text} ${DIM}┃${NC}"
         echo -e "${DIM}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
         return $TASK_CONTINUE
     fi
 
     while true; do
         echo ""
+        # Use printf with precision for fixed-width (58 chars, truncate if longer)
+        local box_text
+        box_text=$(printf "%-58.58s" "TASK $task_id: $task_name")
         echo -e "${BOLD}${CYAN}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
-        echo -e "${BOLD}${CYAN}┃${NC} ${BOLD}TASK $task_id: $task_name${NC}"
+        echo -e "${BOLD}${CYAN}┃${NC} ${BOLD}${box_text}${NC} ${BOLD}${CYAN}┃${NC}"
         echo -e "${BOLD}${CYAN}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
 
-        # Mark task as started
+        # Mark task as started and track for signal cleanup
         task_state_start "$task_id" "$task_name"
+        _PHASE_ACTIVE_TASK_ID="$task_id"
+        _PHASE_ACTIVE_TASK_NAME="$task_name"
 
         # Run the task
         local task_result=0
         if $task_func; then
             # Mark task complete in persistent state
             task_state_complete "$task_id" "$task_name"
+            _PHASE_ACTIVE_TASK_ID=""
+            _PHASE_ACTIVE_TASK_NAME=""
             atomic_success "Task completed"
 
             # Post-task navigation
@@ -455,7 +496,8 @@ phase_task_interactive() {
             echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
             echo -e "  ${GREEN}[c]${NC} Continue    ${YELLOW}[r]${NC} Redo    ${BLUE}[b]${NC} Go back    ${MAGENTA}[j]${NC} Jump to    ${RED}[q]${NC} Quit"
             echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-            read -p "  Choice [c]: " choice
+    atomic_drain_stdin
+            read -e -p "  Choice [c]: " choice || true
             choice=${choice:-c}
 
             case "$choice" in
@@ -474,7 +516,7 @@ phase_task_interactive() {
                 j|J)
                     echo ""
                     echo -e "  ${DIM}Enter task ID to jump to (e.g., 101, 105):${NC}"
-                    read -p "  Jump to: " jump_target
+                    read -e -p "  Jump to: " jump_target || true
                     local validation_error
                     if validation_error=$(phase_validate_task_id "$jump_target" 2>&1); then
                         task_state_reset_from "$jump_target"
@@ -497,6 +539,8 @@ phase_task_interactive() {
         else
             # Mark task failed in persistent state
             task_state_fail "$task_id" "Task execution failed"
+            _PHASE_ACTIVE_TASK_ID=""
+            _PHASE_ACTIVE_TASK_NAME=""
             atomic_error "Task failed"
 
             # Failure navigation
@@ -504,7 +548,8 @@ phase_task_interactive() {
             echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
             echo -e "  ${YELLOW}[r]${NC} Retry    ${BLUE}[b]${NC} Go back    ${MAGENTA}[j]${NC} Jump to    ${DIM}[s]${NC} Skip    ${RED}[q]${NC} Quit"
             echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-            read -p "  Choice [r]: " choice
+    atomic_drain_stdin
+            read -e -p "  Choice [r]: " choice || true
             choice=${choice:-r}
 
             case "$choice" in
@@ -519,7 +564,7 @@ phase_task_interactive() {
                 j|J)
                     echo ""
                     echo -e "  ${DIM}Enter task ID to jump to (e.g., 101, 105):${NC}"
-                    read -p "  Jump to: " jump_target
+                    read -e -p "  Jump to: " jump_target || true
                     local validation_error
                     if validation_error=$(phase_validate_task_id "$jump_target" 2>&1); then
                         task_state_reset_from "$jump_target"
@@ -652,7 +697,7 @@ phase_human_gate() {
     echo -e "${MAGENTA}╚═══════════════════════════════════════════════════════════╝${NC}"
     echo ""
 
-    read -p "Type 'approve' to continue, anything else to abort: " response
+    read -e -p "Type 'approve' to continue, anything else to abort: " response || true
 
     if [[ "$response" == "approve" ]]; then
         atomic_success "Human gate approved"
@@ -683,7 +728,7 @@ phase_review() {
     fi
 
     echo ""
-    read -p "Press Enter to continue..." _
+    read -e -p "Press Enter to continue..." _ || true
 }
 
 # ============================================================================
@@ -698,12 +743,16 @@ phase_transition_banner() {
 
     echo ""
     echo ""
+    local completed_text starting_text
+    completed_text=$(printf "%-55.55s" "Completed: Phase $from_phase")
+    starting_text=$(printf "%-55.55s" "Starting:  Phase $to_phase - $to_name")
+
     echo -e "${MAGENTA}╔═══════════════════════════════════════════════════════════╗${NC}"
     echo -e "${MAGENTA}║${NC}                                                           ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}║${NC}  ${BOLD}PHASE TRANSITION${NC}                                        ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}║${NC}                                                           ${MAGENTA}║${NC}"
-    echo -e "${MAGENTA}║${NC}  ${DIM}Completed:${NC} Phase $from_phase                                  ${MAGENTA}║${NC}"
-    echo -e "${MAGENTA}║${NC}  ${BOLD}Starting:${NC}  Phase $to_phase - $to_name                        ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${NC}  ${DIM}${completed_text}${NC} ${MAGENTA}║${NC}"
+    echo -e "${MAGENTA}║${NC}  ${BOLD}${starting_text}${NC} ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}║${NC}                                                           ${MAGENTA}║${NC}"
     echo -e "${MAGENTA}╚═══════════════════════════════════════════════════════════╝${NC}"
     echo ""
@@ -727,7 +776,8 @@ phase_offer_continue() {
     echo ""
 
     while true; do
-        read -p "  Choice [c]: " choice
+        atomic_drain_stdin
+        read -e -p "  Choice [c]: " choice || true
         choice=${choice:-c}
         case "$choice" in
             c|C|continue|Continue)
@@ -773,6 +823,16 @@ phase_chain() {
     # Brief pause for user to see the transition
     sleep 1
 
+    # Build flags to forward to next phase
+    local forward_flags=("--skip-intro")
+    [[ "${TASK_FORCE_REDO:-}" == "true" ]] && forward_flags+=("--redo")
+
     # Execute next phase (exec replaces current process)
-    exec bash "$next_script" --skip-intro
+    # Note: If exec fails, it returns non-zero but doesn't exit
+    exec bash "$next_script" "${forward_flags[@]}"
+
+    # If we reach here, exec failed
+    atomic_error "Failed to execute next phase script: $next_script"
+    atomic_info "Try running it manually: bash $next_script --skip-intro"
+    return 1
 }

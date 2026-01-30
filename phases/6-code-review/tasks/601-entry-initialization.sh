@@ -5,7 +5,7 @@
 #
 
 task_601_entry_initialization() {
-    local closeout_file="$ATOMIC_ROOT/.claude/closeout/phase-05-closeout.json"
+    local closeout_file=$(atomic_find_closeout "5-implementation")
     local validation_file="$ATOMIC_ROOT/.claude/testing/validation-report.json"
 
     clear
@@ -135,7 +135,7 @@ task_601_entry_initialization() {
     echo -e "    ${DIM}606${NC} Closeout"
     echo ""
 
-    read -p "  Press Enter to begin Code Review..."
+    read -e -p "  Press Enter to begin Code Review..." || true
     echo ""
 
     atomic_success "Entry & Initialization complete"

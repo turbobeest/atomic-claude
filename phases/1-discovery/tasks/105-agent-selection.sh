@@ -103,7 +103,8 @@ EOF
         echo -e "    ${GREEN}[2]${NC} Specify a different path"
         echo -e "    ${GREEN}[3]${NC} Continue with built-in defaults"
         echo ""
-        read -p "  Choice [3]: " repo_choice
+    atomic_drain_stdin
+        read -e -p "  Choice [3]: " repo_choice || true
         repo_choice=${repo_choice:-3}
 
         case "$repo_choice" in
@@ -121,7 +122,7 @@ EOF
                 ;;
             2)
                 echo ""
-                read -p "  Agent repository path: " custom_path
+                read -e -p "  Agent repository path: " custom_path || true
                 if [[ -f "$custom_path/agent-manifest.json" ]]; then
                     AGENT_REPO="$custom_path"
                     AGENT_MANIFEST="$AGENT_REPO/agent-manifest.json"
@@ -304,23 +305,26 @@ EOF
     local suggested_agents_json=""
     local suggestion_file="$prompts_dir/suggested-agents.json"
 
-    if atomic_invoke "$suggestion_prompt" "$suggestion_file" "Suggest agents" --model=sonnet --format=json; then
+    if atomic_invoke "$suggestion_prompt" "$suggestion_file" "Suggest agents" --format=json; then
         # Try to parse JSON response
         if jq -e '.suggested_agents' "$suggestion_file" &>/dev/null; then
             suggested_agents_json=$(cat "$suggestion_file")
 
-            echo -e "  ${GREEN}Recommended agents:${NC}"
-            echo ""
-
-            # Display each suggested agent
-            echo "$suggested_agents_json" | jq -r '.suggested_agents[] | "    \u001b[32m•\u001b[0m \u001b[1m\(.name)\u001b[0m: \(.reason)"'
-
-            # Display gaps if any
-            local gaps=$(echo "$suggested_agents_json" | jq -r '.gaps[]? // empty')
-            if [[ -n "$gaps" ]]; then
+            # Only display formatted summary if not already streamed
+            if [[ "${ATOMIC_STREAM:-true}" != "true" || ! -t 2 ]]; then
+                echo -e "  ${GREEN}Recommended agents:${NC}"
                 echo ""
-                echo -e "  ${YELLOW}Capability gaps identified:${NC}"
-                echo "$suggested_agents_json" | jq -r '.gaps[] | "    ! \(.)"'
+
+                # Display each suggested agent
+                echo "$suggested_agents_json" | jq -r '.suggested_agents[] | "    \u001b[32m•\u001b[0m \u001b[1m\(.name)\u001b[0m: \(.reason)"'
+
+                # Display gaps if any
+                local gaps=$(echo "$suggested_agents_json" | jq -r '.gaps[]? // empty')
+                if [[ -n "$gaps" ]]; then
+                    echo ""
+                    echo -e "  ${YELLOW}Capability gaps identified:${NC}"
+                    echo "$suggested_agents_json" | jq -r '.gaps[] | "    ! \(.)"'
+                fi
             fi
 
             # Pre-populate selected_experts from suggestions
@@ -386,7 +390,7 @@ What would work best for you?"
 
     while [[ "$conversation_complete" == false ]]; do
         echo -e "  ${GREEN}You:${NC}"
-        read -p "    " human_response
+        read -e -p "    " human_response || true
 
         # Check for exit
         if [[ "${human_response,,}" =~ ^(done|finished|accept|1)$ ]]; then
@@ -408,7 +412,7 @@ What would work best for you?"
         # Handle search request
         if [[ "${human_response,,}" =~ (search|find|3) ]]; then
             echo ""
-            read -p "    Search term: " search_term
+            read -e -p "    Search term: " search_term || true
             _105_search_agents "$search_term"
             continue
         fi
@@ -467,8 +471,10 @@ EOF
         atomic_waiting "Thinking..."
 
         local agent_response=""
-        if atomic_invoke "$prompts_dir/agent-response.md" "$prompts_dir/response.txt" "Generate response" --model=sonnet; then
+        local _response_streamed=false
+        if atomic_invoke "$prompts_dir/agent-response.md" "$prompts_dir/response.txt" "Generate response"; then
             agent_response=$(cat "$prompts_dir/response.txt")
+            [[ "${ATOMIC_STREAM:-true}" == "true" && -t 2 ]] && _response_streamed=true
         else
             agent_response="I can help with that. Would you like me to suggest agents for that specific need, or would you prefer to browse the available categories?"
         fi
@@ -476,10 +482,12 @@ EOF
         echo ""
         echo -e "  ${CYAN}Agent:${NC}"
         echo ""
-        echo "$agent_response" | fold -s -w 60 | while IFS= read -r line; do
-            echo -e "    $line"
-        done
-        echo ""
+        if [[ "$_response_streamed" != true ]]; then
+            echo "$agent_response" | fold -s -w 60 | while IFS= read -r line; do
+                echo -e "    $line"
+            done
+            echo ""
+        fi
 
         # Log agent response
         echo "## Turn $((turn + 1))" >> "$conversation_log"
@@ -605,12 +613,12 @@ EOF
     echo ""
 
     echo -e "  ${DIM}Does this roster look good? [Y/n]${NC}"
-    read -p "  > " confirm
+    read -e -p "  > " confirm || true
 
     if [[ "${confirm,,}" =~ ^n ]]; then
         echo ""
         echo -e "  ${DIM}What would you like to change?${NC}"
-        read -p "  > " changes
+        read -e -p "  > " changes || true
 
         # Record the requested changes
         roster=$(echo "$roster" | jq --arg changes "$changes" '.human_feedback = $changes')
@@ -680,7 +688,7 @@ _105_browse_categories() {
     done <<< "$categories"
 
     echo ""
-    read -p "    Select category [1-8]: " cat_choice
+    read -e -p "    Select category [1-8]: " cat_choice || true
 
     # Get the category key by index
     local cat_key=$(jq -r ".categories | keys[$((cat_choice - 1))]" "$AGENT_MANIFEST")

@@ -114,8 +114,9 @@ _005_detect_key_files() {
 
     # Update manifest
     local tmp=$(atomic_mktemp)
-    printf '%s\n' "${key_files[@]}" | jq -R . | jq -s '.' | \
-        jq --slurpfile m "$manifest_file" '$m[0] | .key_files = input' - > "$tmp" && mv "$tmp" "$manifest_file"
+    local key_json
+    key_json=$(printf '%s\n' "${key_files[@]}" | jq -R 'select(length > 0)' | jq -s '.')
+    jq --argjson keys "$key_json" '.key_files = $keys' "$manifest_file" > "$tmp" && mv "$tmp" "$manifest_file"
 
     echo ""
 }
@@ -180,12 +181,15 @@ _005_scan_documentation() {
         -name "*.adoc" -o -name "*.org" \
     \) -type f 2>/dev/null | grep -v node_modules | grep -v .git | grep -v .outputs | grep -v __pycache__ | sort | head -50 || true)
 
-    local count=$(echo "$docs" | grep -c . 2>/dev/null || echo 0)
+    local count=0
+    [[ -n "$docs" ]] && count=$(echo "$docs" | grep -c '^.' 2>/dev/null || echo 0)
+    count=$((count + 0))  # Ensure integer
     local sample=$(echo "$docs" | head -5)
     local loc=0
 
     if [[ $count -gt 0 ]]; then
         loc=$(echo "$docs" | head -20 | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo 0)
+        loc=$((loc + 0))
     fi
 
     echo -e "  ${CYAN}Documentation${NC}  ${DIM}$count files${NC}"
@@ -202,9 +206,10 @@ _005_scan_documentation() {
     jq --argjson count "$count" --argjson loc "$loc" \
         '.summary.documentation = { "count": $count, "lines": $loc }' "$manifest_file" > "$tmp" && mv "$tmp" "$manifest_file"
 
-    local tmp=$(atomic_mktemp)
-    echo "$docs" | jq -R 'select(length > 0)' | jq -s '.' | \
-        jq --slurpfile m "$manifest_file" '$m[0] | .files.documentation = input' - > "$tmp" && mv "$tmp" "$manifest_file"
+    local tmp2=$(atomic_mktemp)
+    local files_json
+    files_json=$(echo "$docs" | jq -R 'select(length > 0)' | jq -s '.')
+    jq --argjson f "$files_json" '.files.documentation = $f' "$manifest_file" > "$tmp2" && mv "$tmp2" "$manifest_file"
 }
 
 # Scan configuration files
@@ -217,7 +222,9 @@ _005_scan_configuration() {
         -name ".*.rc" -o -name "*.config.js" -o -name "*.config.ts" \
     \) -type f 2>/dev/null | grep -v node_modules | grep -v .git | grep -v package-lock | grep -v yarn.lock | sort | head -30 || true)
 
-    local count=$(echo "$configs" | grep -c . 2>/dev/null || echo 0)
+    local count=0
+    [[ -n "$configs" ]] && count=$(echo "$configs" | grep -c '^.' 2>/dev/null || echo 0)
+    count=$((count + 0))
     local sample=$(echo "$configs" | head -5)
 
     echo -e "  ${CYAN}Configuration${NC}  ${DIM}$count files${NC}"
@@ -233,9 +240,10 @@ _005_scan_configuration() {
     local tmp=$(atomic_mktemp)
     jq --argjson count "$count" '.summary.configuration = { "count": $count }' "$manifest_file" > "$tmp" && mv "$tmp" "$manifest_file"
 
-    local tmp=$(atomic_mktemp)
-    echo "$configs" | jq -R 'select(length > 0)' | jq -s '.' | \
-        jq --slurpfile m "$manifest_file" '$m[0] | .files.configuration = input' - > "$tmp" && mv "$tmp" "$manifest_file"
+    local tmp2=$(atomic_mktemp)
+    local files_json
+    files_json=$(echo "$configs" | jq -R 'select(length > 0)' | jq -s '.')
+    jq --argjson f "$files_json" '.files.configuration = $f' "$manifest_file" > "$tmp2" && mv "$tmp2" "$manifest_file"
 }
 
 # Scan source code files
@@ -252,12 +260,15 @@ _005_scan_source_code() {
         -name "*.sql" -o -name "*.graphql" \
     \) -type f 2>/dev/null | grep -v node_modules | grep -v .git | grep -v __pycache__ | grep -v dist | grep -v build | grep -v -E '\.min\.' | sort | head -100 || true)
 
-    local count=$(echo "$code" | grep -c . 2>/dev/null || echo 0)
+    local count=0
+    [[ -n "$code" ]] && count=$(echo "$code" | grep -c '^.' 2>/dev/null || echo 0)
+    count=$((count + 0))
     local sample=$(echo "$code" | head -5)
     local loc=0
 
     if [[ $count -gt 0 ]]; then
         loc=$(echo "$code" | head -50 | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo 0)
+        loc=$((loc + 0))
     fi
 
     echo -e "  ${CYAN}Source Code${NC}    ${DIM}$count files (~$loc lines)${NC}"
@@ -282,9 +293,10 @@ _005_scan_source_code() {
     jq --argjson count "$count" --argjson loc "$loc" \
         '.summary.source_code = { "count": $count, "lines": $loc }' "$manifest_file" > "$tmp" && mv "$tmp" "$manifest_file"
 
-    local tmp=$(atomic_mktemp)
-    echo "$code" | jq -R 'select(length > 0)' | jq -s '.[0:50]' | \
-        jq --slurpfile m "$manifest_file" '$m[0] | .files.source_code = input' - > "$tmp" && mv "$tmp" "$manifest_file"
+    local tmp2=$(atomic_mktemp)
+    local files_json
+    files_json=$(echo "$code" | jq -R 'select(length > 0)' | jq -s '.[0:50]')
+    jq --argjson f "$files_json" '.files.source_code = $f' "$manifest_file" > "$tmp2" && mv "$tmp2" "$manifest_file"
 }
 
 # Scan test files
@@ -301,7 +313,9 @@ _005_scan_tests() {
     # Also check for test directories
     local test_dirs=$(find . -maxdepth 3 -type d \( -name "test" -o -name "tests" -o -name "__tests__" -o -name "spec" \) 2>/dev/null | grep -v node_modules | head -5 || true)
 
-    local count=$(echo "$tests" | grep -c . 2>/dev/null || echo 0)
+    local count=0
+    [[ -n "$tests" ]] && count=$(echo "$tests" | grep -c '^.' 2>/dev/null || echo 0)
+    count=$((count + 0))
     local sample=$(echo "$tests" | head -3)
 
     echo -e "  ${CYAN}Tests${NC}          ${DIM}$count files${NC}"
@@ -319,9 +333,10 @@ _005_scan_tests() {
     local tmp=$(atomic_mktemp)
     jq --argjson count "$count" '.summary.tests = { "count": $count }' "$manifest_file" > "$tmp" && mv "$tmp" "$manifest_file"
 
-    local tmp=$(atomic_mktemp)
-    echo "$tests" | jq -R 'select(length > 0)' | jq -s '.' | \
-        jq --slurpfile m "$manifest_file" '$m[0] | .files.tests = input' - > "$tmp" && mv "$tmp" "$manifest_file"
+    local tmp2=$(atomic_mktemp)
+    local files_json
+    files_json=$(echo "$tests" | jq -R 'select(length > 0)' | jq -s '.')
+    jq --argjson f "$files_json" '.files.tests = $f' "$manifest_file" > "$tmp2" && mv "$tmp2" "$manifest_file"
 }
 
 # Calculate totals

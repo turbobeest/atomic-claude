@@ -46,9 +46,9 @@ task_603_comprehensive_review() {
         # Load Deep Code Reviewer agent
         local deep_agent=$(jq -r '.review_agents.deep_code.name // ""' "$agents_file")
         if [[ -n "$deep_agent" ]]; then
-            local agent_file="$agent_repo/pipeline-agents/$deep_agent.md"
+            agent_file=$(atomic_find_agent "$deep_agent" "$agent_repo")
             if [[ -f "$agent_file" ]]; then
-                _603_DEEP_CODE_AGENT_PROMPT=$(cat "$agent_file")
+                _603_DEEP_CODE_AGENT_PROMPT=$(cat "$agent_file" | atomic_strip_frontmatter)
                 echo -e "  ${CYAN}✓${NC} Loaded agent: $deep_agent"
             fi
         fi
@@ -56,9 +56,9 @@ task_603_comprehensive_review() {
         # Load Architecture Compliance agent
         local arch_agent=$(jq -r '.review_agents.architecture.name // ""' "$agents_file")
         if [[ -n "$arch_agent" ]]; then
-            local agent_file="$agent_repo/pipeline-agents/$arch_agent.md"
+            agent_file=$(atomic_find_agent "$arch_agent" "$agent_repo")
             if [[ -f "$agent_file" ]]; then
-                _603_ARCH_AGENT_PROMPT=$(cat "$agent_file")
+                _603_ARCH_AGENT_PROMPT=$(cat "$agent_file" | atomic_strip_frontmatter)
                 echo -e "  ${MAGENTA}✓${NC} Loaded agent: $arch_agent"
             fi
         fi
@@ -66,9 +66,9 @@ task_603_comprehensive_review() {
         # Load Performance Analyzer agent
         local perf_agent=$(jq -r '.review_agents.performance.name // ""' "$agents_file")
         if [[ -n "$perf_agent" ]]; then
-            local agent_file="$agent_repo/pipeline-agents/$perf_agent.md"
+            agent_file=$(atomic_find_agent "$perf_agent" "$agent_repo")
             if [[ -f "$agent_file" ]]; then
-                _603_PERF_AGENT_PROMPT=$(cat "$agent_file")
+                _603_PERF_AGENT_PROMPT=$(cat "$agent_file" | atomic_strip_frontmatter)
                 echo -e "  ${YELLOW}✓${NC} Loaded agent: $perf_agent"
             fi
         fi
@@ -76,9 +76,9 @@ task_603_comprehensive_review() {
         # Load Documentation Reviewer agent
         local doc_agent=$(jq -r '.review_agents.documentation.name // ""' "$agents_file")
         if [[ -n "$doc_agent" ]]; then
-            local agent_file="$agent_repo/pipeline-agents/$doc_agent.md"
+            agent_file=$(atomic_find_agent "$doc_agent" "$agent_repo")
             if [[ -f "$agent_file" ]]; then
-                _603_DOC_AGENT_PROMPT=$(cat "$agent_file")
+                _603_DOC_AGENT_PROMPT=$(cat "$agent_file" | atomic_strip_frontmatter)
                 echo -e "  ${BLUE}✓${NC} Loaded agent: $doc_agent"
             fi
         fi
@@ -242,7 +242,7 @@ task_603_comprehensive_review() {
     if [[ -f "$perf_result" ]] && jq -e . "$perf_result" &>/dev/null; then
         perf_critical=$(jq '.critical // 0' "$perf_result")
         perf_major=$(jq '.major // 0' "$perf_result")
-        perf_minor=$(jq '.minor // 0' "$perf_minor")
+        perf_minor=$(jq '.minor // 0' "$perf_result")
         perf_suggestions=$(jq '.suggestions // 0' "$perf_result")
     fi
 

@@ -40,24 +40,24 @@ task_804_artifact_generation() {
 
         for agent_entry in $agents_array; do
             local agent_name="${agent_entry%%:*}"
-            local agent_file="$agent_repo/pipeline-agents/$agent_name.md"
+            agent_file=$(atomic_find_agent "$agent_name" "$agent_repo")
 
             if [[ -f "$agent_file" ]]; then
                 case "$agent_name" in
                     *packager*|*release-packager*)
-                        packager_agent_prompt=$(cat "$agent_file")
+                        packager_agent_prompt=$(cat "$agent_file" | atomic_strip_frontmatter)
                         echo -e "  ${CYAN}✓${NC} Loaded agent: $agent_name (Packager)"
                         ;;
                     *changelog*)
-                        changelog_agent_prompt=$(cat "$agent_file")
+                        changelog_agent_prompt=$(cat "$agent_file" | atomic_strip_frontmatter)
                         echo -e "  ${MAGENTA}✓${NC} Loaded agent: $agent_name (Changelog)"
                         ;;
                     *documentation*|*doc-gen*)
-                        docs_agent_prompt=$(cat "$agent_file")
+                        docs_agent_prompt=$(cat "$agent_file" | atomic_strip_frontmatter)
                         echo -e "  ${YELLOW}✓${NC} Loaded agent: $agent_name (Documentation)"
                         ;;
                     *install*|*installation*)
-                        install_agent_prompt=$(cat "$agent_file")
+                        install_agent_prompt=$(cat "$agent_file" | atomic_strip_frontmatter)
                         echo -e "  ${BLUE}✓${NC} Loaded agent: $agent_name (Installation)"
                         ;;
                 esac
@@ -79,7 +79,7 @@ task_804_artifact_generation() {
     fi
 
     # Gather project context
-    local prd_file="$ATOMIC_ROOT/.claude/prd/prd.md"
+    local prd_file="$ATOMIC_ROOT/docs/prd/PRD.md"
     local project_context=""
     [[ -f "$prd_file" ]] && project_context=$(cat "$prd_file" | head -200)
 

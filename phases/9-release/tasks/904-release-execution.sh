@@ -38,12 +38,12 @@ task_904_release_execution() {
 
         for agent_entry in $agents_array; do
             local agent_name="${agent_entry%%:*}"
-            local agent_file="$agent_repo/pipeline-agents/$agent_name.md"
+            agent_file=$(atomic_find_agent "$agent_name" "$agent_repo")
 
             if [[ -f "$agent_file" ]]; then
                 case "$agent_name" in
                     *announcement*|*writer*)
-                        announcement_agent_prompt=$(cat "$agent_file")
+                        announcement_agent_prompt=$(cat "$agent_file" | atomic_strip_frontmatter)
                         echo -e "  ${YELLOW}✓${NC} Loaded agent: $agent_name (Announcement)"
                         ;;
                 esac
@@ -63,7 +63,7 @@ task_904_release_execution() {
     fi
 
     # Gather project context
-    local prd_file="$ATOMIC_ROOT/.claude/prd/prd.md"
+    local prd_file="$ATOMIC_ROOT/docs/prd/PRD.md"
     local changelog_file="$ATOMIC_ROOT/CHANGELOG.md"
     local project_context=""
     [[ -f "$prd_file" ]] && project_context+="## PRD\n$(cat "$prd_file" | head -100)\n\n"

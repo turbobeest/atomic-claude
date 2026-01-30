@@ -5,8 +5,8 @@
 #
 
 task_701_entry_initialization() {
-    local closeout_file="$ATOMIC_ROOT/.claude/closeout/phase-06-closeout.json"
-    local config_file="$ATOMIC_ROOT/project-config.json"
+    local closeout_file=$(atomic_find_closeout "6-code-review")
+    local config_file="$ATOMIC_OUTPUT_DIR/0-setup/project-config.json"
 
     echo ""
     echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -103,7 +103,7 @@ task_701_entry_initialization() {
     echo -e "       ${DIM}(flows)       (criteria)    (benchmarks)     (gate)${NC}"
     echo ""
 
-    read -p "  Press Enter to continue..."
+    read -e -p "  Press Enter to continue..." || true
     echo ""
 
     atomic_context_decision "Phase 7 entry validated" "entry"

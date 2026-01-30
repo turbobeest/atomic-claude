@@ -124,7 +124,8 @@ task_705_integration_approval() {
     echo -e "    ${YELLOW}[fix-and-rerun]${NC} Address issues and retest"
     echo ""
 
-    read -p "  Choice [approve]: " approval_choice
+    atomic_drain_stdin
+    read -e -p "  Choice [approve]: " approval_choice || true
     approval_choice=${approval_choice:-approve}
 
     case "$approval_choice" in
@@ -138,7 +139,7 @@ task_705_integration_approval() {
             echo ""
             ls -la "$integration_dir"/ 2>/dev/null
             echo ""
-            read -p "  Press Enter after investigation to continue..."
+            read -e -p "  Press Enter after investigation to continue..." || true
             echo ""
             echo -e "  ${DIM}Returning to approval...${NC}"
             task_705_integration_approval
@@ -153,7 +154,7 @@ task_705_integration_approval() {
             ;;
         approve)
             echo ""
-            read -p "  Approver name: " approver_name
+            read -e -p "  Approver name: " approver_name || true
             approver_name=${approver_name:-"Human Operator"}
             echo ""
             ;;

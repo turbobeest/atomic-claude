@@ -183,6 +183,20 @@ default
 
 detect
 
+## Agents Repository URL
+# Git URL for the agents repository (specialized AI agents per phase/domain).
+# Browse available agents at https://github.com/turbobeest/agents
+# Options: [value] | default [https://github.com/turbobeest/agents]
+
+default
+
+## Audits Repository URL
+# Git URL for the audits repository (quality audit profiles and categories).
+# Browse audit dimensions at https://github.com/turbobeest/audits
+# Options: [value] | default [https://github.com/turbobeest/audits]
+
+default
+
 ## Default Branch
 # Options: [value] | default [main]
 

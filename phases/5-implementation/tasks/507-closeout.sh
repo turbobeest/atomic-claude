@@ -10,7 +10,9 @@ task_507_closeout() {
     local closeout_json="$closeout_dir/phase-05-closeout.json"
     local tasks_file="$ATOMIC_ROOT/.taskmaster/tasks/tasks.json"
     local testing_dir="$ATOMIC_ROOT/.claude/testing"
-    local audit_file="$ATOMIC_ROOT/.claude/audit/phase-05-audit.json"
+    # Audit file - check new path first, then legacy
+    local audit_file="$ATOMIC_ROOT/.outputs/audits/phase-5-report.json"
+    [[ ! -f "$audit_file" ]] && audit_file="$ATOMIC_ROOT/.claude/audit/phase-05-audit.json"
     local validation_file="$testing_dir/validation-report.json"
 
     atomic_step "Phase Closeout"
@@ -36,7 +38,7 @@ task_507_closeout() {
     # Get metrics
     local total_tasks=$(jq '[.tasks[] | select(.subtasks | length >= 4)] | length' "$tasks_file" 2>/dev/null || echo 0)
     local completed_tasks=$(jq '[.tasks[] | select(.status == "done")] | length' "$tasks_file" 2>/dev/null || echo 0)
-    local tdd_records=$(find "$testing_dir" -name "tdd-t*.json" 2>/dev/null | wc -l)
+    local tdd_records=$(find "$testing_dir" -name "tdd-t*.json" 2>/dev/null | wc -l | tr -d ' ')
 
     local unit_coverage=0
     local passing_tests=0
@@ -48,7 +50,6 @@ task_507_closeout() {
         passing_tests=$(jq -r '.test_quality.passing_tests // 0' "$validation_file")
         total_tests=$(jq -r '.test_quality.total_tests // 0' "$validation_file")
         critical_issues=$(jq -r '.security.critical // 0' "$validation_file")
-    fi
 
     # Check TDD completion
     if [[ "$completed_tasks" -ge "$total_tasks" && "$total_tasks" -gt 0 ]]; then
@@ -58,7 +59,6 @@ task_507_closeout() {
         echo -e "  ${RED}[CRIT]${NC} ${RED}✗${NC} TDD cycles incomplete ($completed_tasks / $total_tasks)"
         checklist+=("TDD cycles complete:FAIL")
         all_passed=false
-    fi
 
     # Check coverage
     if [[ "$unit_coverage" -ge 80 ]]; then
@@ -71,7 +71,6 @@ task_507_closeout() {
         echo -e "  ${RED}[CRIT]${NC} ${RED}✗${NC} Coverage below 70% (${unit_coverage}%)"
         checklist+=("Coverage:FAIL")
         all_passed=false
-    fi
 
     # Check all tests passing
     if [[ "$passing_tests" -eq "$total_tests" && "$total_tests" -gt 0 ]]; then
@@ -81,7 +80,6 @@ task_507_closeout() {
         echo -e "  ${RED}[CRIT]${NC} ${RED}✗${NC} Tests failing ($((total_tests - passing_tests)) of $total_tests)"
         checklist+=("All tests passing:FAIL")
         all_passed=false
-    fi
 
     # Check VERIFY scans
     if [[ "$critical_issues" -eq 0 ]]; then
@@ -90,38 +88,47 @@ task_507_closeout() {
     else
         echo -e "  ${RED}[BLCK]${NC} ${RED}✗${NC} $critical_issues critical security issues"
         checklist+=("VERIFY scans:FAIL")
-    fi
 
     # Check audit
     if [[ -f "$audit_file" ]]; then
-        local audit_status=$(jq -r '.overall_status // "UNKNOWN"' "$audit_file")
-        if [[ "$audit_status" == "PASS" ]]; then
-            echo -e "  ${GREEN}[BLCK]${NC} ${GREEN}✓${NC} Audit passed"
+        # Check summary.passed/failed/warnings (new format) or overall_status (legacy)
+        local passed=$(jq -r '.summary.passed // 0' "$audit_file" 2>/dev/null)
+        local failed=$(jq -r '.summary.failed // 0' "$audit_file" 2>/dev/null)
+        local warnings=$(jq -r '.summary.warnings // 0' "$audit_file" 2>/dev/null)
+        local total=$((passed + failed + warnings))
+
+        if [[ $total -eq 0 ]]; then
+            # Try legacy format
+            local audit_status=$(jq -r '.overall_status // "UNKNOWN"' "$audit_file")
+            case "$audit_status" in
+                PASS) echo -e "  ${GREEN}[BLCK]${NC} ${GREEN}✓${NC} Audit passed"; checklist+=("Audit:PASS") ;;
+                WARNING|DEFERRED) echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Audit: $audit_status"; checklist+=("Audit:WARN") ;;
+                *) echo -e "  ${RED}[BLCK]${NC} ${RED}✗${NC} Audit failed"; checklist+=("Audit:FAIL") ;;
+            esac
+        elif [[ $failed -eq 0 && $warnings -eq 0 ]]; then
+            echo -e "  ${GREEN}[BLCK]${NC} ${GREEN}✓${NC} Audit passed ($passed passed)"
             checklist+=("Audit:PASS")
-        elif [[ "$audit_status" == "DEFERRED" ]]; then
-            echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Audit deferred"
-            checklist+=("Audit:DEFERRED")
-        else
-            echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Audit: $audit_status"
+        elif [[ $failed -eq 0 ]]; then
+            echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Audit has warnings ($warnings warnings)"
             checklist+=("Audit:WARN")
+        else
+            echo -e "  ${RED}[BLCK]${NC} ${RED}✗${NC} Audit has failures ($failed failed)"
+            checklist+=("Audit:FAIL")
         fi
     else
         echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Audit not completed"
         checklist+=("Audit:SKIP")
-    fi
 
     # Check no flaky tests
     local flaky_tests=0
     if [[ -f "$validation_file" ]]; then
         flaky_tests=$(jq -r '.test_quality.flaky_tests // 0' "$validation_file")
-    fi
     if [[ "$flaky_tests" -eq 0 ]]; then
         echo -e "  ${GREEN}[BLCK]${NC} ${GREEN}✓${NC} No flaky tests"
         checklist+=("No flaky tests:PASS")
     else
         echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} $flaky_tests flaky tests detected"
         checklist+=("No flaky tests:WARN")
-    fi
 
     echo -e "  ${GREEN}[PASS]${NC} ${GREEN}✓${NC} Ready for Code Review"
     echo ""
@@ -136,7 +143,6 @@ task_507_closeout() {
     if [[ "$all_passed" == false ]]; then
         echo -e "  ${YELLOW}Some critical items need attention before closeout.${NC}"
         echo ""
-    fi
 
     echo -e "  ${CYAN}Closeout options:${NC}"
     echo ""
@@ -145,7 +151,11 @@ task_507_closeout() {
     echo -e "    ${RED}[hold]${NC}    Hold closeout for now"
     echo ""
 
-    read -p "  Choice [approve]: " closeout_choice
+    # Drain any buffered stdin from previous interactions
+    while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
+
+    # Handle EOF gracefully - default to approve
+    read -e -p "  Choice [approve]: " closeout_choice || true
     closeout_choice=${closeout_choice:-approve}
 
     case "$closeout_choice" in
@@ -159,7 +169,7 @@ task_507_closeout() {
             echo ""
             ls -la "$testing_dir"/ 2>/dev/null | head -10
             echo ""
-            read -p "  Press Enter to continue to closeout..."
+            read -e -p "  Press Enter to continue to closeout..." || true
             ;;
         hold)
             echo ""

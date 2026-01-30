@@ -84,8 +84,12 @@ task_009_environment_check() {
         echo -e "    ${DIM}[c]${NC} Continue anyway (not recommended)"
         echo ""
 
-        while true; do
-            read -p "  Choice [r]: " choice
+        # Drain any buffered stdin
+    while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
+
+    while true; do
+    atomic_drain_stdin
+            read -e -p "  Choice [r]: " choice || true
             choice=${choice:-r}
             case "$choice" in
                 r|R)
@@ -182,7 +186,8 @@ _009_agent_exploration() {
     fi
     echo ""
 
-    read -p "  Choice [skip]: " explore_choice
+    atomic_drain_stdin
+    read -e -p "  Choice [skip]: " explore_choice || true
     explore_choice=${explore_choice:-skip}
 
     case "$explore_choice" in
@@ -199,7 +204,7 @@ _009_agent_exploration() {
             echo ""
             _009_list_agent_categories "$agent_repo"
             echo ""
-            read -p "  Press Enter to continue... " _
+            read -e -p "  Press Enter to continue... " _ || true
             ;;
         skip)
             echo ""
@@ -865,7 +870,7 @@ _009_assess_storage() {
 
     # Update report
     local tmp=$(atomic_mktemp)
-    echo "$storage_json" | jq --slurpfile r "$report_file" '$r[0] | .capabilities.storage = input' - > "$tmp" && mv "$tmp" "$report_file"
+    jq --argjson storage "$storage_json" '.capabilities.storage = $storage' "$report_file" > "$tmp" && mv "$tmp" "$report_file"
 
     echo ""
 }
@@ -931,7 +936,7 @@ _009_assess_network() {
 
     # Update report
     local tmp=$(atomic_mktemp)
-    echo "$network_json" | jq --slurpfile r "$report_file" '$r[0] | .capabilities.network = input' - > "$tmp" && mv "$tmp" "$report_file"
+    jq --argjson network "$network_json" '.capabilities.network = $network' "$report_file" > "$tmp" && mv "$tmp" "$report_file"
 
     echo ""
 }
@@ -1005,8 +1010,9 @@ _009_record_context() {
     atomic_context_decision "$msg" "validation"
 
     # Copy capabilities to main config
+    local cap_json=$(cat "$report_file")
     local tmp=$(atomic_mktemp)
-    jq --slurpfile cap "$report_file" '.system_capabilities = $cap[0].capabilities' "$config_file" > "$tmp" && mv "$tmp" "$config_file"
+    jq --argjson cap "$cap_json" '.system_capabilities = $cap.capabilities' "$config_file" > "$tmp" && mv "$tmp" "$config_file"
 
     # Register report as artifact
     atomic_context_artifact "env-validation" "$report_file" "Environment validation report"

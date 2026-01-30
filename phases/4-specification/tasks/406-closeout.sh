@@ -10,7 +10,9 @@ task_406_closeout() {
     local closeout_json="$closeout_dir/phase-04-closeout.json"
     local tasks_file="$ATOMIC_ROOT/.taskmaster/tasks/tasks.json"
     local specs_dir="$ATOMIC_ROOT/.claude/specs"
-    local audit_file="$ATOMIC_ROOT/.claude/audit/phase-04-audit.json"
+    # Audit file - check new path first, then legacy
+    local audit_file="$ATOMIC_ROOT/.outputs/audits/phase-4-report.json"
+    [[ ! -f "$audit_file" ]] && audit_file="$ATOMIC_ROOT/.claude/audit/phase-04-audit.json"
 
     atomic_step "Phase Closeout"
 
@@ -33,7 +35,7 @@ task_406_closeout() {
     local all_passed=true
 
     local task_count=$(jq '.tasks | length // 0' "$tasks_file" 2>/dev/null || echo 0)
-    local spec_count=$(find "$specs_dir" -name "spec-*.json" 2>/dev/null | wc -l)
+    local spec_count=$(find "$specs_dir" -name "spec-*.json" 2>/dev/null | wc -l | tr -d ' ')
 
     # Check OpenSpecs created
     if [[ "$spec_count" -ge "$task_count" && "$task_count" -gt 0 ]]; then
@@ -46,7 +48,6 @@ task_406_closeout() {
         echo -e "  ${RED}[CRIT]${NC} ${RED}✗${NC} No OpenSpecs created"
         checklist+=("OpenSpecs created:FAIL")
         all_passed=false
-    fi
 
     # Check TDD subtasks
     local tasks_with_tdd=$(jq '[.tasks[] | select(.subtasks | length >= 4)] | length' "$tasks_file" 2>/dev/null || echo 0)
@@ -60,25 +61,36 @@ task_406_closeout() {
         echo -e "  ${RED}[CRIT]${NC} ${RED}✗${NC} No TDD subtasks"
         checklist+=("TDD subtasks:FAIL")
         all_passed=false
-    fi
 
     # Check audit
     if [[ -f "$audit_file" ]]; then
-        local audit_status=$(jq -r '.overall_status // "UNKNOWN"' "$audit_file")
-        if [[ "$audit_status" == "PASS" ]]; then
-            echo -e "  ${GREEN}[BLCK]${NC} ${GREEN}✓${NC} Audit passed"
+        # Check summary.passed/failed/warnings (new format) or overall_status (legacy)
+        local passed=$(jq -r '.summary.passed // 0' "$audit_file" 2>/dev/null)
+        local failed=$(jq -r '.summary.failed // 0' "$audit_file" 2>/dev/null)
+        local warnings=$(jq -r '.summary.warnings // 0' "$audit_file" 2>/dev/null)
+        local total=$((passed + failed + warnings))
+
+        if [[ $total -eq 0 ]]; then
+            # Try legacy format
+            local audit_status=$(jq -r '.overall_status // "UNKNOWN"' "$audit_file")
+            case "$audit_status" in
+                PASS) echo -e "  ${GREEN}[BLCK]${NC} ${GREEN}✓${NC} Audit passed"; checklist+=("Audit:PASS") ;;
+                WARNING|DEFERRED) echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Audit: $audit_status"; checklist+=("Audit:WARN") ;;
+                *) echo -e "  ${RED}[BLCK]${NC} ${RED}✗${NC} Audit failed"; checklist+=("Audit:FAIL") ;;
+            esac
+        elif [[ $failed -eq 0 && $warnings -eq 0 ]]; then
+            echo -e "  ${GREEN}[BLCK]${NC} ${GREEN}✓${NC} Audit passed ($passed passed)"
             checklist+=("Audit:PASS")
-        elif [[ "$audit_status" == "WARNING" || "$audit_status" == "DEFERRED" ]]; then
-            echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Audit: $audit_status"
+        elif [[ $failed -eq 0 ]]; then
+            echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Audit has warnings ($warnings warnings)"
             checklist+=("Audit:WARN")
         else
-            echo -e "  ${RED}[BLCK]${NC} ${RED}✗${NC} Audit failed"
+            echo -e "  ${RED}[BLCK]${NC} ${RED}✗${NC} Audit has failures ($failed failed)"
             checklist+=("Audit:FAIL")
         fi
     else
         echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Audit not completed"
         checklist+=("Audit:SKIP")
-    fi
 
     # Check spec quality (at least have test strategies)
     local specs_with_tests=$(find "$specs_dir" -name "spec-*.json" -exec jq -e '.test_strategy.unit_tests | length > 0' {} \; 2>/dev/null | grep -c true || echo 0)
@@ -88,7 +100,6 @@ task_406_closeout() {
     else
         echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Some specs lack test strategies"
         checklist+=("Test strategies:WARN")
-    fi
 
     # TDD chain integrity
     local valid_chains=$(jq '[.tasks[] | select(.subtasks | length >= 4) | select(.subtasks[1].dependencies == [1]) | select(.subtasks[2].dependencies == [2]) | select(.subtasks[3].dependencies == [3])] | length' "$tasks_file" 2>/dev/null || echo 0)
@@ -98,7 +109,6 @@ task_406_closeout() {
     else
         echo -e "  ${YELLOW}[PASS]${NC} ${YELLOW}!${NC} Some TDD chains may be invalid"
         checklist+=("TDD chains:WARN")
-    fi
 
     echo -e "  ${GREEN}[PASS]${NC} ${GREEN}✓${NC} Ready for TDD Implementation"
     echo ""
@@ -113,7 +123,6 @@ task_406_closeout() {
     if [[ "$all_passed" == false ]]; then
         echo -e "  ${YELLOW}Some critical items need attention before closeout.${NC}"
         echo ""
-    fi
 
     echo -e "  ${CYAN}Closeout options:${NC}"
     echo ""
@@ -122,7 +131,11 @@ task_406_closeout() {
     echo -e "    ${RED}[hold]${NC}    Hold closeout for now"
     echo ""
 
-    read -p "  Choice [approve]: " closeout_choice
+    # Drain any buffered stdin from previous interactions
+    while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
+
+    # Handle EOF gracefully - default to approve
+    read -e -p "  Choice [approve]: " closeout_choice || true
     closeout_choice=${closeout_choice:-approve}
 
     case "$closeout_choice" in
@@ -135,7 +148,7 @@ task_406_closeout() {
             echo ""
             ls -la "$specs_dir"/ 2>/dev/null | head -10
             echo ""
-            read -p "  Press Enter to continue to closeout..."
+            read -e -p "  Press Enter to continue to closeout..." || true
             ;;
         hold)
             echo ""

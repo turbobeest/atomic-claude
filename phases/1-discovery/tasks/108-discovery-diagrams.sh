@@ -91,7 +91,7 @@ task_108_discovery_diagrams() {
     echo -e "    ${CYAN}[standard]${NC}  Context + Container + Data Flow + Deployment"
     echo ""
 
-    read -p "  Selection [standard]: " diagram_selection
+    read -e -p "  Selection [standard]: " diagram_selection || true
     diagram_selection=${diagram_selection:-standard}
 
     local selected_diagrams=()
@@ -192,10 +192,14 @@ task_108_discovery_diagrams() {
 
                 # Convert to SVG if graphviz available
                 if [[ "$has_graphviz" == true ]]; then
-                    if dot -Tsvg "$dot_file" -o "$diagrams_dir/$diagram_type.svg" 2>/dev/null; then
+                    local dot_errors
+                    dot_errors=$(dot -Tsvg "$dot_file" -o "$diagrams_dir/$diagram_type.svg" 2>&1)
+                    if [[ $? -eq 0 ]]; then
                         echo -e "    ${GREEN}✓${NC} Generated $diagram_type.svg"
                     else
-                        echo -e "    ${YELLOW}!${NC} SVG conversion failed"
+                        echo -e "    ${YELLOW}!${NC} SVG conversion failed — DOT syntax error in generated file"
+                        echo -e "    ${DIM}${dot_errors}${NC}" | head -3
+                        echo -e "    ${DIM}Fix: edit $dot_file or regenerate${NC}"
                     fi
                 fi
             else
@@ -299,7 +303,8 @@ task_108_discovery_diagrams() {
     echo ""
 
     while true; do
-        read -p "  Choice [approve]: " review_choice
+    atomic_drain_stdin
+        read -e -p "  Choice [approve]: " review_choice || true
         review_choice=${review_choice:-approve}
 
         case "$review_choice" in
@@ -309,7 +314,7 @@ task_108_discovery_diagrams() {
             view|v)
                 echo ""
                 echo -e "  ${DIM}Available: ${selected_diagrams[*]}${NC}"
-                read -p "  Which diagram? " view_name
+                read -e -p "  Which diagram? " view_name || true
 
                 local view_file="$diagrams_dir/$view_name.dot"
                 if [[ -f "$view_file" ]]; then
@@ -347,7 +352,7 @@ task_108_discovery_diagrams() {
             regenerate|r)
                 echo ""
                 echo -e "  ${DIM}Available: ${selected_diagrams[*]}${NC}"
-                read -p "  Which diagram? " regen_name
+                read -e -p "  Which diagram? " regen_name || true
 
                 if _108_generate_diagram "$regen_name" "$diagrams_dir" "$prompts_dir" \
                     "$approach_name" "$approach_summary" "$dialogue_context" "$direction_context" "$tech_stack_context"; then
@@ -594,8 +599,26 @@ EOF
 
     # Use atomic_invoke if available, otherwise create template
     if type atomic_invoke &>/dev/null; then
-        atomic_invoke "$prompt_file" "$output_file" "Generate $diagram_type diagram" --model=sonnet
-        return $?
+        if atomic_invoke "$prompt_file" "$output_file" "Generate $diagram_type diagram"; then
+            # Sanitize DOT output: strip preamble lines, markdown fences, etc.
+            # LLM output may include Claude Code warnings, markdown fences, or blank lines
+            # before the actual DOT content which starts with "digraph" or "graph"
+            if [[ -f "$output_file" ]]; then
+                local tmp_dot
+                tmp_dot=$(mktemp)
+                # Extract from first "digraph"/"graph" line through end, strip markdown fences
+                sed -n '/^\(digraph\|graph\) /,$ p' "$output_file" | grep -v '^```' > "$tmp_dot"
+                if [[ -s "$tmp_dot" ]]; then
+                    mv "$tmp_dot" "$output_file"
+                else
+                    # Fallback: leave original file if extraction found nothing
+                    rm -f "$tmp_dot"
+                fi
+            fi
+            return 0
+        else
+            return 1
+        fi
     else
         # Fallback: create template diagram
         _108_create_template_diagram "$diagram_type" "$output_file" "$approach_name"

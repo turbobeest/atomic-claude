@@ -5,7 +5,7 @@
 #
 
 task_501_entry_initialization() {
-    local phase4_closeout="$ATOMIC_ROOT/.claude/closeout/phase-04-closeout.json"
+    local phase4_closeout=$(atomic_find_closeout "4-specification")
     local tasks_file="$ATOMIC_ROOT/.taskmaster/tasks/tasks.json"
     local specs_dir="$ATOMIC_ROOT/.claude/specs"
     local testing_dir="$ATOMIC_ROOT/.claude/testing"
@@ -76,7 +76,7 @@ EOF
 
     # Check OpenSpec files
     if [[ -d "$specs_dir" ]]; then
-        local spec_count=$(find "$specs_dir" -name "spec-*.json" 2>/dev/null | wc -l)
+        local spec_count=$(find "$specs_dir" -name "spec-*.json" 2>/dev/null | wc -l | tr -d ' ')
         if [[ "$spec_count" -gt 0 ]]; then
             echo -e "  ${GREEN}✓${NC} OpenSpec files found ($spec_count specs)"
         else
@@ -163,7 +163,7 @@ EOF
     echo -e "    4. Security scan before marking complete"
     echo ""
 
-    read -p "  Press Enter to continue..."
+    read -e -p "  Press Enter to continue..." || true
 
     # Save initialization state
     local init_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/initialization.json"

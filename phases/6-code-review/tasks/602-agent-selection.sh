@@ -97,6 +97,9 @@ task_602_agent_selection() {
     echo -e "  ${BOLD}SELECT AGENTS${NC}"
     echo ""
 
+    # Drain any buffered stdin before agent selection
+    atomic_drain_stdin
+
     # Deep Code Reviewer
     echo -e "  ${CYAN}Deep Code Reviewer${NC}"
     echo -e "    ${GREEN}[1]${NC} deep-code-reviewer-phd (recommended)"
@@ -105,13 +108,13 @@ task_602_agent_selection() {
     echo -e "    ${DIM}[c]${NC} Custom agent name"
     echo ""
 
-    read -p "    Selection [1]: " deep_choice
+    read -e -p "    Selection [1]: " deep_choice || true
     deep_choice=${deep_choice:-1}
     case "$deep_choice" in
         2) deep_agent="senior-engineer" ;;
         3) deep_agent="code-quality-expert" ;;
         c|C)
-            read -p "    Enter custom agent name: " deep_agent
+            read -e -p "    Enter custom agent name: " deep_agent || true
             ;;
         *) deep_agent="deep-code-reviewer-phd" ;;
     esac
@@ -125,13 +128,13 @@ task_602_agent_selection() {
     echo -e "    ${DIM}[c]${NC} Custom agent name"
     echo ""
 
-    read -p "    Selection [1]: " arch_choice
+    read -e -p "    Selection [1]: " arch_choice || true
     arch_choice=${arch_choice:-1}
     case "$arch_choice" in
         2) arch_agent="system-architect" ;;
         3) arch_agent="design-pattern-expert" ;;
         c|C)
-            read -p "    Enter custom agent name: " arch_agent
+            read -e -p "    Enter custom agent name: " arch_agent || true
             ;;
         *) arch_agent="arch-compliance-phd" ;;
     esac
@@ -145,13 +148,13 @@ task_602_agent_selection() {
     echo -e "    ${DIM}[c]${NC} Custom agent name"
     echo ""
 
-    read -p "    Selection [1]: " perf_choice
+    read -e -p "    Selection [1]: " perf_choice || true
     perf_choice=${perf_choice:-1}
     case "$perf_choice" in
         2) perf_agent="performance-engineer" ;;
         3) perf_agent="optimization-specialist" ;;
         c|C)
-            read -p "    Enter custom agent name: " perf_agent
+            read -e -p "    Enter custom agent name: " perf_agent || true
             ;;
         *) perf_agent="perf-analyzer-phd" ;;
     esac
@@ -165,13 +168,13 @@ task_602_agent_selection() {
     echo -e "    ${DIM}[c]${NC} Custom agent name"
     echo ""
 
-    read -p "    Selection [1]: " doc_choice
+    read -e -p "    Selection [1]: " doc_choice || true
     doc_choice=${doc_choice:-1}
     case "$doc_choice" in
         2) doc_agent="technical-writer" ;;
         3) doc_agent="api-doc-specialist" ;;
         c|C)
-            read -p "    Enter custom agent name: " doc_agent
+            read -e -p "    Enter custom agent name: " doc_agent || true
             ;;
         *) doc_agent="doc-reviewer-phd" ;;
     esac
@@ -185,13 +188,13 @@ task_602_agent_selection() {
     echo -e "    ${DIM}[c]${NC} Custom agent name"
     echo ""
 
-    read -p "    Selection [1]: " refiner_choice
+    read -e -p "    Selection [1]: " refiner_choice || true
     refiner_choice=${refiner_choice:-1}
     case "$refiner_choice" in
         2) refiner_agent="refactoring-specialist" ;;
         3) refiner_agent="clean-code-expert" ;;
         c|C)
-            read -p "    Enter custom agent name: " refiner_agent
+            read -e -p "    Enter custom agent name: " refiner_agent || true
             ;;
         *) refiner_agent="code-refiner-phd" ;;
     esac

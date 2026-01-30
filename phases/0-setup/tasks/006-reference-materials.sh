@@ -12,7 +12,7 @@
 
 task_006_reference_materials() {
     local config_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/project-config.json"
-    local reference_dir="$ATOMIC_ROOT/reference"
+    local reference_dir="$ATOMIC_ROOT/docs/reference"
 
     atomic_step "Reference Materials"
 
@@ -58,7 +58,7 @@ task_006_reference_materials() {
     echo ""
 
     if [[ "$has_reference" == "true" ]]; then
-        echo -e "  ${GREEN}✓${NC} Found ${BOLD}./reference/${NC} with $reference_count file(s)"
+        echo -e "  ${GREEN}✓${NC} Found ${BOLD}./docs/reference/${NC} with $reference_count file(s)"
         echo ""
         # Show what's there
         echo -e "  ${DIM}Contents:${NC}"
@@ -77,12 +77,13 @@ task_006_reference_materials() {
 
     echo -e "  ${BOLD}What would you like to do?${NC}"
     echo ""
-    echo -e "  ${CYAN}1.${NC} Create ${BOLD}./reference/${NC} folder (I'll add materials)"
+    echo -e "  ${CYAN}1.${NC} Create ${BOLD}./docs/reference/${NC} folder (I'll add materials)"
     echo -e "  ${CYAN}2.${NC} Point to existing folder"
     echo -e "  ${CYAN}3.${NC} Skip for now (can add later)"
     echo ""
 
-    read -p "  Choice [3]: " ref_choice
+    atomic_drain_stdin
+    read -e -p "  Choice [3]: " ref_choice || true
     ref_choice=${ref_choice:-3}
 
     case "$ref_choice" in
@@ -94,12 +95,12 @@ task_006_reference_materials() {
             ;;
         3)
             atomic_info "Skipping reference materials"
-            atomic_context_decision "Reference materials: skipped (can add later to ./reference/)" "configuration"
+            atomic_context_decision "Reference materials: skipped (can add later to ./docs/reference/)" "configuration"
             ;;
     esac
 
     echo ""
-    echo -e "  ${DIM}Tip: You can add materials to ./reference/ at any time.${NC}"
+    echo -e "  ${DIM}Tip: You can add materials to ./docs/reference/ at any time.${NC}"
     echo -e "  ${DIM}     They'll be available during Discovery and PRD phases.${NC}"
     echo ""
 
@@ -141,15 +142,15 @@ Place materials here to enrich Discovery and PRD phases.
 You can add materials at any time before or during Discovery.
 EOF
 
-    atomic_success "Created ./reference/ with suggested structure"
+    atomic_success "Created ./docs/reference/ with suggested structure"
     echo ""
     echo -e "  ${DIM}Folders created:${NC}"
-    echo -e "    ./reference/visuals/   ${DIM}- Screenshots, mockups${NC}"
-    echo -e "    ./reference/docs/      ${DIM}- Requirements, specs${NC}"
-    echo -e "    ./reference/examples/  ${DIM}- Analogous systems${NC}"
+    echo -e "    ./docs/reference/visuals/   ${DIM}- Screenshots, mockups${NC}"
+    echo -e "    ./docs/reference/docs/      ${DIM}- Requirements, specs${NC}"
+    echo -e "    ./docs/reference/examples/  ${DIM}- Analogous systems${NC}"
     echo ""
 
-    atomic_context_decision "Reference materials: created ./reference/ folder structure" "configuration"
+    atomic_context_decision "Reference materials: created ./docs/reference/ folder structure" "configuration"
 }
 
 # Link to an existing folder
@@ -157,7 +158,7 @@ _006_link_existing_folder() {
     local config_file="$1"
 
     echo ""
-    read -p "  Path to existing folder: " existing_path
+    read -e -p "  Path to existing folder: " existing_path || true
 
     if [[ -z "$existing_path" ]]; then
         atomic_warn "No path provided"

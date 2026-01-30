@@ -2,160 +2,184 @@
 
 ## Overview
 
-10 phases (0-9), each with task range X01-X99.
+ATOMIC CLAUDE uses a 10-phase pipeline (0-9), each with tasks numbered X01-X99.
 
 ```
-0-Setup → 1-Discovery → 2-PRD → 3-Tasking → 4-Spec → 5-Impl → 6-Review → 7-Integration → 8-Validation → 9-Deploy
+0-Setup → 1-Discovery → 2-PRD → 3-Tasking → 4-Specification → 5-Implementation → 6-Code-Review → 7-Integration → 8-Deployment-Prep → 9-Release
 ```
+
+## Common Task Patterns
+
+Most phases follow a consistent structure with these recurring task types:
+
+| Pattern | Purpose |
+|---------|---------|
+| **Entry & Initialization** | Validate prerequisites, load context from previous phase |
+| **Agent Selection** | Choose specialized LLM agents for phase-specific work |
+| **Phase Audit** | Automated validation that phase objectives were met |
+| **Closeout** | Save artifacts, prepare context for next phase |
+
+---
 
 ## Phase Definitions
 
-### Phase 0: Setup (001-099)
-**Purpose:** Project configuration, API keys, environment validation
+### Phase 0: Setup (001-009)
+**Purpose:** Project configuration, environment validation, and material collection
 
-| Task | Name | Type |
-|------|------|------|
-| 001 | Project Name | Input |
-| 002 | Description | Input |
-| 003 | Project Type | Menu |
-| 004 | GitHub URL | Input + Detection |
-| 005 | Summarize Docs | LLM |
-| 006 | API Keys | Secure Input |
-| 007 | Material Manifest | Deterministic |
-| 008 | Validate Environment | Deterministic |
-
----
-
-### Phase 1: Discovery (101-199)
-**Purpose:** Capture idea, explore codebase, understand context
-
-Combines: Ideation + Discovery
-
-| Task | Name | Type |
-|------|------|------|
-| 101 | Capture Idea | Input |
-| 102 | Scan Codebase | Deterministic |
-| 103 | Analyze Architecture | LLM |
-| 104 | Identify Patterns | LLM |
-| 105 | Technical Summary | LLM |
-| 106 | Risk Assessment | LLM |
+| Task | Name | Type | Description |
+|------|------|------|-------------|
+| 001 | Mode Selection | Menu | Choose new project or resume existing |
+| 002 | Config Collection | Input | Gather project name, description, type |
+| 003 | Config Review | Gate | Review and confirm configuration |
+| 004 | API Keys | Secure Input | Configure LLM provider credentials |
+| 005 | Material Scan | Deterministic | Scan for reference materials (docs, repos) |
+| 006 | Reference Materials | LLM | Summarize and index reference materials |
+| 007 | Environment Setup | Deterministic | Create output directories and state files |
+| 008 | Repository Setup | Deterministic | Initialize or clone git repository |
+| 009 | Environment Check | Deterministic | Validate all dependencies are available |
 
 ---
 
-### Phase 2: PRD (201-299)
-**Purpose:** Draft, validate, and audit Product Requirements Document
+### Phase 1: Discovery (101-110)
+**Purpose:** Understand the project idea, explore existing codebase, establish context
 
-Combines: PRD Draft + Validation + Audit
-
-| Task | Name | Type |
-|------|------|------|
-| 201 | Draft PRD Structure | LLM |
-| 202 | Define Requirements | LLM + Input |
-| 203 | Acceptance Criteria | LLM |
-| 204 | Validate Completeness | LLM |
-| 205 | Cross-Reference Check | LLM |
-| 206 | Human Review Gate | Gate |
-| 207 | Final PRD Audit | LLM |
-
----
-
-### Phase 3: Tasking (301-399)
-**Purpose:** Break down PRD into implementable tasks
-
-| Task | Name | Type |
-|------|------|------|
-| 301 | Extract Features | LLM |
-| 302 | Decompose to Tasks | LLM |
-| 303 | Identify Dependencies | LLM |
-| 304 | Estimate Complexity | LLM |
-| 305 | Prioritize Tasks | LLM + Input |
-| 306 | Generate Task Graph | Deterministic |
+| Task | Name | Type | Description |
+|------|------|------|-------------|
+| 101 | Entry Validation | Deterministic | Verify Phase 0 completed successfully |
+| 102 | Corpus Collection | Deterministic | Gather codebase files for analysis |
+| 103 | Import Requirements | Input (Optional) | Import existing requirements documents |
+| 104 | Opening Dialogue | LLM + Input | Initial conversation about project goals |
+| 105 | Agent Selection | Menu | Choose discovery agents (e.g., systems-architect) |
+| 106 | Discovery Work | LLM | Deep exploration of idea and codebase |
+| 107 | Approach Selection | Gate | Human confirms direction before proceeding |
+| 108 | Discovery Diagrams | LLM | Generate architecture and flow diagrams |
+| 109 | Phase Audit | LLM | Validate discovery objectives met |
+| 110 | Closeout | Deterministic | Save context for PRD phase |
 
 ---
 
-### Phase 4: Specification (401-499)
-**Purpose:** Detailed technical specifications for each task
+### Phase 2: PRD (201-209)
+**Purpose:** Draft, validate, and approve Product Requirements Document
 
-| Task | Name | Type |
-|------|------|------|
-| 401 | Select Task | Menu |
-| 402 | Define Interface | LLM |
-| 403 | Specify Behavior | LLM |
-| 404 | Edge Cases | LLM |
-| 405 | Write Test Spec | LLM |
-| 406 | Review Spec | Gate |
-
----
-
-### Phase 5: Implementation (501-599)
-**Purpose:** TDD cycle - Red/Green/Refactor/Verify
-
-| Task | Name | Type |
-|------|------|------|
-| 501 | Setup Test Environment | Deterministic |
-| 510 | RED: Write Failing Test | LLM |
-| 520 | GREEN: Implement Code | LLM |
-| 530 | REFACTOR: Improve Quality | LLM |
-| 540 | VERIFY: Security Scan | LLM |
-| 550 | Coverage Check | Deterministic |
-| 590 | Next Task or Complete | Control |
+| Task | Name | Type | Description |
+|------|------|------|-------------|
+| 201 | Entry Validation | Deterministic | Verify Phase 1 completed successfully |
+| 202 | PRD Setup | Deterministic | Initialize PRD structure and templates |
+| 203 | PRD Interview | LLM + Input (Optional) | Confirmatory questions about requirements |
+| 204 | Agent Selection | Menu | Choose PRD agents (e.g., prd-author) |
+| 205 | PRD Authoring | LLM | Generate comprehensive PRD document |
+| 206 | PRD Validation | LLM | Validate PRD completeness and consistency |
+| 206b | PRD Revision | LLM + Input | Address validation findings via Q&A |
+| 207 | PRD Approval | Gate | Human review, refinement, and sign-off |
+| 208 | Phase Audit | LLM | Validate PRD meets quality standards |
+| 209 | Closeout | Deterministic | Save approved PRD for tasking phase |
 
 ---
 
-### Phase 6: Review (601-699)
-**Purpose:** Code review and quality assurance
+### Phase 3: Tasking (301-306)
+**Purpose:** Decompose PRD into implementable tasks with dependencies
 
-| Task | Name | Type |
-|------|------|------|
-| 601 | Collect Changes | Deterministic |
-| 602 | Static Analysis | Deterministic |
-| 603 | Code Review | LLM |
-| 604 | Security Review | LLM |
-| 605 | Review Findings | Gate |
-| 606 | Address Issues | LLM |
-
----
-
-### Phase 7: Integration (701-799)
-**Purpose:** Integrate components, resolve conflicts
-
-| Task | Name | Type |
-|------|------|------|
-| 701 | Merge Branches | Deterministic |
-| 702 | Resolve Conflicts | LLM + Manual |
-| 703 | Integration Tests | Deterministic |
-| 704 | Verify Integration | LLM |
+| Task | Name | Type | Description |
+|------|------|------|-------------|
+| 301 | Entry & Initialization | Deterministic | Verify Phase 2 completed, load PRD |
+| 302 | Agent Selection | Menu | Choose tasking agents (e.g., task-decomposer) |
+| 303 | Task Decomposition | LLM | Break PRD into atomic tasks |
+| 304 | Dependency Analysis | LLM | Identify task dependencies, create DAG |
+| 305 | Phase Audit | LLM | Validate task coverage and dependencies |
+| 306 | Closeout | Deterministic | Save tasks.json for specification phase |
 
 ---
 
-### Phase 8: Validation (801-899)
-**Purpose:** End-to-end validation, acceptance testing
+### Phase 4: Specification (401-406)
+**Purpose:** Generate detailed OpenSpec for each task
 
-| Task | Name | Type |
-|------|------|------|
-| 801 | E2E Test Suite | Deterministic |
-| 802 | Acceptance Tests | Deterministic |
-| 803 | Performance Tests | Deterministic |
-| 804 | Validate Against PRD | LLM |
-| 805 | Final Sign-off | Gate |
+| Task | Name | Type | Description |
+|------|------|------|-------------|
+| 401 | Entry & Initialization | Deterministic | Verify Phase 3 completed, load tasks |
+| 402 | Agent Selection | Menu | Choose spec agents (e.g., openspec-author) |
+| 403 | OpenSpec Generation | LLM | Generate specs for all tasks (parallel capable) |
+| 404 | TDD Subtask Injection | Deterministic | Add RED/GREEN/REFACTOR/VERIFY subtasks |
+| 405 | Phase Audit | LLM | Validate spec completeness |
+| 406 | Closeout | Deterministic | Save specs for implementation phase |
 
 ---
 
-### Phase 9: Deployment (901-999)
-**Purpose:** Deploy to production, rollback readiness
+### Phase 5: Implementation (501-507)
+**Purpose:** TDD execution - Red/Green/Refactor/Verify cycles
 
-Combines: Deployment + Rollback Readiness
+| Task | Name | Type | Description |
+|------|------|------|-------------|
+| 501 | Entry & Initialization | Deterministic | Verify Phase 4 completed, load specs |
+| 502 | TDD Setup | Deterministic | Configure test framework and directories |
+| 503 | Agent Selection | Menu | Choose TDD agents (test-writer, implementer, etc.) |
+| 504 | TDD Execution | LLM | Execute TDD cycles (parallel/sequential/guided) |
+| 505 | Final Validation | Deterministic | Run full test suite, coverage check |
+| 506 | Phase Audit | LLM | Validate implementation completeness |
+| 507 | Closeout | Deterministic | Save implementation for review phase |
 
-| Task | Name | Type |
-|------|------|------|
-| 901 | Pre-deploy Checklist | Deterministic |
-| 902 | Create Rollback Point | Deterministic |
-| 903 | Deploy to Staging | Deterministic |
-| 904 | Smoke Tests | Deterministic |
-| 905 | Deploy to Production | Deterministic + Gate |
-| 906 | Verify Deployment | Deterministic |
-| 910 | Rollback Procedure | Documentation |
-| 911 | Rollback Test | Deterministic |
+**TDD Cycle (per task in 504):**
+1. **RED** - Write failing tests based on OpenSpec
+2. **GREEN** - Implement minimal code to pass tests
+3. **REFACTOR** - Improve code quality while maintaining tests
+4. **VERIFY** - Security scan and spec conformance check
+
+---
+
+### Phase 6: Code Review (601-606)
+**Purpose:** Comprehensive code review and quality assurance
+
+| Task | Name | Type | Description |
+|------|------|------|-------------|
+| 601 | Entry & Initialization | Deterministic | Verify Phase 5 completed, collect changes |
+| 602 | Agent Selection | Menu | Choose review agents (e.g., code-review-gate) |
+| 603 | Comprehensive Review | LLM | Static analysis, security review, best practices |
+| 604 | Refinement | LLM + Input | Address review findings |
+| 605 | Phase Audit | LLM | Validate review coverage |
+| 606 | Closeout | Deterministic | Save reviewed code for integration |
+
+---
+
+### Phase 7: Integration (701-707)
+**Purpose:** Integration testing and component verification
+
+| Task | Name | Type | Description |
+|------|------|------|-------------|
+| 701 | Entry & Initialization | Deterministic | Verify Phase 6 completed |
+| 702 | Integration Setup | Deterministic | Configure integration test environment |
+| 703 | Agent Selection | Menu | Choose integration agents |
+| 704 | Testing Execution | LLM + Deterministic | Run integration and E2E tests |
+| 705 | Integration Approval | Gate | Human approval of integration results |
+| 706 | Phase Audit | LLM | Validate integration completeness |
+| 707 | Closeout | Deterministic | Save integration results |
+
+---
+
+### Phase 8: Deployment Prep (801-807)
+**Purpose:** Prepare deployment artifacts and documentation
+
+| Task | Name | Type | Description |
+|------|------|------|-------------|
+| 801 | Entry & Initialization | Deterministic | Verify Phase 7 completed |
+| 802 | Deployment Setup | Deterministic | Configure deployment targets |
+| 803 | Agent Selection | Menu | Choose deployment agents |
+| 804 | Artifact Generation | LLM + Deterministic | Generate deployment artifacts, docs |
+| 805 | Phase Audit | LLM | Validate deployment readiness |
+| 806 | Deployment Approval | Gate | Human approval for deployment |
+| 807 | Closeout | Deterministic | Save deployment artifacts |
+
+---
+
+### Phase 9: Release (901-906)
+**Purpose:** Execute release and confirm deployment
+
+| Task | Name | Type | Description |
+|------|------|------|-------------|
+| 901 | Entry & Initialization | Deterministic | Verify Phase 8 completed |
+| 902 | Release Setup | Deterministic | Configure release environment |
+| 903 | Agent Selection | Menu | Choose release agents |
+| 904 | Release Execution | Deterministic + LLM | Execute deployment, run smoke tests |
+| 905 | Release Confirmation | Gate | Verify deployment success |
+| 906 | Closeout (Final) | Deterministic | Archive project, generate summary |
 
 ---
 
@@ -169,11 +193,39 @@ XYY
 ```
 
 **Examples:**
-- `001` → Phase 0 (Setup), Task 1
-- `105` → Phase 1 (Discovery), Task 5
-- `520` → Phase 5 (Implementation), Task 20 (GREEN step)
-- `901` → Phase 9 (Deployment), Task 1
+- `001` → Phase 0 (Setup), Task 1 (Mode Selection)
+- `105` → Phase 1 (Discovery), Task 5 (Agent Selection)
+- `504` → Phase 5 (Implementation), Task 4 (TDD Execution)
+- `906` → Phase 9 (Release), Task 6 (Final Closeout)
 
 **Gaps are intentional** - allows inserting tasks without renumbering:
-- Phase 5 uses 510, 520, 530... for TDD steps
-- Can insert 515 between RED and GREEN if needed
+- `206b` was inserted between validation and approval
+- Future tasks can use numbers like `307`, `408`, etc.
+
+---
+
+## Task Types
+
+| Type | Description |
+|------|-------------|
+| **Deterministic** | No LLM needed - file operations, validation, setup |
+| **Input** | Requires human input (text, selection) |
+| **Menu** | Selection from predefined options |
+| **LLM** | Requires LLM agent invocation |
+| **LLM + Input** | LLM generates, human refines |
+| **Gate** | Human approval required to proceed |
+| **Secure Input** | Sensitive data entry (API keys, credentials) |
+
+---
+
+## Execution Modes
+
+Phases support different execution modes where applicable:
+
+| Mode | Description |
+|------|-------------|
+| **Sequential** | Process tasks one at a time (default) |
+| **Guided** | Pause between tasks for human review |
+| **Parallel** | Process independent tasks concurrently (DAG-aware) |
+
+Parallel mode respects task dependencies - a task won't start until all its dependencies are complete.

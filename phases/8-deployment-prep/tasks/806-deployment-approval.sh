@@ -146,7 +146,8 @@ task_806_deployment_approval() {
     echo -e "    ${YELLOW}[discuss]${NC}  Review specific details"
     echo ""
 
-    read -p "  Choice [approve]: " approval_choice
+    atomic_drain_stdin
+    read -e -p "  Choice [approve]: " approval_choice || true
     approval_choice=${approval_choice:-approve}
 
     case "$approval_choice" in
@@ -159,7 +160,7 @@ task_806_deployment_approval() {
             echo -e "    docs/INSTALL.md            - Installation guide"
             echo -e "    .claude/deployment/        - Deployment metadata"
             echo ""
-            read -p "  Press Enter after review to continue..."
+            read -e -p "  Press Enter after review to continue..." || true
             echo ""
             echo -e "  ${DIM}Returning to approval...${NC}"
             task_805_deployment_approval
@@ -174,7 +175,7 @@ task_806_deployment_approval() {
             ;;
         approve)
             echo ""
-            read -p "  Approver name: " approver_name
+            read -e -p "  Approver name: " approver_name || true
             approver_name=${approver_name:-"Human Operator"}
             echo ""
             ;;
