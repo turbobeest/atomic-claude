@@ -98,7 +98,7 @@ task_009_environment_check() {
                     return $?
                     ;;
                 b|B)
-                    return 1  # Signal to go back
+                    return $TASK_BACK
                     ;;
                 c|C)
                     atomic_warn "Continuing with validation failures"

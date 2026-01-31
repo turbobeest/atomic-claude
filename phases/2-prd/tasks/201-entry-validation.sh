@@ -125,9 +125,9 @@ EOF
             c|C)
                 atomic_warn "Continuing with missing artifacts"
                 ;;
-            *)
-                atomic_error "Phase 1 incomplete - run Phase 1 first"
-                return 1
+            b|B|*)
+                atomic_info "Returning to complete Phase 1 first"
+                return $TASK_BACK
                 ;;
         esac
     fi

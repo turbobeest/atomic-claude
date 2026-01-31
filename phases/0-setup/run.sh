@@ -193,8 +193,9 @@ main() {
         fi
 
         # Run the task with interactive navigation
-        phase_task_interactive "$task_id" "$task_name" "$task_func"
-        local result=$?
+        # Note: Must capture exit code without triggering set -e on non-zero returns
+        local result=0
+        phase_task_interactive "$task_id" "$task_name" "$task_func" || result=$?
 
         case $result in
             $TASK_CONTINUE)

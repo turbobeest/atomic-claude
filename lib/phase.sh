@@ -639,16 +639,17 @@ phase_run_tasks() {
     done
 
     while [[ $i -lt $total ]]; do
-        phase_task_interactive "${task_ids[$i]}" "${task_names[$i]}" "${tasks[$i]}"
-        local result=$?
+        # Capture exit code without triggering set -e on non-zero returns
+        local result=0
+        phase_task_interactive "${task_ids[$i]}" "${task_names[$i]}" "${tasks[$i]}" || result=$?
 
         case $result in
             $TASK_CONTINUE)
-                ((i++))
+                i=$((i + 1))
                 ;;
             $TASK_BACK)
                 if [[ $i -gt 0 ]]; then
-                    ((i--))
+                    i=$((i - 1))
                 else
                     atomic_warn "Already at first task"
                 fi
