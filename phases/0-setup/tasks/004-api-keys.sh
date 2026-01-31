@@ -396,25 +396,44 @@ _004_collect_supermemory() {
     atomic_success "Supermemory key saved"
 }
 
-# Validate Supermemory API key via MCP
+# Validate Supermemory API key via direct HTTP API call
 _004_validate_supermemory() {
     local key="$1"
+    local api_url="https://api.supermemory.ai"
 
-    echo -e "    ${DIM}Testing Supermemory connection...${NC}"
+    echo -e "    ${DIM}Testing Supermemory API key...${NC}"
 
-    # Export key temporarily for MCP call
-    # Use searchSupermemory as a connection test (no whoAmI available)
-    local result
-    result=$(SUPERMEMORY_API_KEY="$key" mcp-cli call supermemory/searchSupermemory '{"informationToGet": "connection test"}' 2>/dev/null)
+    # Make a simple search request to validate the key
+    # A valid key will return a response (even if empty); invalid key returns 401
+    local http_code
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+        -X POST "$api_url/v3/search" \
+        -H "Authorization: Bearer $key" \
+        -H "Content-Type: application/json" \
+        -d '{"q":"test","containerTags":["sm_project_default"],"topK":1}' \
+        --connect-timeout 10 2>/dev/null)
 
-    if [[ $? -eq 0 ]]; then
-        echo -e "    ${GREEN}✓${NC} Supermemory connected"
-        return 0
-    else
-        atomic_error "Could not connect to Supermemory"
-        echo -e "    ${DIM}Make sure the Supermemory MCP server is configured in Claude Code${NC}"
-        return 1
-    fi
+    case "$http_code" in
+        200|201)
+            echo -e "    ${GREEN}✓${NC} Supermemory API key validated"
+            return 0
+            ;;
+        401|403)
+            atomic_error "Invalid API key (authentication failed)"
+            return 1
+            ;;
+        000)
+            atomic_error "Could not connect to Supermemory API"
+            echo -e "    ${DIM}Check your internet connection${NC}"
+            return 1
+            ;;
+        *)
+            # Other responses (404, 500, etc.) might still mean the key is valid
+            # but there's some other issue - treat as success with warning
+            atomic_warn "API returned status $http_code - key may be valid"
+            return 0
+            ;;
+    esac
 }
 
 # Azure OpenAI configuration
