@@ -55,6 +55,41 @@ for task_file in "$PHASE_DIR/tasks/"*.sh; do
 done
 
 # ============================================================================
+# BOOTSTRAP
+# ============================================================================
+
+# Create required directories and templates for a new project
+_bootstrap_project_structure() {
+    local dirs=(
+        "$ATOMIC_ROOT/.claude"
+        "$ATOMIC_ROOT/.outputs"
+        "$ATOMIC_ROOT/.state"
+        "$ATOMIC_ROOT/.logs"
+        "$ATOMIC_ROOT/initialization"
+        "$ATOMIC_ROOT/docs"
+    )
+
+    for dir in "${dirs[@]}"; do
+        if [[ ! -d "$dir" ]]; then
+            mkdir -p "$dir"
+        fi
+    done
+
+    # Create .gitignore for sensitive directories if not exists
+    local gitignore="$ATOMIC_ROOT/.gitignore"
+    if [[ ! -f "$gitignore" ]]; then
+        cat > "$gitignore" << 'GITIGNORE'
+# ATOMIC CLAUDE generated
+.outputs/*/secrets.json
+.state/
+.logs/
+*.log
+__pycache__/
+GITIGNORE
+    fi
+}
+
+# ============================================================================
 # MAIN WORKFLOW
 # ============================================================================
 
@@ -77,6 +112,9 @@ main() {
                 ;;
         esac
     done
+
+    # Bootstrap project structure (creates directories and templates)
+    _bootstrap_project_structure
 
     # Show the WarGames-style intro (only on fresh start)
     if ! $skip_intro; then
