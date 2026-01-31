@@ -198,11 +198,11 @@ main() {
 
         case $result in
             $TASK_CONTINUE)
-                ((i++))
+                i=$((i + 1))
                 ;;
             $TASK_BACK)
                 if [[ $i -gt 0 ]]; then
-                    ((i--))
+                    i=$((i - 1))
                     # Reset state for the task we're going back to
                     task_state_reset_from "${task_ids[$i]}"
                     # Clear SETUP_MODE if going back to task 001 so it can be re-selected

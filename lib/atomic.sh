@@ -802,7 +802,7 @@ atomic_validate_deps() {
         return 1
     fi
 
-    # Report missing optional (warning only unless strict)
+    # Report missing optional (only in strict mode - optional means optional)
     if [[ ${#missing_optional[@]} -gt 0 ]]; then
         if [[ "$strict" == "--strict" ]] || [[ "$strict" == "true" ]]; then
             echo "ERROR: Missing optional dependencies (strict mode):" >&2
@@ -810,12 +810,9 @@ atomic_validate_deps() {
                 echo "  - $dep" >&2
             done
             return 1
-        else
-            # Just warn about missing optional deps
-            for dep in "${missing_optional[@]}"; do
-                echo "WARN: Optional dependency not found: $dep" >&2
-            done
         fi
+        # Silent for non-strict mode - user will get error if they try to use a feature
+        # that requires an optional dependency they don't have
     fi
 
     return 0
