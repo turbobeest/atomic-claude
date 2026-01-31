@@ -111,7 +111,7 @@ task_002_config_document() {
     ref_docs=$(echo "$ref_docs" | head -5)
 
     if [[ -n "$ref_docs" ]]; then
-        atomic_substep "Reading reference documents..."
+        atomic_substep "Reading reference documents from setup.md..."
         while IFS= read -r ref; do
             if [[ -f "$ref" ]]; then
                 atomic_substep "  Found: $ref"
@@ -122,6 +122,38 @@ $(head -200 "$ref" 2>/dev/null || true)
 "
             fi
         done <<< "$ref_docs"
+    fi
+
+    # Auto-scan for common reference files in project root
+    local auto_refs=()
+    for candidate in \
+        "$ATOMIC_ROOT/README.md" \
+        "$ATOMIC_ROOT/WHITEPAPER.md" \
+        "$ATOMIC_ROOT/DESIGN.md" \
+        "$ATOMIC_ROOT/ARCHITECTURE.md" \
+        "$ATOMIC_ROOT/SPEC.md" \
+        "$ATOMIC_ROOT/docs/README.md" \
+        "$ATOMIC_ROOT/docs/design.md" \
+        "$ATOMIC_ROOT/docs/architecture.md"; do
+        if [[ -f "$candidate" ]]; then
+            auto_refs+=("$candidate")
+        fi
+    done
+
+    if [[ ${#auto_refs[@]} -gt 0 ]]; then
+        atomic_substep "Auto-detected reference documents..."
+        for ref in "${auto_refs[@]}"; do
+            # Skip if already included from setup.md
+            if [[ "$reference_content" != *"$ref"* ]]; then
+                local ref_name="${ref#$ATOMIC_ROOT/}"
+                atomic_substep "  Found: $ref_name"
+                reference_content+="
+=== $ref_name ===
+$(head -500 "$ref" 2>/dev/null || true)
+
+"
+            fi
+        done
     fi
 
     # Also try to detect from git remote
@@ -145,7 +177,9 @@ Start with `{` and end with `}`.
 ## Extraction Rules
 
 1. **Explicit values**: Use the exact value from the setup file
-2. **"infer" fields**: Analyze reference materials to derive a project-specific value
+2. **"infer" fields**: Analyze reference materials (provided below) to derive a project-specific value.
+   - CRITICAL: If no reference materials are provided, use the directory name for project name and use `null` for description/goal
+   - NEVER invent or hallucinate project details - only extract from provided materials
 3. **"default [X]" fields**: Use the literal value X shown in brackets
 4. **"detect" fields**: Use the auto-detected values provided below
 5. **Missing required values**: Use `null` (do NOT invent values)
@@ -156,6 +190,7 @@ Start with `{` and end with `}`.
 | Situation | Response |
 |-----------|----------|
 | Setup file is mostly empty | Use defaults for all fields, note in constraints |
+| No reference materials for "infer" | Use directory name for project.name, `null` for project.description and project.primary_goal |
 | Conflicting values | Prefer explicit setup.md values over inferred |
 | Unknown project type | Default to "new-component" |
 | Invalid enum value | Use closest valid option or default |
