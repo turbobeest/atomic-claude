@@ -145,26 +145,44 @@ default
 default
 
 # ============================================================================
-# MCP (MODEL CONTEXT PROTOCOL) TOOLS
+# MCP (MODEL CONTEXT PROTOCOL) TOOLS — Project-Specific
 # ============================================================================
-# Configure MCP servers and tools available to Claude.
-# Documentation: https://modelcontextprotocol.io/introduction
+# Tools available to Claude DURING pipeline execution (PRD authoring, code
+# generation, testing, etc.). These are for your project's needs.
+#
+# NOTE: Pipeline-level services are configured separately:
+#   - Supermemory (memory persistence) → Task 004 API keys
+#   - Anthropic API (LLM provider)     → Task 004 API keys
+#   - HuggingFace (model downloads)    → Task 004 API keys
+#
+# This section is for ADDITIONAL tools Claude can use while working on your
+# project. Documentation: https://modelcontextprotocol.io/introduction
 
 ## MCP Enabled
+# Enable project-specific MCP tools?
 # Options: true | false | default [false]
 
 false
 
 ## MCP Servers
-# List of MCP servers to connect.
+# List of MCP servers for Claude to use during pipeline execution.
+#
+# Common servers:
+#   - github              # PR/issue management, repo operations
+#   - filesystem          # Extended file access beyond project root
+#   - postgres            # Database queries during development
+#   - firecrawl           # Web research for PRD/discovery
+#   - browser             # Browser automation for testing
+#
+# Format: name | config_path (optional)
 # Examples:
 #   - github
 #   - postgres | ./mcp/postgres-config.json
-#   - filesystem
+#   - firecrawl
 
 
 ## MCP Tool Permissions
-# Which MCP tools require human approval?
+# Which MCP tools require human approval before execution?
 #   all           - Approve every MCP tool invocation
 #   write-only    - Approve only tools that modify data
 #   dangerous     - Approve only explicitly dangerous tools
