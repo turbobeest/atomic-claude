@@ -198,18 +198,19 @@ _sm_memory() {
 
 # Search/recall memories from Supermemory
 # Usage: _sm_recall "query"
+# Returns: Always returns 0 (echoes empty string on failure)
 _sm_recall() {
     local query="$1"
 
     if [[ -z "$SUPERMEMORY_API_KEY" ]]; then
         echo ""
-        return 1
+        return 0
     fi
 
     # Check if mcp-cli is available
     if ! command -v mcp-cli &>/dev/null; then
         echo ""
-        return 1
+        return 0
     fi
 
     # Include project context in the search
@@ -573,9 +574,9 @@ memory_session_start() {
     echo "_Retrieved: $(date -Iseconds)_" >> "$session_context_file"
     echo "" >> "$session_context_file"
 
-    # Recall project context
+    # Recall project context (|| true to prevent set -e from killing script)
     local recalled
-    recalled=$(_sm_recall "project context and current state" true)
+    recalled=$(_sm_recall "project context and current state" true) || true
 
     if [[ -n "$recalled" ]] && [[ "$recalled" != "null" ]]; then
         echo "## Project Context" >> "$session_context_file"
