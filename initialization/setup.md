@@ -396,7 +396,7 @@ anthropic
 
 ## Primary Model
 # The main model for critical thinking tasks.
-# Options: [model-id] | default [claude-sonnet-4-20250514]
+# Options: [model-id] | default [claude-opus-4-5-20251101]
 
 default
 
