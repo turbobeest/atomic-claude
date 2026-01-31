@@ -128,117 +128,97 @@ main() {
     echo -e "${DIM}  [c] Continue  [r] Redo  [b] Go back  [q] Quit${NC}"
     echo ""
 
-    # When resuming, skip tasks before the requested start task
-    local skipping=false
-    [[ -n "$start_task" ]] && skipping=true
+    # Task definitions: ID, Name, Function
+    local task_ids=("001" "002" "003" "004" "005" "006" "007" "008" "009")
+    local task_names=(
+        "Mode Selection"
+        "Config Collection"
+        "Config Review"
+        "API Keys"
+        "Material Scan"
+        "Reference Materials"
+        "Environment Setup"
+        "Repository Setup"
+        "Environment Check"
+    )
+    local task_funcs=(
+        "task_001_mode_selection"
+        "task_002_config_collection"
+        "task_003_config_review"
+        "task_004_api_keys"
+        "task_005_material_scan"
+        "task_006_reference_materials"
+        "task_007_environment_setup"
+        "task_008_repository_setup"
+        "task_009_environment_check"
+    )
 
-    # Task 001: Mode Selection
-    if $skipping && [[ "$start_task" != "001" ]]; then
-        atomic_info "Skipping Task 001 (Mode Selection)"
-        # Restore state from previous run
-        local config_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/project-config.json"
-        if [[ -f "$config_file" ]]; then
-            SETUP_MODE=$(jq -r '.setup_mode // "document"' "$config_file")
-            atomic_info "Restored mode: $SETUP_MODE"
+    # Determine starting index (for --task= resume)
+    local i=0
+    if [[ -n "$start_task" ]]; then
+        for idx in "${!task_ids[@]}"; do
+            if [[ "${task_ids[$idx]}" == "$start_task" ]]; then
+                i=$idx
+                break
+            fi
+        done
+        # Restore state for skipped tasks
+        if [[ $i -gt 0 ]]; then
+            local config_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/project-config.json"
+            if [[ -f "$config_file" ]]; then
+                SETUP_MODE=$(jq -r '.setup_mode // "document"' "$config_file")
+                atomic_info "Restored mode from previous run: $SETUP_MODE"
+            fi
         fi
-    else
-        skipping=false
-        phase_task_interactive "001" "Mode Selection" task_001_mode_selection
-        local result=$?
-        [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
     fi
 
-    # Ensure SETUP_MODE is set before Task 002 (restores from config if skipped/resumed)
-    if [[ -z "$SETUP_MODE" ]]; then
-        local config_file="$ATOMIC_OUTPUT_DIR/0-setup/project-config.json"
-        if [[ -f "$config_file" ]]; then
-            SETUP_MODE=$(jq -r '.setup_mode // "document"' "$config_file")
-            atomic_info "Restored setup mode: $SETUP_MODE"
-        else
-            SETUP_MODE="document"
-            atomic_warn "No saved config found, defaulting to document mode"
+    local total=${#task_ids[@]}
+
+    # Main task loop with navigation support
+    while [[ $i -lt $total ]]; do
+        local task_id="${task_ids[$i]}"
+        local task_name="${task_names[$i]}"
+        local task_func="${task_funcs[$i]}"
+
+        # Ensure SETUP_MODE is set before Task 002+ (restore from config if needed)
+        if [[ $i -ge 1 && -z "$SETUP_MODE" ]]; then
+            local config_file="$ATOMIC_OUTPUT_DIR/0-setup/project-config.json"
+            if [[ -f "$config_file" ]]; then
+                SETUP_MODE=$(jq -r '.setup_mode // "document"' "$config_file")
+                atomic_info "Restored setup mode: $SETUP_MODE"
+            else
+                SETUP_MODE="document"
+                atomic_warn "No saved config found, defaulting to document mode"
+            fi
         fi
-    fi
 
-    # Task 002: Config Collection (branches based on mode)
-    if $skipping && [[ "$start_task" != "002" ]]; then
-        atomic_info "Skipping Task 002 (Config Collection)"
-    else
-        skipping=false
-        phase_task_interactive "002" "Config Collection" task_002_config_collection
+        # Run the task with interactive navigation
+        phase_task_interactive "$task_id" "$task_name" "$task_func"
         local result=$?
-        [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
-    fi
 
-    # Task 003: Config Review
-    if $skipping && [[ "$start_task" != "003" ]]; then
-        atomic_info "Skipping Task 003 (Config Review)"
-    else
-        skipping=false
-        phase_task_interactive "003" "Config Review" task_003_config_review
-        local result=$?
-        [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
-    fi
-
-    # Task 004: API Keys
-    if $skipping && [[ "$start_task" != "004" ]]; then
-        atomic_info "Skipping Task 004 (API Keys)"
-    else
-        skipping=false
-        phase_task_interactive "004" "API Keys" task_004_api_keys
-        local result=$?
-        [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
-    fi
-
-    # Task 005: Material Scan
-    if $skipping && [[ "$start_task" != "005" ]]; then
-        atomic_info "Skipping Task 005 (Material Scan)"
-    else
-        skipping=false
-        phase_task_interactive "005" "Material Scan" task_005_material_scan
-        local result=$?
-        [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
-    fi
-
-    # Task 006: Reference Materials (guide user to gather enriching materials)
-    if $skipping && [[ "$start_task" != "006" ]]; then
-        atomic_info "Skipping Task 006 (Reference Materials)"
-    else
-        skipping=false
-        phase_task_interactive "006" "Reference Materials" task_006_reference_materials
-        local result=$?
-        [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
-    fi
-
-    # Task 007: Environment Setup (list dependencies, install instructions)
-    if $skipping && [[ "$start_task" != "007" ]]; then
-        atomic_info "Skipping Task 007 (Environment Setup)"
-    else
-        skipping=false
-        phase_task_interactive "007" "Environment Setup" task_007_environment_setup
-        local result=$?
-        [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
-    fi
-
-    # Task 008: Repository Setup (agents + audits + Ollama)
-    if $skipping && [[ "$start_task" != "008" ]]; then
-        atomic_info "Skipping Task 008 (Repository Setup)"
-    else
-        skipping=false
-        phase_task_interactive "008" "Repository Setup" task_008_repository_setup
-        local result=$?
-        [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
-    fi
-
-    # Task 009: Environment Check (validate installations + agents)
-    if $skipping && [[ "$start_task" != "009" ]]; then
-        atomic_info "Skipping Task 009 (Environment Check)"
-    else
-        skipping=false
-        phase_task_interactive "009" "Environment Check" task_009_environment_check
-        local result=$?
-        [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
-    fi
+        case $result in
+            $TASK_CONTINUE)
+                ((i++))
+                ;;
+            $TASK_BACK)
+                if [[ $i -gt 0 ]]; then
+                    ((i--))
+                    # Reset state for the task we're going back to
+                    task_state_reset_from "${task_ids[$i]}"
+                    # Clear SETUP_MODE if going back to task 001 so it can be re-selected
+                    if [[ $i -eq 0 ]]; then
+                        SETUP_MODE=""
+                    fi
+                else
+                    atomic_warn "Already at first task"
+                fi
+                ;;
+            $TASK_QUIT)
+                atomic_error "Phase aborted"
+                exit 1
+                ;;
+        esac
+    done
 
     # Final summary
     echo ""
