@@ -1308,6 +1308,7 @@ atomic_wrapper_status() {
 #   --timeout=<seconds>    Override default timeout
 #   --stdin                Read additional context from stdin to append to prompt
 #   --ollama-host=<url>    Override Ollama host URL
+#   --no-stream            Disable real-time output streaming (useful for JSON extraction)
 #
 atomic_invoke() {
     local prompt_source="$1"
@@ -1328,6 +1329,7 @@ atomic_invoke() {
     local max_retries="${ATOMIC_MAX_RETRIES:-2}"
     local retry_delay="${ATOMIC_RETRY_DELAY:-5}"
     local ollama_host="$CLAUDE_OLLAMA_HOST"
+    local stream_override=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -1340,6 +1342,7 @@ atomic_invoke() {
             --retry-delay=*) retry_delay="${1#*=}" ;;
             --stdin) use_stdin=true ;;
             --ollama-host=*) ollama_host="${1#*=}" ;;
+            --no-stream) stream_override="false" ;;
             *) atomic_warn "Unknown option: $1" ;;
         esac
         shift
@@ -1407,9 +1410,9 @@ $stdin_content"
     local attempt=1
     local total_duration=0
 
-    # Stream Claude output to terminal in real-time (default on, disable with ATOMIC_STREAM=false)
+    # Stream Claude output to terminal in real-time (default on, disable with ATOMIC_STREAM=false or --no-stream)
     local stream_pid=""
-    local stream_enabled="${ATOMIC_STREAM:-true}"
+    local stream_enabled="${stream_override:-${ATOMIC_STREAM:-true}}"
 
     while [[ $attempt -le $((max_retries + 1)) ]]; do
         attempt_start=$(date +%s)

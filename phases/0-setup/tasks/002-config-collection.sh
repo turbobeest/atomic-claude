@@ -337,8 +337,8 @@ PROMPT_SCHEMA
 
     atomic_waiting "Claude is extracting configuration..."
 
-    # Invoke Claude to extract
-    if atomic_invoke "$prompt_file" "$extracted_file" "Extract configuration from setup" --model=opus; then
+    # Invoke Claude to extract (--no-stream since output is JSON, not prose)
+    if atomic_invoke "$prompt_file" "$extracted_file" "Extract configuration from setup" --model=opus --no-stream; then
         # Try to validate JSON
         if jq . "$extracted_file" > /dev/null 2>&1; then
             atomic_success "Configuration extracted successfully"
