@@ -120,6 +120,25 @@ task_009_environment_check() {
     # Offer agent repository exploration (complements web UI from Task 008)
     _009_agent_exploration "$config_file"
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # MEMORY CHECKPOINT (Phase 0 Complete)
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    # Build summary for memory persistence
+    local project_name
+    project_name=$(jq -r '.project_name // "unknown"' "$config_file" 2>/dev/null)
+    local mode
+    mode=$(jq -r '.mode // "guided"' "$config_file" 2>/dev/null)
+    local cores
+    cores=$(jq '.capabilities.cpu.cores // 0' "$report_file" 2>/dev/null || echo "0")
+    local mem_gb
+    mem_gb=$(jq '.capabilities.memory.total_mb // 0' "$report_file" 2>/dev/null | awk '{printf "%.0f", $1/1024}')
+
+    local memory_summary="Phase 0 Setup complete. Project: $project_name. Mode: $mode. Environment validated: $_009_CHECKS_PASS passed, $_009_CHECKS_FAIL failed. System: ${cores} cores, ${mem_gb}GB RAM."
+
+    # Prompt user to save to long-term memory (if enabled)
+    memory_prompt_save 0 "Setup" "$memory_summary"
+
     return 0
 }
 
