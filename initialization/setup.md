@@ -11,14 +11,14 @@
 #                   Project basics, sandbox, repository, pipeline, LLM
 #
 #   agent-plan.md   WHO DOES THE WORK
-#                   Assign AI agents to each phase. Browse available agents
-#                   at https://github.com/turbobeest/agents or define custom
-#                   agents inline.
+#                   Assign AI agents to each phase. Agents are included with
+#                   the orchestrator in the agents/ directory. Define custom
+#                   agents inline or reference existing ones.
 #
 #   audit-plan.md   HOW QUALITY IS VERIFIED
 #                   Configure audit profiles (quick/standard/thorough) and
-#                   per-phase overrides. Browse audit dimensions at
-#                   https://github.com/turbobeest/audits
+#                   per-phase overrides. Audits are included with the
+#                   orchestrator in the audits/ directory.
 #
 # ============================================================================
 #
@@ -200,20 +200,6 @@ default
 # Options: [value] | infer | detect (from git remote)
 
 detect
-
-## Agents Repository URL
-# Git URL for the agents repository (specialized AI agents per phase/domain).
-# Browse available agents at https://github.com/turbobeest/agents
-# Options: [value] | default [https://github.com/turbobeest/agents]
-
-default
-
-## Audits Repository URL
-# Git URL for the audits repository (quality audit profiles and categories).
-# Browse audit dimensions at https://github.com/turbobeest/audits
-# Options: [value] | default [https://github.com/turbobeest/audits]
-
-default
 
 ## Default Branch
 # Options: [value] | default [main]
