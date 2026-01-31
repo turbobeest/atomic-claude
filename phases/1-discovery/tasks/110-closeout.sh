@@ -266,6 +266,9 @@ EOF
     # Prompt user to save to long-term memory (if enabled)
     memory_prompt_save 1 "Discovery" "$memory_summary"
 
+    # Git: commit and push phase
+    atomic_git_phase_complete 1 "Discovery"
+
     # ═══════════════════════════════════════════════════════════════════════════
     # SESSION END
     # ═══════════════════════════════════════════════════════════════════════════

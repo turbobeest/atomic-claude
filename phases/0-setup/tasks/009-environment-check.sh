@@ -139,6 +139,9 @@ task_009_environment_check() {
     # Prompt user to save to long-term memory (if enabled)
     memory_prompt_save 0 "Setup" "$memory_summary"
 
+    # Git: commit and push phase
+    atomic_git_phase_complete 0 "Setup"
+
     return 0
 }
 

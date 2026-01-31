@@ -329,6 +329,9 @@ EOF
     # Prompt user to save to long-term memory (if enabled)
     memory_prompt_save 5 "TDD Implementation" "$memory_summary"
 
+    # Git: commit and push phase
+    atomic_git_phase_complete 5 "Implementation"
+
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # SESSION END
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────

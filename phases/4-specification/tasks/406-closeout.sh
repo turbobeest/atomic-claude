@@ -291,6 +291,9 @@ EOF
     # Prompt user to save to long-term memory (if enabled)
     memory_prompt_save 4 "Specification" "$memory_summary"
 
+    # Git: commit and push phase
+    atomic_git_phase_complete 4 "Specification"
+
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # SESSION END
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────

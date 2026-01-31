@@ -17,6 +17,7 @@ PHASE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$PHASE_LIB_DIR/atomic.sh"
 source "$PHASE_LIB_DIR/task-state.sh"
 source "$PHASE_LIB_DIR/memory.sh"
+source "$PHASE_LIB_DIR/git-ops.sh"
 
 # ============================================================================
 # PHASE STATE

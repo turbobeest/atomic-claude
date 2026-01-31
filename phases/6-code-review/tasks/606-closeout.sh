@@ -307,6 +307,9 @@ EOF
     # Prompt user to save to long-term memory (if enabled)
     memory_prompt_save 6 "Code Review" "$memory_summary"
 
+    # Git: commit and push phase
+    atomic_git_phase_complete 6 "Code Review"
+
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # SESSION END
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────

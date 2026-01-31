@@ -282,6 +282,9 @@ EOF
     # Prompt user to save to long-term memory (if enabled)
     memory_prompt_save 9 "Release" "$memory_summary"
 
+    # Git: commit and push phase (final)
+    atomic_git_phase_complete 9 "Release"
+
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # PROJECT COMPLETE
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
