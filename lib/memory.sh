@@ -1,16 +1,14 @@
 #!/bin/bash
 #
 # ATOMIC-CLAUDE Memory Layer
-# Persistent memory integration via Supermemory
+# Persistent memory via Supermemory with checkpoint coherence
 #
-# This module provides session-to-session memory, reducing the token tax
-# of re-explaining context every session. It integrates with Supermemory
-# for persistence and retrieval.
-#
-# Memory Tiers:
-#   1. Session Bootstrap - Context injection on session start
-#   2. Gardener Persistence - Checkpoint multi-agent summaries
-#   3. Phase Closeout - Structured phase summaries
+# Architecture:
+#   - Checkpoint model: Memory saved at phase closeouts only
+#   - Head tracking: Local state knows current phase progression
+#   - Backtrack handling: Invalidates/forgets orphaned memories
+#   - Scope separation: Pipeline work vs meta/debug work
+#   - User approval: Nothing persists without explicit consent
 #
 
 # ============================================================================
@@ -18,330 +16,474 @@
 # ============================================================================
 
 MEMORY_ENABLED="${ATOMIC_MEMORY_ENABLED:-false}"
-MEMORY_PROVIDER="${ATOMIC_MEMORY_PROVIDER:-supermemory}"
 SUPERMEMORY_API_KEY="${SUPERMEMORY_API_KEY:-}"
-MEMORY_CHECKPOINT_INTERVAL="${ATOMIC_MEMORY_CHECKPOINT_INTERVAL:-10}"  # turns
 
-# Memory namespaces
-MEMORY_NS_PROJECT="project"
-MEMORY_NS_PHASE="phase"
-MEMORY_NS_GARDENER="gardener"
-MEMORY_NS_USER="user"
+# Local state files
+MEMORY_HEAD_FILE="${ATOMIC_ROOT:-.}/.state/memory-head.json"
+MEMORY_CHECKPOINTS_DIR="${ATOMIC_ROOT:-.}/.state/memory-checkpoints"
 
 # ============================================================================
 # INITIALIZATION
 # ============================================================================
 
-_memory_init() {
+memory_init() {
     if [[ "$MEMORY_ENABLED" != "true" ]]; then
         return 0
     fi
 
-    if [[ -z "$SUPERMEMORY_API_KEY" ]]; then
-        atomic_warn "Memory enabled but SUPERMEMORY_API_KEY not set"
-        MEMORY_ENABLED="false"
-        return 1
+    # Create state directories
+    mkdir -p "$(dirname "$MEMORY_HEAD_FILE")"
+    mkdir -p "$MEMORY_CHECKPOINTS_DIR"
+
+    # Initialize head file if missing
+    if [[ ! -f "$MEMORY_HEAD_FILE" ]]; then
+        _memory_init_head
     fi
 
-    # Check if supermemory MCP is available
-    if ! _memory_check_mcp; then
-        atomic_warn "Supermemory MCP not available, falling back to disabled"
-        MEMORY_ENABLED="false"
-        return 1
+    # Check supermemory availability (non-blocking)
+    if [[ -n "$SUPERMEMORY_API_KEY" ]]; then
+        _memory_check_connection &
     fi
 
-    atomic_info "Memory layer initialized (provider: $MEMORY_PROVIDER)"
     return 0
 }
 
-_memory_check_mcp() {
-    # Check if supermemory MCP server is configured
-    # This will be implemented when MCP integration is added
-    return 0
-}
-
-# ============================================================================
-# CORE MEMORY OPERATIONS
-# ============================================================================
-
-# Write a memory
-# Usage: memory_write "namespace:key" "content" ["metadata_json"]
-memory_write() {
-    local key="$1"
-    local content="$2"
-    local metadata="${3:-{}}"
-
-    if [[ "$MEMORY_ENABLED" != "true" ]]; then
-        return 0
-    fi
-
+_memory_init_head() {
     local project_id
     project_id=$(_memory_get_project_id)
 
-    # Construct full key with project scope
-    local full_key="${project_id}:${key}"
-
-    # Write via MCP or API
-    case "$MEMORY_PROVIDER" in
-        supermemory)
-            _memory_write_supermemory "$full_key" "$content" "$metadata"
-            ;;
-        local)
-            _memory_write_local "$full_key" "$content" "$metadata"
-            ;;
-        *)
-            atomic_warn "Unknown memory provider: $MEMORY_PROVIDER"
-            return 1
-            ;;
-    esac
+    cat > "$MEMORY_HEAD_FILE" << EOF
+{
+  "project": "$project_id",
+  "head_phase": -1,
+  "head_checkpoint": null,
+  "checkpoints": [],
+  "created_at": "$(date -Iseconds)",
+  "updated_at": "$(date -Iseconds)"
+}
+EOF
 }
 
-# Read a memory
-# Usage: memory_read "namespace:key"
-memory_read() {
-    local key="$1"
-
-    if [[ "$MEMORY_ENABLED" != "true" ]]; then
-        echo ""
-        return 0
-    fi
-
-    local project_id
-    project_id=$(_memory_get_project_id)
-    local full_key="${project_id}:${key}"
-
-    case "$MEMORY_PROVIDER" in
-        supermemory)
-            _memory_read_supermemory "$full_key"
-            ;;
-        local)
-            _memory_read_local "$full_key"
-            ;;
-        *)
-            echo ""
-            return 1
-            ;;
-    esac
-}
-
-# Search memories
-# Usage: memory_search "query" ["namespace"]
-memory_search() {
-    local query="$1"
-    local namespace="${2:-}"
-
-    if [[ "$MEMORY_ENABLED" != "true" ]]; then
-        echo "[]"
-        return 0
-    fi
-
-    local project_id
-    project_id=$(_memory_get_project_id)
-
-    case "$MEMORY_PROVIDER" in
-        supermemory)
-            _memory_search_supermemory "$query" "$project_id" "$namespace"
-            ;;
-        local)
-            _memory_search_local "$query" "$project_id" "$namespace"
-            ;;
-        *)
-            echo "[]"
-            return 1
-            ;;
-    esac
-}
-
-# ============================================================================
-# SUPERMEMORY PROVIDER
-# ============================================================================
-
-_memory_write_supermemory() {
-    local key="$1"
-    local content="$2"
-    local metadata="$3"
-
-    # TODO: Implement via supermemory MCP tool
-    # mcp-cli call supermemory/add_memory '{
-    #   "content": "...",
-    #   "metadata": {...}
-    # }'
-
-    # For now, log the intent
-    echo "[memory:write] $key" >> "$ATOMIC_ROOT/.claude/memory.log" 2>/dev/null
-    return 0
-}
-
-_memory_read_supermemory() {
-    local key="$1"
-
-    # TODO: Implement via supermemory MCP tool
-    # mcp-cli call supermemory/get_memory '{"key": "..."}'
-
-    echo ""
-    return 0
-}
-
-_memory_search_supermemory() {
-    local query="$1"
-    local project_id="$2"
-    local namespace="$3"
-
-    # TODO: Implement via supermemory MCP tool
-    # mcp-cli call supermemory/search '{"query": "..."}'
-
-    echo "[]"
-    return 0
-}
-
-# ============================================================================
-# LOCAL PROVIDER (Fallback/Development)
-# ============================================================================
-
-_memory_write_local() {
-    local key="$1"
-    local content="$2"
-    local metadata="$3"
-
-    local memory_dir="$ATOMIC_ROOT/.claude/memory"
-    mkdir -p "$memory_dir"
-
-    local safe_key
-    safe_key=$(echo "$key" | tr ':/' '__')
-    local memory_file="$memory_dir/${safe_key}.json"
-
-    jq -n \
-        --arg key "$key" \
-        --arg content "$content" \
-        --argjson metadata "$metadata" \
-        --arg timestamp "$(date -Iseconds)" \
-        '{
-            key: $key,
-            content: $content,
-            metadata: $metadata,
-            timestamp: $timestamp
-        }' > "$memory_file"
-
-    return 0
-}
-
-_memory_read_local() {
-    local key="$1"
-
-    local memory_dir="$ATOMIC_ROOT/.claude/memory"
-    local safe_key
-    safe_key=$(echo "$key" | tr ':/' '__')
-    local memory_file="$memory_dir/${safe_key}.json"
-
-    if [[ -f "$memory_file" ]]; then
-        jq -r '.content' "$memory_file"
-    else
-        echo ""
+_memory_check_connection() {
+    # Quick auth check via whoAmI
+    local result
+    result=$(mcp-cli call supermemory/whoAmI '{}' 2>/dev/null)
+    if [[ $? -eq 0 ]] && [[ -n "$result" ]]; then
+        echo "[memory] Supermemory connected" >> "${ATOMIC_ROOT:-.}/.logs/memory.log" 2>/dev/null
     fi
 }
 
-_memory_search_local() {
-    local query="$1"
-    local project_id="$2"
-    local namespace="$3"
-
-    local memory_dir="$ATOMIC_ROOT/.claude/memory"
-
-    if [[ ! -d "$memory_dir" ]]; then
-        echo "[]"
-        return 0
-    fi
-
-    # Simple grep-based search for local provider
-    local results=()
-    for f in "$memory_dir"/*.json; do
-        [[ -f "$f" ]] || continue
-        if grep -qi "$query" "$f" 2>/dev/null; then
-            results+=("$(jq -c '.' "$f")")
-        fi
-    done
-
-    printf '%s\n' "${results[@]}" | jq -s '.'
-}
-
 # ============================================================================
-# HIGH-LEVEL MEMORY FUNCTIONS
+# PROJECT IDENTIFICATION
 # ============================================================================
 
-# Get project identifier (used to scope all memories)
 _memory_get_project_id() {
     # Use git remote or directory name as project ID
     local project_id
     if git remote get-url origin &>/dev/null; then
-        project_id=$(git remote get-url origin | sed 's/.*[/:]\([^/]*\/[^/]*\)\.git$/\1/' | tr '/' '_')
+        project_id=$(git remote get-url origin | sed 's/.*[/:]\([^/]*\/[^/]*\)\.git$/\1/' | tr '/' '-')
     else
-        project_id=$(basename "$ATOMIC_ROOT")
+        project_id=$(basename "${ATOMIC_ROOT:-$(pwd)}")
     fi
-    echo "$project_id"
+    echo "atomic-$project_id"
 }
 
-# Write project identity (Phase 0)
-memory_write_project_identity() {
-    local description="$1"
-    local tech_stack="$2"
-    local mode="$3"
-
-    memory_write "${MEMORY_NS_PROJECT}:identity" "$description" \
-        "$(jq -n --arg tech "$tech_stack" --arg mode "$mode" '{tech_stack: $tech, mode: $mode}')"
+_memory_get_container_tag() {
+    echo "$(_memory_get_project_id)-pipeline"
 }
 
-# Write current phase state
-memory_write_phase_state() {
+# ============================================================================
+# SCOPE DETECTION
+# ============================================================================
+
+# Check if we should persist to memory
+# Returns 0 (true) if in pipeline mode, 1 (false) if meta/debug mode
+memory_should_persist() {
+    # Memory must be enabled
+    if [[ "$MEMORY_ENABLED" != "true" ]]; then
+        return 1
+    fi
+
+    # Must be in pipeline mode (phase context exists)
+    if [[ -z "$ATOMIC_PHASE" ]] && [[ -z "$CURRENT_PHASE" ]]; then
+        return 1
+    fi
+
+    # Supermemory API key required for remote persistence
+    if [[ -z "$SUPERMEMORY_API_KEY" ]]; then
+        return 1
+    fi
+
+    return 0
+}
+
+# ============================================================================
+# SUPERMEMORY API WRAPPERS
+# ============================================================================
+
+# Save content to Supermemory
+# Usage: _sm_memory "content to save" ["containerTag"]
+_sm_memory() {
+    local content="$1"
+    local container_tag="${2:-$(_memory_get_container_tag)}"
+
+    if [[ -z "$SUPERMEMORY_API_KEY" ]]; then
+        return 1
+    fi
+
+    local payload
+    payload=$(jq -n \
+        --arg content "$content" \
+        --arg action "save" \
+        --arg containerTag "$container_tag" \
+        '{content: $content, action: $action, containerTag: $containerTag}')
+
+    mcp-cli call supermemory/memory "$payload" 2>/dev/null
+    return $?
+}
+
+# Forget content from Supermemory
+# Usage: _sm_forget "query to forget" ["containerTag"]
+_sm_forget() {
+    local content="$1"
+    local container_tag="${2:-$(_memory_get_container_tag)}"
+
+    if [[ -z "$SUPERMEMORY_API_KEY" ]]; then
+        return 1
+    fi
+
+    local payload
+    payload=$(jq -n \
+        --arg content "$content" \
+        --arg action "forget" \
+        --arg containerTag "$container_tag" \
+        '{content: $content, action: $action, containerTag: $containerTag}')
+
+    mcp-cli call supermemory/memory "$payload" 2>/dev/null
+    return $?
+}
+
+# Recall memories from Supermemory
+# Usage: _sm_recall "query" [includeProfile] ["containerTag"]
+_sm_recall() {
+    local query="$1"
+    local include_profile="${2:-true}"
+    local container_tag="${3:-$(_memory_get_container_tag)}"
+
+    if [[ -z "$SUPERMEMORY_API_KEY" ]]; then
+        echo ""
+        return 1
+    fi
+
+    local payload
+    payload=$(jq -n \
+        --arg query "$query" \
+        --argjson includeProfile "$include_profile" \
+        --arg containerTag "$container_tag" \
+        '{query: $query, includeProfile: $includeProfile, containerTag: $containerTag}')
+
+    mcp-cli call supermemory/recall "$payload" 2>/dev/null
+    return $?
+}
+
+# ============================================================================
+# HEAD TRACKING
+# ============================================================================
+
+# Get current head phase
+memory_get_head_phase() {
+    if [[ -f "$MEMORY_HEAD_FILE" ]]; then
+        jq -r '.head_phase // -1' "$MEMORY_HEAD_FILE"
+    else
+        echo "-1"
+    fi
+}
+
+# Update head to new phase
+memory_set_head_phase() {
     local phase="$1"
-    local status="$2"
+    local checkpoint_id="$2"
 
-    memory_write "${MEMORY_NS_PROJECT}:phase" \
-        "Currently in Phase $phase ($status)" \
-        "$(jq -n --arg phase "$phase" --arg status "$status" '{phase: $phase, status: $status}')"
+    if [[ ! -f "$MEMORY_HEAD_FILE" ]]; then
+        _memory_init_head
+    fi
+
+    local tmp_file
+    tmp_file=$(mktemp)
+
+    jq \
+        --argjson phase "$phase" \
+        --arg checkpoint "$checkpoint_id" \
+        --arg updated "$(date -Iseconds)" \
+        '.head_phase = $phase | .head_checkpoint = $checkpoint | .updated_at = $updated' \
+        "$MEMORY_HEAD_FILE" > "$tmp_file"
+
+    mv "$tmp_file" "$MEMORY_HEAD_FILE"
 }
 
-# Write a decision
-memory_write_decision() {
-    local decision="$1"
-    local rationale="$2"
-    local phase="$3"
+# Add checkpoint to tracking
+memory_add_checkpoint() {
+    local checkpoint_id="$1"
+    local phase="$2"
+    local status="${3:-valid}"
 
-    local timestamp
-    timestamp=$(date -Iseconds)
+    if [[ ! -f "$MEMORY_HEAD_FILE" ]]; then
+        _memory_init_head
+    fi
 
-    memory_write "${MEMORY_NS_PROJECT}:decision:$timestamp" \
-        "$decision" \
-        "$(jq -n --arg rationale "$rationale" --arg phase "$phase" '{rationale: $rationale, phase: $phase}')"
+    local tmp_file
+    tmp_file=$(mktemp)
+
+    local checkpoint_obj
+    checkpoint_obj=$(jq -n \
+        --arg id "$checkpoint_id" \
+        --argjson phase "$phase" \
+        --arg status "$status" \
+        --arg created "$(date -Iseconds)" \
+        '{id: $id, phase: $phase, status: $status, created_at: $created}')
+
+    jq \
+        --argjson cp "$checkpoint_obj" \
+        '.checkpoints += [$cp]' \
+        "$MEMORY_HEAD_FILE" > "$tmp_file"
+
+    mv "$tmp_file" "$MEMORY_HEAD_FILE"
 }
 
-# Write phase closeout summary
-memory_write_phase_closeout() {
+# ============================================================================
+# BACKTRACK HANDLING
+# ============================================================================
+
+# Check if starting this phase is a backtrack
+# Returns 0 if backtrack detected, 1 if normal progression
+memory_check_backtrack() {
+    local target_phase="$1"
+
+    if [[ "$MEMORY_ENABLED" != "true" ]]; then
+        return 1
+    fi
+
+    local head_phase
+    head_phase=$(memory_get_head_phase)
+
+    if [[ "$target_phase" -le "$head_phase" ]] && [[ "$head_phase" -ge 0 ]]; then
+        return 0  # Backtrack detected
+    fi
+
+    return 1  # Normal progression
+}
+
+# Handle backtrack - invalidate or forget orphaned memories
+memory_handle_backtrack() {
+    local target_phase="$1"
+    local head_phase
+    head_phase=$(memory_get_head_phase)
+
+    echo ""
+    echo -e "  ${YELLOW:-}⚠ Backtrack Detected${NC:-}"
+    echo ""
+    echo -e "  Current memory head: Phase $head_phase"
+    echo -e "  Target phase: Phase $target_phase"
+    echo ""
+    echo -e "  Memories from phases $((target_phase + 1))-$head_phase will be affected."
+    echo ""
+    echo -e "  Options:"
+    echo -e "    ${GREEN:-}[continue]${NC:-} Invalidate locally (memories remain in Supermemory but ignored)"
+    echo -e "    ${YELLOW:-}[forget]${NC:-}   Also remove from Supermemory"
+    echo -e "    ${RED:-}[abort]${NC:-}    Cancel and stay at current phase"
+    echo ""
+
+    local choice
+    read -rp "  Choice [continue]: " choice || choice="continue"
+    choice=${choice:-continue}
+
+    case "$choice" in
+        forget)
+            _memory_forget_after_phase "$target_phase"
+            _memory_invalidate_after_phase "$target_phase"
+            ;;
+        abort)
+            echo ""
+            echo -e "  ${DIM:-}Backtrack cancelled.${NC:-}"
+            return 1
+            ;;
+        *)
+            _memory_invalidate_after_phase "$target_phase"
+            ;;
+    esac
+
+    # Update head to target phase
+    memory_set_head_phase "$target_phase" ""
+
+    echo ""
+    echo -e "  ${GREEN:-}✓${NC:-} Memory head reset to Phase $target_phase"
+    echo ""
+
+    return 0
+}
+
+# Mark checkpoints after phase as invalidated (local only)
+_memory_invalidate_after_phase() {
     local phase="$1"
-    local summary="$2"
-    local artifacts="$3"
 
-    memory_write "${MEMORY_NS_PHASE}:${phase}:closeout" \
-        "$summary" \
-        "$(jq -n --arg artifacts "$artifacts" '{artifacts: $artifacts}')"
+    if [[ ! -f "$MEMORY_HEAD_FILE" ]]; then
+        return 0
+    fi
+
+    local tmp_file
+    tmp_file=$(mktemp)
+
+    jq \
+        --argjson phase "$phase" \
+        '.checkpoints = [.checkpoints[] | if .phase > $phase then .status = "invalidated" else . end]' \
+        "$MEMORY_HEAD_FILE" > "$tmp_file"
+
+    mv "$tmp_file" "$MEMORY_HEAD_FILE"
 }
 
-# Write gardener checkpoint
-memory_write_gardener_checkpoint() {
-    local session_id="$1"
-    local summary="$2"
-    local turn_count="$3"
+# Forget memories after phase from Supermemory
+_memory_forget_after_phase() {
+    local phase="$1"
 
-    memory_write "${MEMORY_NS_GARDENER}:${session_id}:checkpoint" \
-        "$summary" \
-        "$(jq -n --argjson turns "$turn_count" '{turn_count: $turns}')"
+    # Get checkpoints to forget
+    local checkpoints
+    checkpoints=$(jq -r ".checkpoints[] | select(.phase > $phase) | .id" "$MEMORY_HEAD_FILE" 2>/dev/null)
+
+    for checkpoint_id in $checkpoints; do
+        echo -e "  ${DIM:-}Forgetting checkpoint: $checkpoint_id${NC:-}"
+        _sm_forget "checkpoint:$checkpoint_id"
+    done
 }
 
-# Write user preference
-memory_write_user_preference() {
-    local key="$1"
-    local value="$2"
+# ============================================================================
+# CHECKPOINT OPERATIONS
+# ============================================================================
 
-    memory_write "${MEMORY_NS_USER}:preference:$key" "$value"
+# Create a checkpoint for the current phase
+# Usage: memory_create_checkpoint <phase> <phase_name> <summary> [key_decisions_json] [artifacts_json]
+memory_create_checkpoint() {
+    local phase="$1"
+    local phase_name="$2"
+    local summary="$3"
+    local decisions="${4:-[]}"
+    local artifacts="${5:-[]}"
+
+    local checkpoint_id="phase${phase}-$(date +%Y%m%d-%H%M%S)"
+    local project_id
+    project_id=$(_memory_get_project_id)
+
+    # Create checkpoint JSON
+    local checkpoint_file="$MEMORY_CHECKPOINTS_DIR/${checkpoint_id}.json"
+
+    jq -n \
+        --arg id "$checkpoint_id" \
+        --arg project "$project_id" \
+        --argjson phase "$phase" \
+        --arg phase_name "$phase_name" \
+        --arg summary "$summary" \
+        --argjson decisions "$decisions" \
+        --argjson artifacts "$artifacts" \
+        --arg created "$(date -Iseconds)" \
+        --arg prev "$(jq -r '.head_checkpoint // ""' "$MEMORY_HEAD_FILE" 2>/dev/null)" \
+        '{
+            checkpoint_id: $id,
+            project: $project,
+            phase: $phase,
+            phase_name: $phase_name,
+            summary: $summary,
+            key_decisions: $decisions,
+            artifacts: $artifacts,
+            created_at: $created,
+            previous_checkpoint: $prev
+        }' > "$checkpoint_file"
+
+    # Add to tracking
+    memory_add_checkpoint "$checkpoint_id" "$phase" "valid"
+    memory_set_head_phase "$phase" "$checkpoint_id"
+
+    echo "$checkpoint_id"
+}
+
+# ============================================================================
+# USER APPROVAL GATE
+# ============================================================================
+
+# Prompt user to save phase to memory
+# Usage: memory_prompt_save <phase> <phase_name> <summary>
+# Returns 0 if saved, 1 if skipped
+memory_prompt_save() {
+    local phase="$1"
+    local phase_name="$2"
+    local summary="$3"
+
+    if ! memory_should_persist; then
+        return 1
+    fi
+
+    echo ""
+    echo -e "  ${BOLD:-}MEMORY CHECKPOINT${NC:-}"
+    echo ""
+    echo -e "  ${DIM:-}Summary to persist:${NC:-}"
+    echo ""
+    echo "$summary" | sed 's/^/    /'
+    echo ""
+    echo -e "  ${CYAN:-}Options:${NC:-}"
+    echo -e "    ${GREEN:-}[save]${NC:-} Save to long-term memory"
+    echo -e "    ${YELLOW:-}[edit]${NC:-} Edit summary before saving"
+    echo -e "    ${DIM:-}[skip]${NC:-} Don't save (local only)"
+    echo ""
+
+    local choice
+    read -rp "  Choice [save]: " choice || choice="save"
+    choice=${choice:-save}
+
+    case "$choice" in
+        save)
+            _memory_commit_phase "$phase" "$phase_name" "$summary"
+            return 0
+            ;;
+        edit)
+            local tmp_file
+            tmp_file=$(mktemp --suffix=.md)
+            echo "$summary" > "$tmp_file"
+            ${EDITOR:-nano} "$tmp_file"
+            local edited_summary
+            edited_summary=$(cat "$tmp_file")
+            rm -f "$tmp_file"
+            _memory_commit_phase "$phase" "$phase_name" "$edited_summary"
+            return 0
+            ;;
+        *)
+            echo ""
+            echo -e "  ${DIM:-}Memory save skipped.${NC:-}"
+            # Still create local checkpoint, just don't push to supermemory
+            memory_create_checkpoint "$phase" "$phase_name" "$summary"
+            return 1
+            ;;
+    esac
+}
+
+# Actually commit phase to supermemory
+_memory_commit_phase() {
+    local phase="$1"
+    local phase_name="$2"
+    local summary="$3"
+
+    # Create local checkpoint first
+    local checkpoint_id
+    checkpoint_id=$(memory_create_checkpoint "$phase" "$phase_name" "$summary")
+
+    # Format content for supermemory
+    local content="[Phase $phase: $phase_name] $summary"
+
+    # Save to supermemory
+    if _sm_memory "$content"; then
+        echo ""
+        echo -e "  ${GREEN:-}✓${NC:-} Saved to long-term memory (checkpoint: $checkpoint_id)"
+    else
+        echo ""
+        echo -e "  ${YELLOW:-}!${NC:-} Saved locally only (Supermemory unavailable)"
+    fi
 }
 
 # ============================================================================
@@ -354,51 +496,57 @@ memory_session_start() {
         return 0
     fi
 
-    echo "# Retrieved Memories" > "$ATOMIC_ROOT/.claude/session-context.md"
+    memory_init
 
-    # Retrieve project identity
-    local identity
-    identity=$(memory_read "${MEMORY_NS_PROJECT}:identity")
-    if [[ -n "$identity" ]]; then
-        echo -e "\n## Project\n$identity" >> "$ATOMIC_ROOT/.claude/session-context.md"
+    local session_context_file="${ATOMIC_ROOT:-.}/.outputs/session-context.md"
+    mkdir -p "$(dirname "$session_context_file")"
+
+    echo "# Session Context (from Memory)" > "$session_context_file"
+    echo "" >> "$session_context_file"
+    echo "_Retrieved: $(date -Iseconds)_" >> "$session_context_file"
+    echo "" >> "$session_context_file"
+
+    # Recall project context
+    local recalled
+    recalled=$(_sm_recall "project context and current state" true)
+
+    if [[ -n "$recalled" ]] && [[ "$recalled" != "null" ]]; then
+        echo "## Project Context" >> "$session_context_file"
+        echo "" >> "$session_context_file"
+        echo "$recalled" | jq -r '.memories[]?.content // empty' >> "$session_context_file" 2>/dev/null
+        echo "" >> "$session_context_file"
+
+        echo -e "  ${GREEN:-}✓${NC:-} Session context loaded from memory"
+    else
+        echo "_No memories found for this project._" >> "$session_context_file"
     fi
 
-    # Retrieve current phase
-    local phase
-    phase=$(memory_read "${MEMORY_NS_PROJECT}:phase")
-    if [[ -n "$phase" ]]; then
-        echo -e "\n## Current State\n$phase" >> "$ATOMIC_ROOT/.claude/session-context.md"
+    # Add local head state
+    if [[ -f "$MEMORY_HEAD_FILE" ]]; then
+        local head_phase
+        head_phase=$(memory_get_head_phase)
+        if [[ "$head_phase" -ge 0 ]]; then
+            echo "## Local State" >> "$session_context_file"
+            echo "" >> "$session_context_file"
+            echo "Current phase progression: Phase $head_phase" >> "$session_context_file"
+        fi
     fi
 
-    # Retrieve recent decisions
-    local decisions
-    decisions=$(memory_search "decision" "${MEMORY_NS_PROJECT}")
-    if [[ "$decisions" != "[]" ]]; then
-        echo -e "\n## Recent Decisions" >> "$ATOMIC_ROOT/.claude/session-context.md"
-        echo "$decisions" | jq -r '.[] | "- \(.content)"' >> "$ATOMIC_ROOT/.claude/session-context.md"
-    fi
-
-    atomic_info "Session context loaded from memory"
+    return 0
 }
 
-# Called on session end - persists important context
+# Called on session end
 memory_session_end() {
-    if [[ "$MEMORY_ENABLED" != "true" ]]; then
-        return 0
-    fi
-
-    # Current phase state should be written by phase scripts
-    # This is a hook for any final session-level captures
-
-    atomic_info "Session context saved to memory"
+    # Currently a no-op - we save at checkpoints, not session end
+    return 0
 }
 
 # ============================================================================
 # EXPORTS
 # ============================================================================
 
-export -f memory_write memory_read memory_search
-export -f memory_write_project_identity memory_write_phase_state
-export -f memory_write_decision memory_write_phase_closeout
-export -f memory_write_gardener_checkpoint memory_write_user_preference
+export -f memory_init memory_should_persist
+export -f memory_get_head_phase memory_set_head_phase
+export -f memory_check_backtrack memory_handle_backtrack
+export -f memory_create_checkpoint memory_prompt_save
 export -f memory_session_start memory_session_end

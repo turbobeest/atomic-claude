@@ -11,6 +11,10 @@ Every ATOMIC-CLAUDE session starts fresh. Claude Code has no memory of:
 
 This creates a **token tax** - thousands of tokens spent re-explaining context that should be persistent.
 
+## Additional Concern: Memory Coherence
+
+When users backtrack (redo Phase 2 after completing Phase 4) or fix bugs in atomic-claude itself, we need to ensure memory reflects the **agreed-upon progression**, not orphaned/invalid states.
+
 ## Solution: Three-Tier Memory Architecture
 
 ### Tier 1: Session Bootstrap
@@ -68,6 +72,86 @@ Each phase produces a closeout document. This gets persisted to memory.
 │   "Why did we choose that architecture?"    │
 │   "What was decided in Phase 2?"            │
 └─────────────────────────────────────────────┘
+```
+
+## Memory Coherence: Checkpoint + Head Model
+
+### The Problem
+
+```
+Timeline A (happy path):
+  Phase 0 ──→ Phase 1 ──→ Phase 2 ──→ Phase 3 ──→ Phase 4
+     ↓           ↓           ↓           ↓           ↓
+  memory      memory      memory      memory      memory
+
+Timeline B (backtrack):
+  Phase 0 ──→ Phase 1 ──→ Phase 2 ──→ Phase 3 ──→ Phase 4
+     ↓           ↓           ↓           ↓           ↓
+  memory      memory      memory      memory      memory
+                             │
+                             └──→ Phase 2 (redo)
+                                       ↓
+                                  What happens to Phase 3-4 memories?
+```
+
+### The Solution: Head Tracking
+
+Like git, we track a "head" pointer:
+
+```json
+// .state/memory-head.json
+{
+  "project": "atomic-my-project",
+  "head_phase": 2,
+  "head_checkpoint": "phase2-20260131-143022",
+  "checkpoints": [
+    {"id": "phase0-...", "phase": 0, "status": "valid"},
+    {"id": "phase1-...", "phase": 1, "status": "valid"},
+    {"id": "phase2-...", "phase": 2, "status": "valid"},
+    {"id": "phase3-...", "phase": 3, "status": "invalidated"},
+    {"id": "phase4-...", "phase": 4, "status": "invalidated"}
+  ]
+}
+```
+
+### Backtrack Handling
+
+When user starts Phase 2 after completing Phase 4:
+
+1. **Detect**: `memory_check_backtrack(2)` returns true
+2. **Prompt**: Ask user what to do with Phase 3-4 memories
+3. **Options**:
+   - `continue`: Mark as invalidated locally (ignored on recall)
+   - `forget`: Also remove from Supermemory
+   - `abort`: Cancel the backtrack
+4. **Update**: Set head_phase = 2
+
+### Scope Separation
+
+Pipeline work vs. meta/debug work:
+
+- **Pipeline mode**: `$ATOMIC_PHASE` is set → memories persist
+- **Meta mode**: No phase context → skip memory operations
+
+This prevents bug-fixing sessions from polluting project memory.
+
+### User Approval Gate
+
+Nothing persists without explicit consent:
+
+```
+MEMORY CHECKPOINT
+
+Summary to persist:
+  Phase 2 PRD complete. Mobile-first e-commerce platform.
+  JWT auth, React frontend, Python/FastAPI backend.
+
+Options:
+  [save] Save to long-term memory
+  [edit] Edit summary before saving
+  [skip] Don't save (local only)
+
+Choice [save]: _
 ```
 
 ## Memory Schema
