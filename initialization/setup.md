@@ -402,7 +402,7 @@ default
 
 ## Fast Model
 # For quick operations (validations, simple checks).
-# Options: [model-id] | default [claude-haiku]
+# Options: [model-id] | default [claude-haiku-4-5-20251101]
 
 default
 
