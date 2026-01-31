@@ -1437,7 +1437,7 @@ def main():
     )
     parser.add_argument(
         "project_dir",
-        help="Path to the target project directory (e.g., ATOMICGROK)",
+        help="Path to the target project directory (e.g., my-project)",
     )
     parser.add_argument(
         "--port", type=int, default=8420,
