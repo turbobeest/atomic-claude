@@ -15,18 +15,47 @@
 # CONFIGURATION
 # ============================================================================
 
-MEMORY_ENABLED="${ATOMIC_MEMORY_ENABLED:-false}"
-SUPERMEMORY_API_KEY="${SUPERMEMORY_API_KEY:-}"
-
 # Local state files
 MEMORY_HEAD_FILE="${ATOMIC_ROOT:-.}/.state/memory-head.json"
 MEMORY_CHECKPOINTS_DIR="${ATOMIC_ROOT:-.}/.state/memory-checkpoints"
+
+# Load configuration from environment and/or secrets file
+_memory_load_config() {
+    # Check secrets file for memory settings if not in environment
+    local secrets_file="${ATOMIC_OUTPUT_DIR:-${ATOMIC_ROOT:-.}/.outputs}/0-setup/secrets.json"
+
+    # Load SUPERMEMORY_API_KEY from secrets if not in env
+    if [[ -z "${SUPERMEMORY_API_KEY:-}" ]] && [[ -f "$secrets_file" ]]; then
+        SUPERMEMORY_API_KEY=$(jq -r '.supermemory_api_key // empty' "$secrets_file" 2>/dev/null)
+        export SUPERMEMORY_API_KEY
+    fi
+
+    # Load memory enabled flag from secrets if not in env
+    if [[ -z "${ATOMIC_MEMORY_ENABLED:-}" ]] && [[ -f "$secrets_file" ]]; then
+        local mem_enabled
+        mem_enabled=$(jq -r '.memory_enabled // false' "$secrets_file" 2>/dev/null)
+        if [[ "$mem_enabled" == "true" ]]; then
+            ATOMIC_MEMORY_ENABLED="true"
+            export ATOMIC_MEMORY_ENABLED
+        fi
+    fi
+
+    # Set module-level variables
+    MEMORY_ENABLED="${ATOMIC_MEMORY_ENABLED:-false}"
+    SUPERMEMORY_API_KEY="${SUPERMEMORY_API_KEY:-}"
+}
+
+# Load config on source
+_memory_load_config
 
 # ============================================================================
 # INITIALIZATION
 # ============================================================================
 
 memory_init() {
+    # Reload config in case secrets changed
+    _memory_load_config
+
     if [[ "$MEMORY_ENABLED" != "true" ]]; then
         return 0
     fi

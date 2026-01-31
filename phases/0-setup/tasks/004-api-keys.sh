@@ -52,7 +52,10 @@ task_004_api_keys() {
     echo -e "  ${CYAN}3.${NC} AWS Bedrock (Claude via AWS)"
     echo -e "  ${CYAN}4.${NC} Ollama (local/LAN models)"
     echo ""
-    echo -e "  ${DIM}Enter numbers separated by spaces (e.g., \"1 4\" for Max + Ollama)${NC}"
+    echo -e "  ${BOLD}Optional Enhancements:${NC}"
+    echo -e "  ${CYAN}5.${NC} Supermemory (cross-session memory persistence)"
+    echo ""
+    echo -e "  ${DIM}Enter numbers separated by spaces (e.g., \"1 4 5\" for Max + Ollama + Supermemory)${NC}"
     # Drain stdin before prompt
     while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
     read -e -p "  Configure [1 4]: " provider_choices || true
@@ -65,6 +68,7 @@ task_004_api_keys() {
             2) _004_collect_anthropic "$secrets_file" ;;
             3) _004_collect_bedrock "$secrets_file" ;;
             4) _004_collect_ollama "$secrets_file" ;;
+            5) _004_collect_supermemory "$secrets_file" ;;
         esac
     done
 
@@ -334,6 +338,83 @@ _004_collect_bedrock() {
     jq --arg region "$aws_region" --arg profile "$aws_profile" \
         '.aws_region = $region | .aws_profile = $profile' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
     atomic_success "AWS Bedrock configured"
+}
+
+# Supermemory API key collection (for cross-session memory)
+_004_collect_supermemory() {
+    local secrets_file="$1"
+    local key_name="supermemory_api_key"
+
+    echo -e "  ${CYAN}Supermemory${NC}"
+    echo -e "  ${DIM}Enables persistent memory across Claude Code sessions${NC}"
+    echo -e "  ${DIM}Get your API key at: https://supermemory.ai${NC}"
+    echo ""
+
+    # Check environment variable first
+    if [[ -n "${SUPERMEMORY_API_KEY:-}" ]]; then
+        local masked=$(_004_mask_key "$SUPERMEMORY_API_KEY")
+        echo -e "  ${GREEN}✓${NC} Found in environment: ${DIM}$masked${NC}"
+        read -e -p "    Use this key? [Y/n]: " use_env || true
+        if [[ ! "$use_env" =~ ^[Nn] ]]; then
+            local tmp=$(atomic_mktemp)
+            jq --arg key "$key_name" --arg val "$SUPERMEMORY_API_KEY" '.[$key] = $val' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
+            # Also enable memory in config
+            jq '.memory_enabled = true' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
+            atomic_success "Supermemory key saved (from env)"
+            return 0
+        fi
+    fi
+
+    echo -e "  ${DIM}Format: sm_...${NC}"
+    read -s -p "    Key: " api_key
+    echo ""
+
+    if [[ -z "$api_key" ]]; then
+        atomic_warn "No key provided - memory will be local only"
+        local tmp=$(atomic_mktemp)
+        jq '.memory_enabled = false' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
+        return 0
+    fi
+
+    # Show masked key for confirmation
+    local masked=$(_004_mask_key "$api_key")
+    echo -e "    Entered: ${DIM}$masked${NC}"
+
+    # Offer validation via MCP
+    read -e -p "    Validate key? [y/N]: " do_validate || true
+    if [[ "$do_validate" =~ ^[Yy] ]]; then
+        if _004_validate_supermemory "$api_key"; then
+            atomic_success "Key validated successfully"
+        else
+            atomic_warn "Validation failed - saving anyway"
+        fi
+    fi
+
+    local tmp=$(atomic_mktemp)
+    jq --arg key "$key_name" --arg val "$api_key" '.[$key] = $val' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
+    jq '.memory_enabled = true' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
+    atomic_success "Supermemory key saved"
+}
+
+# Validate Supermemory API key via MCP
+_004_validate_supermemory() {
+    local key="$1"
+
+    echo -e "    ${DIM}Testing Supermemory connection...${NC}"
+
+    # Export key temporarily for MCP call
+    local result
+    result=$(SUPERMEMORY_API_KEY="$key" mcp-cli call supermemory/whoAmI '{}' 2>/dev/null)
+
+    if [[ $? -eq 0 ]] && [[ -n "$result" ]]; then
+        local username
+        username=$(echo "$result" | jq -r '.username // .name // "connected"' 2>/dev/null)
+        echo -e "    ${GREEN}✓${NC} Connected as: $username"
+        return 0
+    else
+        atomic_error "Could not connect to Supermemory"
+        return 1
+    fi
 }
 
 # Azure OpenAI configuration
