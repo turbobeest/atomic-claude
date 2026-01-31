@@ -215,3 +215,84 @@ ollama pull devstral:24b   # Primary workhorse
 ollama pull llama3.2:3b    # Fast validation tasks
 ollama pull llama3.1:8b    # Fallback workhorse
 ```
+
+## Persistent Memory (Supermemory)
+
+Atomic Claude can persist project context across Claude Code sessions using [Supermemory](https://supermemory.ai). This reduces the "token tax" of re-explaining project state each session.
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Session Start                                           │
+│   → Recall project context from Supermemory             │
+│   → Write to .outputs/session-context.md                │
+├─────────────────────────────────────────────────────────┤
+│ Phase Closeout                                          │
+│   → Prompt user to save phase summary                   │
+│   → Persist to Supermemory (with approval)              │
+├─────────────────────────────────────────────────────────┤
+│ Next Session                                            │
+│   → Retrieve context automatically                      │
+│   → Continue with full project awareness                │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Configuration
+
+**Option 1: During Setup (Phase 0)**
+
+Run Phase 0 and select option `5` (Supermemory) when prompted for providers.
+
+**Option 2: Environment Variables**
+
+```bash
+export ATOMIC_MEMORY_ENABLED=true
+export SUPERMEMORY_API_KEY=your_key_here
+
+# Optional: Custom MCP server name (default: supermemory)
+export SUPERMEMORY_MCP_SERVER=supermemory
+```
+
+**Option 3: Secrets File**
+
+Add to `.outputs/0-setup/secrets.json`:
+```json
+{
+  "supermemory_api_key": "your_key_here",
+  "memory_enabled": true
+}
+```
+
+### Prerequisites
+
+1. **Supermemory API Key** - Get one at [supermemory.ai](https://supermemory.ai)
+2. **MCP Server** - Configure `supermemory-mcp` in your Claude Code settings
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **Session Bootstrap** | Recalls project context on `./main.sh run` |
+| **Phase Checkpoints** | Saves summary at each phase closeout (with approval) |
+| **Backtrack Detection** | Warns when re-running earlier phases, offers to invalidate orphaned memories |
+| **Scope Separation** | Only pipeline work persists; bug-fix sessions don't pollute memory |
+| **Graceful Degradation** | Works without Supermemory (local checkpoints only) |
+
+### Backtrack Handling
+
+When you restart an earlier phase (e.g., Phase 2 after completing Phase 4):
+
+```
+⚠ Backtrack Detected
+
+Current memory head: Phase 4
+Target phase: Phase 2
+
+Memories from phases 3-4 will be affected.
+
+Options:
+  [continue] Invalidate locally (memories remain but ignored)
+  [forget]   Also remove from Supermemory
+  [abort]    Cancel and stay at current phase
+```

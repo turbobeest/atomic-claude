@@ -257,6 +257,59 @@ Memory is an enhancement, not a requirement:
 - All memory operations are non-blocking
 - System works identically, just with higher token usage
 
+## Testing
+
+### E2E Test Scenarios
+
+1. **Full Flow with Supermemory**
+   ```bash
+   export ATOMIC_MEMORY_ENABLED=true
+   export SUPERMEMORY_API_KEY=<your_key>
+   ./main.sh run 0
+   # Complete Phase 0, approve memory checkpoint
+   # Verify: .state/memory-checkpoints/ contains checkpoint JSON
+   # Verify: .state/memory-head.json updated with head_phase=0
+   ```
+
+2. **Local-Only Mode (no API key)**
+   ```bash
+   export ATOMIC_MEMORY_ENABLED=true
+   unset SUPERMEMORY_API_KEY
+   ./main.sh run 0
+   # Should show "(local only - Supermemory not configured)"
+   # Checkpoint saves locally, no MCP calls made
+   ```
+
+3. **Backtrack Scenario**
+   ```bash
+   # After completing phases 0-3:
+   ./main.sh run 1
+   # Should show "Backtrack Detected" warning
+   # Options: continue (invalidate), forget, abort
+   ```
+
+4. **Session Context Bootstrap**
+   ```bash
+   ./main.sh run 2
+   # Check .outputs/session-context.md for recalled memories
+   ```
+
+### Manual Verification Checklist
+
+- [ ] Phase 0 closeout prompts for memory save
+- [ ] `[save]` creates local checkpoint AND calls Supermemory (if configured)
+- [ ] `[skip]` creates local checkpoint only
+- [ ] `[edit]` opens editor, then saves
+- [ ] Backtrack detection triggers at phase start
+- [ ] `memory_has_remote()` returns correct value
+- [ ] Session context file created with recalled memories
+- [ ] Graceful degradation when MCP server unavailable
+
+### Log Files
+
+- `.logs/memory.log` - Connection status, checkpoint operations
+- `.logs/memory-invalidations.log` - Forget/invalidate operations
+
 ## Future Enhancements
 
 1. **Cross-project learning**: "How did we handle auth in project X?"

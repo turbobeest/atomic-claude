@@ -127,7 +127,8 @@ _memory_get_container_tag() {
 # ============================================================================
 
 # Check if we should persist to memory
-# Returns 0 (true) if in pipeline mode, 1 (false) if meta/debug mode
+# Returns 0 (true) if in pipeline mode with memory enabled, 1 (false) otherwise
+# Note: Does NOT require API key - local checkpoints work without Supermemory
 memory_should_persist() {
     # Memory must be enabled
     if [[ "$MEMORY_ENABLED" != "true" ]]; then
@@ -139,12 +140,15 @@ memory_should_persist() {
         return 1
     fi
 
-    # Supermemory API key required for remote persistence
-    if [[ -z "$SUPERMEMORY_API_KEY" ]]; then
-        return 1
-    fi
-
+    # Local checkpoints work without Supermemory API key
+    # Remote persistence will gracefully degrade in _memory_commit_phase()
     return 0
+}
+
+# Check if remote persistence (Supermemory) is available
+# Returns 0 (true) if API key is configured, 1 (false) otherwise
+memory_has_remote() {
+    [[ -n "$SUPERMEMORY_API_KEY" ]]
 }
 
 # ============================================================================
@@ -454,17 +458,31 @@ memory_prompt_save() {
         return 1
     fi
 
+    local has_remote=false
+    if memory_has_remote; then
+        has_remote=true
+    fi
+
     echo ""
     echo -e "  ${BOLD:-}MEMORY CHECKPOINT${NC:-}"
+    if [[ "$has_remote" != "true" ]]; then
+        echo -e "  ${DIM:-}(local only - Supermemory not configured)${NC:-}"
+    fi
     echo ""
     echo -e "  ${DIM:-}Summary to persist:${NC:-}"
     echo ""
     echo "$summary" | sed 's/^/    /'
     echo ""
     echo -e "  ${CYAN:-}Options:${NC:-}"
-    echo -e "    ${GREEN:-}[save]${NC:-} Save to long-term memory"
-    echo -e "    ${YELLOW:-}[edit]${NC:-} Edit summary before saving"
-    echo -e "    ${DIM:-}[skip]${NC:-} Don't save (local only)"
+    if [[ "$has_remote" == "true" ]]; then
+        echo -e "    ${GREEN:-}[save]${NC:-} Save to long-term memory (Supermemory + local)"
+        echo -e "    ${YELLOW:-}[edit]${NC:-} Edit summary before saving"
+        echo -e "    ${DIM:-}[skip]${NC:-} Don't save (local checkpoint only)"
+    else
+        echo -e "    ${GREEN:-}[save]${NC:-} Save local checkpoint"
+        echo -e "    ${YELLOW:-}[edit]${NC:-} Edit summary before saving"
+        echo -e "    ${DIM:-}[skip]${NC:-} Don't save"
+    fi
     echo ""
 
     local choice
@@ -579,7 +597,7 @@ memory_session_end() {
 # EXPORTS
 # ============================================================================
 
-export -f memory_init memory_should_persist
+export -f memory_init memory_should_persist memory_has_remote
 export -f memory_get_head_phase memory_set_head_phase
 export -f memory_check_backtrack memory_handle_backtrack
 export -f memory_create_checkpoint memory_prompt_save
