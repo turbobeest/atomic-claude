@@ -1,0 +1,326 @@
+audit:
+  id: code-quality.idioms.standard-library-usage
+  name: Standard Library Usage Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: idioms
+  tier: expert
+  estimated_duration: 45 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  - quality
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates whether the codebase effectively uses standard library features
+    instead of reinventing functionality or using unnecessary third-party
+    dependencies. This includes checking for custom implementations of common
+    algorithms, data structures, and utilities that exist in the standard library.
+  why_it_matters: |
+    Standard library implementations are typically well-tested, optimized, and
+    maintained by language teams. Reinventing standard functionality introduces
+    bugs, increases maintenance burden, and often results in inferior performance.
+    Unnecessary dependencies increase attack surface and supply chain risk.
+  when_to_run:
+  - During dependency audits
+  - Code review processes
+  - Technical debt assessments
+  - Security reviews
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  - type: dependency_manifest
+    description: Package manifest files (package.json, requirements.txt, etc.)
+  access_requirements:
+  - Read access to source code repository
+discovery:
+  code_patterns:
+  - pattern: function\s+(deepCopy|deepClone|cloneDeep)
+    type: regex
+    scope: source
+    purpose: Detect custom deep clone implementations
+  - pattern: function\s+(debounce|throttle|memoize)
+    type: regex
+    scope: source
+    purpose: Detect custom utility implementations
+  - pattern: function\s+(leftPad|padStart|padLeft)
+    type: regex
+    scope: source
+    purpose: Detect custom string padding
+  - pattern: def\s+(flatten|unique|chunk)
+    type: regex
+    scope: source
+    purpose: Detect reimplemented utilities
+  file_patterns:
+  - glob: '**/utils/**/*.{js,ts,py}'
+    purpose: Utility directories likely containing reinventions
+  - glob: '**/helpers/**/*.{js,ts,py}'
+    purpose: Helper directories
+  - glob: '**/package.json'
+    purpose: NPM dependencies
+  - glob: '**/requirements.txt'
+    purpose: Python dependencies
+knowledge_sources:
+  guides:
+  - id: mdn-js
+    name: MDN JavaScript Reference
+    url: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference
+    offline_cache: true
+  - id: python-stdlib
+    name: Python Standard Library Documentation
+    url: https://docs.python.org/3/library/
+    offline_cache: true
+  - id: go-stdlib
+    name: Go Standard Library Documentation
+    url: https://pkg.go.dev/std
+    offline_cache: true
+  - id: design-patterns-gof
+    name: 'Design Patterns: Elements of Reusable Object-Oriented Software'
+    url: https://www.oreilly.com/library/view/design-patterns-elements/0201633612/
+    offline_cache: false
+  - id: effective-java
+    name: Effective Java
+    url: https://www.oreilly.com/library/view/effective-java-3rd/9780134686097/
+    offline_cache: false
+tooling:
+  static_analysis:
+  - tool: eslint-plugin-you-dont-need-lodash-underscore
+    purpose: Identify lodash functions with native equivalents
+    offline_capable: true
+  - tool: depcheck
+    purpose: Find unused dependencies
+    offline_capable: true
+  - tool: vulture
+    purpose: Find unused Python code
+    offline_capable: true
+  scripts:
+  - id: stdlib-scan
+    language: bash
+    purpose: Detect common reinvented functionality
+    source: inline
+    code: |
+      echo "=== Custom Utility Detection ==="
+      grep -rn "function\s\+\(deepCopy\|deepClone\|debounce\|throttle\|flatten\|unique\)" \
+        --include="*.js" --include="*.ts" . 2>/dev/null | head -20
+
+      echo "=== Unnecessary Lodash Usage ==="
+      grep -rn "lodash\|_\.\(map\|filter\|reduce\|find\|forEach\)" \
+        --include="*.js" --include="*.ts" . 2>/dev/null | wc -l
+signals:
+  critical:
+  - id: STDLIB-CRIT-001
+    signal: Custom cryptography implementations
+    evidence_pattern: function.*(encrypt|decrypt|hash|md5|sha)
+    explanation: |
+      Custom cryptography is almost always insecure. Standard libraries
+      and well-vetted packages should be used for all cryptographic operations.
+    remediation: Use crypto standard library or established packages (crypto-js, bcrypt)
+  - id: STDLIB-CRIT-002
+    signal: Custom URL/input parsing for security-sensitive operations
+    evidence_pattern: function.*(parseUrl|sanitize|escape).*\{
+    explanation: |
+      Custom parsing/sanitization often misses edge cases and attack vectors.
+      This creates injection vulnerabilities.
+    remediation: Use URL standard library and established sanitization libraries
+  high:
+  - id: STDLIB-HIGH-001
+    signal: Reimplemented common algorithms available in stdlib
+    evidence_pattern: function.*(binarySearch|quickSort|mergeSort)
+    explanation: |
+      Standard library sort and search implementations are highly optimized
+      and well-tested. Custom implementations are likely slower and buggier.
+    remediation: Use Array.prototype.sort(), sorted(), or language equivalents
+  - id: STDLIB-HIGH-002
+    signal: Custom date/time manipulation instead of standard utilities
+    evidence_pattern: new Date\(.*\)\.getTime|Date\.parse
+    explanation: |
+      Date manipulation is notoriously error-prone. Standard utilities or
+      well-maintained libraries handle edge cases better.
+    remediation: Use Intl.DateTimeFormat, date-fns, or temporal API when available
+  medium:
+  - id: STDLIB-MED-001
+    signal: Lodash/underscore for operations with native equivalents
+    evidence_pattern: _\.(map|filter|reduce|find|forEach|includes)
+    remediation: Use native Array methods (map, filter, reduce, find, forEach, includes)
+  - id: STDLIB-MED-002
+    signal: Custom deep clone/copy implementations
+    evidence_pattern: function\s*(deepCopy|deepClone|clone)
+    remediation: Use structuredClone() (modern) or JSON.parse(JSON.stringify()) for simple cases
+  - id: STDLIB-MED-003
+    signal: Custom string utilities for stdlib equivalents
+    evidence_pattern: function\s*(leftPad|padStart|capitalize|trim)
+    remediation: Use String.prototype methods (padStart, padEnd, trim, etc.)
+  low:
+  - id: STDLIB-LOW-001
+    signal: Custom uuid generation
+    evidence_pattern: function.*uuid|Math\.random.*toString\(36\)
+    remediation: Use crypto.randomUUID() or uuid package
+  - id: STDLIB-LOW-002
+    signal: Custom path manipulation
+    evidence_pattern: split\(['"/]\)|replace.*\\
+    remediation: Use path standard library (path.join, path.resolve, etc.)
+  positive:
+  - id: STDLIB-POS-001
+    signal: Consistent use of standard library utilities
+    evidence_pattern: Native array methods, standard path/url handling
+  - id: STDLIB-POS-002
+    signal: Minimal unnecessary dependencies
+    evidence_pattern: Small dependency count, no redundant utilities
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Analyze Utility Directories
+    description: |
+      Examine utils, helpers, and common directories for custom
+      implementations of standard functionality.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find utility files
+      command: |
+        find . -type d \( -name "utils" -o -name "helpers" -o -name "common" -o -name "lib" \) \
+          -not -path "*/node_modules/*" 2>/dev/null
+    - purpose: List functions in utility files
+      command: |
+        grep -rn "^export\s\+function\|^function\|^def\s" \
+          --include="*.js" --include="*.ts" --include="*.py" . 2>/dev/null | \
+          grep -i "util\|helper\|common" | head -30
+    expected_findings:
+    - Custom utility inventory
+    - Potential stdlib replacements
+  - id: '2'
+    name: Check for Redundant Dependencies
+    description: |
+      Analyze dependencies for packages that duplicate standard library
+      functionality.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Check for lodash when native suffices
+      command: |
+        grep -l "lodash\|underscore" package.json 2>/dev/null && \
+        grep -rn "_\.\(map\|filter\|reduce\|find\)" --include="*.js" --include="*.ts" . 2>/dev/null | wc -l
+    - purpose: Check for moment.js (consider native Intl)
+      command: |
+        grep "moment\|luxon\|dayjs" package.json 2>/dev/null || echo "No date libraries found"
+    expected_findings:
+    - Redundant dependency list
+    - Native replacement opportunities
+  - id: '3'
+    name: Identify Custom Implementations
+    description: |
+      Search for common patterns that indicate reinvented functionality.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find custom deep clone
+      command: |
+        grep -rn "deepCopy\|deepClone\|cloneDeep\|JSON\.parse.*JSON\.stringify" \
+          --include="*.js" --include="*.ts" . 2>/dev/null | head -20
+    - purpose: Find custom debounce/throttle
+      command: |
+        grep -rn "function.*debounce\|function.*throttle" \
+          --include="*.js" --include="*.ts" . 2>/dev/null | head -10
+    expected_findings:
+    - Custom implementation locations
+    - Replacement recommendations
+  - id: '4'
+    name: Security-Sensitive Custom Code
+    description: |
+      Identify any custom implementations of security-sensitive functionality.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find custom crypto
+      command: |
+        grep -rn "function.*\(encrypt\|decrypt\|hash\)" \
+          --include="*.js" --include="*.ts" --include="*.py" . 2>/dev/null | head -20
+    - purpose: Find custom sanitization
+      command: |
+        grep -rn "function.*\(sanitize\|escape\|encode\)" \
+          --include="*.js" --include="*.ts" --include="*.py" . 2>/dev/null | head -20
+    expected_findings:
+    - Security-critical custom code
+    - Immediate remediation needs
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - custom_implementation_inventory
+    - redundant_dependencies
+    - stdlib_alternatives
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Security-Critical Findings
+    - Modernization Opportunities
+    - Dependency Optimization
+  confidence_guidance:
+    high: Clear stdlib alternative exists
+    medium: Stdlib alternative with different API
+    low: Custom implementation may have unique requirements
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: mdn-js
+      priority: recommended
+    - source_id: python-stdlib
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires thorough codebase analysis
+    full:
+      included: true
+      priority: 2
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: stdlib-001
+  item: No custom crypto implementations
+  level: CRITICAL
+  verification: grep -rn 'function.*(encrypt|decrypt)' --include='*.js' --include='*.ts'
+  expected: Zero matches
+- id: stdlib-002
+  item: Utility directories reviewed
+  level: BLOCKING
+  verification: All utils/helpers directories examined
+  expected: Complete inventory
+- id: stdlib-003
+  item: Redundant dependencies identified
+  level: WARNING
+  verification: Dependency analysis completed
+  expected: List of removable dependencies
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP
+    controls:
+    - Cryptographic Failures
+  - framework: ISO 25010
+    controls:
+    - Maintainability
+    - Security
+relationships:
+  commonly_combined:
+  - code-quality.idioms.idiomatic-code
+  - security.dependencies.supply-chain
+  - code-quality.technical-debt.debt-assessment

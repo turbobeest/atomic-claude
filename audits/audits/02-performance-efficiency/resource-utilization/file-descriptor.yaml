@@ -1,0 +1,330 @@
+# ============================================================
+# File Descriptor Audit
+# ============================================================
+# Evaluates file descriptor utilization, limits, and identifies
+# file descriptor exhaustion risks across processes and containers.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.resource-utilization.file-descriptor"
+  name: "File Descriptor Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "resource-utilization"
+
+  tier: "expert"
+  estimated_duration: "1.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines file descriptor (FD) utilization at process, container,
+    and system levels. It analyzes current FD usage against limits, identifies
+    FD leaks, and evaluates ulimit configurations to prevent exhaustion that
+    causes application failures.
+
+  why_it_matters: |
+    File descriptor exhaustion causes immediate application failure with
+    cryptic "Too many open files" errors. Every socket, file, pipe, and
+    connection consumes a file descriptor. Applications with many connections
+    (web servers, databases, proxies) are particularly vulnerable. FD leaks
+    slowly degrade the system until sudden failure.
+
+  when_to_run:
+    - "After deploying high-connection applications"
+    - "When investigating 'Too many open files' errors"
+    - "During capacity planning for connection scaling"
+    - "After changes to ulimit configurations"
+
+prerequisites:
+  required_artifacts:
+    - type: "system-access"
+      description: "Access to process file descriptor information"
+    - type: "metrics-system"
+      description: "Access to node_exporter or process metrics"
+
+  access_requirements:
+    - "Read access to /proc filesystem or equivalent"
+    - "Access to node-level metrics"
+    - "Ability to inspect process FD counts"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus"
+      query: "process_open_fds / process_max_fds"
+      purpose: "Process FD utilization"
+      threshold: "< 80% for safe operation"
+    - system: "Prometheus"
+      query: "node_filefd_allocated / node_filefd_maximum"
+      purpose: "System-wide FD utilization"
+      threshold: "< 70% for safe operation"
+    - system: "Prometheus"
+      query: "rate(process_open_fds[1h])"
+      purpose: "FD growth rate indicating potential leak"
+      threshold: "Should be stable, not growing"
+
+  file_patterns:
+    - glob: "**/limits.conf"
+      purpose: "System ulimit configurations"
+    - glob: "**/sysctl.conf"
+      purpose: "System-wide FD limits"
+
+knowledge_sources:
+  specifications:
+    - id: "linux-fd-limits"
+      name: "Linux File Descriptor Limits"
+      url: "https://man7.org/linux/man-pages/man5/limits.conf.5.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "k8s-security-context"
+      name: "Kubernetes Security Context"
+      url: "https://kubernetes.io/docs/tasks/configure-pod-container/security-context/"
+      offline_cache: true
+    - id: "docker-ulimits"
+      name: "Docker Resource Constraints"
+      url: "https://docs.docker.com/engine/containers/resource_constraints/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "lsof"
+      purpose: "List open files per process"
+      command: "lsof -p <pid> | wc -l"
+    - tool: "cat"
+      purpose: "Check process FD count"
+      command: "ls /proc/<pid>/fd | wc -l"
+    - tool: "ulimit"
+      purpose: "Check current limits"
+      command: "ulimit -n"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        topk(10, process_open_fds / process_max_fds)
+      purpose: "Top 10 processes by FD utilization"
+
+signals:
+  critical:
+    - id: "FD-CRIT-001"
+      signal: "File descriptor utilization above 90%"
+      evidence_threshold: "open_fds / max_fds > 0.9"
+      explanation: |
+        When FD utilization exceeds 90%, the process is at imminent risk of
+        exhaustion. Any spike in connections or file operations will cause
+        failures. Applications typically fail without graceful degradation.
+      remediation: "Increase ulimit, fix FD leaks, or reduce concurrent connections"
+
+    - id: "FD-CRIT-002"
+      signal: "'Too many open files' errors in logs"
+      evidence_pattern: "EMFILE|Too many open files"
+      explanation: |
+        These errors indicate the process has hit its FD limit and cannot
+        open new files or connections. This typically causes request failures
+        and may prevent logging, making diagnosis difficult.
+      remediation: "Immediately increase limits and restart, then investigate root cause"
+
+  high:
+    - id: "FD-HIGH-001"
+      signal: "File descriptor count growing over time (leak)"
+      evidence_threshold: "rate(process_open_fds[1h]) > 0 consistently"
+      explanation: |
+        Growing FD counts indicate a leak - files or connections being opened
+        but never closed. The application will eventually exhaust its limit,
+        even if current utilization appears safe.
+      remediation: "Profile application to find unclosed resources"
+
+    - id: "FD-HIGH-002"
+      signal: "Default ulimits in production containers"
+      evidence_threshold: "ulimit -n returns default value (1024)"
+      explanation: |
+        Default FD limits (often 1024) are inadequate for production workloads.
+        Web servers, databases, and connection-heavy applications easily
+        exceed this with normal traffic.
+      remediation: "Configure appropriate ulimits in container or pod spec"
+
+  medium:
+    - id: "FD-MED-001"
+      signal: "System-wide FD utilization above 50%"
+      evidence_threshold: "node_filefd_allocated / node_filefd_maximum > 0.5"
+      remediation: "Increase fs.file-max sysctl or investigate FD-heavy processes"
+
+    - id: "FD-MED-002"
+      signal: "Inconsistent ulimit configurations across pods"
+      evidence_pattern: "Different FD limits for similar workloads"
+      remediation: "Standardize ulimit configurations"
+
+  low:
+    - id: "FD-LOW-001"
+      signal: "FD metrics not exposed for some processes"
+
+  positive:
+    - id: "FD-POS-001"
+      signal: "FD utilization stable and well below limits"
+    - id: "FD-POS-002"
+      signal: "Appropriate ulimits configured for workload type"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Check system-wide FD limits"
+      description: |
+        Examine system-wide file descriptor limits and current allocation
+        to establish baseline capacity.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Check system FD limit"
+          command: "cat /proc/sys/fs/file-max"
+        - purpose: "Check current system FD allocation"
+          command: "cat /proc/sys/fs/file-nr"
+        - purpose: "Node-level FD metrics"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=node_filefd_allocated' | jq '.data.result'
+      expected_findings:
+        - "System FD limits"
+        - "Current system FD usage"
+
+    - id: "2"
+      name: "Analyze per-process FD utilization"
+      description: |
+        Examine file descriptor usage for individual processes, focusing
+        on high-connection workloads.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Top FD consumers"
+          command: |
+            for pid in $(pgrep -f java\|node\|python); do echo "$pid: $(ls /proc/$pid/fd 2>/dev/null | wc -l)"; done | sort -t: -k2 -nr | head -10
+        - purpose: "Process FD metrics (Prometheus)"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=topk(10,process_open_fds)' | jq '.data.result'
+      expected_findings:
+        - "Per-process FD counts"
+        - "FD utilization percentages"
+
+    - id: "3"
+      name: "Check container ulimit configurations"
+      description: |
+        Verify that containers have appropriate ulimit configurations
+        for their workload requirements.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check ulimits in running container"
+          command: |
+            kubectl exec -it <pod-name> -- sh -c 'ulimit -n'
+        - purpose: "Check pod security context for ulimits"
+          command: |
+            kubectl get pods -A -o json | jq '.items[].spec.containers[].securityContext // "no securityContext"'
+      expected_findings:
+        - "Container ulimit settings"
+        - "Security context configurations"
+
+    - id: "4"
+      name: "Investigate FD growth patterns"
+      description: |
+        Analyze historical FD usage to identify leaks or concerning
+        growth patterns.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "FD count over time"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query_range?query=process_open_fds&start=-24h&end=now&step=5m'
+        - purpose: "Check for FD growth rate"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=rate(process_open_fds[1h])' | jq '.data.result'
+      expected_findings:
+        - "FD usage trends"
+        - "Growth patterns indicating leaks"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "System-wide FD Assessment"
+        - "Per-Process Analysis"
+        - "Leak Detection Results"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct /proc analysis with historical metrics"
+    medium: "Point-in-time observation"
+    low: "Configuration review without runtime verification"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "linux-fd-limits"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime inspection"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "fd-001"
+    item: "No processes above 80% FD utilization"
+    level: "CRITICAL"
+    verification: |
+      curl -s 'http://prometheus:9090/api/v1/query?query=max(process_open_fds/process_max_fds)' | jq '.data.result[0].value[1] | tonumber < 0.8'
+    expected: "true"
+
+  - id: "fd-002"
+    item: "No 'Too many open files' errors in logs"
+    level: "CRITICAL"
+    verification: |
+      grep -r "Too many open files\|EMFILE" /var/log/*.log | wc -l | xargs test 0 -eq
+    expected: "true"
+
+  - id: "fd-003"
+    item: "Production containers have elevated ulimits"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify ulimit -n > 65536 for high-connection workloads"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.resource-utilization.connection-pool-utilization"
+    - "performance-efficiency.resource-utilization.memory-utilization"

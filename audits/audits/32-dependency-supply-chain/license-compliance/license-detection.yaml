@@ -1,0 +1,232 @@
+audit:
+  id: dependency-supply-chain.license-compliance.license-detection
+  name: License Detection Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: dependency-supply-chain
+  category_number: 32
+  subcategory: license-compliance
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: dependencies
+  default_profiles:
+  - full
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit identifies and catalogs all licenses used by project
+    dependencies, including both direct and transitive dependencies.
+    It creates a comprehensive license inventory and identifies any
+    dependencies with unknown or missing license information.
+  why_it_matters: |
+    Using software without understanding its license can lead to legal
+    liability, IP contamination, or compliance violations. Many organizations
+    have policies prohibiting certain licenses. Unknown licenses represent
+    legal risk that must be assessed.
+  when_to_run:
+  - Before initial release
+  - When adding new dependencies
+  - During compliance audits
+  - Before open-sourcing projects
+prerequisites:
+  required_artifacts:
+  - type: dependency_manifest
+    description: package.json, requirements.txt, etc.
+  - type: lock_file
+    description: Lock files for complete dependency tree
+  access_requirements:
+  - Read access to dependency files
+  - Access to license scanning tools
+discovery:
+  file_patterns:
+  - glob: '**/package.json'
+    purpose: Find npm dependencies
+  - glob: '**/requirements.txt'
+    purpose: Find Python dependencies
+  - glob: '**/go.mod'
+    purpose: Find Go dependencies
+  - glob: '**/LICENSE*'
+    purpose: Find license files
+  - glob: '**/COPYING*'
+    purpose: Find alternative license files
+knowledge_sources:
+  guides:
+  - id: spdx-licenses
+    name: SPDX License List
+    url: https://spdx.org/licenses/
+  - id: osi-licenses
+    name: OSI Approved Licenses
+    url: https://opensource.org/licenses/
+  standards:
+  - id: spdx
+    name: Software Package Data Exchange
+    relevance: License identifier standards
+tooling:
+  analysis_tools:
+  - tool: license-checker
+    purpose: Scan npm licenses
+  - tool: pip-licenses
+    purpose: Scan Python licenses
+  - tool: go-licenses
+    purpose: Scan Go licenses
+  - tool: fossa
+    purpose: Commercial license scanning
+  - tool: scancode-toolkit
+    purpose: Comprehensive license detection
+  - tool: licensee
+    purpose: GitHub license detection
+signals:
+  critical:
+  - id: DEP-LIC-CRIT-001
+    signal: Dependencies with unknown or UNLICENSED status
+    evidence_indicators:
+    - License field missing
+    - UNLICENSED in package.json
+    - No LICENSE file in package
+    explanation: |
+      Unknown licenses create legal uncertainty. Without explicit license
+      grant, use may infringe copyright. UNLICENSED typically means
+      proprietary with no rights granted.
+    remediation: Identify actual license or remove dependency
+  - id: DEP-LIC-CRIT-002
+    signal: Multiple conflicting license interpretations
+    evidence_indicators:
+    - License file doesn't match package.json
+    - Dual licensing not clearly specified
+    remediation: Clarify license intent; document interpretation
+  high:
+  - id: DEP-LIC-HIGH-001
+    signal: Significant portion of dependencies without license info
+    evidence_indicators:
+    - More than 5% of dependencies missing licenses
+    - Key dependencies without licenses
+    remediation: Research and document missing licenses
+  - id: DEP-LIC-HIGH-002
+    signal: Non-standard license expressions
+    evidence_indicators:
+    - Custom license text
+    - Non-SPDX identifiers
+    remediation: Map to SPDX identifiers or document custom terms
+  medium:
+  - id: DEP-LIC-MED-001
+    signal: Deprecated license identifiers used
+    evidence_indicators:
+    - GPL without version
+    - BSD without specificity
+    remediation: Update to current SPDX identifiers
+  low:
+  - id: DEP-LIC-LOW-001
+    signal: License information only in README
+    evidence_indicators:
+    - No dedicated LICENSE file
+    - License buried in documentation
+    remediation: Note for completeness; generally acceptable
+  positive:
+  - id: DEP-LIC-POS-001
+    signal: All dependencies have identifiable licenses
+  - id: DEP-LIC-POS-002
+    signal: Licenses documented using SPDX identifiers
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Scan npm Licenses
+    description: Identify licenses in npm dependencies
+    commands:
+    - purpose: Run license-checker
+      command: npx license-checker --summary 2>/dev/null || echo 'license-checker not available'
+    - purpose: Get detailed license info
+      command: npx license-checker --json 2>/dev/null | jq 'to_entries | .[:10] | from_entries' || echo
+        'license-checker json not available'
+  - id: '2'
+    name: Scan Python Licenses
+    description: Identify licenses in Python dependencies
+    commands:
+    - purpose: Run pip-licenses
+      command: pip-licenses 2>/dev/null | head -50 || echo 'pip-licenses not available'
+  - id: '3'
+    name: Scan Go Licenses
+    description: Identify licenses in Go dependencies
+    commands:
+    - purpose: Run go-licenses
+      command: go-licenses csv . 2>/dev/null | head -50 || echo 'go-licenses not available'
+  - id: '4'
+    name: Identify Unknown Licenses
+    description: Find dependencies with missing or unclear licenses
+    commands:
+    - purpose: Find UNKNOWN licenses in npm
+      command: npx license-checker --unknown 2>/dev/null || echo 'Unknown license check not available'
+  - id: '5'
+    name: Create License Inventory
+    description: Generate summary of all licenses in use
+    commands:
+    - purpose: Count licenses by type
+      command: npx license-checker --summary 2>/dev/null | sort | uniq -c | sort -rn | head -20 || echo
+        'License summary not available'
+  - id: '6'
+    name: Check for License Files
+    description: Verify project has proper license documentation
+    commands:
+    - purpose: Find license files in project
+      command: find . -maxdepth 2 -iname 'LICENSE*' -o -iname 'COPYING*' | head -10
+output:
+  deliverables:
+  - type: license_inventory
+    format: structured
+    description: Complete list of all licenses in use
+  - type: unknown_license_list
+    format: list
+    description: Dependencies with unknown licenses
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - License Inventory
+    - Unknown Licenses
+    - Recommendations
+closeout_checklist:
+- id: dep-lic-001
+  item: All dependencies scanned for licenses
+  level: REQUIRED
+  verification: License scanner run complete
+- id: dep-lic-002
+  item: Unknown licenses identified
+  level: CRITICAL
+  verification: Unknown list documented
+- id: dep-lic-003
+  item: License inventory created
+  level: REQUIRED
+  verification: Inventory documented
+- id: dep-lic-004
+  item: SPDX identifiers used where possible
+  level: RECOMMENDED
+  verification: Licenses mapped to SPDX
+governance:
+  applicable_to:
+    archetypes:
+    - all-software-projects
+  compliance_mappings:
+  - framework: SOC 2
+    control: CC6.1
+    description: Asset management
+  - framework: ISO 27001
+    control: A.18.1.2
+    description: Intellectual property rights
+relationships:
+  commonly_combined:
+  - dependency-supply-chain.license-compliance.license-compatibility
+  depends_on:
+  - dependency-supply-chain.dependency-inventory.dependency-enumeration
+  feeds_into:
+  - compliance-legal.license-compliance

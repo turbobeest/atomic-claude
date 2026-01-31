@@ -1,0 +1,273 @@
+audit:
+  id: observability-instrumentation.logging.log-format-consistency
+  name: Log Format Consistency Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: logging
+  tier: expert
+  estimated_duration: 45 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Examines log output formats across all services and components to ensure
+    consistency in structure, field naming, timestamp formats, and encoding.
+    Reviews whether a common schema is adopted and enforced across the
+    organization.
+  why_it_matters: |
+    Inconsistent log formats break aggregation queries, require multiple
+    parsing configurations, and make cross-service analysis difficult. When
+    service A logs timestamps as ISO8601 and service B uses Unix epoch,
+    time-based queries become unreliable. Consistent formats enable unified
+    dashboards, alerts, and automated analysis.
+  when_to_run:
+  - After adding new services or components
+  - During log aggregation system setup
+  - When log queries return inconsistent results
+  - Organizational logging standards review
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code with logging configuration
+  - type: log_samples
+    description: Sample log output from each service (optional)
+  access_requirements:
+  - Read access to application codebase
+  - Access to logging configuration files
+discovery:
+  code_patterns:
+  - pattern: timestamp|@timestamp|time|ts
+    type: keyword
+    scope: config
+    purpose: Find timestamp field naming
+  - pattern: level|severity|log_level
+    type: keyword
+    scope: config
+    purpose: Find log level field naming
+  - pattern: message|msg|log|text
+    type: keyword
+    scope: config
+    purpose: Find message field naming
+  - pattern: ISO8601|RFC3339|unix|epoch
+    type: keyword
+    scope: config
+    purpose: Find timestamp format specifications
+  file_patterns:
+  - glob: '**/logging*.{yml,yaml,json,conf}'
+    purpose: Logging configuration files
+  - glob: '**/logger/*.{js,ts,py,go}'
+    purpose: Custom logger implementations
+  - glob: '**/*formatter*.{js,ts,py,go}'
+    purpose: Log formatters
+  documents_to_review:
+  - type: Logging standards document
+    purpose: Organizational logging guidelines
+knowledge_sources:
+  specifications:
+  - id: ecs
+    name: Elastic Common Schema
+    url: https://www.elastic.co/guide/en/ecs/current/index.html
+    offline_cache: true
+    priority: recommended
+  - id: rfc3339
+    name: RFC 3339 - Timestamps
+    url: https://tools.ietf.org/html/rfc3339
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: log-schema-design
+    name: Designing Log Schemas
+    url: https://www.honeycomb.io/blog/logging-best-practices/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: grep/ripgrep
+    purpose: Find logging configurations
+    offline_capable: true
+  scripts:
+  - id: compare-log-formats
+    language: bash
+    purpose: Compare log formats across services
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Finding timestamp field names ==="
+      rg -i '"(timestamp|@timestamp|time|ts)"' --type-add 'config:*.{yml,yaml,json}' -t config
+      echo "=== Finding level field names ==="
+      rg -i '"(level|severity|log_level)"' --type-add 'config:*.{yml,yaml,json}' -t config
+      echo "=== Finding timestamp formats ==="
+      rg -i '(iso8601|rfc3339|unix|epoch|strftime)' --type-add 'config:*.{yml,yaml,json}' -t config
+signals:
+  critical:
+  - id: LOG-FMT-CRIT-001
+    signal: Mixed JSON and plaintext log output across services
+    evidence_indicators:
+    - Some services output JSON, others output text
+    - Aggregation system parsing failures
+    explanation: |
+      Mixed formats require multiple parsing configurations and may cause
+      parsing failures that drop or corrupt log data.
+    remediation: Standardize all services on structured JSON output
+  high:
+  - id: LOG-FMT-HIGH-001
+    signal: Inconsistent timestamp formats across services
+    explanation: Time-based queries and correlation become unreliable
+    remediation: Standardize on ISO8601/RFC3339 with timezone
+  - id: LOG-FMT-HIGH-002
+    signal: Different field names for same concept
+    explanation: Queries must account for multiple field names
+    remediation: Adopt a common schema like ECS and enforce it
+  medium:
+  - id: LOG-FMT-MED-001
+    signal: No documented logging schema
+    remediation: Create and publish organizational logging standards
+  - id: LOG-FMT-MED-002
+    signal: Log level values inconsistent (DEBUG vs debug vs 10)
+    remediation: Standardize log level representation
+  low:
+  - id: LOG-FMT-LOW-001
+    signal: Minor field naming inconsistencies
+  positive:
+  - id: LOG-FMT-POS-001
+    signal: Common schema (ECS, etc.) adopted across all services
+  - id: LOG-FMT-POS-002
+    signal: Shared logging library enforces format consistency
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory logging configurations
+    description: |
+      Find all logging configuration across services and catalog
+      the formats, field names, and settings in use.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find logging config files
+      command: fd -e yml -e yaml -e json | xargs rg -l 'log|logging' 2>/dev/null
+    - purpose: Find logger implementations
+      command: rg -l '(winston|pino|bunyan|logrus|zap|structlog)' .
+    expected_findings:
+    - List of logging configurations
+    - Logging libraries in use
+  - id: '2'
+    name: Compare timestamp handling
+    description: |
+      Examine how each service handles timestamps including format,
+      timezone, and field naming.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find timestamp configuration
+      command: rg -i 'timestamp.*format|time.*format|date.*format' .
+    - purpose: Find timezone handling
+      command: rg -i '(utc|timezone|tz)' --type-add 'config:*.{yml,yaml,json}' -t config
+    expected_findings:
+    - Timestamp format variations
+    - Timezone handling differences
+  - id: '3'
+    name: Analyze field naming conventions
+    description: |
+      Compare field names used for common log concepts across services.
+    duration_estimate: 10 min
+    questions:
+    - What field name is used for the log message?
+    - How are log levels represented?
+    - What field contains the service/application name?
+    expected_findings:
+    - Field naming variations
+    - Schema adherence
+  - id: '4'
+    name: Check for shared logging infrastructure
+    description: |
+      Determine if there is a shared logging library or configuration
+      that enforces consistency.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find shared logger packages
+      command: rg -l '@company/logger|shared.*logger|common.*log' .
+    expected_findings:
+    - Shared logging infrastructure
+    - Enforcement mechanisms
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Format Inventory
+    - Consistency Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Log output directly compared across services
+    medium: Configuration analysis without output verification
+    low: Based on partial configuration review
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: ecs
+      priority: recommended
+    - source_id: rfc3339
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires cross-service comparison
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: log-fmt-001
+  item: All services use structured JSON logging
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify each service outputs JSON-formatted logs
+  expected: Confirmed by reviewer
+- id: log-fmt-002
+  item: Timestamp format is consistent (ISO8601/RFC3339)
+  level: BLOCKING
+  verification: manual
+  verification_notes: Compare timestamp formats in sample logs from each service
+  expected: Confirmed by reviewer
+- id: log-fmt-003
+  item: Common field names used across services
+  level: WARNING
+  verification: manual
+  verification_notes: Verify message, level, timestamp fields are consistently named
+  expected: Confirmed by reviewer
+- id: log-fmt-004
+  item: Logging schema documented
+  level: WARNING
+  verification: manual
+  verification_notes: Verify logging standards documentation exists
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - microservices
+    - distributed-systems
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC7.2
+relationships:
+  commonly_combined:
+  - observability-instrumentation.logging.structured-logging
+  - observability-instrumentation.logging.log-aggregation
+  - observability-instrumentation.logging.correlation-id

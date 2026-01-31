@@ -1,0 +1,398 @@
+# ============================================================
+# AUDIT: Batch vs Individual Access
+# ============================================================
+
+audit:
+  id: "data-state-management.data-access-patterns.batch-vs-individual-access"
+  name: "Batch vs Individual Access Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "data-access-patterns"
+
+  tier: "expert"
+  estimated_duration: "90 minutes"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "performance"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates whether data access operations appropriately use batch or
+    individual access patterns. Analyzes loops that make database calls,
+    opportunities for batching, and whether bulk operations are used
+    effectively for mass updates, inserts, and deletes.
+
+  why_it_matters: |
+    Individual database operations in loops create N+1 patterns and network
+    round-trip overhead. A loop inserting 1000 records one at a time takes
+    1000 round trips; a batch insert takes one. The difference can be 100x
+    in performance for bulk operations.
+
+  when_to_run:
+    - "Performance optimization"
+    - "Code reviews for data operations"
+    - "Before bulk data processing features"
+    - "When investigating slow operations"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application code with data access operations"
+
+  access_requirements:
+    - "Read access to application source code"
+
+discovery:
+  code_patterns:
+    - pattern: "for.*await.*save|forEach.*await.*create"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect individual saves in loops"
+
+    - pattern: "bulkWrite|insertMany|batchInsert|bulk.*create"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect batch operations"
+
+    - pattern: "Promise\\.all.*map.*find|map.*await.*get"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect parallel individual fetches"
+
+    - pattern: "IN \\(|whereIn|findByIds"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect batched reads"
+
+  file_patterns:
+    - glob: "**/services/**"
+      purpose: "Service layer with data operations"
+    - glob: "**/jobs/**"
+      purpose: "Background job processors"
+    - glob: "**/workers/**"
+      purpose: "Worker processes"
+
+knowledge_sources:
+  guides:
+    - id: "batch-operations"
+      name: "Database Batch Operations"
+      url: "https://www.postgresql.org/docs/current/populate.html"
+      offline_cache: true
+
+    - id: "dataloader"
+      name: "DataLoader Pattern"
+      url: "https://github.com/graphql/dataloader"
+      offline_cache: true
+
+  learning_resources:
+    - id: "high-performance-mysql"
+      title: "High Performance MySQL"
+      type: "book"
+      reference: "Baron Schwartz, ISBN: 978-1449314286"
+
+tooling:
+  static_analysis:
+    - tool: "eslint-plugin-loops"
+      purpose: "Detect async operations in loops"
+      offline_capable: true
+
+  scripts:
+    - id: "batch-access-scan"
+      language: "bash"
+      purpose: "Identify batch vs individual access patterns"
+      source: "inline"
+      code: |
+        echo "=== Batch vs Individual Access Analysis ==="
+        echo "--- Individual operations in loops ---"
+        grep -rn "for.*await.*save\|for.*await.*create\|for.*await.*update" \
+          --include="*.ts" --include="*.js" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+
+        echo "--- Batch operations ---"
+        grep -rn "bulkWrite\|insertMany\|batchInsert\|createMany\|bulk_create" \
+          --include="*.ts" --include="*.js" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+
+        echo "--- DataLoader usage ---"
+        grep -rn "DataLoader\|dataloader\|batchLoad" \
+          --include="*.ts" --include="*.js" . 2>/dev/null | \
+          grep -v node_modules | head -20
+
+signals:
+  critical:
+    - id: "BIA-CRIT-001"
+      signal: "Database writes inside loops"
+      evidence_pattern: "for/forEach with await save/create/update inside"
+      explanation: |
+        Each database write in a loop is a separate transaction and network
+        round trip. For N records, this creates N transactions instead of 1.
+        Performance degrades linearly with data volume.
+      remediation: "Collect items and use batch insert/update operations"
+
+    - id: "BIA-CRIT-002"
+      signal: "Individual fetches instead of IN clause"
+      evidence_pattern: "Loop calling findById for each ID instead of findByIds"
+      explanation: |
+        Fetching records one at a time when multiple are needed wastes
+        database connections and round trips. A single WHERE IN query
+        is far more efficient.
+      remediation: "Use IN clause or batch fetch methods"
+
+  high:
+    - id: "BIA-HIGH-001"
+      signal: "No DataLoader for GraphQL resolvers"
+      evidence_pattern: "GraphQL resolvers fetch related entities individually"
+      explanation: |
+        GraphQL's nested resolution naturally creates N+1 problems.
+        DataLoader batches and caches requests within a single request,
+        preventing explosion of database queries.
+      remediation: "Implement DataLoader for all entity relationships"
+
+    - id: "BIA-HIGH-002"
+      signal: "Sequential API calls instead of parallel"
+      evidence_pattern: "Await in loop instead of Promise.all with map"
+      explanation: |
+        Sequential awaits in loops block on each operation. When operations
+        are independent, parallel execution dramatically reduces total time.
+      remediation: "Use Promise.all for independent parallel operations"
+
+    - id: "BIA-HIGH-003"
+      signal: "Large batch without chunking"
+      evidence_pattern: "Single INSERT of 100k+ rows"
+      explanation: |
+        Extremely large batches can timeout, exhaust memory, or lock
+        tables for extended periods. Large operations should be chunked
+        into manageable batch sizes.
+      remediation: "Chunk large batches into 1000-10000 record batches"
+
+  medium:
+    - id: "BIA-MED-001"
+      signal: "No progress tracking for batch operations"
+      evidence_pattern: "Bulk operation without progress reporting"
+      remediation: "Add progress tracking for long-running batch operations"
+
+    - id: "BIA-MED-002"
+      signal: "Batch errors not handled individually"
+      evidence_pattern: "Entire batch fails if one record errors"
+      remediation: "Implement per-record error handling with partial success"
+
+    - id: "BIA-MED-003"
+      signal: "Batch size not configurable"
+      evidence_pattern: "Hardcoded batch sizes"
+      remediation: "Make batch sizes configurable for tuning"
+
+  low:
+    - id: "BIA-LOW-001"
+      signal: "No batch operation documentation"
+      evidence_pattern: "Batch operations without performance notes"
+      remediation: "Document batch size rationale and performance characteristics"
+
+    - id: "BIA-LOW-002"
+      signal: "Inconsistent batching across codebase"
+      evidence_pattern: "Some operations batched, similar ones not"
+      remediation: "Apply consistent batching patterns throughout"
+
+  positive:
+    - id: "BIA-POS-001"
+      signal: "Consistent use of batch operations"
+      evidence_pattern: "All bulk operations use insertMany/updateMany"
+
+    - id: "BIA-POS-002"
+      signal: "DataLoader implemented for relationships"
+      evidence_pattern: "DataLoader used in GraphQL resolvers"
+
+    - id: "BIA-POS-003"
+      signal: "Chunked processing for large datasets"
+      evidence_pattern: "Large operations processed in configurable batches"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Find Loop-Based Data Access"
+      description: |
+        Identify data access operations inside loops.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find async operations in loops"
+          command: |
+            grep -rn "for.*await\|forEach.*await\|while.*await" \
+              --include="*.ts" --include="*.js" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | grep -v test | head -40
+        - purpose: "Find individual saves"
+          command: |
+            grep -rn "\.save(\|\.create(\|\.insert(" \
+              --include="*.ts" --include="*.js" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -40
+
+      expected_findings:
+        - "Loop-based access patterns"
+        - "Individual operation frequency"
+
+    - id: "2"
+      name: "Analyze Batch Operations"
+      description: |
+        Review use of batch/bulk operations.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find batch operations"
+          command: |
+            grep -rn "bulkWrite\|insertMany\|updateMany\|deleteMany\|bulk_create\|createMany" \
+              --include="*.ts" --include="*.js" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+        - purpose: "Find batch fetches"
+          command: |
+            grep -rn "IN (\|whereIn\|findByIds\|\\$in" \
+              --include="*.ts" --include="*.js" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Batch operation usage"
+        - "Batch fetch patterns"
+
+    - id: "3"
+      name: "Check GraphQL/DataLoader"
+      description: |
+        Review DataLoader usage in GraphQL context.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find DataLoader"
+          command: |
+            grep -rn "DataLoader\|dataloader\|batchLoadFn" \
+              --include="*.ts" --include="*.js" . 2>/dev/null | \
+              grep -v node_modules | head -20
+        - purpose: "Find GraphQL resolvers"
+          command: |
+            grep -rn "@Resolver\|@Query\|@Mutation\|@ResolveField" \
+              --include="*.ts" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "DataLoader implementation"
+        - "Resolver patterns"
+
+    - id: "4"
+      name: "Review Batch Processing Jobs"
+      description: |
+        Examine background job batch processing.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find job processors"
+          command: |
+            find . -type f \( -name "*job*" -o -name "*worker*" -o -name "*processor*" \) \
+              -not -path "*/node_modules/*" 2>/dev/null | head -20
+        - purpose: "Find chunk/batch patterns"
+          command: |
+            grep -rn "chunk\|batch\|page\|cursor" \
+              --include="*.ts" --include="*.js" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Job processing patterns"
+        - "Chunking implementation"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "loop_based_access"
+        - "batch_operation_coverage"
+        - "dataloader_status"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Loop Analysis"
+        - "Batch Operation Coverage"
+        - "Performance Opportunities"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear loop-based individual operations"
+    medium: "Pattern suggests batching opportunity"
+    low: "Requires profiling to confirm benefit"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "batch-operations"
+        priority: "required"
+      - source_id: "dataloader"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    performance:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "bia-001"
+    item: "No database writes inside loops"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "for.*await.*save\|for.*await.*create\|forEach.*await.*insert" \
+        --include="*.ts" --include="*.js" . 2>/dev/null | \
+        grep -v node_modules | grep -v test | wc -l | \
+        xargs -I {} test {} -lt 3 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "bia-002"
+    item: "Batch fetch methods used for multiple IDs"
+    level: "BLOCKING"
+    verification: |
+      grep -rn "whereIn\|findByIds\|\\$in" --include="*.ts" --include="*.js" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "bia-003"
+    item: "Large batches are chunked"
+    level: "WARNING"
+    verification: |
+      grep -rn "chunk\|batch.*size\|BATCH_SIZE" --include="*.ts" --include="*.js" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Performance Efficiency"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.data-access-patterns.orm-usage"
+    - "data-state-management.data-access-patterns.query-pattern"
+    - "performance-efficiency.database.query-optimization"

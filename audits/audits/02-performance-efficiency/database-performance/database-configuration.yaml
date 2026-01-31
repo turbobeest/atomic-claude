@@ -1,0 +1,346 @@
+# ============================================================
+# Database Configuration Audit
+# ============================================================
+# Evaluates database server configuration for performance,
+# identifying suboptimal settings and tuning opportunities.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.database-performance.database-configuration"
+  name: "Database Configuration Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "database-performance"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "config"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates database server configuration parameters for
+    performance optimization. It examines memory allocation, connection
+    settings, checkpoint configuration, query planner settings, and
+    other parameters that affect database performance and stability.
+
+  why_it_matters: |
+    Database configuration significantly impacts performance. Default settings
+    are often conservative and inappropriate for production workloads. Proper
+    tuning of shared_buffers, work_mem, effective_cache_size, and other
+    parameters can provide 2-10x performance improvements without code changes.
+
+  when_to_run:
+    - "During initial database deployment"
+    - "After infrastructure changes (memory, CPU)"
+    - "When investigating database performance issues"
+    - "After database version upgrades"
+
+prerequisites:
+  required_artifacts:
+    - type: "database-access"
+      description: "Access to database configuration"
+    - type: "server-specs"
+      description: "Knowledge of server hardware (RAM, CPU, disk)"
+
+  access_requirements:
+    - "Access to pg_settings or SHOW commands"
+    - "Knowledge of available server resources"
+    - "Read access to configuration files"
+
+discovery:
+  metrics_queries:
+    - system: "PostgreSQL"
+      query: |
+        SELECT name, setting, unit, source, pending_restart
+        FROM pg_settings
+        WHERE source NOT IN ('default', 'override')
+        ORDER BY name
+      purpose: "Non-default configuration settings"
+      threshold: "Should be tuned for workload"
+    - system: "PostgreSQL"
+      query: |
+        SELECT name, setting, unit,
+               CASE WHEN name = 'shared_buffers' THEN 'Should be ~25% of RAM'
+                    WHEN name = 'effective_cache_size' THEN 'Should be ~75% of RAM'
+                    WHEN name = 'work_mem' THEN 'Should be tuned for query complexity'
+                    WHEN name = 'maintenance_work_mem' THEN 'Should be ~5% of RAM'
+               END as recommendation
+        FROM pg_settings
+        WHERE name IN ('shared_buffers', 'effective_cache_size', 'work_mem', 'maintenance_work_mem')
+      purpose: "Key memory settings"
+      threshold: "Should follow recommended ratios"
+
+  file_patterns:
+    - glob: "**/postgresql.conf"
+      purpose: "PostgreSQL configuration file"
+    - glob: "**/my.cnf"
+      purpose: "MySQL configuration file"
+    - glob: "**/pg_hba.conf"
+      purpose: "PostgreSQL authentication configuration"
+
+knowledge_sources:
+  specifications:
+    - id: "postgres-config"
+      name: "PostgreSQL Server Configuration"
+      url: "https://www.postgresql.org/docs/current/runtime-config.html"
+      offline_cache: true
+      priority: "required"
+    - id: "mysql-config"
+      name: "MySQL Server System Variables"
+      url: "https://dev.mysql.com/doc/refman/8.0/en/server-system-variables.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "pgtune"
+      name: "PGTune - PostgreSQL Configuration Calculator"
+      url: "https://pgtune.leopard.in.ua/"
+      offline_cache: true
+    - id: "postgres-tuning"
+      name: "PostgreSQL Tuning Guide"
+      url: "https://wiki.postgresql.org/wiki/Tuning_Your_PostgreSQL_Server"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "psql"
+      purpose: "Query current configuration"
+      command: "psql -c 'SHOW ALL'"
+    - tool: "pgtune"
+      purpose: "Generate recommended configuration"
+      command: "pgtune -T OLTP -M 16GB -c 200"
+
+  monitoring_queries:
+    - system: "PostgreSQL"
+      query: |
+        SELECT name, setting,
+               pg_size_pretty(setting::bigint) as pretty_value
+        FROM pg_settings
+        WHERE unit = '8kB' OR unit = 'kB'
+        ORDER BY setting::bigint DESC
+      purpose: "Memory-related settings"
+
+signals:
+  critical:
+    - id: "DBCONF-CRIT-001"
+      signal: "shared_buffers at default value on production"
+      evidence_threshold: "shared_buffers < 1GB on server with 8GB+ RAM"
+      explanation: |
+        The default shared_buffers (typically 128MB) is far too small for
+        production. This forces the database to rely heavily on OS cache,
+        reducing buffer hit ratio and increasing I/O operations.
+      remediation: "Set shared_buffers to ~25% of RAM (max ~8GB typically)"
+
+    - id: "DBCONF-CRIT-002"
+      signal: "max_connections exhausted or near limit"
+      evidence_threshold: "current_connections > 80% of max_connections"
+      explanation: |
+        Running near max_connections causes connection failures during
+        traffic spikes. Each connection consumes memory (work_mem * sorts),
+        so high max_connections with high work_mem can exhaust memory.
+      remediation: "Increase max_connections or use connection pooler"
+
+  high:
+    - id: "DBCONF-HIGH-001"
+      signal: "work_mem too low causing disk sorts"
+      evidence_threshold: "temp_files created frequently in pg_stat_database"
+      explanation: |
+        Low work_mem forces complex queries to spill to disk for sorting
+        and hashing. This dramatically slows queries that could complete
+        in memory. The setting affects each sort operation independently.
+      remediation: "Increase work_mem based on available memory and concurrency"
+
+    - id: "DBCONF-HIGH-002"
+      signal: "effective_cache_size not matching available memory"
+      evidence_threshold: "effective_cache_size far from 75% of RAM"
+      explanation: |
+        effective_cache_size tells the planner how much memory is available
+        for caching. If set too low, the planner avoids index scans. If too
+        high, it may choose plans that don't fit in available memory.
+      remediation: "Set to ~75% of total RAM (shared_buffers + OS cache)"
+
+  medium:
+    - id: "DBCONF-MED-001"
+      signal: "Checkpoint configuration causing performance spikes"
+      evidence_pattern: "checkpoint_completion_target < 0.9 or checkpoint_timeout too low"
+      remediation: "Tune checkpoint settings to spread writes evenly"
+
+    - id: "DBCONF-MED-002"
+      signal: "autovacuum configuration too conservative"
+      evidence_pattern: "autovacuum_vacuum_cost_limit default on busy system"
+      remediation: "Increase autovacuum aggressiveness for OLTP workloads"
+
+  low:
+    - id: "DBCONF-LOW-001"
+      signal: "Logging configuration insufficient for troubleshooting"
+
+  positive:
+    - id: "DBCONF-POS-001"
+      signal: "Memory settings tuned for available hardware"
+    - id: "DBCONF-POS-002"
+      signal: "Checkpoint configuration optimized for workload"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Collect current configuration"
+      description: |
+        Query all database configuration settings and identify
+        non-default values.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "All non-default settings (PostgreSQL)"
+          command: |
+            psql -c "SELECT name, setting, unit, context, source FROM pg_settings WHERE source != 'default' ORDER BY category, name"
+        - purpose: "Memory-related settings"
+          command: |
+            psql -c "SELECT name, setting, unit, pg_size_pretty(CASE WHEN unit = '8kB' THEN setting::bigint * 8192 WHEN unit = 'kB' THEN setting::bigint * 1024 ELSE setting::bigint END) as pretty FROM pg_settings WHERE category LIKE '%Memory%' OR name IN ('shared_buffers', 'work_mem', 'maintenance_work_mem', 'effective_cache_size')"
+      expected_findings:
+        - "Current configuration values"
+        - "Non-default settings"
+
+    - id: "2"
+      name: "Compare against recommendations"
+      description: |
+        Evaluate configuration against PGTune recommendations and
+        best practices for the available hardware.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "System RAM (Linux)"
+          command: "free -h | grep Mem | awk '{print $2}'"
+        - purpose: "CPU cores"
+          command: "nproc"
+        - purpose: "Compare settings to recommendations"
+          command: |
+            psql -c "SELECT name, setting, CASE name WHEN 'shared_buffers' THEN 'Recommend: ~25% RAM' WHEN 'effective_cache_size' THEN 'Recommend: ~75% RAM' WHEN 'work_mem' THEN 'Recommend: RAM/(max_conn*3)' WHEN 'maintenance_work_mem' THEN 'Recommend: ~512MB-2GB' END as guideline FROM pg_settings WHERE name IN ('shared_buffers', 'effective_cache_size', 'work_mem', 'maintenance_work_mem')"
+      expected_findings:
+        - "Hardware specifications"
+        - "Configuration vs recommended values"
+
+    - id: "3"
+      name: "Check connection settings"
+      description: |
+        Evaluate connection-related settings and current utilization.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Connection settings and usage"
+          command: |
+            psql -c "SELECT (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') as max_conn, (SELECT count(*) FROM pg_stat_activity) as current_conn, (SELECT count(*) FROM pg_stat_activity WHERE state = 'active') as active_conn"
+        - purpose: "Connection utilization by database"
+          command: |
+            psql -c "SELECT datname, numbackends FROM pg_stat_database ORDER BY numbackends DESC"
+      expected_findings:
+        - "Connection capacity"
+        - "Current utilization"
+
+    - id: "4"
+      name: "Review checkpoint and WAL configuration"
+      description: |
+        Examine checkpoint and write-ahead log settings that affect
+        write performance and recovery.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Checkpoint settings"
+          command: |
+            psql -c "SELECT name, setting, unit FROM pg_settings WHERE name LIKE 'checkpoint%' OR name LIKE 'wal%' ORDER BY name"
+        - purpose: "Checkpoint statistics"
+          command: |
+            psql -c "SELECT checkpoints_timed, checkpoints_req, checkpoint_write_time, checkpoint_sync_time FROM pg_stat_bgwriter"
+      expected_findings:
+        - "Checkpoint configuration"
+        - "Checkpoint performance metrics"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Current Configuration Review"
+        - "Memory Configuration Analysis"
+        - "Connection Configuration"
+        - "Tuning Recommendations"
+
+  confidence_guidance:
+    high: "Configuration compared against hardware specs"
+    medium: "Configuration review without hardware details"
+    low: "Default detection only"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "postgres-config"
+        priority: "required"
+      - source_id: "pgtune"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "dbconf-001"
+    item: "shared_buffers appropriately sized (>1GB for production)"
+    level: "CRITICAL"
+    verification: |
+      psql -c "SELECT setting::bigint > 131072 FROM pg_settings WHERE name = 'shared_buffers'" -t | grep -q "t"
+    expected: "true"
+
+  - id: "dbconf-002"
+    item: "max_connections has 20% headroom"
+    level: "BLOCKING"
+    verification: |
+      psql -c "SELECT (SELECT count(*) FROM pg_stat_activity) < (SELECT setting::int * 0.8 FROM pg_settings WHERE name = 'max_connections')" -t | grep -q "t"
+    expected: "true"
+
+  - id: "dbconf-003"
+    item: "Configuration documented and version controlled"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify postgresql.conf is in version control with comments"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.database-performance.connection-pool-sizing"
+    - "performance-efficiency.database-performance.query-plan-stability"

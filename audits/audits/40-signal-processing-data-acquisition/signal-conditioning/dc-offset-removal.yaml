@@ -1,0 +1,236 @@
+audit:
+  id: signal-processing-data-acquisition.signal-conditioning.dc-offset-removal
+  name: DC Offset Removal Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: signal-conditioning
+  tier: expert
+  estimated_duration: 1 hour
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: hardware-software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates DC offset removal in signal conditioning
+    for applications requiring AC-only measurements. It examines:
+    - AC coupling vs. DC coupling selection
+    - High-pass filter design for DC removal
+    - Digital DC offset subtraction
+    - Low-frequency response preservation
+    - Settling time after transients
+    - Offset drift compensation
+  why_it_matters: |
+    DC offset affects measurement accuracy:
+    - Unwanted DC consumes ADC dynamic range
+    - DC offset can saturate amplifiers
+    - AC measurements may include offset error
+    - High-pass cutoff affects low-frequency response
+    - Settling time affects measurement start
+
+    Proper DC handling preserves signal bandwidth while removing
+    unwanted offset components.
+  when_to_run:
+  - AC measurement system design
+  - Signal conditioning optimization
+  - Offset drift investigation
+  - Low-frequency performance verification
+prerequisites:
+  required_artifacts:
+  - type: schematic
+    description: AC coupling or offset removal circuit
+  - type: source_code
+    description: Digital offset removal code
+  - type: requirements
+    description: Low-frequency cutoff requirements
+  access_requirements:
+  - Access to coupling configuration
+  - Filter specifications
+  - Application requirements
+discovery:
+  code_patterns:
+  - pattern: (dc|DC)_(offset|remove|subtract|coupling)
+    type: regex
+    scope: source
+    purpose: Detect DC handling
+  - pattern: (highpass|hpf|ac_couple)
+    type: regex
+    scope: source
+    purpose: Detect highpass filtering
+  - pattern: (mean|average).*subtract
+    type: regex
+    scope: source
+    purpose: Detect digital offset removal
+  file_patterns:
+  - glob: '**/offset*.{c,h,cpp,py}'
+    purpose: Offset handling files
+  - glob: '**/coupling*.{c,h,cpp}'
+    purpose: Coupling configuration
+signals:
+  critical:
+  - id: DC-CRIT-001
+    signal: DC offset saturating signal path
+    evidence_indicators:
+    - Amplifier output at supply rail
+    - ADC at full scale due to offset
+    - Signal completely lost in offset
+    explanation: |
+      Large DC offset can saturate amplifiers or ADCs, completely
+      losing the AC signal of interest. DC removal or offset
+      correction is essential.
+    remediation: |
+      - Implement AC coupling
+      - Add offset adjustment
+      - Use differential signaling
+      - Correct offset in calibration
+    cwe: CWE-682
+  high:
+  - id: DC-HIGH-001
+    signal: High-pass cutoff too high, removing signal
+    evidence_indicators:
+    - Cutoff frequency > signal minimum frequency
+    - Low-frequency content attenuated
+    - Signal distortion from filtering
+    explanation: |
+      High-pass filter for DC removal also attenuates low-frequency
+      signal content. Cutoff must be well below minimum signal
+      frequency to avoid distortion.
+    remediation: |
+      - Lower cutoff frequency
+      - Use digital offset subtraction instead
+      - Accept DC in measurement if needed
+      - Document frequency response
+  - id: DC-HIGH-002
+    signal: Settling time exceeds measurement window
+    evidence_indicators:
+    - High-pass filter settling time too long
+    - Initial measurements invalid
+    - Transients from coupling capacitors
+    explanation: |
+      AC coupling with low cutoff has long settling time
+      (several time constants = 5*RC). This initial period
+      produces invalid measurements.
+    remediation: |
+      - Allow settling time before measurement
+      - Use faster settling (higher cutoff if acceptable)
+      - Implement digital offset tracking
+      - Document settling requirements
+  medium:
+  - id: DC-MED-001
+    signal: Offset drift not compensated
+    evidence_indicators:
+    - DC offset varies with temperature
+    - Long-term drift affecting measurements
+    - No periodic offset calibration
+    explanation: |
+      Analog circuits exhibit offset drift with temperature and
+      time. Without compensation, DC offset creeps into AC
+      measurements.
+    remediation: |
+      - Implement auto-zero or chopper stabilization
+      - Add periodic offset calibration
+      - Use low-drift components
+      - Monitor and correct for drift
+  low:
+  - id: DC-LOW-001
+    signal: DC handling not documented
+    evidence_indicators:
+    - Coupling mode not specified
+    - Cutoff frequency not documented
+    - Settling time not noted
+    explanation: |
+      Undocumented DC handling makes low-frequency behavior
+      unclear. Users may misinterpret measurements due to
+      unexpected high-pass response.
+    remediation: |
+      - Document coupling mode
+      - Specify cutoff frequency
+      - Note settling time requirements
+      - Include in system specifications
+  positive:
+  - id: DC-POS-001
+    signal: Well-designed DC handling
+    evidence_indicators:
+    - Cutoff appropriate for application
+    - Settling time acceptable
+    - Documentation complete
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: analog-engineer
+  steps:
+  - id: '1'
+    name: DC Handling Review
+    description: |
+      Review DC offset handling configuration.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find DC handling code
+      command: |
+        grep -rniE "(dc|offset|highpass|ac.?coupl)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -20
+    expected_findings:
+    - Coupling configuration
+    - Cutoff frequency
+    - Offset correction
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - DC Handling Analysis
+    - Frequency Response
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 4
+    signal-processing:
+      included: true
+      priority: 3
+closeout_checklist:
+- id: dc-001
+  item: DC offset does not saturate signal path
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify signal path has headroom with max offset
+  expected: Confirmed by reviewer
+- id: dc-002
+  item: High-pass cutoff appropriate
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify cutoff well below minimum signal frequency
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - signal-processing
+    - audio-systems
+    - scientific-instruments
+relationships:
+  commonly_combined:
+  - signal-processing.signal-conditioning.amplification
+  - signal-processing.filtering.filter-design
+  - signal-processing.signal-conditioning.normalization
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

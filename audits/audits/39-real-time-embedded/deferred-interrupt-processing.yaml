@@ -1,0 +1,265 @@
+audit:
+  id: real-time-embedded.interrupt-handling.deferred-interrupt-processing
+  name: Deferred Interrupt Processing Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: real-time-embedded
+  category_number: 39
+  subcategory: interrupt-handling
+  tier: expert
+  estimated_duration: 4-6 hours  # median: 5h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: embedded-systems
+  default_profiles:
+  - full
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Reviews the implementation of deferred interrupt processing patterns where
+    ISRs perform minimal work and signal tasks for extended processing. Examines
+    semaphore and queue-based handoff mechanisms, task notification patterns,
+    and proper use of xHigherPriorityTaskWoken semantics.
+  why_it_matters: |
+    Deferred processing keeps ISRs short while enabling complex event handling.
+    The handoff mechanism must be correct and efficient - missed signals cause
+    lost events, excessive latency degrades responsiveness, and incorrect yield
+    handling delays task activation. This pattern is fundamental to good RTOS
+    interrupt design.
+  when_to_run:
+  - During ISR design review
+  - After implementing interrupt handling
+  - When debugging event loss
+  - When optimizing interrupt response
+  - During code review
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: ISR and handler task code
+  - type: rtos_api
+    description: RTOS ISR communication API documentation
+  - type: architecture_docs
+    description: ISR-task communication design
+  - type: timing_requirements
+    description: Response time requirements
+  access_requirements:
+  - Access to source code
+  - Access to RTOS documentation
+  - Timing measurement tools
+  - Debug/trace capability
+discovery:
+  file_patterns:
+  - glob: '**/isr*.c'
+    purpose: Find ISR implementations
+  - glob: '**/handler_task*.c'
+    purpose: Find handler tasks
+  - glob: '**/deferred*.c'
+    purpose: Find deferred processing code
+  - glob: '**/event_handler*.c'
+    purpose: Find event handlers
+  - glob: '**/notification*.c'
+    purpose: Find notification code
+knowledge_sources:
+  guides:
+  - id: deferred-processing
+    name: Deferred Interrupt Processing
+    url: https://www.freertos.org/deferred_interrupt_processing.html
+  - id: isr-task-comm
+    name: ISR-Task Communication Patterns
+    url: https://www.embedded.com/isr-task-communication
+  standards:
+  - id: autosar-os
+    name: AUTOSAR OS Specification
+    relevance: ISR Category 2 handling
+  - id: freertos
+    name: FreeRTOS API Reference
+    relevance: ISR-safe API usage
+tooling:
+  analysis_tools:
+  - tool: tracealyzer
+    purpose: ISR-task visualization
+  - tool: systemview
+    purpose: Deferred processing analysis
+  - tool: profiler
+    purpose: Latency measurement
+signals:
+  critical:
+  - id: DIP-CRIT-001
+    signal: Deferred signal can be lost
+    evidence_indicators:
+    - Binary semaphore can miss events
+    - Queue can overflow
+    - Notification overwritten
+    explanation: |
+      If signaling mechanism can lose events (e.g., binary semaphore
+      given multiple times), interrupt events may be dropped.
+    remediation: Use counting semaphore, queue, or event flags appropriately
+  - id: DIP-CRIT-002
+    signal: xHigherPriorityTaskWoken not handled
+    evidence_indicators:
+    - Return value ignored
+    - portYIELD_FROM_ISR not called
+    - Task activation delayed to next tick
+    explanation: |
+      Without checking and yielding when higher priority task woken,
+      deferred processing is delayed until next scheduler tick.
+    remediation: Properly handle yield from ISR
+  high:
+  - id: DIP-HIGH-001
+    signal: Excessive ISR-to-task latency
+    evidence_indicators:
+    - Deferred task not running promptly
+    - Task priority too low
+    - Other tasks blocking handler
+    explanation: |
+      Even with proper signaling, low priority or blocking can delay
+      deferred processing, negating its benefits.
+    remediation: Ensure handler task runs promptly after signal
+  - id: DIP-HIGH-002
+    signal: Blocking API used in ISR signal path
+    evidence_indicators:
+    - Non-ISR-safe API called
+    - Queue send without timeout 0
+    - Blocking possible in ISR
+    explanation: |
+      Any blocking in ISR path causes severe timing issues. Only
+      non-blocking, ISR-safe calls are permitted.
+    remediation: Use only non-blocking ISR-safe API calls
+  medium:
+  - id: DIP-MED-001
+    signal: Handler task can be starved
+    evidence_indicators:
+    - Other tasks at same or higher priority
+    - Handler may be delayed
+    - No priority boost mechanism
+    explanation: |
+      Handler task starvation delays interrupt processing and may
+      cause event loss if signals accumulate.
+    remediation: Ensure handler task priority appropriate for response needs
+  - id: DIP-MED-002
+    signal: Inefficient ISR-task communication
+    evidence_indicators:
+    - Excessive data copying
+    - Large queue elements
+    - Overhead impacts performance
+    explanation: |
+      Inefficient communication patterns add latency and overhead.
+      Consider direct notification or circular buffers.
+    remediation: Optimize communication mechanism for use case
+  low:
+  - id: DIP-LOW-001
+    signal: Deferred processing pattern not documented
+    evidence_indicators:
+    - Design rationale missing
+    - Communication mechanism not explained
+    - Timing analysis not recorded
+    explanation: |
+      Documentation supports maintenance and helps prevent
+      introduction of errors in communication patterns.
+    remediation: Document deferred processing design
+  positive:
+  - id: DIP-POS-001
+    signal: Robust deferred processing implementation
+    evidence_indicators:
+    - No event loss possible
+    - Proper yield handling
+    - Low latency
+  - id: DIP-POS-002
+    signal: Efficient ISR-task communication
+    evidence_indicators:
+    - Minimal ISR work
+    - Fast handoff mechanism
+    - Handler runs promptly
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Deferred Processing Points
+    description: Document all ISR-task handoff locations
+    duration_estimate: 1 hour
+  - id: '2'
+    name: Review Communication Mechanisms
+    description: Analyze signaling and data passing patterns
+    duration_estimate: 1-2 hours
+  - id: '3'
+    name: Check Yield Handling
+    description: Verify xHigherPriorityTaskWoken usage
+    duration_estimate: 30 minutes
+  - id: '4'
+    name: Analyze Event Loss Potential
+    description: Check for possible signal loss scenarios
+    duration_estimate: 1 hour
+  - id: '5'
+    name: Measure Handoff Latency
+    description: Time from ISR signal to task execution
+    duration_estimate: 1 hour
+  - id: '6'
+    name: Document Findings
+    description: Compile analysis results and recommendations
+    duration_estimate: 30 minutes
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Deferred Processing Inventory
+    - Communication Analysis
+    - Latency Results
+    - Recommendations
+closeout_checklist:
+- id: dip-001
+  item: Deferred processing points documented
+  level: HIGH
+  verification: manual
+- id: dip-002
+  item: Communication mechanisms reviewed
+  level: HIGH
+  verification: manual
+- id: dip-003
+  item: Yield handling verified
+  level: HIGH
+  verification: automated
+- id: dip-004
+  item: Event loss potential analyzed
+  level: CRITICAL
+  verification: manual
+governance:
+  applicable_to:
+    archetypes:
+    - embedded-systems
+    - rtos-based
+    - real-time
+  compliance_mappings:
+  - framework: AUTOSAR
+    control: OS Category 2 ISR
+    description: Deferred interrupt handling
+  - framework: DO-178C
+    control: 6.3.1
+    description: Interrupt architecture
+relationships:
+  commonly_combined:
+  - real-time-embedded.interrupt-handling.isr-design-review
+  - real-time-embedded.rtos-configuration.task-synchronization-review
+  depends_on:
+  - real-time-embedded.interrupt-handling.isr-design-review
+  feeds_into:
+  - real-time-embedded.timing-analysis.deadline-verification
+  - reliability.event-handling
+
+# Glossary of domain-specific terms:
+glossary:
+  "WCET": "Worst-Case Execution Time - maximum possible execution time for a code path"
+  "ISR": "Interrupt Service Routine - function executed in response to hardware interrupt"
+  "jitter": "Variation in timing between expected and actual execution"

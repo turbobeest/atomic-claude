@@ -46,6 +46,7 @@ task_306_closeout() {
         echo -e "  ${RED}[CRIT]${NC} ${RED}✗${NC} Tasks file missing"
         checklist+=("Tasks decomposed:FAIL")
         all_passed=false
+    fi
 
     # Check dependencies
     local dep_analysis="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/dependency-analysis.json"
@@ -62,6 +63,7 @@ task_306_closeout() {
     else
         echo -e "  ${YELLOW}[CRIT]${NC} ${YELLOW}!${NC} Dependency analysis not found"
         checklist+=("Dependencies mapped:SKIP")
+    fi
 
     # Check audit - look in .outputs/audits/ (current path) or .claude/audit/ (legacy)
     local audit_file="$ATOMIC_ROOT/.outputs/audits/phase-3-report.json"
@@ -89,6 +91,7 @@ task_306_closeout() {
     else
         echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Audit not completed"
         checklist+=("Audit:SKIP")
+    fi
 
     # Check work packages
     if [[ -f "$packages_file" ]]; then
@@ -98,6 +101,7 @@ task_306_closeout() {
     else
         echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Work packages not created"
         checklist+=("Work packages:SKIP")
+    fi
 
     # Check complexity report (embedded in dependency-analysis.json or separate file)
     local complexity_file="$ATOMIC_ROOT/.taskmaster/reports/task-complexity-report.json"
@@ -108,6 +112,7 @@ task_306_closeout() {
         # Check for complexity data in dependency analysis
         local complexity_data=$(jq -r '.complexity // empty' "$dep_analysis" 2>/dev/null)
         [[ -n "$complexity_data" ]] && has_complexity=true
+    fi
 
     if [[ "$has_complexity" == "true" ]]; then
         echo -e "  ${GREEN}[PASS]${NC} ${GREEN}✓${NC} Complexity analysis complete"
@@ -115,6 +120,7 @@ task_306_closeout() {
     else
         echo -e "  ${YELLOW}[PASS]${NC} ${YELLOW}!${NC} Complexity analysis not found"
         checklist+=("Complexity:SKIP")
+    fi
 
     echo -e "  ${GREEN}[PASS]${NC} ${GREEN}✓${NC} Ready for Specification"
     echo ""
@@ -129,6 +135,8 @@ task_306_closeout() {
     if [[ "$all_passed" == false ]]; then
         echo -e "  ${YELLOW}Some critical items need attention before closeout.${NC}"
         echo ""
+
+    fi
 
     echo -e "  ${CYAN}Closeout options:${NC}"
     echo ""

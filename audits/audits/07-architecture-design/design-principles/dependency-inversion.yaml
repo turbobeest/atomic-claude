@@ -1,0 +1,379 @@
+# ============================================================
+# AUDIT: Dependency Inversion Principle (DIP) Compliance
+# ============================================================
+# Evaluates whether high-level modules depend on abstractions
+# rather than concrete implementations (the D in SOLID).
+# ============================================================
+
+audit:
+  id: "architecture-design.design-principles.dependency-inversion"
+  name: "Dependency Inversion Principle Compliance"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "architecture-design"
+  category_number: 7
+  subcategory: "design-principles"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates compliance with the Dependency Inversion Principle,
+    which states that high-level modules should not depend on low-level modules
+    - both should depend on abstractions. It identifies direct dependencies on
+    concrete classes, missing interface abstractions, and improper dependency
+    direction in architectural layers.
+
+  why_it_matters: |
+    DIP violations cause:
+    - High-level business logic coupled to infrastructure details
+    - Difficulty testing components in isolation
+    - Rigid architecture that's hard to change
+    - Transitive dependency problems
+    - Inability to substitute implementations
+    DIP enables flexible, testable, and maintainable architecture.
+
+  when_to_run:
+    - "During architecture reviews"
+    - "When implementing dependency injection"
+    - "When testability is a concern"
+    - "Before extracting reusable modules"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Complete source code"
+    - type: "architecture_documentation"
+      description: "Documentation of intended layer boundaries"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Understanding of architectural layers"
+
+discovery:
+  code_patterns:
+    - pattern: "new\\s+[A-Z][a-zA-Z]+Repository|new\\s+[A-Z][a-zA-Z]+Dao"
+      type: "regex"
+      scope: "source"
+      purpose: "Find direct instantiation of data access"
+
+    - pattern: "new\\s+[A-Z][a-zA-Z]+Service|new\\s+[A-Z][a-zA-Z]+Client"
+      type: "regex"
+      scope: "source"
+      purpose: "Find direct instantiation of services"
+
+    - pattern: "import\\s+.*\\.impl\\.|import\\s+.*\\.internal\\."
+      type: "regex"
+      scope: "source"
+      purpose: "Find imports of implementation packages"
+
+  file_patterns:
+    - glob: "**/domain/**/*.{java,ts,py}"
+      purpose: "Domain layer - should have no infrastructure dependencies"
+    - glob: "**/application/**/*.{java,ts,py}"
+      purpose: "Application layer - should depend on abstractions"
+    - glob: "**/infrastructure/**/*.{java,ts,py}"
+      purpose: "Infrastructure layer - implements abstractions"
+
+knowledge_sources:
+  specifications:
+    - id: "dip-uncle-bob"
+      name: "The Dependency Inversion Principle"
+      url: "https://blog.cleancoder.com/uncle-bob/2020/10/18/Solid-Relevance.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "clean-architecture"
+      name: "Clean Architecture"
+      url: "https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html"
+      offline_cache: true
+
+    - id: "clean-code"
+      name: "Clean Code Summary"
+      url: "https://gist.github.com/wojteklu/73c6914cc446146b8b533c0988cf8d29"
+      offline_cache: true
+
+  learning_resources:
+    - id: "agile-ppp"
+      title: "Agile Software Development: Principles, Patterns, and Practices"
+      type: "book"
+      reference: "Robert C. Martin - Chapter 11"
+
+    - id: "di-book"
+      title: "Dependency Injection Principles, Practices, and Patterns"
+      type: "book"
+      reference: "Steven van Deursen, Mark Seemann"
+
+tooling:
+  static_analysis:
+    - tool: "ArchUnit"
+      purpose: "Enforce dependency rules in Java"
+      offline_capable: true
+
+    - tool: "NDepend"
+      purpose: "Analyze dependency direction in .NET"
+      offline_capable: true
+
+    - tool: "dependency-cruiser"
+      purpose: "Enforce JavaScript/TypeScript dependency rules"
+      offline_capable: true
+
+  scripts:
+    - id: "dip-analyzer"
+      language: "bash"
+      purpose: "Find dependency inversion violations"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Direct Instantiation of Infrastructure ==="
+        grep -rn "new.*Repository\|new.*Dao\|new.*Client" --include="*.java" | grep -v Test | head -30
+
+        echo "=== Implementation Package Imports ==="
+        grep -rn "import.*\\.impl\\.\|import.*\\.infrastructure\\." --include="*.java" | grep -v impl | head -20
+
+        echo "=== Domain Package Dependencies ==="
+        grep -rn "import" $(find . -path "*/domain/*.java") 2>/dev/null | grep -v "domain\\|java\\." | head -20
+
+signals:
+  critical:
+    - id: "DIP-CRIT-001"
+      signal: "Domain layer imports infrastructure packages"
+      evidence_pattern: "Domain class imports from .repository., .database., .http."
+      explanation: |
+        When domain/business logic depends on infrastructure, the core
+        of the application becomes tightly coupled to technical details.
+        This makes the domain untestable and non-portable.
+      remediation: "Define interfaces in domain; implement in infrastructure"
+
+    - id: "DIP-CRIT-002"
+      signal: "High-level module directly instantiates low-level dependencies"
+      evidence_pattern: "Service creates new Repository() instead of injection"
+      explanation: |
+        Direct instantiation couples high-level to low-level and prevents
+        substitution. Testing requires real infrastructure or brittle mocking.
+      remediation: "Use dependency injection; define dependencies as interfaces"
+
+  high:
+    - id: "DIP-HIGH-001"
+      signal: "Constructor parameters typed to concrete classes"
+      evidence_pattern: "UserService(MySQLUserRepository repo) instead of interface"
+      explanation: |
+        Depending on concrete types in constructors prevents substitution
+        and makes the dependency apparent but still tightly coupled.
+      remediation: "Change parameter type to interface"
+
+    - id: "DIP-HIGH-002"
+      signal: "Static method calls to infrastructure"
+      evidence_pattern: "Domain uses DatabaseConnection.getInstance()"
+      explanation: |
+        Static dependencies are the hardest to substitute and create
+        hidden coupling that's impossible to mock.
+      remediation: "Inject instance via constructor; avoid static dependencies"
+
+  medium:
+    - id: "DIP-MED-001"
+      signal: "Interface defined in infrastructure package"
+      evidence_pattern: "Repository interface in persistence package, not domain"
+      remediation: "Move interface to package that uses it; implement where convenient"
+
+    - id: "DIP-MED-002"
+      signal: "Service locator pattern instead of DI"
+      evidence_pattern: "Container.resolve<IService>() calls throughout code"
+      remediation: "Prefer constructor injection; use service locator only at composition root"
+
+  low:
+    - id: "DIP-LOW-001"
+      signal: "Utility class instantiation in business logic"
+      remediation: "Consider if utility should be injected for testability"
+
+  positive:
+    - id: "DIP-POS-001"
+      signal: "Clean layer separation with inward-pointing dependencies"
+    - id: "DIP-POS-002"
+      signal: "Interfaces defined in domain, implemented in infrastructure"
+    - id: "DIP-POS-003"
+      signal: "Constructor injection used consistently"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map architectural layers"
+      description: |
+        Identify the architectural layers and their intended
+        dependency direction.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find layer packages"
+          command: "find . -type d -name 'domain' -o -name 'application' -o -name 'infrastructure' -o -name 'presentation' | head -20"
+        - purpose: "List top-level packages"
+          command: "find . -mindepth 3 -maxdepth 3 -type d | head -30"
+      expected_findings:
+        - "Layer structure"
+        - "Package organization"
+
+    - id: "2"
+      name: "Check domain layer purity"
+      description: |
+        Verify that domain layer has no dependencies on
+        infrastructure or external libraries.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find domain imports"
+          command: "find . -path '*/domain/*.java' -exec grep '^import' {} \\; 2>/dev/null | sort | uniq | head -40"
+        - purpose: "Check for infrastructure leakage"
+          command: "grep -rn 'import.*sql\\|import.*http\\|import.*persistence' $(find . -path '*/domain/*.java') 2>/dev/null | head -20"
+      expected_findings:
+        - "Domain dependencies"
+        - "Infrastructure leakage"
+
+    - id: "3"
+      name: "Analyze dependency injection patterns"
+      description: |
+        Review how dependencies are provided - constructor injection,
+        setter injection, or direct instantiation.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find constructor injection"
+          command: "grep -rn 'private final.*Repository\\|private final.*Service' --include='*.java' | head -30"
+        - purpose: "Find direct instantiation"
+          command: "grep -rn 'new.*Repository()\\|new.*Service()\\|new.*Client()' --include='*.java' | grep -v Test | head -20"
+      expected_findings:
+        - "DI patterns in use"
+        - "Direct instantiation violations"
+
+    - id: "4"
+      name: "Review interface locations"
+      description: |
+        Check that interfaces are defined in the correct packages
+        per dependency inversion.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find interface definitions"
+          command: "grep -rln 'interface.*Repository\\|interface.*Service\\|interface.*Gateway' --include='*.java' | head -20"
+        - purpose: "Check interface package locations"
+          command: "find . -name '*Repository.java' -o -name '*Gateway.java' | head -20"
+      expected_findings:
+        - "Interface locations"
+        - "Proper abstraction placement"
+
+    - id: "5"
+      name: "Validate dependency direction"
+      description: |
+        Ensure dependencies flow inward from infrastructure
+        to domain, not outward.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check outward dependencies"
+          command: "npx dependency-cruiser --output-type text src 2>/dev/null | grep 'domain.*->.*infra\\|core.*->.*impl' | head -20"
+      expected_findings:
+        - "Dependency direction violations"
+        - "Correct dependency flow"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "dependency_diagram"
+      format: "visual"
+      sections:
+        - "Layer Dependencies"
+        - "Violation Highlights"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "DIP Violations"
+        - "Refactoring Recommendations"
+
+  confidence_guidance:
+    high: "Clear import of infrastructure in domain"
+    medium: "Suspicious pattern requiring review"
+    low: "Potential concern based on structure"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "dip-uncle-bob"
+        priority: "required"
+      - source_id: "clean-architecture"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires layer analysis"
+    full:
+      included: true
+      priority: 1
+    architecture:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "dip-001"
+    item: "Domain layer has no infrastructure imports"
+    level: "CRITICAL"
+    verification: "grep -rn 'import.*sql\\|import.*http' $(find . -path '*/domain/*.java') 2>/dev/null | wc -l"
+    expected: "0"
+
+  - id: "dip-002"
+    item: "Dependencies injected via constructor, not instantiated"
+    level: "CRITICAL"
+    verification: "grep -rn 'new.*Repository()' --include='*.java' | grep -v Test | wc -l"
+    expected: "0"
+
+  - id: "dip-003"
+    item: "Interfaces defined in consumer packages"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Interfaces owned by packages that use them"
+    expected: "Confirmed by reviewer"
+
+  - id: "dip-004"
+    item: "Dependency direction flows inward"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Infrastructure depends on domain, not reverse"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Testability"]
+
+relationships:
+  commonly_combined:
+    - "architecture-design.coupling.afferent-efferent-coupling"
+    - "architecture-design.design-principles.interface-segregation"
+    - "architecture-design.design-principles.open-closed-principle"

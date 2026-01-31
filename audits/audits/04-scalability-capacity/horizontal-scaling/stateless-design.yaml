@@ -1,0 +1,302 @@
+# ============================================================
+# AUDIT: Stateless Design Audit
+# Category: Scalability & Capacity > Horizontal Scaling
+# ============================================================
+
+audit:
+  id: "scalability-capacity.horizontal-scaling.stateless-design"
+  name: "Stateless Design Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "horizontal-scaling"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates whether application components are designed statelessly to enable
+    horizontal scaling. Examines code patterns for local state storage, in-memory
+    caches, file system dependencies, and thread-local storage that would prevent
+    instances from being added or removed freely. Reviews whether state is properly
+    externalized to shared services.
+
+  why_it_matters: |
+    Stateful application instances cannot scale horizontally without data loss or
+    inconsistency. Local state creates "sticky session" requirements, prevents
+    load balancer flexibility, and makes deployments risky. Stateless design is
+    the foundation of elastic, resilient systems that can scale to meet demand.
+
+  when_to_run:
+    - "Before implementing auto-scaling"
+    - "When planning horizontal scaling architecture"
+    - "After major refactoring efforts"
+    - "During capacity planning reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code with business logic"
+    - type: "architecture_docs"
+      description: "System architecture documentation"
+
+  access_requirements:
+    - "Source code repository access"
+    - "Architecture diagrams and documentation"
+
+discovery:
+  code_patterns:
+    - pattern: "static\\s+(final\\s+)?\\w+\\s*=.*new\\s+(HashMap|HashSet|ArrayList|ConcurrentHashMap)"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect static collections holding state"
+
+    - pattern: "(session\\.setAttribute|HttpSession|getSession\\()"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect HTTP session usage"
+
+    - pattern: "(File\\.createTempFile|FileWriter|FileOutputStream|new\\s+File\\()"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect local file system dependencies"
+
+    - pattern: "(ThreadLocal|InheritableThreadLocal)"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect thread-local storage patterns"
+
+    - pattern: "@Singleton|@ApplicationScoped"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect singleton patterns with potential state"
+
+  file_patterns:
+    - glob: "**/src/**/*.java"
+      purpose: "Java application source files"
+    - glob: "**/src/**/*.py"
+      purpose: "Python application source files"
+    - glob: "**/src/**/*.go"
+      purpose: "Go application source files"
+
+knowledge_sources:
+  guides:
+    - id: "12factor-processes"
+      name: "The Twelve-Factor App - Processes"
+      url: "https://12factor.net/processes"
+      offline_cache: true
+
+  learning_resources:
+    - id: "designing-data-intensive"
+      title: "Designing Data-Intensive Applications"
+      type: "book"
+      reference: "ISBN: 978-1449373320"
+
+tooling:
+  static_analysis:
+    - tool: "grep/ripgrep"
+      purpose: "Pattern-based state detection"
+      offline_capable: true
+
+    - tool: "semgrep"
+      purpose: "AST-based state pattern detection"
+      offline_capable: true
+
+  scripts:
+    - id: "state-detector"
+      language: "bash"
+      purpose: "Scan for common stateful patterns"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "Scanning for stateful patterns..."
+        rg -l "(static.*new.*(Map|Set|List)|ThreadLocal|HttpSession)" --type java
+        rg -l "(global\s+\w+\s*=|__file__|tempfile)" --type py
+
+signals:
+  critical:
+    - id: "SCALE-CRIT-001"
+      signal: "In-memory session storage without externalization"
+      evidence_pattern: "session\\.setAttribute|getSession\\(\\)\\.set"
+      explanation: |
+        HTTP sessions stored in-memory are lost when instances terminate and
+        cannot be shared across instances. This prevents true horizontal scaling
+        and creates sticky session requirements.
+      remediation: "Externalize sessions to Redis, Memcached, or database-backed session store"
+
+    - id: "SCALE-CRIT-002"
+      signal: "Static mutable collections holding application state"
+      evidence_pattern: "static.*=.*new.*(HashMap|ArrayList|ConcurrentHashMap)"
+      explanation: |
+        Static collections holding state are per-instance and not synchronized
+        across horizontally scaled instances, leading to data inconsistency.
+      remediation: "Move state to external data store (Redis, database, distributed cache)"
+
+  high:
+    - id: "SCALE-HIGH-001"
+      signal: "Local file system used for persistent data"
+      evidence_pattern: "FileWriter|FileOutputStream|writeFile"
+      explanation: |
+        Data written to local file system is not available to other instances
+        and is lost when containers or instances terminate.
+      remediation: "Use object storage (S3, GCS) or shared file systems (EFS, NFS)"
+
+    - id: "SCALE-HIGH-002"
+      signal: "Thread-local storage with request-spanning data"
+      evidence_pattern: "ThreadLocal.*=.*new"
+      explanation: |
+        Thread-local storage can cause issues in async environments and doesn't
+        scale across instances for shared state.
+      remediation: "Pass context explicitly or use request-scoped dependency injection"
+
+  medium:
+    - id: "SCALE-MED-001"
+      signal: "Singleton services with mutable instance variables"
+      evidence_pattern: "@Singleton.*private\\s+\\w+\\s+\\w+\\s*;"
+      remediation: "Ensure singletons are truly stateless or externalize their state"
+
+  positive:
+    - id: "SCALE-POS-001"
+      signal: "Proper use of external session store"
+      evidence_pattern: "spring\\.session\\.store-type=redis|SESSION_ENGINE.*cache"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify potential state holders"
+      description: |
+        Scan codebase for patterns indicating local state storage including
+        static variables, session usage, file system access, and caches.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find static mutable collections"
+          command: "rg 'static.*(Map|Set|List|Cache).*=' --type java --type py"
+        - purpose: "Find session usage"
+          command: "rg '(session|Session)' -i --type java --type py"
+      expected_findings:
+        - "List of files containing potential stateful patterns"
+        - "Classification of state types (session, cache, data)"
+
+    - id: "2"
+      name: "Analyze state persistence requirements"
+      description: |
+        For each identified state holder, determine if the state needs to
+        persist across requests, survive instance restarts, or be shared.
+      duration_estimate: "60 min"
+      questions:
+        - "Does this state need to survive instance restarts?"
+        - "Is this state shared across multiple requests?"
+        - "Would losing this state cause data loss or user impact?"
+      expected_findings:
+        - "Classification of state as ephemeral vs persistent"
+        - "Identification of state that blocks horizontal scaling"
+
+    - id: "3"
+      name: "Review externalization mechanisms"
+      description: |
+        Evaluate existing mechanisms for state externalization and identify
+        gaps where state should be externalized but isn't.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Check for external cache configuration"
+          command: "rg '(redis|memcache|elasticache)' -i"
+        - purpose: "Check session configuration"
+          command: "rg 'session.*store|SESSION.*BACKEND' -i"
+      expected_findings:
+        - "Inventory of externalized state mechanisms"
+        - "Gap analysis of state requiring externalization"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Stateful Component Inventory"
+        - "Risk Assessment"
+        - "Remediation Recommendations"
+
+  confidence_guidance:
+    high: "Direct code evidence of stateful patterns verified in context"
+    medium: "Pattern matches found but context unclear"
+    low: "Indirect indicators of potential state"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "12factor-processes"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires deep code analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "stateless-design-001"
+    item: "No in-memory session storage detected"
+    level: "CRITICAL"
+    verification: "rg -c 'session\\.setAttribute' --type java || echo '0'"
+    expected: "0"
+
+  - id: "stateless-design-002"
+    item: "No static mutable state collections"
+    level: "CRITICAL"
+    verification: "rg -c 'static.*(HashMap|ArrayList).*new' --type java || echo '0'"
+    expected: "0"
+
+  - id: "stateless-design-003"
+    item: "External session store configured if sessions used"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify session configuration uses external store"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["web-service", "api-service", "microservice"]
+
+  compliance_frameworks:
+    - framework: "AWS Well-Architected"
+      controls: ["REL-6", "REL-7"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.horizontal-scaling.session-externalization"
+    - "scalability-capacity.horizontal-scaling.shared-state-management"

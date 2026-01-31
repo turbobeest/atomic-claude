@@ -1,0 +1,407 @@
+audit:
+  id: security-trust.secrets-management.config-file-security
+  name: Configuration File Security Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: secrets-management
+  tier: phd
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines configuration files for security vulnerabilities including
+    exposed secrets, insecure defaults, verbose error settings, debug modes, and
+    sensitive information disclosure. Configuration files include application.yaml,
+    config.json, .properties files, nginx.conf, and similar. The audit ensures
+    configuration follows security best practices and sensitive data is properly
+    protected.
+  why_it_matters: |
+    Configuration files are common targets for attackers as they often contain
+    credentials, internal URLs, and security settings. CWE-200 (Exposure of
+    Sensitive Information) and CWE-538 (Insertion of Sensitive Information into
+    Externally-Accessible File) directly address these risks. Misconfigured
+    settings can expose applications to attacks even when code is secure.
+  when_to_run:
+  - During security reviews
+  - Before production deployments
+  - When auditing configuration management
+  - After environment promotions
+prerequisites:
+  required_artifacts:
+  - type: configuration
+    description: Application and infrastructure configuration files
+  access_requirements:
+  - Read access to configuration files
+  - Access to deployment configurations
+discovery:
+  code_patterns:
+  - pattern: (?i)password\s*[:=]|secret\s*[:=]|api[_-]?key\s*[:=]
+    type: regex
+    scope: config
+    purpose: Secrets in configuration files
+  - pattern: debug\s*[:=]\s*(true|1|on)|DEBUG\s*[:=]\s*(true|1|on)
+    type: regex
+    scope: config
+    purpose: Debug mode enabled
+  - pattern: (?i)error[_-]?reporting|display[_-]?errors|show[_-]?errors
+    type: regex
+    scope: config
+    purpose: Error display configuration
+  - pattern: (?i)allow[_-]?origin\s*[:=]\s*\*|cors.*\*
+    type: regex
+    scope: config
+    purpose: Overly permissive CORS
+  file_patterns:
+  - glob: '**/*.{yaml,yml}'
+    purpose: YAML configuration files
+  - glob: '**/*.{json,jsonc}'
+    purpose: JSON configuration files
+  - glob: '**/*.{properties,ini,cfg,conf}'
+    purpose: Properties and INI files
+  - glob: '**/config/**'
+    purpose: Configuration directories
+  - glob: '**/nginx*.conf'
+    purpose: Nginx configuration
+  - glob: '**/apache*.conf'
+    purpose: Apache configuration
+knowledge_sources:
+  specifications:
+  - id: cwe-200
+    name: 'CWE-200: Exposure of Sensitive Information'
+    url: https://cwe.mitre.org/data/definitions/200.html
+    offline_cache: true
+    priority: required
+  - id: cwe-538
+    name: 'CWE-538: Insertion of Sensitive Information into Externally-Accessible File'
+    url: https://cwe.mitre.org/data/definitions/538.html
+    offline_cache: true
+    priority: required
+  - id: owasp-security-misconfiguration
+    name: OWASP Security Misconfiguration
+    url: https://owasp.org/www-project-top-ten/2017/A6_2017-Security_Misconfiguration
+    offline_cache: true
+    priority: required
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: cwe-209
+    name: 'CWE-209: Information Exposure Through Error Message'
+    url: https://cwe.mitre.org/data/definitions/209.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Configuration security scanning
+    offline_capable: true
+  - tool: checkov
+    purpose: IaC and configuration scanning
+    offline_capable: true
+  scripts:
+  - id: config-security-scan
+    language: bash
+    purpose: Scan configuration files for security issues
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Scanning Configuration File Security ==="
+
+      # Find secrets in config files
+      grep -rn --include="*.yaml" --include="*.yml" --include="*.json" --include="*.properties" \
+        -E '(password|secret|key|token)\s*[:=]\s*["\x27][^"\x27]{8,}' . 2>/dev/null
+
+      # Find debug mode enabled
+      grep -rn --include="*.yaml" --include="*.yml" --include="*.json" \
+        -E 'debug\s*[:=]\s*(true|1|"true")' . 2>/dev/null
+
+      # Find permissive CORS
+      grep -rn 'allow.*origin.*\*\|Access-Control-Allow-Origin.*\*' . 2>/dev/null
+signals:
+  critical:
+  - id: CONFIG-CRIT-001
+    signal: Plaintext credentials in configuration file
+    evidence_pattern: (?i)password\s*[:=]\s*['"][^'"]{8,}['"]
+    explanation: |
+      Credentials stored in plaintext configuration files can be accessed
+      by anyone with file system access, including through SCM, backups,
+      or container images. CWE-256.
+    remediation: Use secrets manager, encrypted secrets, or environment variable references
+    cwe: CWE-256
+  - id: CONFIG-CRIT-002
+    signal: Database connection string with embedded credentials
+    evidence_pattern: (?i)(jdbc|mongodb|mysql|postgres)://[^:]+:[^@]+@
+    explanation: |
+      Connection strings with embedded credentials expose database access
+      to anyone with configuration file access. CWE-259.
+    remediation: Separate credentials from connection strings, use secrets manager
+    cwe: CWE-259
+  - id: CONFIG-CRIT-003
+    signal: Private key embedded in configuration
+    evidence_pattern: '-----BEGIN.*PRIVATE KEY'
+    explanation: |
+      Private keys in configuration files can be extracted and used for
+      impersonation, decryption, or unauthorized access. CWE-321.
+    remediation: Store keys in secrets manager, HSM, or secure key storage
+    cwe: CWE-321
+  high:
+  - id: CONFIG-HIGH-001
+    signal: Debug mode enabled in production configuration
+    evidence_pattern: debug\s*[:=]\s*(true|1|on)
+    explanation: |
+      Debug mode often exposes stack traces, internal paths, and sensitive
+      configuration details. It may also disable security controls. CWE-489.
+    remediation: Ensure debug mode is disabled in production configurations
+    cwe: CWE-489
+  - id: CONFIG-HIGH-002
+    signal: Verbose error display enabled
+    evidence_pattern: display_errors\s*[:=]\s*(on|true|1)
+    explanation: |
+      Displaying detailed errors to users reveals internal implementation
+      details, file paths, and potential vulnerabilities. CWE-209.
+    remediation: Disable error display in production, log errors securely
+    cwe: CWE-209
+  - id: CONFIG-HIGH-003
+    signal: Wildcard CORS origin
+    evidence_pattern: (?i)allow[_-]?origin\s*[:=]\s*\*
+    explanation: |
+      Allowing any origin for CORS defeats same-origin security protections.
+      Attackers can make cross-origin requests from malicious sites. CWE-942.
+    remediation: Specify explicit allowed origins, never use wildcard in production
+    cwe: CWE-942
+  - id: CONFIG-HIGH-004
+    signal: Admin credentials with default values
+    evidence_pattern: (?i)admin.*password\s*[:=]\s*(admin|password|123456|default)
+    explanation: |
+      Default admin credentials are first targets for attackers. Publicly
+      known defaults provide immediate system access. CWE-1188.
+    remediation: Force password change on first use, use unique generated credentials
+    cwe: CWE-1188
+  medium:
+  - id: CONFIG-MED-001
+    signal: SSL/TLS verification disabled
+    evidence_pattern: verify.*ssl\s*[:=]\s*false|insecure\s*[:=]\s*true
+    explanation: |
+      Disabling SSL verification exposes connections to man-in-the-middle
+      attacks. Traffic can be intercepted and modified. CWE-295.
+    remediation: Enable SSL verification, use proper certificate management
+    cwe: CWE-295
+  - id: CONFIG-MED-002
+    signal: Insecure HTTP endpoints in configuration
+    evidence_pattern: http://(?!localhost|127\.0\.0\.1)
+    explanation: |
+      Non-localhost HTTP URLs transmit data in cleartext. Credentials
+      and sensitive data can be intercepted. CWE-319.
+    remediation: Use HTTPS for all external endpoints
+    cwe: CWE-319
+  - id: CONFIG-MED-003
+    signal: Sensitive paths exposed in configuration
+    evidence_pattern: /home/|/var/|/etc/|C:\\Users
+    explanation: |
+      Absolute paths in configuration reveal system structure and may
+      indicate where sensitive data is stored. CWE-200.
+    remediation: Use relative paths or environment variables for paths
+    cwe: CWE-200
+  positive:
+  - id: CONFIG-POS-001
+    signal: Configuration references secrets manager
+  - id: CONFIG-POS-002
+    signal: Environment variable references for sensitive values
+  - id: CONFIG-POS-003
+    signal: Separate configuration for production
+  - id: CONFIG-POS-004
+    signal: Config file encryption at rest
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify configuration files
+    description: |
+      Locate all configuration files in the project including
+      YAML, JSON, properties, and server configurations.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find YAML config files
+      command: find . -name '*.yaml' -o -name '*.yml' 2>/dev/null | grep -v node_modules | head -30
+    - purpose: Find JSON config files
+      command: find . -name '*.json' 2>/dev/null | grep -v node_modules | grep -v package | head -30
+    - purpose: Find properties/INI files
+      command: find . -name '*.properties' -o -name '*.ini' -o -name '*.cfg' -o -name '*.conf' 2>/dev/null
+        | grep -v node_modules | head -30
+    expected_findings:
+    - Configuration file locations
+    - Configuration file types
+  - id: '2'
+    name: Scan for embedded secrets
+    description: |
+      Search configuration files for hardcoded credentials,
+      API keys, and other sensitive values.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find password patterns
+      command: grep -rn --include='*.yaml' --include='*.yml' --include='*.json' -E 'password\s*[:=]' .
+        2>/dev/null | grep -v node_modules | head -30
+    - purpose: Find API key patterns
+      command: grep -rn --include='*.yaml' --include='*.yml' --include='*.json' -E 'api[_-]?key\s*[:=]'
+        . 2>/dev/null | grep -v node_modules | head -20
+    - purpose: Find connection strings
+      command: grep -rn --include='*.yaml' --include='*.yml' --include='*.json' -E '(jdbc|mongodb|redis)://'
+        . 2>/dev/null | grep -v node_modules | head -20
+    expected_findings:
+    - Embedded credentials
+    - Connection strings with passwords
+  - id: '3'
+    name: Check debug and error settings
+    description: |
+      Verify that debug mode and verbose error reporting
+      are disabled in production configurations.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find debug mode settings
+      command: grep -rn --include='*.yaml' --include='*.yml' --include='*.json' -iE 'debug\s*[:=]\s*(true|1)'
+        . 2>/dev/null | grep -v node_modules
+    - purpose: Find error display settings
+      command: grep -rn -iE 'display.errors|show.errors|error.reporting' . 2>/dev/null | head -20
+    - purpose: Check for production configs
+      command: find . -name '*prod*' -name '*.yaml' -o -name '*production*' -name '*.yaml' 2>/dev/null
+        | head -10
+    expected_findings:
+    - Debug mode configurations
+    - Error handling settings
+  - id: '4'
+    name: Analyze CORS and security headers
+    description: |
+      Check for overly permissive CORS configuration and
+      missing security headers.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find CORS configuration
+      command: grep -rn -iE 'cors|allow.*origin|access-control' . 2>/dev/null | grep -v node_modules |
+        head -20
+    - purpose: Check for security headers
+      command: grep -rn -iE 'x-frame-options|x-content-type|strict-transport' . 2>/dev/null | head -20
+    expected_findings:
+    - CORS configuration
+    - Security header settings
+  - id: '5'
+    name: Verify SSL/TLS settings
+    description: |
+      Check that SSL/TLS verification is enabled and
+      secure protocols are configured.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find SSL verification settings
+      command: grep -rn -iE 'verify.*ssl|ssl.*verify|insecure' . 2>/dev/null | head -20
+    - purpose: Find HTTP (non-HTTPS) endpoints
+      command: grep -rn 'http://' . 2>/dev/null | grep -v localhost | grep -v 127.0.0.1 | grep -v node_modules
+        | head -20
+    - purpose: Check TLS version settings
+      command: grep -rn -iE 'tls.*version|ssl.*protocol|min.*tls' . 2>/dev/null | head -20
+    expected_findings:
+    - SSL/TLS configuration
+    - Insecure endpoints
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Credential Exposure
+    - Security Misconfigurations
+    - Remediation Priorities
+  confidence_guidance:
+    high: Direct evidence of secrets or dangerous configurations
+    medium: Potentially insecure configurations requiring context
+    low: Configuration patterns that may be intentional or test-only
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-200
+      priority: required
+    - source_id: owasp-security-misconfiguration
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: config-file-security-001
+  item: No plaintext passwords in config files
+  level: CRITICAL
+  verification: manual
+  expected: PASS
+  verification_notes: 'Command has syntax issues - review: grep -rn --include=''*.yaml'' --include=''*.yml''
+    --include=''*.json'' -E ''password\s*[:=]\s*["''\''''''][^"''\'
+- id: config-file-security-002
+  item: Debug mode disabled in production configs
+  level: BLOCKING
+  verification: grep -rn --include='*prod*' -iE 'debug\s*[:=]\s*(true|1)' . 2>/dev/null | wc -l | xargs
+    -I {} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: config-file-security-003
+  item: No wildcard CORS origin
+  level: BLOCKING
+  verification: grep -rn -iE 'allow.*origin.*\*' . 2>/dev/null | grep -v node_modules | wc -l | xargs
+    -I {} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: config-file-security-004
+  item: SSL verification not disabled
+  level: WARNING
+  verification: grep -rn -iE 'verify.*ssl.*false\|insecure.*true' . 2>/dev/null | wc -l | xargs -I {}
+    test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-200
+    - CWE-538
+    - CWE-256
+    - CWE-209
+  - framework: OWASP Top 10
+    controls:
+    - A05:2021-Security Misconfiguration
+  - framework: PCI-DSS
+    controls:
+    - 6.5.3
+    - 6.5.5
+relationships:
+  commonly_combined:
+  - security-trust.secrets-management.hardcoded-secrets
+  - security-trust.secrets-management.environment-variable-security
+  - security-trust.application-security.security-headers

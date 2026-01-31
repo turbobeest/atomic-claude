@@ -1,0 +1,294 @@
+# ============================================================
+# AUDIT: Replication Factor Audit
+# ============================================================
+
+audit:
+  id: "reliability-resilience.data-durability.replication-factor"
+  name: "Replication Factor Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "data-durability"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the replication factor configuration for databases, message
+    queues, and storage systems. Examines whether data is replicated
+    across sufficient nodes and availability zones to survive hardware
+    failures, and verifies that replication is synchronous or asynchronous
+    as appropriate for the durability requirements.
+
+  why_it_matters: |
+    Replication factor directly determines data durability and availability.
+    Insufficient replication means data loss when nodes fail. Over-replication
+    wastes resources and increases write latency. The right replication
+    factor balances durability requirements against cost and performance,
+    ensuring data survives expected failure scenarios.
+
+  when_to_run:
+    - "During data architecture review"
+    - "After data loss incidents"
+    - "When planning storage capacity"
+    - "Before production deployment"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure"
+      description: "Database and storage system configuration"
+    - type: "documentation"
+      description: "Data durability requirements"
+
+  access_requirements:
+    - "Database admin access"
+    - "Storage system access"
+    - "Infrastructure configuration access"
+
+discovery:
+  code_patterns:
+    - pattern: "replication.*factor|replica|RF=|min\\.insync\\.replicas"
+      type: "regex"
+      scope: "config"
+      purpose: "Find replication configuration"
+
+  file_patterns:
+    - glob: "**/cassandra.yaml"
+      purpose: "Cassandra configuration"
+    - glob: "**/kafka/**/*.properties"
+      purpose: "Kafka configuration"
+    - glob: "**/terraform/**/*.tf"
+      purpose: "Infrastructure as code"
+
+  metrics_queries:
+    - system: "Database metrics"
+      query: "Replication lag and replica health"
+      purpose: "Verify replicas are healthy and in sync"
+      threshold: "All replicas should be healthy"
+
+knowledge_sources:
+  guides:
+    - id: "kafka-replication"
+      name: "Kafka Replication Best Practices"
+      url: "https://kafka.apache.org/documentation/#replication"
+      offline_cache: true
+
+    - id: "cassandra-replication"
+      name: "Cassandra Replication Guide"
+      url: "https://cassandra.apache.org/doc/latest/cassandra/architecture/dynamo.html#replication-strategy"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "cqlsh"
+      purpose: "Check Cassandra keyspace replication"
+      command: "DESCRIBE KEYSPACE keyspace_name;"
+    - tool: "kafka-topics"
+      purpose: "Check Kafka topic replication"
+      command: "kafka-topics.sh --describe --topic topic-name --bootstrap-server localhost:9092"
+    - tool: "aws cli"
+      purpose: "Check RDS read replica configuration"
+      command: "aws rds describe-db-instances --query 'DBInstances[*].[DBInstanceIdentifier,ReadReplicaDBInstanceIdentifiers]'"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "kafka_cluster_partition_underreplicated"
+      purpose: "Find under-replicated partitions"
+
+signals:
+  critical:
+    - id: "DD-RF-CRIT-001"
+      signal: "Replication factor of 1 for critical data"
+      evidence_indicators:
+        - "RF=1 in database configuration"
+        - "No read replicas configured"
+      explanation: |
+        Replication factor of 1 means a single node failure causes data
+        loss. This provides no protection against hardware failure.
+      remediation: "Increase replication factor to at least 3 for critical data"
+
+    - id: "DD-RF-CRIT-002"
+      signal: "Replicas all in same availability zone"
+      evidence_indicators:
+        - "All replicas in single AZ"
+        - "No cross-AZ replication"
+      explanation: |
+        Co-located replicas don't protect against AZ failures, defeating
+        the purpose of replication for availability.
+      remediation: "Distribute replicas across multiple availability zones"
+
+  high:
+    - id: "DD-RF-HIGH-001"
+      signal: "Replication factor lower than consistency level allows"
+      explanation: "Quorum operations will fail if insufficient replicas are healthy"
+      remediation: "Ensure RF >= 2 * floor(consistency_level/2) + 1"
+
+    - id: "DD-RF-HIGH-002"
+      signal: "Under-replicated partitions detected"
+      explanation: "Under-replicated partitions risk data loss during additional failures"
+      remediation: "Investigate and resolve under-replication before it compounds"
+
+  medium:
+    - id: "DD-RF-MED-001"
+      signal: "Replication factor not consistent across environments"
+      remediation: "Use production-equivalent replication in staging for accurate testing"
+
+    - id: "DD-RF-MED-002"
+      signal: "No alerting on under-replication"
+      remediation: "Configure alerts for under-replicated partitions or lagging replicas"
+
+  low:
+    - id: "DD-RF-LOW-001"
+      signal: "Replication factor documentation missing"
+
+  positive:
+    - id: "DD-RF-POS-001"
+      signal: "RF >= 3 with cross-AZ distribution"
+    - id: "DD-RF-POS-002"
+      signal: "Continuous monitoring of replica health"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Data Stores"
+      description: |
+        Identify all databases and storage systems that hold persistent data.
+      duration_estimate: "20 min"
+      questions:
+        - "What databases are in use (SQL, NoSQL, message queues)?"
+        - "Which data is considered critical for business operations?"
+      expected_findings:
+        - "Complete inventory of data stores"
+        - "Data criticality classification"
+
+    - id: "2"
+      name: "Check Replication Configuration"
+      description: |
+        Review replication factor settings for each data store.
+      duration_estimate: "40 min"
+      commands:
+        - purpose: "Check Cassandra replication"
+          command: "cqlsh -e \"DESCRIBE KEYSPACES;\""
+        - purpose: "Check Kafka topic replication"
+          command: "kafka-topics.sh --list --bootstrap-server localhost:9092"
+      expected_findings:
+        - "Replication factor per data store"
+        - "Synchronous vs asynchronous replication"
+
+    - id: "3"
+      name: "Verify Geographic Distribution"
+      description: |
+        Confirm replicas are distributed across availability zones.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check replica placement"
+          command: "Check cloud console or nodetool status"
+      expected_findings:
+        - "Replica distribution across AZs"
+        - "Data center topology"
+
+    - id: "4"
+      name: "Review Replica Health"
+      description: |
+        Check current replica health and any under-replication.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check for under-replicated partitions"
+          command: "kafka-topics.sh --describe --under-replicated-partitions --bootstrap-server localhost:9092"
+      expected_findings:
+        - "Current replica health status"
+        - "Under-replication issues"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Data Store Inventory"
+        - "Replication Configuration Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct access to data store configuration and metrics"
+    medium: "Infrastructure as code review with limited runtime access"
+    low: "Documentation review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "kafka-replication"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires data store access"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "replication-factor-001"
+    item: "Critical data has replication factor >= 3"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify RF configuration for all critical data stores"
+    expected: "Confirmed by reviewer"
+
+  - id: "replication-factor-002"
+    item: "Replicas distributed across availability zones"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Confirm replica placement in multiple AZs"
+    expected: "Confirmed by reviewer"
+
+  - id: "replication-factor-003"
+    item: "No under-replicated partitions present"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Check for under-replication warnings"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["A1.2"]
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.data-durability.write-acknowledgment"
+    - "reliability-resilience.data-durability.storage-redundancy"

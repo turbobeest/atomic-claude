@@ -1,0 +1,399 @@
+# ============================================================
+# AUDIT: ACID Compliance Audit
+# ============================================================
+# Evaluates database systems for ACID (Atomicity, Consistency,
+# Isolation, Durability) property compliance.
+# ============================================================
+
+# ============================================================
+# SECTION 1: IDENTITY & METADATA
+# ============================================================
+
+audit:
+  id: "reliability-resilience.data-consistency.acid-compliance"
+
+  name: "ACID Compliance Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "data-consistency"
+
+  tier: "expert"
+  estimated_duration: "4 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+# ============================================================
+# SECTION 2: EXECUTION CLASSIFICATION
+# ============================================================
+
+execution:
+  automatable: "partial"
+
+  severity: "critical"
+
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+# ============================================================
+# SECTION 3: DESCRIPTION & RATIONALE
+# ============================================================
+
+description:
+  what: |
+    Evaluates database systems for ACID compliance including
+    transaction atomicity, consistency enforcement, isolation
+    levels, and durability guarantees. Assesses configuration
+    and usage patterns that may compromise ACID properties.
+
+  why_it_matters: |
+    ACID properties ensure data integrity in database systems.
+    Violations can cause data corruption, inconsistent reads,
+    lost updates, and phantom reads. Understanding and maintaining
+    ACID compliance is critical for systems requiring strong
+    data consistency guarantees.
+
+  when_to_run:
+    - "Initial database architecture review"
+    - "When changing database configurations"
+    - "After data integrity incidents"
+    - "Before critical transaction system launches"
+
+# ============================================================
+# SECTION 4: PREREQUISITES
+# ============================================================
+
+prerequisites:
+  required_artifacts:
+    - type: "database_configuration"
+      description: "Database system configurations"
+    - type: "application_code"
+      description: "Transaction handling code"
+    - type: "architecture_docs"
+      description: "Database architecture documentation"
+
+  access_requirements:
+    - "Read access to database configurations"
+    - "Application code repository access"
+    - "Database monitoring access"
+
+# ============================================================
+# SECTION 5: DISCOVERY SPECIFICATION
+# ============================================================
+
+discovery:
+  code_patterns:
+    - pattern: "BEGIN|COMMIT|ROLLBACK|TRANSACTION"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify transaction handling"
+    - pattern: "SET\\s+TRANSACTION\\s+ISOLATION"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify isolation level settings"
+
+  file_patterns:
+    - glob: "**/database*.yaml"
+      purpose: "Database configuration files"
+    - glob: "**/postgresql.conf"
+      purpose: "PostgreSQL configuration"
+    - glob: "**/my.cnf"
+      purpose: "MySQL configuration"
+
+  interviews:
+    - role: "Database Administrators"
+      questions:
+        - "What isolation levels are configured by default?"
+        - "How are transactions managed in the application?"
+        - "Have there been any data consistency issues?"
+      purpose: "Understand database configuration and practices"
+
+# ============================================================
+# SECTION 6: EXTERNAL KNOWLEDGE SOURCES
+# ============================================================
+
+knowledge_sources:
+  specifications:
+    - id: "sql-standard"
+      name: "SQL Transaction Isolation Levels"
+      url: "https://en.wikipedia.org/wiki/Isolation_(database_systems)"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "postgresql-mvcc"
+      name: "PostgreSQL Transaction Isolation"
+      url: "https://www.postgresql.org/docs/current/transaction-iso.html"
+      offline_cache: true
+
+  papers:
+    - id: "hermitage"
+      title: "Hermitage: Testing Database Transaction Isolation"
+      url: "https://github.com/ept/hermitage"
+
+# ============================================================
+# SECTION 7: TOOLING & AUTOMATION
+# ============================================================
+
+tooling:
+  infrastructure_tools:
+    - tool: "psql"
+      purpose: "Check PostgreSQL isolation level"
+      command: "psql -c 'SHOW default_transaction_isolation;'"
+    - tool: "mysql"
+      purpose: "Check MySQL isolation level"
+      command: "mysql -e 'SELECT @@transaction_isolation;'"
+
+  scripts:
+    - id: "check-isolation"
+      language: "sql"
+      purpose: "Verify current isolation level settings"
+      source: "inline"
+      code: |
+        -- PostgreSQL
+        SHOW default_transaction_isolation;
+        -- Check for serialization failures
+        SELECT COUNT(*) FROM pg_stat_database WHERE deadlocks > 0;
+
+# ============================================================
+# SECTION 8: SIGNALS & FINDINGS TAXONOMY
+# ============================================================
+
+signals:
+  critical:
+    - id: "ACID-CRIT-001"
+      signal: "Autocommit enabled for critical transactional operations"
+      evidence_pattern: "autocommit.*=.*true|autocommit.*=.*1"
+      explanation: |
+        Autocommit prevents atomic multi-statement transactions,
+        leaving data in inconsistent states if operations fail midway.
+      remediation: "Disable autocommit and use explicit transactions for multi-step operations"
+
+    - id: "ACID-CRIT-002"
+      signal: "Isolation level set to READ UNCOMMITTED for transactional workloads"
+      evidence_pattern: "READ.UNCOMMITTED|isolation.*0"
+      explanation: |
+        READ UNCOMMITTED allows dirty reads, causing applications to
+        read uncommitted data that may be rolled back.
+      remediation: "Use at least READ COMMITTED isolation level"
+
+  high:
+    - id: "ACID-HIGH-001"
+      signal: "No transaction handling for related database operations"
+      explanation: "Related operations without transactions can cause partial updates"
+      remediation: "Wrap related operations in explicit transactions"
+
+    - id: "ACID-HIGH-002"
+      signal: "Durability settings weakened for performance"
+      explanation: "fsync=off or similar settings risk data loss on crash"
+      remediation: "Enable synchronous commit and fsync for durable writes"
+
+  medium:
+    - id: "ACID-MED-001"
+      signal: "Inconsistent isolation levels across different operations"
+      remediation: "Standardize isolation levels based on consistency requirements"
+
+    - id: "ACID-MED-002"
+      signal: "Long-running transactions without timeout"
+      remediation: "Implement transaction timeouts to prevent lock contention"
+
+  low:
+    - id: "ACID-LOW-001"
+      signal: "ACID properties not documented for data stores"
+
+  positive:
+    - id: "ACID-POS-001"
+      signal: "Proper transaction management with appropriate isolation"
+    - id: "ACID-POS-002"
+      signal: "Durability settings configured for data safety"
+
+# ============================================================
+# SECTION 9: EXECUTION PROCEDURE
+# ============================================================
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Review Database Configuration"
+      description: |
+        Examine database configuration files for ACID-related
+        settings including isolation levels and durability.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Check PostgreSQL isolation level"
+          command: "psql -c 'SHOW default_transaction_isolation;'"
+        - purpose: "Check PostgreSQL fsync setting"
+          command: "psql -c 'SHOW fsync;'"
+      expected_findings:
+        - "Default isolation level"
+        - "Durability settings"
+
+    - id: "2"
+      name: "Analyze Transaction Patterns"
+      description: |
+        Review application code for transaction handling patterns
+        including begin/commit/rollback usage.
+      duration_estimate: "60 min"
+      commands:
+        - purpose: "Find transaction handling in code"
+          command: "grep -r 'BEGIN\\|COMMIT\\|ROLLBACK\\|transaction' --include='*.py' --include='*.js'"
+      expected_findings:
+        - "Transaction handling patterns"
+        - "Potential atomicity issues"
+
+    - id: "3"
+      name: "Assess Consistency Constraints"
+      description: |
+        Review database constraints including foreign keys,
+        check constraints, and triggers.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "List constraints in PostgreSQL"
+          command: "psql -c \"SELECT conname, contype FROM pg_constraint WHERE conrelid != 0;\""
+      expected_findings:
+        - "Constraint coverage"
+        - "Consistency enforcement mechanisms"
+
+    - id: "4"
+      name: "Evaluate Durability Configuration"
+      description: |
+        Verify durability settings ensure committed data survives
+        system failures.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check PostgreSQL durability settings"
+          command: "psql -c 'SHOW synchronous_commit; SHOW wal_level;'"
+      expected_findings:
+        - "Durability guarantee level"
+        - "WAL configuration"
+
+# ============================================================
+# SECTION 10: OUTPUT SPECIFICATION
+# ============================================================
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "acid_matrix"
+      format: "table"
+      columns:
+        - "Database"
+        - "Atomicity"
+        - "Consistency"
+        - "Isolation Level"
+        - "Durability"
+        - "Status"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "ACID Property Analysis"
+        - "Configuration Review"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Configurations verified and code reviewed"
+    medium: "Configuration checked but code not fully reviewed"
+    low: "Based on documentation without direct verification"
+
+# ============================================================
+# SECTION 11: OFFLINE SUPPORT
+# ============================================================
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "sql-standard"
+        priority: "required"
+
+# ============================================================
+# SECTION 12: PROFILES
+# ============================================================
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "ACID compliance requires thorough database review"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+# ============================================================
+# SECTION 13: DETERMINISTIC VERIFICATION
+# ============================================================
+
+closeout_checklist:
+  - id: "acid-001"
+    item: "Default isolation level is READ COMMITTED or higher"
+    level: "CRITICAL"
+    verification: "psql -c 'SHOW default_transaction_isolation;' | grep -E 'read committed|repeatable read|serializable' && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "acid-002"
+    item: "Synchronous commit enabled for transactional databases"
+    level: "CRITICAL"
+    verification: "psql -c 'SHOW synchronous_commit;' | grep -i on && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "acid-003"
+    item: "Critical operations wrapped in explicit transactions"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review code for transaction handling patterns"
+    expected: "Confirmed by reviewer"
+
+  - id: "acid-004"
+    item: "Database constraints enforce consistency"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Review constraint definitions"
+    expected: "Confirmed by reviewer"
+
+# ============================================================
+# SECTION 14: GOVERNANCE
+# ============================================================
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["CC6.1"]
+    - framework: "PCI-DSS"
+      controls: ["3.4", "3.5"]
+
+# ============================================================
+# SECTION 15: RELATIONSHIPS
+# ============================================================
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.data-consistency.transaction-boundary"
+    - "reliability-resilience.data-consistency.referential-integrity"
+    - "reliability-resilience.data-durability.write-ahead-logging"

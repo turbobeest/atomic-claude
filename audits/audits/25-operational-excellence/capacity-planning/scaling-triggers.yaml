@@ -1,0 +1,388 @@
+audit:
+  id: operational-excellence.capacity-planning.scaling-triggers
+  name: Scaling Triggers Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: operational-excellence
+  category_number: 25
+  subcategory: capacity-planning
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: configuration
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines autoscaling trigger configurations including:
+    - Scale-up and scale-down trigger metrics
+    - Threshold values and sensitivity
+    - Cooldown periods
+    - Minimum and maximum instance limits
+    - Metric selection appropriateness
+    - Scaling speed and responsiveness
+    - Custom metric integrations
+    - Multi-metric scaling policies
+  why_it_matters: |
+    Well-configured scaling ensures responsive capacity management:
+    - Too slow scaling causes performance degradation
+    - Too aggressive scaling wastes resources
+    - Wrong metrics cause inappropriate scaling
+    - Missing limits risk runaway costs
+
+    Autoscaling is a core reliability mechanism. Proper configuration
+    ensures capacity responds to demand while maintaining cost efficiency.
+  when_to_run:
+  - Quarterly operational reviews
+  - After scaling failures
+  - When traffic patterns change
+  - During cost optimization
+  - After application changes
+prerequisites:
+  required_artifacts:
+  - type: scaling_config
+    description: Autoscaling configurations
+  - type: metrics_config
+    description: Scaling metric definitions
+  - type: scaling_history
+    description: Historical scaling events
+  access_requirements:
+  - Autoscaling configuration access
+  - Scaling metrics access
+  - Scaling event history
+  - Cost data access
+discovery:
+  code_patterns:
+  - pattern: (autoscal|hpa|scale).*(trigger|threshold|metric)
+    type: regex
+    scope: config
+    purpose: Detect scaling configurations
+  - pattern: (minReplicas|maxReplicas|targetCPU|targetMemory)
+    type: regex
+    scope: config
+    purpose: Detect HPA configurations
+  file_patterns:
+  - glob: '**/hpa*/**/*.{yaml,yml}'
+    purpose: HPA configurations
+  - glob: '**/autoscal*/**/*.{yaml,yml}'
+    purpose: Autoscaling configurations
+  - glob: '**/scaling*/**/*.{yaml,yml}'
+    purpose: Scaling configurations
+knowledge_sources:
+  specifications:
+  - id: k8s-hpa
+    name: Kubernetes Horizontal Pod Autoscaler
+    url: https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: autoscaling-practices
+    name: Autoscaling Best Practices
+    url: https://cloud.google.com/architecture/best-practices-for-running-cost-effective-kubernetes-applications
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: kubectl
+    purpose: HPA configuration
+    command: kubectl get hpa
+  - tool: aws
+    purpose: AWS autoscaling
+    command: aws autoscaling describe-auto-scaling-groups
+  scripts:
+  - id: scaling-scanner
+    language: bash
+    purpose: Find scaling configurations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Autoscaling Configuration Scan ==="
+      find . -type f \( -name "*hpa*" -o -name "*autoscal*" -o -name "*scaling*" \) \
+        -name "*.yaml" 2>/dev/null | head -20
+signals:
+  critical:
+  - id: ST-CRIT-001
+    signal: No autoscaling configured for critical services
+    evidence_indicators:
+    - Fixed replica counts
+    - No HPA or autoscaling policies
+    - Manual scaling only
+    explanation: |
+      Critical services without autoscaling cannot respond to demand
+      changes automatically. Traffic spikes cause degradation while
+      low traffic wastes resources.
+    remediation: |
+      - Implement autoscaling for critical services
+      - Configure appropriate metrics
+      - Set min/max limits
+      - Test scaling behavior
+      - Monitor scaling events
+  - id: ST-CRIT-002
+    signal: No maximum scaling limit configured
+    evidence_indicators:
+    - Unlimited maxReplicas
+    - No scaling ceiling
+    - Potential runaway costs
+    explanation: |
+      Without maximum limits, autoscaling can create runaway instances
+      during traffic spikes or metric anomalies, causing severe cost
+      impact or resource exhaustion.
+    remediation: |
+      - Set maximum replica limits
+      - Calculate safe maximum based on budget
+      - Configure scaling rate limits
+      - Alert on approaching maximum
+      - Review limits periodically
+  high:
+  - id: ST-HIGH-001
+    signal: Scaling metrics don't reflect actual load
+    evidence_indicators:
+    - CPU scaling for IO-bound workloads
+    - Generic metrics for specialized services
+    - Scaling doesn't match demand
+    explanation: |
+      Wrong metrics cause inappropriate scaling. CPU utilization may
+      not reflect queue depth, request rate, or application-specific
+      bottlenecks. Metrics should reflect actual load indicators.
+    remediation: |
+      - Identify true load indicators
+      - Implement custom metrics if needed
+      - Test metric-load correlation
+      - Use multiple metrics if appropriate
+      - Monitor scaling effectiveness
+  - id: ST-HIGH-002
+    signal: Scaling too slow for traffic patterns
+    evidence_indicators:
+    - Degradation before scale-up completes
+    - Long cooldown periods
+    - Scaling lags behind demand
+    explanation: |
+      Slow scaling causes degradation during traffic ramps. Scale-up
+      should complete before capacity is exhausted. Long cooldowns
+      prevent responsive scaling.
+    remediation: |
+      - Reduce cooldown periods
+      - Enable predictive scaling
+      - Pre-scale for known events
+      - Increase scaling step size
+      - Monitor scale-up time
+  medium:
+  - id: ST-MED-001
+    signal: Scale-down too aggressive
+    evidence_indicators:
+    - Frequent scale-down during variable traffic
+    - Oscillating replica counts
+    - Instances terminated prematurely
+    explanation: |
+      Aggressive scale-down causes oscillation and may remove
+      capacity during traffic variability. Conservative scale-down
+      prevents thrashing while maintaining efficiency.
+    remediation: |
+      - Increase scale-down cooldown
+      - Use longer metric windows
+      - Implement scale-down delays
+      - Consider keeping minimum headroom
+      - Monitor scaling stability
+  - id: ST-MED-002
+    signal: Minimum replicas too low for reliability
+    evidence_indicators:
+    - minReplicas = 1
+    - Single instance under low load
+    - No redundancy at minimum scale
+    explanation: |
+      Minimum replicas should maintain service reliability. Scaling
+      to a single instance eliminates redundancy. Critical services
+      need minimum redundancy even at low traffic.
+    remediation: |
+      - Set minimum replicas for redundancy
+      - Consider availability requirements
+      - Balance cost vs reliability
+      - Document minimum rationale
+      - Review periodically
+  low:
+  - id: ST-LOW-001
+    signal: Scaling events not monitored
+    evidence_indicators:
+    - No scaling event alerts
+    - Scaling activity unknown
+    - No scaling dashboards
+    explanation: |
+      Monitoring scaling events enables optimization and troubleshooting.
+      Without visibility, scaling problems go unnoticed.
+    remediation: |
+      - Enable scaling event logging
+      - Create scaling dashboards
+      - Alert on unusual scaling
+      - Track scaling frequency
+      - Review scaling effectiveness
+  positive:
+  - id: ST-POS-001
+    signal: Well-tuned autoscaling with appropriate metrics
+    evidence_indicators:
+    - Metrics match actual load indicators
+    - Responsive scale-up, stable scale-down
+    - Appropriate min/max limits
+  - id: ST-POS-002
+    signal: Scaling monitored and optimized
+    evidence_indicators:
+    - Scaling events tracked
+    - Regular configuration review
+    - Scaling effectiveness measured
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Scaling Configuration Review
+    description: |
+      Examine autoscaling configurations.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find HPA configurations
+      command: |
+        find . -type f \( -name "*hpa*" -o -name "*autoscal*" \) \
+          -name "*.yaml" 2>/dev/null | head -20
+    - purpose: Search for scaling parameters
+      command: |
+        grep -rniE "(minReplicas|maxReplicas|target|threshold)" \
+          --include="*hpa*.yaml" --include="*autoscal*.yaml" . 2>/dev/null | head -30
+    expected_findings:
+    - Scaling configurations
+    - Replica limits
+    - Target values
+  - id: '2'
+    name: Metrics Configuration Review
+    description: |
+      Assess scaling metrics appropriateness.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find metric configurations
+      command: |
+        grep -rniE "(metric|cpu|memory|custom)" \
+          --include="*hpa*.yaml" --include="*autoscal*.yaml" . 2>/dev/null | head -30
+    expected_findings:
+    - Metric definitions
+    - Custom metrics
+    - Metric sources
+  - id: '3'
+    name: Timing Configuration Review
+    description: |
+      Evaluate scaling timing and cooldowns.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find timing configurations
+      command: |
+        grep -rniE "(cooldown|stabilization|scaleDown|scaleUp)" \
+          --include="*.yaml" . 2>/dev/null | head -20
+    expected_findings:
+    - Cooldown settings
+    - Stabilization windows
+    - Rate limits
+  - id: '4'
+    name: Limit Configuration Review
+    description: |
+      Review minimum and maximum limits.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find limit configurations
+      command: |
+        grep -rniE "(min|max).*(replica|instance|capacity)" \
+          --include="*.yaml" . 2>/dev/null | head -30
+    expected_findings:
+    - Minimum limits
+    - Maximum limits
+    - Limit rationale
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Configuration Assessment
+    - Metrics Review
+    - Timing Analysis
+    - Recommendations
+  - type: scaling_matrix
+    format: table
+    description: Services and their scaling configurations
+  confidence_guidance:
+    high: Scaling configurations documented and reviewed
+    medium: Configuration exists but effectiveness unclear
+    low: Scaling configuration unclear
+offline:
+  capability: partial
+  runtime_required_for:
+  - Configuration verification
+  - Scaling event analysis
+  - Effectiveness measurement
+  cache_manifest:
+    knowledge:
+    - source_id: k8s-hpa
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Scaling audit requires configuration analysis
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: st-001
+  item: Autoscaling configured for critical services
+  level: CRITICAL
+  verification: |
+    find . -type f \( -name "*hpa*" -o -name "*autoscal*" \) \
+      -name "*.yaml" 2>/dev/null | wc -l | \
+      xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: st-002
+  item: Maximum limits configured
+  level: CRITICAL
+  verification: |
+    grep -rniE "maxReplicas" \
+      --include="*.yaml" . 2>/dev/null | wc -l | \
+      xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: st-003
+  item: Scaling metrics appropriate
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify metrics reflect actual load indicators
+  expected: Confirmed by reviewer
+- id: st-004
+  item: Minimum replicas ensure redundancy
+  level: WARNING
+  verification: manual
+  verification_notes: Verify minReplicas >= 2 for critical services
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - A1.2
+  - framework: ITIL 4
+    controls:
+    - Capacity Management
+relationships:
+  commonly_combined:
+  - operational-excellence.capacity-planning.resource-headroom
+  - operational-excellence.capacity-planning.capacity-testing
+  - operational-excellence.service-level-management.slo-definition

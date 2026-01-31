@@ -1,0 +1,735 @@
+# ============================================================
+# EXAMPLE AUDIT: Process/Documentation Domain
+# ============================================================
+# This example shows how to adapt the template for audits that:
+# - Examine documentation artifacts rather than code or infrastructure
+# - Use document analysis and completeness checklists
+# - Combine automated checks (file existence) with qualitative review
+# - Have mixed automation levels
+# ============================================================
+
+audit:
+  id: "documentation-knowledge.operational.runbook-completeness"
+  name: "Runbook Completeness Audit"
+  version: "1.0.0"
+  last_updated: "2025-01-18"
+  status: "active"
+  
+  category: "documentation-knowledge"
+  category_number: 27
+  subcategory: "operational"
+  
+  tier: "expert"           # Requires judgment on quality
+  estimated_duration: "2-4 hours"
+  
+  completeness: "requires_discovery"  # Must find runbooks first
+  requires_runtime: false
+  destructive: false
+
+# ============================================================
+# EXECUTION: Partially automatable
+# ============================================================
+
+execution:
+  # File existence is automatable, quality is not
+  automatable: "partial"
+  severity: "high"
+  scope: "documentation"
+  
+  default_profiles:
+    - "full"
+    - "production"         # Runbooks are critical for production readiness
+    
+  blocks_phase: false      # Missing runbook is warning, not blocker
+  parallelizable: true
+
+# ============================================================
+# DESCRIPTION
+# ============================================================
+
+description:
+  what: |
+    Evaluates the completeness, accuracy, and usability of operational
+    runbooks for each service. Checks that runbooks exist, follow a
+    consistent template, cover required scenarios, and are kept current.
+    Assesses whether an on-call engineer unfamiliar with the service
+    could use the runbook to diagnose and resolve common issues.
+    
+  why_it_matters: |
+    Incomplete or outdated runbooks lead to:
+    - Extended incident resolution times (MTTR)
+    - Escalation to unavailable experts (3am pages)
+    - Inconsistent incident handling
+    - Knowledge loss when team members leave
+    - On-call burnout and stress
+    - Customer-facing impact during outages
+    
+  when_to_run:
+    - "Before promoting service to production"
+    - "After major service changes"
+    - "Quarterly operational reviews"
+    - "Post-incident reviews revealing runbook gaps"
+    - "During on-call handoff improvements"
+
+# ============================================================
+# PREREQUISITES
+# ============================================================
+
+prerequisites:
+  required_artifacts:
+    - type: "service_catalog"
+      description: "List of services that should have runbooks"
+      location_hints:
+        - "service-catalog.yaml"
+        - "services.json"
+        - "SERVICES.md"
+        
+    - type: "runbook_repository"
+      description: "Location where runbooks are stored"
+      location_hints:
+        - "runbooks/"
+        - "docs/runbooks/"
+        - "operations/runbooks/"
+        - "wiki/runbooks/"
+        
+  optional_artifacts:
+    - type: "runbook_template"
+      description: "Standard template for runbooks"
+      location_hints:
+        - "templates/runbook-template.md"
+        - "runbooks/TEMPLATE.md"
+        
+    - type: "incident_history"
+      description: "Past incidents to validate runbook coverage"
+      
+    - type: "alert_definitions"
+      description: "Alerts that should link to runbooks"
+      
+  access_requirements:
+    - "Read access to runbook repository"
+    - "Access to service catalog or deployment manifests"
+    - "Access to alerting system (optional, for coverage check)"
+
+# ============================================================
+# DISCOVERY: Find runbooks and services
+# ============================================================
+
+discovery:
+  # Find all runbooks
+  file_patterns:
+    - glob: "**/runbooks/**/*.md"
+      purpose: "Markdown runbooks"
+      
+    - glob: "**/runbooks/**/*.html"
+      purpose: "HTML runbooks (wiki exports)"
+      
+    - glob: "**/operations/**/*.md"
+      purpose: "Operations docs that may be runbooks"
+      
+  # Find service list
+  code_patterns:
+    - pattern: "name:\\s*['\"]?([a-z-]+)['\"]?"
+      type: "regex"
+      scope: "config"
+      purpose: "Service names from deployment configs"
+      files: ["**/deployment.yaml", "**/service.yaml", "**/k8s/*.yaml"]
+      
+  # Documents to analyze
+  documents_to_review:
+    - type: "runbooks"
+      purpose: "Assess quality and completeness of each runbook"
+      analysis_checklist:
+        - "Has clear title and service identification"
+        - "Includes contact/escalation information"
+        - "Covers common failure scenarios"
+        - "Has troubleshooting decision tree or steps"
+        - "Includes resolution procedures"
+        - "Shows last updated date"
+        - "Has been tested/validated"
+        
+    - type: "runbook_template"
+      purpose: "Understand expected runbook structure"
+      
+    - type: "alert_definitions"
+      purpose: "Map alerts to runbooks for coverage"
+
+# ============================================================
+# KNOWLEDGE SOURCES
+# ============================================================
+
+knowledge_sources:
+  guides:
+    - id: "google-sre-runbooks"
+      name: "Google SRE Book - Being On-Call"
+      url: "https://sre.google/sre-book/being-on-call/"
+      offline_cache: true
+      priority: "recommended"
+      
+    - id: "pagerduty-runbook-guide"
+      name: "PagerDuty Runbook Best Practices"
+      url: "https://www.pagerduty.com/resources/learn/what-is-a-runbook/"
+      offline_cache: true
+      priority: "recommended"
+      
+    - id: "atlassian-runbook-template"
+      name: "Atlassian Runbook Template"
+      url: "https://www.atlassian.com/incident-management/kpis/runbook"
+      offline_cache: true
+      priority: "optional"
+      
+  learning_resources:
+    - id: "incident-management-book"
+      title: "Incident Management for Operations"
+      type: "book"
+      reference: "O'Reilly Media"
+
+# ============================================================
+# TOOLING: Document analysis, not static analysis
+# ============================================================
+
+tooling:
+  # File discovery and analysis
+  scripts:
+    - id: "runbook-inventory"
+      language: "bash"
+      purpose: "Build inventory of runbooks and services"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find all runbooks and extract metadata
+        
+        echo "=== Runbook Inventory ==="
+        find . -path '*/runbooks/*' -name '*.md' | while read file; do
+          title=$(head -1 "$file" | sed 's/^#* *//')
+          updated=$(git log -1 --format='%ci' -- "$file" 2>/dev/null || echo "unknown")
+          echo "FILE: $file"
+          echo "TITLE: $title"
+          echo "UPDATED: $updated"
+          echo "---"
+        done
+      offline_capable: true
+      
+    - id: "runbook-section-checker"
+      language: "python"
+      purpose: "Check runbook for required sections"
+      source: "inline"
+      code: |
+        #!/usr/bin/env python3
+        """
+        Check runbook markdown file for required sections.
+        """
+        import re
+        import sys
+        from pathlib import Path
+        
+        REQUIRED_SECTIONS = [
+            r"overview|description|about",
+            r"contact|escalat|owner",
+            r"prerequisite|requirement|access",
+            r"troubleshoot|diagnos|debug",
+            r"resolut|fix|remediat|mitigat",
+            r"rollback|revert",
+        ]
+        
+        RECOMMENDED_SECTIONS = [
+            r"alert|monitor",
+            r"log|metric|dashboard",
+            r"common.*(issue|problem|failure)",
+            r"related|see.also|reference",
+        ]
+        
+        def check_runbook(filepath):
+            content = Path(filepath).read_text().lower()
+            
+            results = {"required": [], "recommended": [], "missing_required": [], "missing_recommended": []}
+            
+            for pattern in REQUIRED_SECTIONS:
+                if re.search(pattern, content):
+                    results["required"].append(pattern)
+                else:
+                    results["missing_required"].append(pattern)
+                    
+            for pattern in RECOMMENDED_SECTIONS:
+                if re.search(pattern, content):
+                    results["recommended"].append(pattern)
+                else:
+                    results["missing_recommended"].append(pattern)
+                    
+            return results
+        
+        if __name__ == "__main__":
+            if len(sys.argv) < 2:
+                print("Usage: runbook-section-checker.py <runbook.md>")
+                sys.exit(1)
+            results = check_runbook(sys.argv[1])
+            print(f"Required sections found: {len(results['required'])}/{len(REQUIRED_SECTIONS)}")
+            print(f"Missing required: {results['missing_required']}")
+            print(f"Recommended sections found: {len(results['recommended'])}/{len(RECOMMENDED_SECTIONS)}")
+      offline_capable: true
+      dependencies: ["pathlib"]
+      
+    - id: "service-runbook-mapper"
+      language: "bash"
+      purpose: "Map services to runbooks"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # For each service, check if corresponding runbook exists
+        
+        RUNBOOK_DIR="${RUNBOOK_DIR:-./runbooks}"
+        SERVICES_FILE="${SERVICES_FILE:-./services.txt}"
+        
+        if [ ! -f "$SERVICES_FILE" ]; then
+          # Try to build from k8s manifests
+          find . -name 'deployment.yaml' -exec grep -h 'name:' {} \; | \
+            awk -F: '{print $2}' | tr -d ' "'"'" | sort -u > "$SERVICES_FILE"
+        fi
+        
+        echo "=== Service to Runbook Mapping ==="
+        while read service; do
+          runbook=$(find "$RUNBOOK_DIR" -iname "*${service}*" -type f 2>/dev/null | head -1)
+          if [ -n "$runbook" ]; then
+            echo "✓ $service -> $runbook"
+          else
+            echo "✗ $service -> MISSING"
+          fi
+        done < "$SERVICES_FILE"
+      offline_capable: true
+      
+  # Quality assessment (manual with checklist)
+  assessment_tools:
+    - tool: "Runbook Quality Checklist"
+      purpose: "Structured evaluation of each runbook"
+      description: |
+        For each runbook, score on:
+        - Clarity (1-5): Could someone unfamiliar follow this?
+        - Completeness (1-5): Are all scenarios covered?
+        - Currency (1-5): Is information up to date?
+        - Actionability (1-5): Are steps concrete and executable?
+        - Testability (1-5): Can this be validated in a drill?
+
+# ============================================================
+# SIGNALS
+# ============================================================
+
+signals:
+  critical:
+    - id: "RUNBOOK-CRIT-001"
+      signal: "Production service has no runbook"
+      evidence_pattern: "Service in production namespace with no corresponding runbook file"
+      evidence_indicators:
+        - "No file matching service name in runbook directory"
+        - "Service catalog shows service as production but no runbook link"
+      explanation: |
+        A production service without a runbook means on-call engineers
+        have no documented procedures for handling incidents. This leads
+        to extended outages and expert dependency.
+      remediation: |
+        1. Create runbook using standard template
+        2. Document at minimum: overview, contacts, common issues, troubleshooting
+        3. Have service owner review and approve
+        4. Link runbook to alerts for this service
+        
+    - id: "RUNBOOK-CRIT-002"
+      signal: "Runbook has no troubleshooting or resolution section"
+      evidence_pattern: "Runbook file exists but lacks troubleshooting/resolution content"
+      evidence_indicators:
+        - "No section matching 'troubleshoot', 'diagnose', 'resolve', 'fix'"
+        - "Document is only an overview without actionable procedures"
+      explanation: |
+        A runbook without troubleshooting steps is not useful during
+        incidents. The primary purpose of a runbook is to guide
+        diagnosis and resolution.
+      remediation: |
+        Add sections covering:
+        - How to diagnose common failure modes
+        - Step-by-step resolution procedures
+        - Rollback/recovery procedures
+        - When and how to escalate
+        
+  high:
+    - id: "RUNBOOK-HIGH-001"
+      signal: "Runbook not updated in over 6 months"
+      evidence_pattern: "git log shows last modification > 180 days ago"
+      verification_command: |
+        find runbooks/ -name '*.md' -exec sh -c 'git log -1 --format="%ci" -- "$1" | xargs -I {} test $(date -d "{}" +%s) -lt $(date -d "6 months ago" +%s) && echo "STALE: $1"' _ {} \;
+      explanation: |
+        Stale runbooks may contain outdated information about:
+        - Service architecture that has changed
+        - Commands or APIs that no longer exist
+        - Contact information for people who left
+        - Thresholds or configurations that were modified
+      remediation: |
+        1. Schedule runbook review with service owner
+        2. Validate all commands and procedures still work
+        3. Update contact and escalation information
+        4. Add "Last validated" date to runbook
+        
+    - id: "RUNBOOK-HIGH-002"
+      signal: "Alerts not linked to runbooks"
+      evidence_pattern: "Alert definitions missing runbook_url annotation"
+      evidence_indicators:
+        - "Prometheus alerts without runbook_url label"
+        - "PagerDuty services without linked documentation"
+      explanation: |
+        When alerts fire, on-call engineers need immediate access to
+        relevant runbooks. Unlinked alerts force engineers to search
+        for documentation during incidents.
+      remediation: |
+        1. Audit all alert definitions
+        2. Add runbook_url annotation/label to each alert
+        3. Ensure linked runbooks are specific to the alert
+        
+    - id: "RUNBOOK-HIGH-003"
+      signal: "Runbook lacks escalation information"
+      evidence_pattern: "No contact/escalation section in runbook"
+      evidence_indicators:
+        - "No 'contact', 'escalation', 'owner' section"
+        - "No on-call schedule reference"
+        - "No subject matter expert contacts"
+      explanation: |
+        When an on-call engineer cannot resolve an issue, they need
+        clear guidance on who to escalate to and how.
+      remediation: |
+        Add escalation section with:
+        - Service owner and team
+        - On-call schedule link
+        - Subject matter experts for specific subsystems
+        - Escalation criteria (when to page vs when to wait)
+        
+  medium:
+    - id: "RUNBOOK-MED-001"
+      signal: "Runbook lacks common issues section"
+      evidence_pattern: "No section covering frequently occurring problems"
+      explanation: |
+        Most incidents are repeat issues. Documenting common problems
+        and their solutions dramatically reduces resolution time.
+      remediation: |
+        Add "Common Issues" section with:
+        - Symptom description
+        - Root cause
+        - Resolution steps
+        - Prevention measures
+        
+    - id: "RUNBOOK-MED-002"
+      signal: "Runbook not tested in drill"
+      evidence_pattern: "No evidence of runbook validation through exercise"
+      evidence_indicators:
+        - "No 'last tested' date"
+        - "No drill/game day history"
+      explanation: |
+        Untested runbooks may have errors, missing steps, or assume
+        access/permissions that don't exist.
+      remediation: |
+        Schedule runbook validation:
+        - Walk through with someone unfamiliar with service
+        - Include in game day exercises
+        - Document and fix gaps found
+        
+    - id: "RUNBOOK-MED-003"
+      signal: "Runbook doesn't follow standard template"
+      evidence_pattern: "Structure differs significantly from team template"
+      explanation: |
+        Inconsistent formats slow down incident response as engineers
+        must learn different structures for different services.
+      remediation: |
+        Migrate runbook to standard template, preserving content.
+        
+  low:
+    - id: "RUNBOOK-LOW-001"
+      signal: "Runbook lacks dashboard/metrics links"
+      evidence_pattern: "No links to monitoring dashboards"
+      remediation: |
+        Add links to:
+        - Service dashboard in Grafana/Datadog
+        - Key metrics to check during incidents
+        - Log search queries
+        
+  positive:
+    - id: "RUNBOOK-POS-001"
+      signal: "Runbook has been recently tested"
+      evidence_indicators:
+        - "'Last tested' date within 90 days"
+        - "Evidence of drill/game day validation"
+        
+    - id: "RUNBOOK-POS-002"
+      signal: "All alerts link to specific runbooks"
+      evidence_indicators:
+        - "100% of alerts have runbook_url"
+        - "Links are to specific runbooks, not generic docs"
+        
+    - id: "RUNBOOK-POS-003"
+      signal: "Runbook includes automation/self-healing"
+      evidence_indicators:
+        - "Documented auto-remediation exists"
+        - "Runbook references automated recovery procedures"
+
+# ============================================================
+# PROCEDURE
+# ============================================================
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"  # Judging quality, not just checking existence
+    ensemble_role: "auditor"
+    
+  preparation:
+    - step: "Identify runbook repository location"
+    - step: "Build service catalog (list of services needing runbooks)"
+    - step: "Obtain runbook template if one exists"
+    
+  steps:
+    - id: "1"
+      name: "Inventory Runbooks"
+      description: |
+        Find all runbook files and build inventory with metadata.
+      duration_estimate: "15-30 min"
+      commands:
+        - purpose: "List all runbook files"
+          command: "find . -path '*/runbooks/*' -name '*.md' -o -path '*/runbooks/*' -name '*.html'"
+        - purpose: "Get last modified dates"
+          command: |
+            find . -path '*/runbooks/*' -name '*.md' -exec sh -c 'echo "$1: $(git log -1 --format=%ci -- "$1" 2>/dev/null || stat -c %y "$1")"' _ {} \;
+      expected_findings:
+        - "Complete list of runbooks"
+        - "Last updated dates for each"
+        
+    - id: "2"
+      name: "Build Service-to-Runbook Map"
+      description: |
+        Map each service to its runbook. Identify services without runbooks.
+      duration_estimate: "15-30 min"
+      commands:
+        - purpose: "List services"
+          command: "kubectl get deployments --all-namespaces -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\\n' | sort -u"
+        - purpose: "Match to runbooks"
+          command: |
+            # Custom script to match services to runbooks
+            for svc in $(kubectl get deployments -o name | cut -d/ -f2); do
+              match=$(find runbooks/ -iname "*$svc*" | head -1)
+              echo "$svc: ${match:-MISSING}"
+            done
+      expected_findings:
+        - "Coverage percentage"
+        - "List of services without runbooks"
+        
+    - id: "3"
+      name: "Check Runbook Structure"
+      description: |
+        Verify each runbook has required sections.
+      duration_estimate: "30-60 min"
+      commands:
+        - purpose: "Check for required sections"
+          command: |
+            for rb in runbooks/*.md; do
+              echo "=== $rb ==="
+              grep -i -E "^#+.*(overview|contact|troubleshoot|resolution)" "$rb" || echo "MISSING REQUIRED SECTIONS"
+            done
+      questions:
+        - "Does each runbook have all required sections?"
+        - "Are sections substantive or just placeholders?"
+      expected_findings:
+        - "Structural compliance percentage"
+        - "List of runbooks with missing sections"
+        
+    - id: "4"
+      name: "Assess Runbook Quality"
+      description: |
+        For each runbook, evaluate quality dimensions:
+        - Clarity: Could someone unfamiliar follow this?
+        - Completeness: Are all scenarios covered?
+        - Currency: Is information up to date?
+        - Actionability: Are steps concrete and executable?
+      duration_estimate: "1-2 hours"
+      questions:
+        - "Are troubleshooting steps specific and actionable?"
+        - "Do resolution procedures include actual commands?"
+        - "Is contact information current?"
+        - "Are dashboards and log queries linked?"
+      expected_findings:
+        - "Quality scores per runbook"
+        - "Specific improvement recommendations"
+        
+    - id: "5"
+      name: "Check Alert Linkage"
+      description: |
+        Verify alerts are linked to corresponding runbooks.
+      duration_estimate: "15-30 min"
+      commands:
+        - purpose: "Check Prometheus alerts for runbook_url"
+          command: |
+            kubectl get prometheusrules --all-namespaces -o json | jq '.items[].spec.groups[].rules[] | select(.alert != null) | {alert: .alert, runbook: .annotations.runbook_url}'
+        - purpose: "Count unlinked alerts"
+          command: |
+            kubectl get prometheusrules --all-namespaces -o json | jq '[.items[].spec.groups[].rules[] | select(.alert != null and .annotations.runbook_url == null)] | length'
+      expected_findings:
+        - "Alert linkage percentage"
+        - "List of unlinked alerts"
+        
+    - id: "6"
+      name: "Freshness Analysis"
+      description: |
+        Check when runbooks were last updated and validated.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find stale runbooks (>6 months)"
+          command: |
+            find runbooks/ -name '*.md' -mtime +180
+        - purpose: "Last commit dates"
+          command: |
+            for f in runbooks/*.md; do
+              echo "$f: $(git log -1 --format='%ci' -- "$f")"
+            done | sort -t: -k2
+      expected_findings:
+        - "Freshness distribution"
+        - "List of stale runbooks"
+
+# ============================================================
+# OUTPUT
+# ============================================================
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      
+    - type: "coverage_matrix"
+      format: "table"
+      description: "Services x Runbook existence matrix"
+      columns:
+        - "Service"
+        - "Runbook Exists"
+        - "Last Updated"
+        - "Quality Score"
+        - "Alert Linkage"
+        
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Coverage Analysis (X/Y services have runbooks)"
+        - "Quality Assessment"
+        - "Freshness Analysis"
+        - "Alert Linkage Status"
+        - "Priority Remediation List"
+        
+  confidence_guidance:
+    high: "File existence checks and automated analysis"
+    medium: "Quality assessments based on content review"
+    low: "Inferred from limited sampling"
+
+# ============================================================
+# OFFLINE SUPPORT
+# ============================================================
+
+offline:
+  capability: "full"  # Runbooks are static documents
+  
+  cache_manifest:
+    knowledge:
+      - source_id: "google-sre-runbooks"
+        priority: "recommended"
+      - source_id: "pagerduty-runbook-guide"
+        priority: "recommended"
+        
+  degradation:
+    - feature: "Alert linkage check (Prometheus)"
+      impact: "Cannot verify alert-to-runbook mapping"
+      mitigation: "Export alert rules before going offline: kubectl get prometheusrules -A -o yaml > alerts.yaml"
+
+# ============================================================
+# PROFILES
+# ============================================================
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Quality assessment requires time"
+    security:
+      included: false
+      reason: "Not security-focused"
+    production:
+      included: true
+      priority: 20
+    full:
+      included: true
+      priority: 75
+
+# ============================================================
+# CLOSEOUT: Mix of automated and manual verification
+# ============================================================
+
+closeout_checklist:
+  - id: "runbook-001"
+    item: "All production services have runbooks"
+    level: "CRITICAL"
+    verification: |
+      missing=$(for svc in $(kubectl get deploy -n production -o name 2>/dev/null | cut -d/ -f2); do
+        [ ! -f "runbooks/$svc.md" ] && [ ! -f "runbooks/${svc}-runbook.md" ] && echo "$svc"
+      done)
+      [ -z "$missing" ] && echo 'PASS' || echo "FAIL: Missing runbooks for: $missing"
+    expected: "PASS"
+    
+  - id: "runbook-002"
+    item: "Runbooks have required sections"
+    level: "BLOCKING"
+    verification: |
+      for rb in runbooks/*.md; do
+        if ! grep -qi -E "(troubleshoot|diagnos|resolution|fix)" "$rb"; then
+          echo "FAIL: $rb missing troubleshooting/resolution"
+          exit 1
+        fi
+      done
+      echo 'PASS'
+    expected: "PASS"
+    
+  - id: "runbook-003"
+    item: "No runbooks older than 12 months"
+    level: "WARNING"
+    verification: |
+      old=$(find runbooks/ -name '*.md' -mtime +365 2>/dev/null)
+      [ -z "$old" ] && echo 'PASS' || echo "WARNING: Stale runbooks: $old"
+    expected: "PASS"
+    
+  - id: "runbook-004"
+    item: "Quality review completed for all runbooks"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms quality checklist completed for each runbook"
+    expected: "Confirmed by reviewer"
+    
+  - id: "runbook-005"
+    item: "Critical service runbooks tested in drill"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Evidence of runbook validation through walkthrough or game day"
+    expected: "Confirmed by reviewer"
+
+# ============================================================
+# GOVERNANCE
+# ============================================================
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+    maturity: ["growing", "mature"]  # Not for early prototypes
+    
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.4", "CC7.5"]  # Incident response
+    - framework: "ISO27001"
+      controls: ["A.16.1"]  # Incident management
+    - framework: "ITIL"
+      controls: ["Incident Management", "Knowledge Management"]
+
+# ============================================================
+# RELATIONSHIPS
+# ============================================================
+
+relationships:
+  commonly_combined:
+    - "human-organizational.knowledge-distribution.bus-factor"
+    - "operational-excellence.incident-management.incident-response-process"
+    - "observability-instrumentation.alerting.alert-coverage"
+    - "documentation-knowledge.operational.architecture-docs"

@@ -1,0 +1,308 @@
+audit:
+  id: code-quality.readability.control-flow-clarity
+  name: Control Flow Clarity Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: readability
+  tier: expert
+  estimated_duration: 30 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  - quality
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates the clarity of control flow structures throughout the codebase.
+    Identifies issues like deeply nested conditionals, missing early returns,
+    confusing loop structures, goto/break/continue abuse, exception-based
+    flow control, and functions with multiple exit points that hinder
+    understanding of execution paths.
+  why_it_matters: |
+    Unclear control flow is a leading cause of bugs and makes code review
+    ineffective. Deeply nested code requires readers to maintain mental
+    state about multiple conditions. Functions with many exit points are
+    harder to reason about. Research shows that reducing nesting depth by
+    one level decreases defect density by approximately 15%.
+  when_to_run:
+  - Code review processes
+  - Refactoring initiatives
+  - Bug investigation
+  - Complexity reduction efforts
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  access_requirements:
+  - Read access to source code
+discovery:
+  code_patterns:
+  - pattern: ^(\s{8}|\t\t)if\b|^(\s{12}|\t\t\t)if\b
+    type: regex
+    scope: source
+    purpose: Detect deeply nested conditionals
+  - pattern: \bbreak\b|\bcontinue\b
+    type: regex
+    scope: source
+    purpose: Find break/continue usage
+  - pattern: \breturn\b.*\breturn\b
+    type: regex
+    scope: source
+    purpose: Find multiple returns in same scope
+  - pattern: \bwhile\s+True\b|\bfor.*;;|\bloop\s*\{
+    type: regex
+    scope: source
+    purpose: Find infinite loops
+  file_patterns:
+  - glob: '**/*.{js,ts,jsx,tsx,py,java,go,rb,cs}'
+    purpose: Source code files
+knowledge_sources:
+  guides:
+  - id: clean-code
+    name: Clean Code - Functions
+    url: https://www.oreilly.com/library/view/clean-code/9780136083238/
+    offline_cache: true
+  - id: refactoring-guru
+    name: Refactoring Guru - Replace Nested Conditional with Guard Clauses
+    url: https://refactoring.guru/replace-nested-conditional-with-guard-clauses
+    offline_cache: true
+  - id: pragmatic-programmer
+    name: The Pragmatic Programmer
+    url: https://pragprog.com/titles/tpp20/the-pragmatic-programmer-20th-anniversary-edition/
+    offline_cache: false
+  learning_resources:
+  - id: clean-code-book
+    title: 'Clean Code: A Handbook of Agile Software Craftsmanship'
+    type: book
+    reference: 'ISBN: 978-0132350884, Chapter 3'
+tooling:
+  static_analysis:
+  - tool: eslint
+    purpose: Max depth and complexity rules
+    offline_capable: true
+  - tool: pylint
+    purpose: Nesting and complexity analysis
+    offline_capable: true
+  - tool: sonarqube
+    purpose: Cognitive complexity measurement
+    offline_capable: true
+  scripts:
+  - id: control-flow-scan
+    language: bash
+    purpose: Detect control flow issues
+    source: inline
+    code: |
+      # Find deeply nested code (4+ levels)
+      grep -rn --include="*.py" "^                if\|^                for\|^                while" . 2>/dev/null | head -20
+      # Find multiple returns
+      grep -rln --include="*.py" -E "^\s+return\b" . 2>/dev/null | xargs -I{} sh -c 'count=$(grep -c "^\s*return\b" "{}"); [ "$count" -gt 3 ] && echo "{}: $count returns"' 2>/dev/null | head -10
+      # Find break/continue in nested loops
+      grep -rn --include="*.py" "^\s{8,}(break|continue)\b" . 2>/dev/null | head -10
+signals:
+  critical:
+  - id: CFC-CRIT-001
+    signal: Control flow depends on exception handling
+    evidence_pattern: Exception thrown for non-exceptional flow
+    cwe: CWE-755
+    explanation: |
+      Using exceptions for normal control flow (e.g., throwing to exit a loop
+      or signal a condition) makes code extremely hard to follow and debug.
+      Exceptions should be reserved for truly exceptional conditions.
+    remediation: Replace exception-based flow with proper conditionals/returns
+  - id: CFC-CRIT-002
+    signal: Deeply nested conditionals (5+ levels) in critical code
+    evidence_pattern: Five or more levels of nesting
+    cwe: CWE-1075
+    explanation: |
+      Deeply nested code in critical paths (auth, payments, data processing)
+      is nearly impossible to test comprehensively and highly prone to subtle
+      bugs due to condition combinations.
+    remediation: Refactor using guard clauses and extracted functions
+  high:
+  - id: CFC-HIGH-001
+    signal: Functions with multiple nested if-else chains
+    evidence_pattern: if-else-if-else patterns 4+ deep
+    explanation: |
+      Multiple levels of if-else create numerous execution paths that are
+      difficult to trace mentally. Each nested level doubles the possible
+      paths through the code.
+    remediation: Use early returns, switch/match, or strategy pattern
+  - id: CFC-HIGH-002
+    signal: Loop control obscured by break/continue
+    evidence_pattern: Multiple break/continue in same loop
+    explanation: |
+      Multiple break and continue statements make loop termination conditions
+      unclear. Readers must trace through all paths to understand when and
+      how the loop ends.
+    remediation: Restructure loop or extract to separate functions
+  medium:
+  - id: CFC-MED-001
+    signal: Missing guard clauses (early returns)
+    evidence_pattern: Full function wrapped in if block
+    remediation: Invert condition and return early
+  - id: CFC-MED-002
+    signal: Infinite loops without clear exit
+    evidence_pattern: while True without visible break
+    remediation: Add clear termination condition or document exit
+  low:
+  - id: CFC-LOW-001
+    signal: Inconsistent return style within function
+    evidence_pattern: Mix of return with/without value
+    remediation: Standardize return style
+  positive:
+  - id: CFC-POS-001
+    signal: Guard clauses used for preconditions
+  - id: CFC-POS-002
+    signal: Single level of nesting in most functions
+  - id: CFC-POS-003
+    signal: Clear loop termination conditions
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Analyze Nesting Depth
+    description: |
+      Identify functions with deep nesting that make control
+      flow difficult to follow.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find deep nesting
+      command: |
+        grep -rn --include="*.py" "^                    " . 2>/dev/null | wc -l
+    - purpose: Sample deeply nested code
+      command: |
+        grep -rn --include="*.py" "^                if\|^                for" . 2>/dev/null | head -15
+    - purpose: Count files with deep nesting
+      command: |
+        grep -rln --include="*.py" "^                    " . 2>/dev/null | wc -l
+    expected_findings:
+    - Nesting depth statistics
+    - Files with excessive nesting
+  - id: '2'
+    name: Check Return Statement Patterns
+    description: |
+      Analyze return statement usage to identify functions with
+      many exit points or missing early returns.
+    duration_estimate: 8 min
+    commands:
+    - purpose: Find functions with many returns
+      command: |
+        for f in $(find . -name "*.py" -type f | head -50); do
+          count=$(grep -c "^\s*return\b" "$f" 2>/dev/null || echo 0)
+          if [ "$count" -gt 5 ]; then echo "$f: $count returns"; fi
+        done 2>/dev/null
+    - purpose: Find missing guard clauses
+      command: |
+        grep -rn --include="*.py" -A5 "def [a-z_][a-z0-9_]*" . 2>/dev/null | grep -E "def.*:\s*$" -A5 | grep "^\s{4}if" | head -10
+    expected_findings:
+    - Functions with many exits
+    - Guard clause opportunities
+  - id: '3'
+    name: Analyze Loop Structures
+    description: |
+      Examine loop constructs for clarity, particularly use of
+      break, continue, and infinite loops.
+    duration_estimate: 7 min
+    commands:
+    - purpose: Find break/continue usage
+      command: |
+        grep -rn --include="*.py" "\b(break|continue)\b" . 2>/dev/null | wc -l
+    - purpose: Find infinite loops
+      command: |
+        grep -rn --include="*.py" "while\s+True\s*:" . 2>/dev/null | head -10
+    - purpose: Find nested break/continue
+      command: |
+        grep -rn --include="*.py" "^\s{8,}(break|continue)\b" . 2>/dev/null | head -10
+    expected_findings:
+    - Break/continue patterns
+    - Infinite loop locations
+  - id: '4'
+    name: Review Exception-Based Flow
+    description: |
+      Identify places where exceptions are used for control
+      flow rather than error handling.
+    duration_estimate: 5 min
+    commands:
+    - purpose: Find broad exception catching
+      command: |
+        grep -rn --include="*.py" "except\s*:" . 2>/dev/null | head -10
+    - purpose: Find exception-based control patterns
+      command: |
+        grep -rn --include="*.py" -B2 "except.*pass\|except.*continue\|except.*break" . 2>/dev/null | head -15
+    expected_findings:
+    - Exception flow patterns
+    - Non-exceptional exception use
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - deep_nesting_instances
+    - complex_return_patterns
+    - loop_clarity_issues
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Control Flow Analysis
+    - Refactoring Opportunities
+    - Recommendations
+  confidence_guidance:
+    high: Comprehensive analysis with tooling support
+    medium: Pattern matching with manual review
+    low: Limited scope or grep-only analysis
+offline:
+  capability: full
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed analysis
+    full:
+      included: true
+      priority: 2
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: cfc-001
+  item: No excessive nesting (5+ levels)
+  level: WARNING
+  verification: |
+    grep -rn --include="*.py" "^                        " . 2>/dev/null | wc -l | awk '{print ($1 < 10) ? "PASS" : "FAIL"}'
+  expected: PASS
+- id: cfc-002
+  item: No exception-based control flow
+  level: WARNING
+  verification: |
+    grep -rn --include="*.py" "except.*:\s*$" . 2>/dev/null -A1 | grep -E "pass|continue|break" | wc -l | awk '{print ($1 < 5) ? "PASS" : "FAIL"}'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-755
+    - CWE-1075
+  - framework: ISO 25010
+    controls:
+    - Maintainability
+relationships:
+  commonly_combined:
+  - code-quality.readability.boolean-expression-clarity
+  - code-quality.maintainability.cyclomatic-complexity
+  - code-quality.readability.self-documenting-code

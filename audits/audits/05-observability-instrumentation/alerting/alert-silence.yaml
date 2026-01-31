@@ -1,0 +1,252 @@
+audit:
+  id: observability-instrumentation.alerting.alert-silence
+  name: Alert Silence Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: alerting
+  tier: expert
+  estimated_duration: 1 hour
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: full
+  severity: medium
+  scope: operations
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Reviews alert silencing practices including active silences, silence
+    duration limits, approval processes, and orphaned silences. Ensures
+    silences are used appropriately without masking real problems.
+  why_it_matters: |
+    Silences can mask real incidents if misused. Long-running or forgotten
+    silences hide problems that should be addressed. Without governance,
+    silences become a way to ignore alerts rather than fix issues, leading
+    to undetected degradation.
+  when_to_run:
+  - Weekly silence hygiene check
+  - After maintenance windows
+  - When silenced alerts cause incidents
+  - Quarterly alerting review
+prerequisites:
+  required_artifacts:
+  - type: alertmanager_access
+    description: AlertManager API access
+  - type: silence_policy
+    description: Silence governance policy
+  access_requirements:
+  - AlertManager silence management
+  - Silence audit logs
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: alertmanager_silences{state='active'}
+    purpose: Count active silences
+    threshold: Minimal active silences
+  - system: Prometheus
+    query: alertmanager_silences_total
+    purpose: Track total silence usage
+    threshold: Reasonable silence frequency
+  code_patterns:
+  - pattern: silence|inhibit
+    type: regex
+    scope: alertmanager_config
+    purpose: Identify silence configuration
+  file_patterns:
+  - glob: '**/alertmanager*.yaml'
+    purpose: AlertManager configuration
+  - glob: '**/inhibit*.yaml'
+    purpose: Inhibition rules
+knowledge_sources:
+  specifications:
+  - id: alertmanager-silences
+    name: AlertManager Silences
+    url: https://prometheus.io/docs/alerting/latest/alertmanager/#silences
+    offline_cache: true
+    priority: required
+  guides:
+  - id: silence-best-practices
+    name: Silence Management Best Practices
+    url: https://prometheus.io/docs/practices/alerting/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: amtool
+    purpose: List active silences
+    command: amtool silence query --alertmanager.url=http://alertmanager:9093
+  - tool: amtool
+    purpose: Expire old silences
+    command: amtool silence expire --alertmanager.url=http://alertmanager:9093 {silence-id}
+  monitoring_queries:
+  - system: Prometheus
+    query: count(alertmanager_silences{state='active'})
+    purpose: Count active silences
+signals:
+  critical:
+  - id: ALERT-SIL-CRIT-001
+    signal: Long-running silences (>7 days)
+    evidence_threshold: silence_duration > 7 days
+    explanation: |
+      Silences longer than a week likely indicate an underlying problem
+      being ignored rather than fixed. These create dangerous blind spots.
+    remediation: Expire silence and create ticket to fix underlying issue
+  - id: ALERT-SIL-CRIT-002
+    signal: Silences covering critical alerts
+    evidence_pattern: severity=critical silenced
+    explanation: |
+      Silencing critical alerts is extremely dangerous and should
+      require explicit approval with time limits.
+    remediation: Review and remove critical alert silences
+  high:
+  - id: ALERT-SIL-HIGH-001
+    signal: Orphaned silences (creator no longer on team)
+    evidence_pattern: Silence creator departed organization
+    explanation: |
+      Silences without ownership may persist indefinitely without
+      anyone understanding why they exist.
+    remediation: Assign ownership or expire orphaned silences
+  - id: ALERT-SIL-HIGH-002
+    signal: Broad matchers silencing multiple alerts
+    evidence_pattern: Silence matcher covers 10+ alerts
+    explanation: |
+      Overly broad silences may unintentionally suppress alerts
+      that should be monitored.
+    remediation: Narrow silence matchers to specific alerts
+  medium:
+  - id: ALERT-SIL-MED-001
+    signal: Silences without comments
+    evidence_pattern: Empty silence comment field
+    remediation: Require comments explaining silence reason
+  - id: ALERT-SIL-MED-002
+    signal: No silence audit trail
+    evidence_pattern: Silence changes not logged
+    remediation: Enable silence audit logging
+  low:
+  - id: ALERT-SIL-LOW-001
+    signal: No silence governance policy
+    remediation: Document silence usage policy
+  positive:
+  - id: ALERT-SIL-POS-001
+    signal: Minimal, well-documented, time-limited silences
+    evidence_pattern: All silences < 24h with clear comments
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory active silences
+    description: |
+      List all active silences including their matchers,
+      duration, and creators.
+    duration_estimate: 15 min
+    commands:
+    - purpose: List active silences
+      command: 'amtool silence query --alertmanager.url=http://alertmanager:9093 -o json | jq ''.[] |
+        {id: .id, matchers: .matchers, createdBy: .createdBy, comment: .comment, startsAt: .startsAt,
+        endsAt: .endsAt}'''
+    - purpose: Count silences by age
+      command: 'curl -s ''http://alertmanager:9093/api/v2/silences'' | jq ''[.[] | select(.status.state=="active")]
+        | group_by(.createdBy) | map({creator: .[0].createdBy, count: length})'''
+    expected_findings:
+    - Active silence inventory
+    - Silence age distribution
+  - id: '2'
+    name: Analyze silence patterns
+    description: |
+      Review silence usage patterns to identify potential
+      abuse or governance gaps.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find long-running silences
+      command: curl -s 'http://alertmanager:9093/api/v2/silences' | jq '[.[] | select(.status.state=="active")
+        | select((.endsAt | fromdateiso8601) - (.startsAt | fromdateiso8601) > 604800)] | length'
+    - purpose: Check silence coverage
+      command: curl -s 'http://alertmanager:9093/api/v2/silences' | jq '[.[] | select(.status.state=="active")
+        | .matchers[]] | unique'
+    expected_findings:
+    - Long-running silences
+    - Broad matchers
+  - id: '3'
+    name: Review silence governance
+    description: |
+      Verify silence creation process and approval
+      requirements are being followed.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check silences without comments
+      command: curl -s 'http://alertmanager:9093/api/v2/silences' | jq '[.[] | select(.status.state=="active"
+        and (.comment == "" or .comment == null))] | length'
+    expected_findings:
+    - Governance compliance
+    - Documentation gaps
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Active Silence Review
+    - Governance Assessment
+    - Cleanup Recommendations
+  confidence_guidance:
+    high: Full silence audit with pattern analysis
+    medium: Active silence review only
+    low: Configuration review
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: alertmanager-silences
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: alert-sil-001
+  item: Active silences inventoried
+  level: CRITICAL
+  verification: amtool silence query --alertmanager.url=http://alertmanager:9093 && echo PASS || echo
+    FAIL
+  expected: PASS
+- id: alert-sil-002
+  item: Long-running silences identified
+  level: BLOCKING
+  verification: manual
+  expected: Silences > 7 days flagged
+- id: alert-sil-003
+  item: Critical alert silences reviewed
+  level: WARNING
+  verification: manual
+  expected: No unauthorized critical silences
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SRE Best Practices
+    controls:
+    - Alert Hygiene
+relationships:
+  commonly_combined:
+  - observability-instrumentation.alerting.alert-fatigue
+  - observability-instrumentation.alerting.alert-threshold
+  - observability-instrumentation.alerting.alert-routing

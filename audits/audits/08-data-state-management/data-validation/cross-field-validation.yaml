@@ -1,0 +1,385 @@
+# ============================================================
+# AUDIT: Cross-Field Validation
+# ============================================================
+
+audit:
+  id: "data-state-management.data-validation.cross-field-validation"
+  name: "Cross-Field Validation Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "data-validation"
+
+  tier: "expert"
+  estimated_duration: "90 minutes"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates validation rules that span multiple fields, such as date ranges
+    (start before end), conditional requirements (if A then B required),
+    mutual exclusivity, and aggregate constraints. These validations cannot be
+    expressed as single-field rules and require coordinated checking.
+
+  why_it_matters: |
+    Single-field validation catches individual format errors but misses logical
+    inconsistencies between related fields. An end date before a start date,
+    or a shipping address required when delivery method is "ship" are examples
+    of business rules that only cross-field validation can enforce. Missing
+    these leads to data that is individually valid but collectively nonsensical.
+
+  when_to_run:
+    - "API design reviews"
+    - "Form validation audits"
+    - "After adding complex business rules"
+    - "Data quality assessments"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code including validation schemas and models"
+    - type: "business_requirements"
+      description: "Business rules involving multiple fields"
+
+  access_requirements:
+    - "Read access to application source code"
+    - "Access to business rules documentation"
+
+discovery:
+  code_patterns:
+    - pattern: "startDate.*endDate|from.*to.*date|begin.*end"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect date range validations"
+
+    - pattern: "if.*then.*required|when.*must|conditional.*valid"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect conditional requirements"
+
+    - pattern: "@AssertTrue|custom.*validator|class.*Validator"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect custom cross-field validators"
+
+    - pattern: "refine\\(|superRefine\\(|when\\(.*is\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Detect Zod/Yup cross-field validation"
+
+  file_patterns:
+    - glob: "**/validators/**"
+      purpose: "Validation modules"
+    - glob: "**/constraints/**"
+      purpose: "Custom constraints"
+    - glob: "**/schemas/**"
+      purpose: "Validation schemas"
+
+knowledge_sources:
+  guides:
+    - id: "cross-field-validation"
+      name: "Cross-Field Validation Patterns"
+      url: "https://www.baeldung.com/spring-mvc-custom-validator"
+      offline_cache: true
+
+    - id: "zod-refinements"
+      name: "Zod Schema Refinements"
+      url: "https://zod.dev/?id=refine"
+      offline_cache: true
+
+    - id: "bean-validation"
+      name: "Bean Validation Class-Level Constraints"
+      url: "https://beanvalidation.org/2.0/spec/#constraintsdefinitionimplementation-validationimplementation"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "custom-cross-field-analyzer"
+      purpose: "Detect cross-field validation patterns"
+      offline_capable: true
+
+  scripts:
+    - id: "cross-field-scan"
+      language: "bash"
+      purpose: "Scan for cross-field validation patterns"
+      source: "inline"
+      code: |
+        echo "=== Cross-Field Validation Analysis ==="
+        echo "--- Date range patterns ---"
+        grep -rn "start.*end\|from.*to\|begin.*finish" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -i "date\|time" | head -20
+
+        echo "--- Custom validators ---"
+        grep -rn "class.*Validator\|@Constraint\|ConstraintValidator" \
+          --include="*.java" --include="*.ts" . 2>/dev/null | head -20
+
+        echo "--- Conditional validation ---"
+        grep -rn "refine\|superRefine\|when.*is\|if.*then.*valid" \
+          --include="*.ts" --include="*.js" --include="*.java" . 2>/dev/null | head -20
+
+signals:
+  critical:
+    - id: "CFV-CRIT-001"
+      signal: "Date ranges allow end before start"
+      evidence_pattern: "startDate and endDate without comparison validation"
+      explanation: |
+        Date ranges without ordering validation allow illogical data like
+        events ending before they start. This corrupts analytics and causes
+        downstream calculation errors.
+      remediation: "Add cross-field validation ensuring start <= end"
+
+    - id: "CFV-CRIT-002"
+      signal: "Conditional requirements not enforced"
+      evidence_pattern: "Type field changes required fields but validation ignores"
+      explanation: |
+        When field requirements depend on other field values (e.g., shipping
+        address required if delivery=ship), missing validation allows
+        incomplete records that fail during processing.
+      remediation: "Implement conditional validation rules"
+
+  high:
+    - id: "CFV-HIGH-001"
+      signal: "Mutually exclusive fields both populated"
+      evidence_pattern: "Either A or B but not both - not validated"
+      explanation: |
+        When business logic requires mutual exclusivity (cash or credit, not
+        both), failing to validate creates ambiguous records requiring
+        manual resolution.
+      remediation: "Add mutual exclusivity validation"
+
+    - id: "CFV-HIGH-002"
+      signal: "Sum constraints not validated"
+      evidence_pattern: "Percentages should sum to 100 but not checked"
+      explanation: |
+        Aggregate constraints like "percentages must sum to 100" or "item
+        quantities must match total" prevent data from balancing.
+      remediation: "Implement sum/aggregate constraint validation"
+
+    - id: "CFV-HIGH-003"
+      signal: "Numeric range constraints missing"
+      evidence_pattern: "Min/max values without min < max validation"
+      explanation: |
+        Range fields (minPrice/maxPrice, minAge/maxAge) need ordering
+        validation or users can specify impossible ranges.
+      remediation: "Add min <= max cross-field validation"
+
+  medium:
+    - id: "CFV-MED-001"
+      signal: "Cross-field validation only on server"
+      evidence_pattern: "Client validates fields individually, server validates together"
+      remediation: "Mirror cross-field validation on client for UX"
+
+    - id: "CFV-MED-002"
+      signal: "Inconsistent cross-field rules across endpoints"
+      evidence_pattern: "Create validates date range but update doesn't"
+      remediation: "Share cross-field validators across all endpoints"
+
+    - id: "CFV-MED-003"
+      signal: "Complex cross-field rules not documented"
+      evidence_pattern: "Validation logic unclear from schema alone"
+      remediation: "Document cross-field rules in API docs and schema comments"
+
+  low:
+    - id: "CFV-LOW-001"
+      signal: "Cross-field error messages don't identify involved fields"
+      evidence_pattern: "Generic 'invalid data' instead of 'end date must be after start date'"
+      remediation: "Include all involved fields in error messages"
+
+    - id: "CFV-LOW-002"
+      signal: "No unit tests for cross-field validation"
+      evidence_pattern: "Tests only check individual field validation"
+      remediation: "Add test cases for all cross-field combinations"
+
+  positive:
+    - id: "CFV-POS-001"
+      signal: "Comprehensive cross-field validation schema"
+      evidence_pattern: "refine() or custom validators for all related fields"
+
+    - id: "CFV-POS-002"
+      signal: "Reusable cross-field validators"
+      evidence_pattern: "DateRange, ConditionalRequired validators shared"
+
+    - id: "CFV-POS-003"
+      signal: "Cross-field validation tested with edge cases"
+      evidence_pattern: "Test cases for boundary conditions"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Related Field Groups"
+      description: |
+        Find fields that logically belong together and may need cross-validation.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find date range patterns"
+          command: |
+            grep -rn "start\|end\|from\|to\|begin\|finish" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -i "date\|time" | grep -v node_modules | head -30
+        - purpose: "Find min/max patterns"
+          command: |
+            grep -rn "min.*max\|lower.*upper\|floor.*ceiling" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Related field pairs inventory"
+        - "Potential cross-field rules"
+
+    - id: "2"
+      name: "Analyze Existing Cross-Field Validators"
+      description: |
+        Review implemented cross-field validation logic.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find custom validators"
+          command: |
+            grep -rn "class.*Validator\|ConstraintValidator\|validator.*function" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+        - purpose: "Find schema refinements"
+          command: |
+            grep -rn "refine\\(\|superRefine\\(\|when\\(\|transform\\(" \
+              --include="*.ts" --include="*.js" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Cross-field validator inventory"
+        - "Validation patterns used"
+
+    - id: "3"
+      name: "Check Conditional Requirements"
+      description: |
+        Verify conditional field requirements are enforced.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find conditional logic in validation"
+          command: |
+            grep -rn "if.*required\|when.*then\|conditional\|dependent" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Conditional rules list"
+        - "Enforcement status"
+
+    - id: "4"
+      name: "Review Error Messages"
+      description: |
+        Check that cross-field errors are clear and actionable.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find validation error messages"
+          command: |
+            grep -rn "message.*date\|error.*field\|invalid.*must" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Error message quality"
+        - "Field identification in errors"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "related_field_groups"
+        - "cross_field_rules"
+        - "validation_gaps"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Related Field Analysis"
+        - "Validation Coverage"
+        - "Gap Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear related fields without cross-field validation"
+    medium: "Validation exists but may not cover all cases"
+    low: "Business rules unclear; requires domain expert confirmation"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "cross-field-validation"
+        priority: "required"
+      - source_id: "zod-refinements"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires business rule analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "cfv-001"
+    item: "Date ranges validated for correct ordering"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "startDate\|start_date\|beginDate" --include="*.ts" --include="*.java" . 2>/dev/null | \
+        grep -v node_modules | head -5 | wc -l | \
+        xargs -I {} sh -c 'if [ {} -eq 0 ]; then echo "PASS"; else
+          grep -rn "start.*end\|before\|after" --include="*.ts" --include="*.java" . 2>/dev/null | \
+          grep -v node_modules | wc -l | xargs -I @ test @ -gt 0 && echo "PASS" || echo "FAIL"; fi'
+    expected: "PASS"
+
+  - id: "cfv-002"
+    item: "Conditional requirements enforced"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "when\|refine\|conditional" --include="*.ts" --include="*.java" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "cfv-003"
+    item: "Cross-field error messages identify involved fields"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Review error messages for cross-field validation clarity"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 27001"
+      controls: ["A.14.2.5"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.data-validation.input-validation"
+    - "data-state-management.data-validation.business-rule-enforcement"
+    - "data-state-management.data-validation.constraint-validation"

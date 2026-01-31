@@ -1,0 +1,362 @@
+# ============================================================
+# DEADLOCK RISK AUDIT
+# ============================================================
+# Identifies patterns that can lead to deadlocks in concurrent
+# systems, including lock ordering violations and resource cycles.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.concurrency-parallelism.deadlock-risk"
+  name: "Deadlock Risk Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "concurrency-parallelism"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Examines code for deadlock-prone patterns including inconsistent lock
+    ordering, nested lock acquisition, holding locks across external calls,
+    and circular wait conditions. Analyzes resource acquisition graphs
+    to identify potential cycles.
+
+  why_it_matters: |
+    Deadlocks cause complete system hangs that require restart to resolve.
+    They often manifest only under specific timing conditions in production,
+    making them extremely difficult to reproduce and debug. A single deadlock
+    can take down an entire service.
+
+  when_to_run:
+    - "Before deploying code with multiple locks"
+    - "When system hangs are observed under load"
+    - "After modifying lock acquisition patterns"
+    - "During code review of concurrent code"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code with locking mechanisms"
+
+  access_requirements:
+    - "Read access to source code repository"
+    - "Understanding of lock dependencies"
+
+discovery:
+  code_patterns:
+    - pattern: "synchronized.*synchronized|lock.*lock"
+      type: "regex"
+      scope: "source"
+      purpose: "Find nested lock acquisitions"
+
+    - pattern: "\\.lock\\([^)]*\\).*\\.lock\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find multiple lock acquisitions"
+
+    - pattern: "Lock\\s+\\w+\\s*=|Mutex\\s+\\w+"
+      type: "regex"
+      scope: "source"
+      purpose: "Find lock declarations to build lock graph"
+
+    - pattern: "wait\\(\\)|Wait\\(\\)|Condition\\."
+      type: "regex"
+      scope: "source"
+      purpose: "Find condition variables (potential signal ordering issues)"
+
+  file_patterns:
+    - glob: "**/*.java"
+      purpose: "Java source files"
+    - glob: "**/*.go"
+      purpose: "Go source files"
+    - glob: "**/*.py"
+      purpose: "Python source files"
+    - glob: "**/*.cpp"
+      purpose: "C++ source files"
+
+knowledge_sources:
+  specifications:
+    - id: "cwe-833"
+      name: "CWE-833: Deadlock"
+      url: "https://cwe.mitre.org/data/definitions/833.html"
+      offline_cache: true
+      priority: "required"
+
+    - id: "cwe-764"
+      name: "CWE-764: Multiple Locks of a Critical Resource"
+      url: "https://cwe.mitre.org/data/definitions/764.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "deadlock-detection"
+      name: "Deadlock Detection and Prevention"
+      url: "https://docs.oracle.com/javase/tutorial/essential/concurrency/deadlock.html"
+      offline_cache: true
+
+  learning_resources:
+    - id: "os-concepts"
+      title: "Operating System Concepts - Deadlock Chapter"
+      type: "book"
+      reference: "ISBN 978-1119800361"
+
+tooling:
+  static_analysis:
+    - tool: "ThreadSanitizer (TSan)"
+      purpose: "Runtime deadlock detection"
+      offline_capable: true
+
+    - tool: "jcmd"
+      purpose: "JVM thread dump for deadlock analysis"
+      offline_capable: true
+
+    - tool: "go tool pprof"
+      purpose: "Go goroutine dump analysis"
+      offline_capable: true
+
+  scripts:
+    - id: "find-nested-locks"
+      language: "bash"
+      purpose: "Find nested lock acquisition patterns"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find nested synchronized in Java
+        grep -rn -A10 "synchronized" --include="*.java" . | grep "synchronized"
+        # Find nested Lock() in Go
+        grep -rn -A10 "\.Lock()" --include="*.go" . | grep "\.Lock()"
+
+signals:
+  critical:
+    - id: "DEADLOCK-CRIT-001"
+      signal: "Inconsistent lock ordering across code paths"
+      evidence_pattern: "lock.*A.*lock.*B|lock.*B.*lock.*A"
+      explanation: |
+        If one code path acquires lock A then B, and another acquires B then A,
+        a deadlock occurs when the threads interleave: Thread 1 holds A waiting
+        for B, Thread 2 holds B waiting for A. Classic circular wait.
+      remediation: "Establish and enforce consistent global lock ordering"
+      cwe: "CWE-833"
+
+    - id: "DEADLOCK-CRIT-002"
+      signal: "Holding lock while calling external/unknown code"
+      evidence_pattern: "synchronized.*callback|lock.*invoke|lock.*listener"
+      explanation: |
+        Calling callbacks or virtual methods while holding a lock allows the
+        called code to attempt acquiring other locks, potentially creating
+        cycles. The lock holder cannot control what locks the callback needs.
+      remediation: "Release lock before callbacks; use copy-then-iterate pattern"
+      cwe: "CWE-833"
+
+  high:
+    - id: "DEADLOCK-HIGH-001"
+      signal: "Nested synchronized blocks"
+      evidence_pattern: "synchronized.*\\{[^}]*synchronized"
+      explanation: |
+        Nested synchronized blocks acquire multiple locks. Unless lock ordering
+        is carefully controlled, this creates deadlock risk.
+      remediation: "Minimize nesting; use single lock or document ordering"
+      cwe: "CWE-764"
+
+    - id: "DEADLOCK-HIGH-002"
+      signal: "Lock acquired in loop with external state"
+      evidence_pattern: "for.*\\{.*lock.*external|while.*lock.*remote"
+      explanation: |
+        Acquiring locks in loops that depend on external state can lead to
+        livelock or deadlock if the external state never changes or if
+        lock ordering varies by iteration.
+      remediation: "Acquire all needed locks before loop; use tryLock with timeout"
+
+    - id: "DEADLOCK-HIGH-003"
+      signal: "Missing timeout on lock acquisition"
+      evidence_pattern: "\\.lock\\(\\)(?!.*timeout|tryLock)"
+      explanation: |
+        Lock acquisition without timeout will wait forever if deadlocked.
+        With timeout, the system can detect and recover from deadlock.
+      remediation: "Use tryLock with timeout; implement deadlock detection"
+
+  medium:
+    - id: "DEADLOCK-MED-001"
+      signal: "Wait without timeout"
+      evidence_pattern: "\\.wait\\(\\)|condition\\.await\\(\\)(?!.*timeout)"
+      remediation: "Use wait/await with timeout to prevent indefinite blocking"
+
+    - id: "DEADLOCK-MED-002"
+      signal: "Resource allocation without ordering"
+      evidence_pattern: "acquire.*resource.*acquire.*resource"
+      remediation: "Implement resource ordering or all-or-nothing allocation"
+
+  low:
+    - id: "DEADLOCK-LOW-001"
+      signal: "Lock field not final"
+      evidence_pattern: "Lock\\s+(?!final)\\w+|Mutex\\s+\\w+[^=]*$"
+      remediation: "Make lock objects final/const to prevent accidental replacement"
+
+  positive:
+    - id: "DEADLOCK-POS-001"
+      signal: "Use of tryLock with timeout"
+      evidence_pattern: "tryLock\\(.*TimeUnit|TryLockWithTimeout"
+
+    - id: "DEADLOCK-POS-002"
+      signal: "Documented lock ordering"
+      evidence_pattern: "lock.*order|ordering.*lock"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Build lock inventory"
+      description: |
+        Identify all locks in the codebase and document what resources
+        each lock protects.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find all lock declarations"
+          command: "grep -rn 'Lock\\|Mutex\\|synchronized' --include='*.java' --include='*.go' ."
+      expected_findings:
+        - "Complete lock inventory"
+        - "Lock-to-resource mapping"
+
+    - id: "2"
+      name: "Analyze lock acquisition patterns"
+      description: |
+        For each lock, find all code paths that acquire it and document
+        what other locks are held at acquisition time.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find nested lock patterns"
+          command: "grep -rn -A15 'synchronized\\|.lock()' --include='*.java' --include='*.go' . | grep -E 'synchronized|lock'"
+      expected_findings:
+        - "Lock acquisition sequences"
+        - "Nested lock patterns"
+
+    - id: "3"
+      name: "Build lock dependency graph"
+      description: |
+        Create a graph of lock dependencies. An edge from A to B means
+        code acquires B while holding A. Cycles indicate deadlock risk.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Lock dependency graph"
+        - "Cycles in the graph (deadlock risks)"
+
+    - id: "4"
+      name: "Check for external calls under lock"
+      description: |
+        Find places where locks are held during callbacks, virtual method
+        calls, or external service calls.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find callbacks under synchronized"
+          command: "grep -rn -B5 'callback\\|listener\\|handler' --include='*.java' . | grep 'synchronized'"
+      expected_findings:
+        - "Callbacks called while holding locks"
+        - "External calls in critical sections"
+
+    - id: "5"
+      name: "Verify timeout usage"
+      description: |
+        Check that lock acquisitions use timeouts where appropriate.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find lock without timeout"
+          command: "grep -rn '\\.lock()' --include='*.java' --include='*.go' . | grep -v tryLock"
+      expected_findings:
+        - "Lock acquisitions without timeout"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Lock Dependency Graph"
+        - "Deadlock Risk Areas"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear cycle in lock graph or confirmed inconsistent ordering"
+    medium: "Nested locks with complex control flow"
+    low: "Potential risk requiring deeper analysis"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "cwe-833"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires deep lock analysis"
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "deadlock-001"
+    item: "Lock dependency graph created with no cycles"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Reviewer confirms lock graph has been analyzed for cycles"
+    expected: "No cycles found"
+
+  - id: "deadlock-002"
+    item: "No callbacks invoked while holding locks"
+    level: "CRITICAL"
+    verification: "grep -rn 'synchronized.*callback\\|lock.*invoke' --include='*.java' . | wc -l"
+    expected: "0"
+
+  - id: "deadlock-003"
+    item: "Lock ordering documented and consistent"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms lock ordering is documented"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["api", "service", "library"]
+
+  compliance_frameworks:
+    - framework: "CWE"
+      controls: ["CWE-833", "CWE-764"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.concurrency-parallelism.thread-safety"
+    - "performance-efficiency.concurrency-parallelism.lock-contention"
+    - "performance-efficiency.concurrency-parallelism.race-condition"

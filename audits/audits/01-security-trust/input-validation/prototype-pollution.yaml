@@ -1,0 +1,412 @@
+audit:
+  id: security-trust.input-validation.prototype-pollution
+  name: Prototype Pollution Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: input-validation
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines JavaScript/TypeScript applications for prototype pollution
+    vulnerabilities where attackers can inject properties into Object.prototype or
+    other built-in prototypes through user-controlled input. These injected properties
+    then propagate to all objects in the application, potentially enabling XSS,
+    remote code execution, privilege escalation, or denial of service.
+  why_it_matters: |
+    Prototype pollution is classified as CWE-1321 and represents a critical
+    vulnerability class in JavaScript applications. Successful exploitation can lead
+    to complete application compromise, including remote code execution in Node.js
+    environments or DOM-based XSS in browsers. The vulnerability is particularly
+    dangerous because a single pollution point can affect the entire application
+    through JavaScript's prototype chain inheritance.
+  when_to_run:
+  - During JavaScript/TypeScript security reviews
+  - When using object merging or cloning libraries
+  - After adding user input processing logic
+  - When evaluating third-party dependencies
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: JavaScript/TypeScript application source code
+  access_requirements:
+  - Read access to application source code
+  - Access to package.json for dependency analysis
+discovery:
+  code_patterns:
+  - pattern: __proto__|constructor\.prototype|Object\.prototype
+    type: regex
+    scope: source
+    purpose: Direct prototype access patterns
+  - pattern: \[\s*['"]?__proto__|\[\s*key\s*\].*=|\[\s*prop\s*\].*=
+    type: regex
+    scope: source
+    purpose: Dynamic property assignment that could pollute prototypes
+  - pattern: merge\(|extend\(|assign\(|deepMerge\(|deepExtend\(
+    type: regex
+    scope: source
+    purpose: Object merging functions that may be vulnerable
+  - pattern: lodash|underscore|jquery|hoek|mixin
+    type: regex
+    scope: source
+    purpose: Libraries with known prototype pollution vulnerabilities
+  - pattern: JSON\.parse.*req\.|JSON\.parse.*user
+    type: regex
+    scope: source
+    purpose: JSON parsing of user input
+  file_patterns:
+  - glob: '**/*.js'
+    purpose: JavaScript source files
+  - glob: '**/*.ts'
+    purpose: TypeScript source files
+  - glob: '**/package.json'
+    purpose: Dependency manifest for vulnerable packages
+  - glob: '**/package-lock.json'
+    purpose: Locked dependency versions
+knowledge_sources:
+  specifications:
+  - id: owasp-prototype-pollution
+    name: OWASP Prototype Pollution Prevention Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Prototype_Pollution_Prevention_Cheat_Sheet.html
+    offline_cache: true
+    priority: required
+  - id: cwe-1321
+    name: 'CWE-1321: Improperly Controlled Modification of Object Prototype Attributes'
+    url: https://cwe.mitre.org/data/definitions/1321.html
+    offline_cache: true
+    priority: required
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: portswigger-prototype-pollution
+    name: PortSwigger Client-side Prototype Pollution
+    url: https://portswigger.net/kb/issues/00200316_client-side-prototype-pollution
+    offline_cache: true
+  - id: snyk-prototype-pollution
+    name: Snyk Prototype Pollution Vulnerabilities
+    url: https://security.snyk.io/vuln/npm
+    offline_cache: false
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect prototype pollution patterns
+    offline_capable: true
+  - tool: eslint-plugin-security
+    purpose: JavaScript security linting
+    offline_capable: true
+  - tool: npm audit
+    purpose: Check dependencies for known vulnerabilities
+    offline_capable: false
+  - tool: snyk
+    purpose: Dependency vulnerability scanning
+    offline_capable: false
+  scripts:
+  - id: prototype-pollution-scan
+    language: bash
+    purpose: Scan for prototype pollution vulnerabilities
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Scanning for Prototype Pollution Patterns ==="
+
+      # Direct __proto__ access
+      grep -rn --include="*.js" --include="*.ts" '__proto__' . 2>/dev/null
+
+      # Dynamic property assignment patterns
+      grep -rn --include="*.js" --include="*.ts" '\[key\]\s*=' . 2>/dev/null
+      grep -rn --include="*.js" --include="*.ts" '\[prop\]\s*=' . 2>/dev/null
+
+      # Unsafe merge functions
+      grep -rn --include="*.js" --include="*.ts" 'function.*merge\|\.merge\(' . 2>/dev/null
+signals:
+  critical:
+  - id: PROTO-CRIT-001
+    signal: Direct __proto__ assignment from user input
+    evidence_pattern: __proto__.*=.*req\.|req\..*__proto__
+    explanation: |
+      Directly assigning to __proto__ with user-controlled values enables
+      attackers to inject properties into Object.prototype, affecting all
+      objects in the application. This can lead to RCE, XSS, or authentication
+      bypass. CWE-1321.
+    remediation: Filter __proto__, constructor, and prototype from user input
+    cwe: CWE-1321
+  - id: PROTO-CRIT-002
+    signal: Recursive merge without prototype filtering
+    evidence_pattern: function\s+\w*[Mm]erge.*\[key\].*=|deepMerge.*\[key\].*=
+    explanation: |
+      Custom recursive merge functions that don't filter dangerous keys
+      (__proto__, constructor, prototype) are common prototype pollution
+      vectors. Attackers can inject {"__proto__": {"isAdmin": true}}. CWE-1321.
+    remediation: Use Object.create(null), filter dangerous keys, or use safe libraries
+    cwe: CWE-1321
+  - id: PROTO-CRIT-003
+    signal: Vulnerable library version with prototype pollution
+    evidence_pattern: lodash.*<4\.17\.12|hoek.*<4\.2\.1|jquery.*<3\.4\.0
+    explanation: |
+      Known vulnerable versions of popular libraries have prototype pollution
+      vulnerabilities. These are frequently exploited in the wild. CWE-1321.
+    remediation: Update to patched versions of affected libraries
+    cwe: CWE-1321
+  high:
+  - id: PROTO-HIGH-001
+    signal: Dynamic property access with user-controlled key
+    evidence_pattern: \[req\.body\.\w+\]|\[req\.query\.\w+\]|\[user\.\w+\]
+    explanation: |
+      Using user input as property keys without validation allows attackers
+      to access or modify __proto__ through bracket notation. For example,
+      obj[userInput] where userInput = "__proto__". CWE-1321.
+    remediation: Validate property names against an allowlist before use
+    cwe: CWE-1321
+  - id: PROTO-HIGH-002
+    signal: Object.assign with user-controlled source
+    evidence_pattern: Object\.assign\(.*req\.|Object\.assign\(.*JSON\.parse
+    explanation: |
+      Object.assign copies all enumerable properties including __proto__
+      if present in user input. This can pollute the target object's
+      prototype. CWE-1321.
+    remediation: Sanitize source objects or use Object.create(null) as target
+    cwe: CWE-1321
+  - id: PROTO-HIGH-003
+    signal: Spread operator with unsanitized user input
+    evidence_pattern: \.\.\.req\.body|\.\.\.JSON\.parse
+    explanation: |
+      The spread operator copies all properties including __proto__ from
+      user input. While less direct than Object.assign, it can still enable
+      prototype pollution. CWE-1321.
+    remediation: Destructure only expected properties, validate input structure
+    cwe: CWE-1321
+  medium:
+  - id: PROTO-MED-001
+    signal: Lodash/Underscore merge without sanitization
+    evidence_pattern: _\.merge\(|_\.extend\(|lodash\.merge
+    explanation: |
+      While newer versions are patched, older usage patterns may still be
+      vulnerable or may lack proper input sanitization. CWE-1321.
+    remediation: Verify library version is patched and sanitize input
+    cwe: CWE-1321
+  - id: PROTO-MED-002
+    signal: Object.prototype not frozen
+    explanation: |
+      Object.prototype can be frozen to prevent modification. While not a
+      vulnerability itself, unfrozen prototypes increase attack surface.
+    remediation: Consider Object.freeze(Object.prototype) in initialization
+  - id: PROTO-MED-003
+    signal: Using objects as dictionaries without null prototype
+    evidence_pattern: \{\s*\}\s*;?\s*//.*map|\{\s*\}\s*;?\s*//.*dict
+    explanation: |
+      Plain objects inherit from Object.prototype. When used as dictionaries
+      with user-controlled keys, they can be polluted. CWE-1321.
+    remediation: Use Map, Set, or Object.create(null) for dictionaries
+    cwe: CWE-1321
+  positive:
+  - id: PROTO-POS-001
+    signal: Object.create(null) used for safe objects
+  - id: PROTO-POS-002
+    signal: Map or Set used instead of plain objects
+  - id: PROTO-POS-003
+    signal: Object.freeze applied to prototypes
+  - id: PROTO-POS-004
+    signal: Property key validation with allowlists
+  - id: PROTO-POS-005
+    signal: Using hasOwnProperty checks before property access
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Check for vulnerable dependencies
+    description: |
+      Identify dependencies with known prototype pollution vulnerabilities
+      using npm audit and version analysis.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Run npm audit for vulnerabilities
+      command: npm audit 2>/dev/null | grep -i 'prototype' || echo 'No npm audit issues or npm not available'
+    - purpose: Check lodash version
+      command: grep -A1 '"lodash"' package-lock.json 2>/dev/null | grep version || echo 'Lodash not found'
+    - purpose: Check for known vulnerable packages
+      command: grep -E 'hoek|mixin-deep|merge-deep|defaults-deep' package.json 2>/dev/null
+    expected_findings:
+    - Vulnerable dependency versions
+    - Libraries with history of prototype pollution
+  - id: '2'
+    name: Scan for __proto__ access patterns
+    description: |
+      Search for direct access to __proto__ or constructor.prototype
+      in the codebase.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find __proto__ references
+      command: grep -rn --include='*.js' --include='*.ts' '__proto__' . 2>/dev/null | grep -v node_modules
+    - purpose: Find constructor.prototype references
+      command: grep -rn --include='*.js' --include='*.ts' 'constructor\.prototype' . 2>/dev/null | grep
+        -v node_modules
+    - purpose: Find Object.prototype modifications
+      command: grep -rn --include='*.js' --include='*.ts' 'Object\.prototype' . 2>/dev/null | grep -v
+        node_modules
+    expected_findings:
+    - Direct prototype manipulation
+    - Potentially dangerous prototype access
+  - id: '3'
+    name: Analyze object merging patterns
+    description: |
+      Identify custom merge/extend functions and usage of library
+      merge functions with user input.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find custom merge functions
+      command: grep -rn --include='*.js' --include='*.ts' 'function.*[Mm]erge\|function.*[Ee]xtend' .
+        2>/dev/null | grep -v node_modules
+    - purpose: Find Object.assign with request data
+      command: grep -rn --include='*.js' --include='*.ts' 'Object\.assign.*req\.' . 2>/dev/null | grep
+        -v node_modules
+    - purpose: Find spread with request data
+      command: grep -rn --include='*.js' --include='*.ts' '\.\.\.req\.' . 2>/dev/null | grep -v node_modules
+    expected_findings:
+    - Merge function implementations
+    - User input flowing into merge operations
+  - id: '4'
+    name: Check for dynamic property access
+    description: |
+      Search for patterns where user input is used as property keys
+      without proper validation.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find bracket notation with variables
+      command: grep -rn --include='*.js' --include='*.ts' '\[key\]\s*=\|\[prop\]\s*=' . 2>/dev/null |
+        grep -v node_modules | head -30
+    - purpose: Find user input as property keys
+      command: grep -rn --include='*.js' --include='*.ts' '\[req\.\|\[body\.\|\[query\.' . 2>/dev/null
+        | grep -v node_modules
+    expected_findings:
+    - Dynamic property assignment patterns
+    - User-controlled property keys
+  - id: '5'
+    name: Verify protective measures
+    description: |
+      Check for defensive coding patterns that prevent prototype
+      pollution.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check for Object.create(null) usage
+      command: grep -rn --include='*.js' --include='*.ts' 'Object\.create(null)' . 2>/dev/null | grep
+        -v node_modules
+    - purpose: Check for hasOwnProperty guards
+      command: grep -rn --include='*.js' --include='*.ts' 'hasOwnProperty' . 2>/dev/null | grep -v node_modules
+        | head -10
+    - purpose: Check for Map/Set usage
+      command: grep -rn --include='*.js' --include='*.ts' 'new Map\|new Set' . 2>/dev/null | grep -v node_modules
+        | head -10
+    expected_findings:
+    - Defensive patterns in use
+    - Safe object creation methods
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Vulnerable Dependencies
+    - Code Vulnerabilities
+    - Remediation Recommendations
+  confidence_guidance:
+    high: Direct evidence of __proto__ or constructor.prototype manipulation with user input
+    medium: Merge patterns or dynamic property access that could be exploitable
+    low: Potential issues requiring data flow analysis
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-prototype-pollution
+      priority: required
+    - source_id: cwe-1321
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires thorough code and dependency analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: prototype-pollution-001
+  item: No direct __proto__ access with user input
+  level: CRITICAL
+  verification: grep -rn --include='*.js' --include='*.ts' '__proto__.*req\.' . 2>/dev/null | grep -v
+    node_modules | wc -l | xargs -I {} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: prototype-pollution-002
+  item: No vulnerable dependency versions
+  level: CRITICAL
+  verification: npm audit --json 2>/dev/null | grep -i prototype | wc -l | xargs -I {} test {} -eq 0 &&
+    echo PASS || echo FAIL
+  expected: PASS
+- id: prototype-pollution-003
+  item: Merge functions filter dangerous keys
+  level: BLOCKING
+  verification: manual
+  verification_notes: Review custom merge functions for __proto__, constructor, prototype filtering
+  expected: Confirmed by reviewer
+- id: prototype-pollution-004
+  item: User input property keys validated
+  level: WARNING
+  verification: grep -rn --include='*.js' --include='*.ts' '\[req\.body\.' . 2>/dev/null | grep -v node_modules
+    | wc -l | xargs -I {} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - web-application
+    - api-service
+    - node-application
+  compliance_frameworks:
+  - framework: OWASP Top 10
+    controls:
+    - A03:2021-Injection
+  - framework: CWE
+    controls:
+    - CWE-1321
+    - CWE-915
+  - framework: OWASP ASVS
+    controls:
+    - V5.1.3
+relationships:
+  commonly_combined:
+  - security-trust.input-validation.mass-assignment
+  - security-trust.application-security.dependency-vulnerabilities
+  - security-trust.input-validation.xss

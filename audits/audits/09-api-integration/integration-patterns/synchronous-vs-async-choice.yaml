@@ -1,0 +1,349 @@
+audit:
+  id: api-integration.integration-patterns.synchronous-vs-async-choice
+  name: Synchronous vs Async Choice Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: api-integration
+  category_number: 9
+  subcategory: integration-patterns
+  tier: phd
+  estimated_duration: 90 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - api
+  - architecture
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates whether synchronous or asynchronous communication patterns
+    are appropriately chosen for different API operations. Analyzes
+    request/response vs event-driven patterns, long-running operation
+    handling, and communication pattern consistency.
+  why_it_matters: |
+    Wrong communication pattern choice causes poor user experience
+    (blocking on slow operations), reliability issues (timeout failures),
+    or unnecessary complexity (async for simple reads). Long-running
+    operations must use async patterns to avoid timeouts and allow
+    progress tracking.
+  when_to_run:
+  - API architecture review
+  - Performance optimization
+  - Timeout issue investigation
+  - Before major API changes
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: API endpoint implementations
+  - type: architecture
+    description: System design documentation
+  access_requirements:
+  - Read access to API source code
+  - Access to architecture documentation
+discovery:
+  code_patterns:
+  - pattern: async|await|Promise|Future|CompletableFuture
+    type: regex
+    scope: source
+    purpose: Detect async code patterns
+  - pattern: queue|publish|emit|dispatch
+    type: regex
+    scope: source
+    purpose: Detect message/event patterns
+  - pattern: job|task|worker|background
+    type: regex
+    scope: source
+    purpose: Detect background processing
+  file_patterns:
+  - glob: '**/jobs/**'
+    purpose: Background job definitions
+  - glob: '**/workers/**'
+    purpose: Worker implementations
+  - glob: '**/queues/**'
+    purpose: Queue configuration
+knowledge_sources:
+  specifications:
+  - id: building-microservices
+    name: Sam Newman - Building Microservices
+    url: https://www.oreilly.com/library/view/building-microservices-2nd/9781492034018/
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: sync-async-patterns
+    name: Sync vs Async API Patterns
+    url: https://www.asyncapi.com/docs/tutorials/getting-started
+    offline_cache: true
+  - id: long-running-ops
+    name: Long-Running Operations Pattern
+    url: https://docs.microsoft.com/en-us/azure/architecture/patterns/async-request-reply
+    offline_cache: true
+  learning_resources:
+  - id: api-design-patterns
+    title: API Design Patterns
+    type: book
+    reference: JJ Geewax - API Design Patterns
+tooling:
+  static_analysis:
+  - tool: asyncapi-validator
+    purpose: Validate async API specifications
+    offline_capable: true
+  scripts:
+  - id: sync-async-scan
+    language: bash
+    purpose: Analyze sync/async patterns
+    source: inline
+    code: |
+      echo "=== Synchronous vs Async Analysis ==="
+      echo "--- Background jobs ---"
+      grep -rn "job\|task\|worker\|background" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+
+      echo "--- Message queues ---"
+      grep -rn "queue\|publish\|subscribe\|emit" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+
+      echo "--- Long-running operations ---"
+      grep -rn "status\|progress\|poll" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+signals:
+  critical:
+  - id: SAC-CRIT-001
+    signal: Long-running operations block synchronously
+    evidence_pattern: Request waits for slow processing without timeout
+    explanation: |
+      Synchronous blocking on long-running operations (file processing,
+      report generation, bulk operations) causes request timeouts,
+      connection pool exhaustion, and poor user experience.
+    remediation: Convert to async pattern with job creation and status polling
+  - id: SAC-CRIT-002
+    signal: External API calls without timeout in sync path
+    evidence_pattern: HTTP call to external service without timeout
+    explanation: |
+      Synchronous calls to external services without timeouts can
+      hang indefinitely if the external service is slow or unresponsive,
+      causing cascading failures.
+    remediation: Add timeouts to all external calls; consider async for slow services
+  high:
+  - id: SAC-HIGH-001
+    signal: Simple reads using complex async patterns
+    evidence_pattern: Message queues for basic CRUD operations
+    explanation: |
+      Using async patterns for simple, fast operations adds unnecessary
+      complexity and latency. Simple reads should be synchronous for
+      simplicity and performance.
+    remediation: Use sync for fast operations, async for slow ones
+  - id: SAC-HIGH-002
+    signal: No status endpoint for async operations
+    evidence_pattern: Async job created but no way to check status
+    explanation: |
+      Without status endpoints, clients have no way to know when
+      async operations complete or if they failed. They must guess
+      or poll indefinitely.
+    remediation: Provide status endpoints for all async operations
+  - id: SAC-HIGH-003
+    signal: Bulk operations handled synchronously
+    evidence_pattern: Batch processing in request handler
+    explanation: |
+      Processing large batches in the request thread causes timeouts
+      and blocks resources. Bulk operations should be processed
+      asynchronously with progress tracking.
+    remediation: Process bulk operations asynchronously with status updates
+  medium:
+  - id: SAC-MED-001
+    signal: Inconsistent async patterns across endpoints
+    evidence_pattern: Some operations async, similar ones sync
+    remediation: Standardize patterns for similar operation types
+  - id: SAC-MED-002
+    signal: No callback/webhook for async completion
+    evidence_pattern: Only polling available for async operations
+    remediation: Add webhook support for async operation completion
+  - id: SAC-MED-003
+    signal: Async operation results expire too quickly
+    evidence_pattern: Job results deleted before retrieval
+    remediation: Retain async results for reasonable time (24+ hours)
+  low:
+  - id: SAC-LOW-001
+    signal: Async pattern choice not documented
+    evidence_pattern: No guidance on when async is used
+    remediation: Document async operation patterns in API docs
+  positive:
+  - id: SAC-POS-001
+    signal: Long-running ops return job ID immediately
+    evidence_pattern: 202 Accepted with Location header for status
+  - id: SAC-POS-002
+    signal: Webhook notifications for async completion
+    evidence_pattern: Callback URL support in async requests
+  - id: SAC-POS-003
+    signal: Progress tracking for long operations
+    evidence_pattern: Percentage or step progress in status
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Operation Types
+    description: |
+      Categorize API operations by expected duration.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find potential long-running operations
+      command: |
+        grep -rn "export\|import\|generate\|bulk\|batch\|process" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    - purpose: Find background job definitions
+      command: |
+        grep -rn "Job\|Worker\|Queue\|Bull\|Celery" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Long-running operations
+    - Background processing
+  - id: '2'
+    name: Analyze Request Timeouts
+    description: |
+      Check timeout configuration for sync operations.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find timeout configuration
+      command: |
+        grep -rn "timeout\|Timeout\|TIMEOUT" \
+          --include="*.ts" --include="*.java" --include="*.py" --include="*.yaml" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Timeout settings
+    - Missing timeouts
+  - id: '3'
+    name: Review Async Operation Patterns
+    description: |
+      Check how async operations are implemented.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find async operation creation
+      command: |
+        grep -rn "enqueue\|dispatch\|publish\|addJob" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    - purpose: Find status checking
+      command: |
+        grep -rn "getStatus\|checkStatus\|jobStatus" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    expected_findings:
+    - Async implementation
+    - Status endpoints
+  - id: '4'
+    name: Check External Service Calls
+    description: |
+      Review timeout handling for external calls.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find HTTP client usage
+      command: |
+        grep -rn "fetch\|axios\|http\|HttpClient\|requests\." \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - External calls
+    - Timeout handling
+  - id: '5'
+    name: Evaluate Pattern Consistency
+    description: |
+      Check for consistent application of patterns.
+    duration_estimate: 15 min
+    questions:
+    - Are similar operations using the same pattern?
+    - Is the async pattern documented?
+    - Are webhooks supported for async completion?
+    expected_findings:
+    - Pattern consistency
+    - Documentation status
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - operation_categorization
+    - timeout_analysis
+    - async_pattern_assessment
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Pattern Analysis
+    - Risk Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Clear blocking operation or missing async pattern
+    medium: Pattern exists but edge cases uncertain
+    low: Requires load testing to confirm timing issues
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: sync-async-patterns
+      priority: required
+    - source_id: long-running-ops
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires architecture analysis
+    full:
+      included: true
+      priority: 1
+    architecture:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: sac-001
+  item: Long-running operations use async pattern
+  level: CRITICAL
+  verification: |
+    grep -rn "Job\|Worker\|Queue\|background" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: sac-002
+  item: External calls have timeouts
+  level: CRITICAL
+  verification: |
+    grep -rn "timeout" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: sac-003
+  item: Status endpoints for async operations
+  level: WARNING
+  verification: |
+    grep -rn "status\|getJob\|jobStatus" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Performance Efficiency
+    - Reliability
+relationships:
+  commonly_combined:
+  - api-integration.integration-patterns.webhook-design
+  - api-integration.integration-patterns.polling-vs-push
+  - reliability-resilience.timeout-management.timeout-configuration

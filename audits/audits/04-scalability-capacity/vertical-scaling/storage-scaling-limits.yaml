@@ -1,0 +1,303 @@
+# ============================================================
+# AUDIT: Storage Scaling Limits Audit
+# Category: Scalability & Capacity > Vertical Scaling
+# ============================================================
+
+audit:
+  id: "scalability-capacity.vertical-scaling.storage-scaling-limits"
+  name: "Storage Scaling Limits Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "vertical-scaling"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates storage scaling constraints including IOPS limits, throughput
+    bandwidth, volume size maximums, and storage type characteristics.
+    Reviews database storage scaling, object storage limits, and ephemeral
+    storage behavior under load.
+
+  why_it_matters: |
+    Storage is often the hardest resource to scale vertically - IOPS don't
+    always scale with size, throughput has hard limits, and resizing can
+    require downtime. Understanding storage ceilings is critical for data-
+    intensive applications and prevents unexpected I/O bottlenecks.
+
+  when_to_run:
+    - "During capacity planning for data growth"
+    - "When experiencing I/O bottlenecks"
+    - "Before data migration projects"
+    - "When evaluating storage architecture"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure_config"
+      description: "Storage configuration and volume definitions"
+    - type: "metrics_data"
+      description: "Storage performance metrics"
+
+  access_requirements:
+    - "Cloud storage configuration access"
+    - "Database storage metrics access"
+    - "Volume and disk configuration access"
+
+discovery:
+  code_patterns:
+    - pattern: "(persistentVolumeClaim|storageClass|volumeClaimTemplates)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect Kubernetes storage configuration"
+
+    - pattern: "(gp2|gp3|io1|io2|sc1|st1)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect AWS EBS volume types"
+
+    - pattern: "(iops|throughput|storage.*size)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect storage performance configuration"
+
+  file_patterns:
+    - glob: "**/k8s/**/*pv*.yaml"
+      purpose: "Kubernetes PersistentVolume files"
+    - glob: "**/terraform/**/*.tf"
+      purpose: "Terraform storage resources"
+
+knowledge_sources:
+  guides:
+    - id: "aws-ebs"
+      name: "AWS EBS Volume Types"
+      url: "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-volume-types.html"
+      offline_cache: true
+
+    - id: "k8s-storage"
+      name: "Kubernetes Storage Classes"
+      url: "https://kubernetes.io/docs/concepts/storage/storage-classes/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Check PVC sizes and storage classes"
+      command: "kubectl get pvc -A -o wide"
+
+    - tool: "aws-cli"
+      purpose: "Check EBS volume configuration"
+      command: "aws ec2 describe-volumes --query 'Volumes[*].[VolumeId,VolumeType,Size,Iops]'"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "rate(node_disk_read_bytes_total[5m]) + rate(node_disk_written_bytes_total[5m])"
+      purpose: "Disk throughput"
+      threshold: "Compare against volume type limits"
+
+    - system: "Prometheus"
+      query: "rate(node_disk_reads_completed_total[5m]) + rate(node_disk_writes_completed_total[5m])"
+      purpose: "Disk IOPS"
+      threshold: "Compare against provisioned IOPS"
+
+  scripts:
+    - id: "storage-limits-analyzer"
+      language: "bash"
+      purpose: "Analyze storage configuration and limits"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Kubernetes PVCs ==="
+        kubectl get pvc -A -o custom-columns='NAMESPACE:.metadata.namespace,NAME:.metadata.name,SIZE:.spec.resources.requests.storage,CLASS:.spec.storageClassName'
+        echo "=== Storage Classes ==="
+        kubectl get storageclass
+        echo "=== AWS EBS Volumes ==="
+        aws ec2 describe-volumes --query 'Volumes[*].[VolumeId,VolumeType,Size,Iops,Throughput]' --output table
+
+signals:
+  critical:
+    - id: "STOR-CRIT-001"
+      signal: "Approaching maximum volume size for storage type"
+      evidence_threshold: "volume_size > 90% of type_maximum"
+      explanation: |
+        Each storage type has maximum size limits. Reaching this limit requires
+        migration to different storage or architectural changes.
+      remediation: "Plan migration to larger storage type or implement data archival"
+
+    - id: "STOR-CRIT-002"
+      signal: "IOPS at provisioned limit causing I/O wait"
+      evidence_threshold: "actual_iops >= provisioned_iops * 0.95"
+      explanation: |
+        When IOPS are capped, applications experience increased latency
+        and reduced throughput regardless of CPU/memory availability.
+      remediation: "Increase provisioned IOPS or upgrade to higher-performance storage type"
+
+  high:
+    - id: "STOR-HIGH-001"
+      signal: "Using baseline IOPS volume type for high I/O workload"
+      evidence_pattern: "gp2|standard"
+      explanation: |
+        gp2 volumes have baseline IOPS based on size with burst credits.
+        High I/O workloads can exhaust credits causing performance degradation.
+      remediation: "Migrate to gp3 with provisioned IOPS or io2 for consistent performance"
+
+    - id: "STOR-HIGH-002"
+      signal: "No storage class provisioner for dynamic expansion"
+      evidence_indicators:
+        - "Static PV provisioning only"
+        - "Storage class without expansion"
+      explanation: |
+        Without dynamic provisioning and expansion, storage scaling requires
+        manual intervention and potential downtime.
+      remediation: "Configure storage class with allowVolumeExpansion: true"
+
+  medium:
+    - id: "STOR-MED-001"
+      signal: "Ephemeral storage not sized for workload"
+      evidence_pattern: "ephemeral-storage|emptyDir"
+      remediation: "Configure appropriate ephemeral storage limits based on workload needs"
+
+  positive:
+    - id: "STOR-POS-001"
+      signal: "Provisioned IOPS with headroom"
+      evidence_threshold: "actual_iops < provisioned_iops * 0.7"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory storage configuration"
+      description: |
+        Collect all storage configuration including volumes, storage classes,
+        and provisioned performance characteristics.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "List PVCs and sizes"
+          command: "kubectl get pvc -A -o wide"
+        - purpose: "Check storage classes"
+          command: "kubectl get storageclass -o yaml"
+      expected_findings:
+        - "Complete storage inventory"
+        - "Performance configuration per volume"
+
+    - id: "2"
+      name: "Analyze storage performance limits"
+      description: |
+        Map storage types to their performance limits and compare
+        against current usage.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "AWS EBS volume details"
+          command: "aws ec2 describe-volumes --query 'Volumes[*].[VolumeId,VolumeType,Size,Iops,Throughput]'"
+      expected_findings:
+        - "Performance limits per volume type"
+        - "Current usage vs limits"
+
+    - id: "3"
+      name: "Identify scaling bottlenecks"
+      description: |
+        Determine which storage characteristics will become bottlenecks
+        as data and I/O grow.
+      duration_estimate: "30 min"
+      questions:
+        - "What is the maximum size for current storage type?"
+        - "Can IOPS scale with the workload?"
+        - "Is volume expansion supported without downtime?"
+      expected_findings:
+        - "Storage scaling ceilings"
+        - "Recommended storage architecture changes"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Storage Configuration Inventory"
+        - "Performance Limits Analysis"
+        - "Scaling Recommendations"
+
+  confidence_guidance:
+    high: "Direct measurement of storage performance"
+    medium: "Configuration analysis with vendor documentation"
+    low: "Configuration review without performance data"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-ebs"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires infrastructure analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "storage-limits-001"
+    item: "Storage headroom above 20%"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify storage usage is below 80% of maximum"
+    expected: "< 80% utilization"
+
+  - id: "storage-limits-002"
+    item: "IOPS sufficient for workload"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Compare actual IOPS against provisioned limits"
+    expected: "Actual < 80% of provisioned"
+
+  - id: "storage-limits-003"
+    item: "Volume expansion enabled where possible"
+    level: "BLOCKING"
+    verification: "kubectl get storageclass -o jsonpath='{.items[*].allowVolumeExpansion}'"
+    expected: "true for primary storage classes"
+
+governance:
+  applicable_to:
+    archetypes: ["database", "data-pipeline", "storage-intensive"]
+
+  compliance_frameworks:
+    - framework: "AWS Well-Architected"
+      controls: ["REL-2", "PERF-2"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.vertical-scaling.resource-ceiling"
+    - "scalability-capacity.vertical-scaling.instance-size-optimization"

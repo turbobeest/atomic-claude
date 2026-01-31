@@ -56,6 +56,7 @@ task_110_closeout() {
     else
         echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Diagrams not generated"
         checklist+=("diagrams:WARN")
+    fi
 
     # Check audit - look in .outputs/audits/ (current path) or .claude/audit/ (legacy)
     local audit_file="$ATOMIC_ROOT/.outputs/audits/phase-1-report.json"
@@ -88,6 +89,7 @@ task_110_closeout() {
     else
         echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Audit not completed"
         checklist+=("audit:SKIP")
+    fi
 
     # Additional checks
     echo -e "  ${GREEN}[PASS]${NC} ${GREEN}✓${NC} Ready for PRD"
@@ -104,6 +106,7 @@ task_110_closeout() {
     if [[ "$all_passed" == false ]]; then
         echo -e "  ${YELLOW}Some items need attention before closeout.${NC}"
         echo ""
+    fi
 
     echo -e "  ${CYAN}Closeout options:${NC}"
     echo ""
@@ -303,4 +306,5 @@ _110_check_artifact() {
             echo -e "  ${YELLOW}[$level]${NC} ${YELLOW}!${NC} $name"
             checklist_ref+=("$name:WARN")
         fi
+    fi
 }

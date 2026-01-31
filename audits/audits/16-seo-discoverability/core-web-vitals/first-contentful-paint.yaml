@@ -1,0 +1,376 @@
+# ============================================================
+# AUDIT: First Contentful Paint (FCP) Optimization
+# ============================================================
+# Evaluates FCP performance, measuring when the first content
+# appears on screen during page load.
+# ============================================================
+
+audit:
+  id: "seo-discoverability.core-web-vitals.first-contentful-paint"
+
+  name: "First Contentful Paint (FCP) Optimization Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "seo-discoverability"
+  category_number: 16
+  subcategory: "core-web-vitals"
+
+  tier: "expert"
+  estimated_duration: "1-2 hours"  # median: 1h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "runtime"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines First Contentful Paint (FCP) performance,
+    which measures when the first text, image, or canvas is rendered
+    on screen. FCP is an important user-centric metric that indicates
+    when users first perceive the page is loading. It evaluates current
+    FCP scores, identifies render-blocking resources, and provides
+    optimization recommendations.
+
+  why_it_matters: |
+    FCP is the first signal to users that the page is loading. Fast
+    FCP (under 1.8 seconds) reassures users their request is being
+    processed. Slow FCP (over 3 seconds) creates uncertainty and
+    increases abandonment. FCP is a diagnostic metric that helps
+    understand the critical rendering path performance.
+
+  when_to_run:
+    - "During performance optimization"
+    - "After infrastructure changes"
+    - "When perceived performance is slow"
+    - "During Core Web Vitals audits"
+    - "After adding render-blocking resources"
+
+prerequisites:
+  required_artifacts:
+    - type: "website"
+      description: "Live website accessible for testing"
+    - type: "crux_data"
+      description: "Chrome User Experience Report data (optional)"
+
+  access_requirements:
+    - "PageSpeed Insights API access"
+    - "Chrome DevTools or Lighthouse"
+
+discovery:
+  code_patterns:
+    - pattern: "render-blocking"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find render-blocking resource references"
+    - pattern: "defer|async"
+      type: "regex"
+      scope: "source"
+      purpose: "Find non-blocking script loading"
+    - pattern: "rel=[\"']preload[\"']"
+      type: "regex"
+      scope: "source"
+      purpose: "Find preloaded resources"
+
+  file_patterns:
+    - glob: "**/*.html"
+      purpose: "Check HTML for critical path resources"
+    - glob: "**/*.css"
+      purpose: "Check CSS for critical styles"
+
+knowledge_sources:
+  specifications:
+    - id: "web-vitals-fcp"
+      name: "web.dev: First Contentful Paint"
+      url: "https://web.dev/fcp/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "google-render-blocking"
+      name: "Google: Eliminate Render-Blocking Resources"
+      url: "https://web.dev/render-blocking-resources/"
+      offline_cache: true
+    - id: "google-critical-css"
+      name: "Google: Extract Critical CSS"
+      url: "https://web.dev/extract-critical-css/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "Lighthouse"
+      purpose: "FCP measurement and diagnostics"
+      offline_capable: true
+    - tool: "WebPageTest"
+      purpose: "Detailed waterfall and filmstrip"
+      offline_capable: false
+
+  infrastructure_tools:
+    - tool: "PageSpeed Insights"
+      purpose: "Field and lab FCP data"
+      command: "https://pagespeed.web.dev/"
+    - tool: "Chrome DevTools"
+      purpose: "Performance panel for FCP timing"
+      command: "Performance > Timings"
+
+  scripts:
+    - id: "fcp-checker"
+      language: "bash"
+      purpose: "Check FCP via PageSpeed Insights API"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        URL=$1
+        API_KEY=$2
+
+        echo "=== FCP Analysis for: $URL ==="
+
+        RESULT=$(curl -s "https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=$URL&key=$API_KEY&strategy=mobile")
+
+        # Lab FCP
+        echo "Lab FCP (ms):"
+        echo $RESULT | jq '.lighthouseResult.audits["first-contentful-paint"].numericValue'
+
+        # Field FCP
+        echo ""
+        echo "Field FCP (75th percentile):"
+        echo $RESULT | jq '.loadingExperience.metrics.FIRST_CONTENTFUL_PAINT_MS.percentile'
+
+        # Render-blocking resources
+        echo ""
+        echo "Render-blocking resources:"
+        echo $RESULT | jq '.lighthouseResult.audits["render-blocking-resources"]'
+
+signals:
+  critical:
+    - id: "FCP-CRIT-001"
+      signal: "FCP exceeds 3 seconds (poor threshold)"
+      evidence_threshold: "FCP > 3000ms"
+      explanation: |
+        FCP over 3 seconds creates significant user uncertainty and
+        dramatically increases page abandonment rates. Users may
+        believe the page is broken.
+      remediation: "Eliminate render-blocking resources, inline critical CSS, optimize TTFB"
+
+    - id: "FCP-CRIT-002"
+      signal: "Large render-blocking CSS files"
+      evidence_indicators:
+        - "External CSS > 100KB render-blocking"
+        - "Multiple render-blocking stylesheets"
+      explanation: |
+        Large CSS files block rendering until fully downloaded and
+        parsed, significantly delaying FCP.
+      remediation: "Inline critical CSS, async load non-critical CSS"
+
+  high:
+    - id: "FCP-HIGH-001"
+      signal: "FCP between 1.8-3 seconds (needs improvement)"
+      evidence_threshold: "FCP > 1800ms && FCP <= 3000ms"
+      explanation: |
+        FCP in this range is classified as "needs improvement" and
+        may feel slow to users.
+      remediation: "Optimize critical rendering path"
+
+    - id: "FCP-HIGH-002"
+      signal: "Render-blocking JavaScript in head"
+      explanation: |
+        Synchronous JavaScript in the head blocks parsing and
+        rendering until downloaded and executed.
+      remediation: "Use defer or async attributes, move to body end"
+
+    - id: "FCP-HIGH-003"
+      signal: "Slow TTFB delaying FCP"
+      explanation: |
+        FCP cannot begin until the HTML document starts arriving.
+        High TTFB delays all subsequent rendering.
+      remediation: "Optimize server response, use CDN, implement caching"
+
+  medium:
+    - id: "FCP-MED-001"
+      signal: "Web fonts blocking first paint"
+      remediation: "Use font-display: swap, preload critical fonts"
+
+    - id: "FCP-MED-002"
+      signal: "Critical CSS not inlined"
+      remediation: "Inline above-the-fold CSS, async load rest"
+
+    - id: "FCP-MED-003"
+      signal: "Third-party scripts blocking render"
+      remediation: "Defer third-party scripts, use async loading"
+
+  low:
+    - id: "FCP-LOW-001"
+      signal: "FCP varies significantly between pages"
+
+  positive:
+    - id: "FCP-POS-001"
+      signal: "FCP under 1.8 seconds (good threshold)"
+    - id: "FCP-POS-002"
+      signal: "No render-blocking resources"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Gather FCP Field Data"
+      description: |
+        Collect real-user FCP data from Chrome User Experience
+        Report via PageSpeed Insights.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Get field FCP data"
+          command: "PageSpeed Insights for key pages"
+      expected_findings:
+        - "Field FCP by page type"
+        - "FCP distribution"
+        - "Mobile vs desktop FCP"
+
+    - id: "2"
+      name: "Run Lab Tests"
+      description: |
+        Use Lighthouse to measure lab FCP and identify
+        render-blocking resources.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Run Lighthouse audit"
+          command: "Chrome DevTools > Lighthouse > Performance"
+      expected_findings:
+        - "Lab FCP scores"
+        - "Render-blocking resources"
+        - "Opportunities"
+
+    - id: "3"
+      name: "Analyze Critical Rendering Path"
+      description: |
+        Use DevTools to understand the critical rendering path
+        and identify blocking resources.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "View critical path"
+          command: "Chrome DevTools > Coverage for CSS usage"
+      expected_findings:
+        - "Critical resources"
+        - "Unused CSS"
+        - "Resource priority"
+
+    - id: "4"
+      name: "Audit Render-Blocking Resources"
+      description: |
+        Identify all CSS and JavaScript that blocks rendering
+        and evaluate necessity.
+      duration_estimate: "20 min"
+      expected_findings:
+        - "Blocking resource list"
+        - "Resource sizes"
+        - "Load order"
+
+    - id: "5"
+      name: "Check Critical CSS Implementation"
+      description: |
+        Verify whether critical CSS is inlined and non-critical
+        CSS is loaded asynchronously.
+      duration_estimate: "15 min"
+      expected_findings:
+        - "Inlined CSS status"
+        - "Async CSS loading"
+        - "Coverage efficiency"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "FCP Performance Summary"
+        - "Render-Blocking Analysis"
+        - "Critical Path Optimization"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Field data from CrUX with large sample size"
+    medium: "Lab data verified with multiple tests"
+    low: "Single lab test without field validation"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "web-vitals-fcp"
+        priority: "required"
+      - source_id: "google-render-blocking"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires critical path analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "fcp-001"
+    item: "FCP under 1.8 seconds on key pages"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Check PageSpeed Insights field data"
+    expected: "Confirmed by reviewer"
+
+  - id: "fcp-002"
+    item: "No large render-blocking CSS"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review Lighthouse render-blocking audit"
+    expected: "Confirmed by reviewer"
+
+  - id: "fcp-003"
+    item: "Critical CSS inlined"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Check for inline styles in head"
+    expected: "Confirmed by reviewer"
+
+  - id: "fcp-004"
+    item: "JavaScript uses defer or async"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Audit script tags for loading attributes"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["web-application", "marketing-site", "ecommerce", "content-site"]
+
+  compliance_frameworks:
+    - framework: "Web Performance Best Practices"
+      controls: ["Critical Rendering Path", "Resource Loading"]
+
+relationships:
+  commonly_combined:
+    - "seo-discoverability.core-web-vitals.largest-contentful-paint"
+    - "seo-discoverability.core-web-vitals.time-to-first-byte"
+    - "seo-discoverability.core-web-vitals.cumulative-layout-shift"

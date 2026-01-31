@@ -1,0 +1,386 @@
+# ============================================================
+# AUDIT: Validation Timing
+# ============================================================
+
+audit:
+  id: "data-state-management.data-validation.validation-timing"
+  name: "Validation Timing Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "data-validation"
+
+  tier: "expert"
+  estimated_duration: "90 minutes"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates when validation occurs in the application lifecycle - at
+    construction time, before persistence, lazily on access, or never.
+    Analyzes the "fail fast" principle implementation and determines if
+    invalid data can exist in memory or be partially processed before
+    validation occurs.
+
+  why_it_matters: |
+    Late validation allows invalid data to propagate through the system,
+    causing errors far from the original source. Early validation (fail fast)
+    catches issues at the point of entry, making debugging easier and
+    preventing partially processed invalid requests. Construction-time
+    validation ensures objects are always in valid states.
+
+  when_to_run:
+    - "Architecture reviews"
+    - "After API changes"
+    - "Security audits"
+    - "When debugging data validation issues"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code including constructors and factories"
+
+  access_requirements:
+    - "Read access to application source code"
+
+discovery:
+  code_patterns:
+    - pattern: "constructor.*\\{[^}]*validate|__init__.*validate"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect constructor-time validation"
+
+    - pattern: "@PrePersist|@BeforeInsert|pre_save|before_save"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect pre-persistence validation"
+
+    - pattern: "lazy.*valid|get.*\\{.*if.*valid"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect lazy validation"
+
+    - pattern: "builder\\(\\)|factory\\.|create\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Detect object creation patterns"
+
+  file_patterns:
+    - glob: "**/factories/**"
+      purpose: "Factory implementations"
+    - glob: "**/builders/**"
+      purpose: "Builder patterns"
+    - glob: "**/entities/**"
+      purpose: "Entity definitions"
+    - glob: "**/models/**"
+      purpose: "Model definitions"
+
+knowledge_sources:
+  guides:
+    - id: "fail-fast"
+      name: "Fail Fast Principle"
+      url: "https://martinfowler.com/ieeeSoftware/failFast.pdf"
+      offline_cache: true
+
+    - id: "validation-patterns"
+      name: "Validation Design Patterns"
+      url: "https://enterprisecraftsmanship.com/posts/validation-and-ddd/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "make-illegal-states"
+      title: "Making Illegal States Unrepresentable"
+      type: "article"
+      reference: "Yaron Minsky, Jane Street"
+
+tooling:
+  static_analysis:
+    - tool: "custom-validation-timing"
+      purpose: "Analyze when validation occurs in object lifecycle"
+      offline_capable: true
+
+  scripts:
+    - id: "validation-timing-scan"
+      language: "bash"
+      purpose: "Scan for validation timing patterns"
+      source: "inline"
+      code: |
+        echo "=== Validation Timing Analysis ==="
+        echo "--- Constructor validation ---"
+        grep -rn "constructor.*validate\|__init__.*self.*validate\|this\.validate" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | head -20
+
+        echo "--- Pre-persistence validation ---"
+        grep -rn "@PrePersist\|@BeforeInsert\|pre_save\|before_create" \
+          --include="*.java" --include="*.ts" --include="*.py" --include="*.rb" . 2>/dev/null | head -20
+
+        echo "--- Public setters (late mutation) ---"
+        grep -rn "public.*set[A-Z]\|def set_" \
+          --include="*.java" --include="*.py" . 2>/dev/null | head -20
+
+signals:
+  critical:
+    - id: "VT-CRIT-001"
+      signal: "Validation only at database persistence time"
+      evidence_pattern: "No validation until @PrePersist or DB constraint"
+      explanation: |
+        When validation only occurs at persistence, invalid objects can exist
+        in memory and pass through business logic before failing. This leads
+        to partially completed operations and difficult-to-debug issues.
+      remediation: "Validate at object construction; treat persistence validation as backup"
+
+    - id: "VT-CRIT-002"
+      signal: "Public setters allow invalid state after construction"
+      evidence_pattern: "Valid constructor but unrestricted public setters"
+      explanation: |
+        Objects validated at construction can be put into invalid states
+        via public setters. This undermines the entire validation strategy
+        and creates race conditions in concurrent environments.
+      remediation: "Make setters private or validate in setters; prefer immutable objects"
+
+  high:
+    - id: "VT-HIGH-001"
+      signal: "Validation deferred until explicit call"
+      evidence_pattern: "object.validate() called separately from construction"
+      explanation: |
+        When validation must be explicitly called, callers can forget to
+        call it. Invalid objects then propagate until something fails.
+      remediation: "Validate automatically in constructor or factory"
+
+    - id: "VT-HIGH-002"
+      signal: "Partial object processing before validation"
+      evidence_pattern: "Business logic executed before validation check"
+      explanation: |
+        Executing business logic before validation wastes resources and can
+        leave side effects that must be rolled back when validation fails.
+      remediation: "Validate all inputs before any processing begins"
+
+    - id: "VT-HIGH-003"
+      signal: "No validation on deserialization"
+      evidence_pattern: "JSON.parse without subsequent validation"
+      explanation: |
+        Deserialized objects bypass constructor validation. Malicious payloads
+        can create objects in invalid states that pass type checks.
+      remediation: "Validate after deserialization; use factory methods"
+
+  medium:
+    - id: "VT-MED-001"
+      signal: "Inconsistent validation timing across entity types"
+      evidence_pattern: "Some entities validate in constructor, others don't"
+      remediation: "Standardize validation timing across all entities"
+
+    - id: "VT-MED-002"
+      signal: "Lazy validation on property access"
+      evidence_pattern: "Validation occurs when getter is called"
+      remediation: "Prefer eager validation unless performance requires lazy"
+
+    - id: "VT-MED-003"
+      signal: "Multiple validation passes required"
+      evidence_pattern: "Schema validation, then business validation, then DB validation"
+      remediation: "Consolidate validation into fewer passes where possible"
+
+  low:
+    - id: "VT-LOW-001"
+      signal: "Validation errors don't indicate timing source"
+      evidence_pattern: "Generic validation errors without context"
+      remediation: "Include validation phase in error details"
+
+    - id: "VT-LOW-002"
+      signal: "No validation caching for repeated checks"
+      evidence_pattern: "Same validation performed multiple times"
+      remediation: "Cache validation results where appropriate"
+
+  positive:
+    - id: "VT-POS-001"
+      signal: "Constructor enforces all invariants"
+      evidence_pattern: "All validation in constructor, immutable objects"
+
+    - id: "VT-POS-002"
+      signal: "Factory methods ensure valid construction"
+      evidence_pattern: "Private constructors with validating factories"
+
+    - id: "VT-POS-003"
+      signal: "Type system prevents invalid states"
+      evidence_pattern: "Strong typing makes invalid states unrepresentable"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Analyze Construction Patterns"
+      description: |
+        Examine how objects are created and when validation occurs.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find constructor definitions"
+          command: |
+            grep -rn "constructor\|__init__\|def initialize" \
+              --include="*.ts" --include="*.java" --include="*.py" --include="*.rb" . 2>/dev/null | \
+              grep -v node_modules | grep -v test | head -40
+        - purpose: "Find factory methods"
+          command: |
+            grep -rn "static.*create\|factory\.|Factory\." \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Construction pattern inventory"
+        - "Validation in constructors"
+
+    - id: "2"
+      name: "Check Mutation Points"
+      description: |
+        Identify where objects can be mutated after construction.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find public setters"
+          command: |
+            grep -rn "public.*void set\|public set \|def set_" \
+              --include="*.java" --include="*.ts" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+        - purpose: "Find mutable fields"
+          command: |
+            grep -rn "public [A-Z]\|let \|var " \
+              --include="*.java" --include="*.ts" . 2>/dev/null | \
+              grep -v node_modules | grep -v const | head -30
+
+      expected_findings:
+        - "Mutation point inventory"
+        - "Setter validation status"
+
+    - id: "3"
+      name: "Review Pre-Persistence Hooks"
+      description: |
+        Check what validation occurs before database operations.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find ORM lifecycle hooks"
+          command: |
+            grep -rn "@PrePersist\|@BeforeInsert\|@BeforeUpdate\|pre_save\|before_save" \
+              --include="*.java" --include="*.ts" --include="*.py" --include="*.rb" . 2>/dev/null | head -30
+
+      expected_findings:
+        - "Pre-persistence validation"
+        - "Lifecycle hook usage"
+
+    - id: "4"
+      name: "Trace Validation Flow"
+      description: |
+        Follow a request to understand complete validation path.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find request handling entry points"
+          command: |
+            grep -rn "@Post\|@Put\|app\.post\|router\.post" \
+              --include="*.java" --include="*.ts" --include="*.js" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Validation sequence"
+        - "Gap identification"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "construction_patterns"
+        - "validation_timing_map"
+        - "mutation_point_analysis"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Validation Timing Analysis"
+        - "Construction Patterns"
+        - "Mutation Safety"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear evidence of late validation or unvalidated mutations"
+    medium: "Validation exists but timing is inconsistent"
+    low: "Framework may provide validation not visible in scan"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "fail-fast"
+        priority: "required"
+      - source_id: "validation-patterns"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires architectural analysis"
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "vt-001"
+    item: "Entities validate in constructor or factory"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "constructor.*validate\|create.*validate\|__init__.*valid" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "vt-002"
+    item: "Public setters include validation or don't exist"
+    level: "BLOCKING"
+    verification: |
+      grep -rn "public.*void set.*\\{$\|public set.*\\{$" \
+        --include="*.java" --include="*.ts" . 2>/dev/null | \
+        grep -v validate | wc -l | xargs -I {} test {} -lt 5 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "vt-003"
+    item: "Validation occurs before business logic"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Trace request handling to verify validation precedes processing"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 27001"
+      controls: ["A.14.2.5"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.data-validation.input-validation"
+    - "data-state-management.data-validation.business-rule-enforcement"
+    - "architecture-design.design-principles.single-responsibility"

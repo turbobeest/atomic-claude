@@ -1,0 +1,318 @@
+audit:
+  id: cost-economics.resource-efficiency.idle-resources
+  name: Idle Resources Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: cost-economics
+  category_number: 31
+  subcategory: resource-efficiency
+  tier: expert
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - finops
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit identifies running resources that receive no traffic,
+    process no requests, or serve no active purpose. Unlike stopped
+    resources or orphaned volumes, idle resources appear healthy but
+    are not contributing value.
+  why_it_matters: |
+    Idle resources are often harder to identify than obvious waste
+    because they appear operational. They result from abandoned
+    projects, deprecated services, or misconfigured architectures.
+    These resources consume budget while delivering zero business value.
+  when_to_run:
+  - Monthly idle resource scan
+  - After project completions
+  - During team transitions
+  - As part of cost optimization reviews
+prerequisites:
+  required_artifacts:
+  - type: traffic-metrics
+    description: Network and request metrics for resources
+  - type: access-logs
+    description: Resource access patterns
+  - type: resource-inventory
+    description: Complete resource inventory with tags
+  access_requirements:
+  - Access to load balancer access logs
+  - Access to CloudWatch metrics
+  - Access to application logs
+  - Access to network flow data
+discovery:
+  idle_indicators:
+  - resource: EC2/VM
+    indicator: No network traffic for 7+ days
+  - resource: Load Balancer
+    indicator: Zero request count for 7+ days
+  - resource: RDS/Database
+    indicator: Zero connections for 7+ days
+  - resource: API Gateway
+    indicator: Zero API calls for 14+ days
+  - resource: Lambda
+    indicator: Zero invocations for 30+ days
+  file_patterns:
+  - glob: '**/*.tf'
+    purpose: Terraform files
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: CloudFormation templates
+  - glob: '**/*cost*.yaml'
+    purpose: Cost configuration files
+  - glob: '**/*budget*.yaml'
+    purpose: Budget configuration files
+  - glob: '**/*tag*.yaml'
+    purpose: Tagging policy files
+  code_patterns:
+  - pattern: tags\s*[=:]|cost_center|billing|budget
+    type: regex
+    scope: config
+    purpose: Cost/billing references
+  - pattern: reserved_instance|spot_instance|savings_plan
+    type: regex
+    scope: config
+    purpose: Cost optimization patterns
+knowledge_sources:
+  specifications:
+  - id: aws-trusted-advisor-idle
+    name: AWS Trusted Advisor - Idle Resources
+    url: https://docs.aws.amazon.com/awssupport/latest/user/cost-optimization-checks.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: finops-idle-detection
+    name: FinOps - Identifying Idle Resources
+    url: https://www.finops.org/framework/capabilities/
+    offline_cache: true
+tooling:
+  detection_tools:
+  - tool: AWS Trusted Advisor
+    purpose: Built-in idle resource detection
+  - tool: CloudWatch Alarms
+    purpose: Monitor for zero-traffic conditions
+  - tool: Custom scripts
+    purpose: Cross-reference traffic with inventory
+  commands:
+  - purpose: Find EC2 with no network traffic
+    command: |
+      aws cloudwatch get-metric-statistics \
+        --namespace AWS/EC2 \
+        --metric-name NetworkPacketsIn \
+        --dimensions Name=InstanceId,Value=i-xxx \
+        --start-time $(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ) \
+        --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
+        --period 86400 --statistics Sum
+  - purpose: Find ALB with no requests
+    command: |
+      aws cloudwatch get-metric-statistics \
+        --namespace AWS/ApplicationELB \
+        --metric-name RequestCount \
+        --dimensions Name=LoadBalancer,Value=app/xxx \
+        --start-time $(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ) \
+        --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
+        --period 86400 --statistics Sum
+signals:
+  critical:
+  - id: IDLE-CRIT-001
+    signal: Production-tagged resources with zero traffic for 30+ days
+    evidence_threshold: production_idle_days > 30
+    explanation: |
+      Resources tagged as production but receiving no traffic for
+      a month are likely misconfigured, abandoned, or no longer
+      needed. The production tag suggests potential cost significance.
+    remediation: Investigate and terminate or re-classify resources
+  - id: IDLE-CRIT-002
+    signal: Large database instances with zero connections
+    evidence_threshold: rds_connections = 0 for 14+ days
+    explanation: |
+      Database instances are expensive. An RDS instance with no
+      connections is either completely unused or seriously
+      misconfigured.
+    remediation: Delete, snapshot, or investigate configuration
+  high:
+  - id: IDLE-HIGH-001
+    signal: Load balancers with zero request count
+    evidence_threshold: alb_requests = 0 for 7+ days
+    explanation: |
+      Load balancers without traffic are serving no purpose but
+      incur hourly charges. They may be remnants of deleted
+      applications.
+    remediation: Delete unused load balancers
+  - id: IDLE-HIGH-002
+    signal: Idle dev/test environments not scheduled
+    evidence_pattern: Dev resources running 24/7 with business hours usage
+    explanation: |
+      Development and test environments often only need to run
+      during business hours. Running 24/7 wastes roughly 75%
+      of the resource cost.
+    remediation: Implement scheduled shutdown for dev/test
+  medium:
+  - id: IDLE-MED-001
+    signal: API Gateways with no API calls
+    evidence_threshold: api_calls = 0 for 14+ days
+    remediation: Delete unused API Gateways
+  - id: IDLE-MED-002
+    signal: Lambda functions never invoked
+    evidence_threshold: invocations = 0 for 30+ days
+    remediation: Delete unused Lambda functions
+  low:
+  - id: IDLE-LOW-001
+    signal: No idle resource monitoring configured
+    evidence_pattern: No alerting on idle conditions
+    remediation: Implement idle resource monitoring
+  positive:
+  - id: IDLE-POS-001
+    signal: Automated idle resource detection and alerting
+  - id: IDLE-POS-002
+    signal: Scheduled shutdown for non-production environments
+  - id: IDLE-POS-003
+    signal: Regular idle resource review process
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Collect traffic metrics
+    description: |
+      Gather network, request, and connection metrics for all
+      resources over the analysis period (typically 7-30 days).
+    duration_estimate: 45 min
+    expected_findings:
+    - Traffic baseline by resource
+    - Zero-traffic resources identified
+  - id: '2'
+    name: Identify idle candidates
+    description: |
+      Cross-reference resources with zero or near-zero traffic
+      against the resource inventory.
+    duration_estimate: 30 min
+    expected_findings:
+    - Idle candidate list
+    - Cost of idle resources
+  - id: '3'
+    name: Validate idle status
+    description: |
+      Verify that identified resources are truly idle by checking
+      access logs, owner consultation, and dependency analysis.
+    duration_estimate: 60 min
+    expected_findings:
+    - Validated idle resources
+    - False positives identified
+    - Owner attribution
+  - id: '4'
+    name: Assess scheduling opportunities
+    description: |
+      Identify non-production resources that could benefit from
+      scheduled shutdown during off-hours.
+    duration_estimate: 30 min
+    expected_findings:
+    - Scheduling candidates
+    - Potential savings from scheduling
+  - id: '5'
+    name: Create remediation plan
+    description: |
+      Develop a plan to address idle resources through termination,
+      scheduling, or investigation.
+    duration_estimate: 30 min
+    expected_findings:
+    - Remediation actions
+    - Owner notifications
+    - Timeline for cleanup
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Idle Resource Inventory
+    - Cost Impact
+    - Scheduling Opportunities
+    - Remediation Plan
+  - type: metrics_dashboard
+    metrics:
+    - Idle resource count by type
+    - Idle resource cost
+    - Scheduling opportunity savings
+  confidence_guidance:
+    high: 7+ days traffic data with access log validation
+    medium: Traffic data only
+    low: Partial metrics coverage
+offline:
+  capability: minimal
+  cache_manifest:
+    knowledge:
+    - source_id: finops-idle-detection
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 1
+      reduced_scope: High-cost resources only
+    full:
+      included: true
+      priority: 1
+    finops:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: idle-001
+  item: Idle resources identified
+  level: CRITICAL
+  verification: automated
+  expected: Inventory complete
+- id: idle-002
+  item: Cost impact quantified
+  level: BLOCKING
+  verification: automated
+  expected: Cost calculated
+- id: idle-003
+  item: Remediation plan created
+  level: WARNING
+  verification: manual
+  expected: Plan with timeline
+governance:
+  applicable_to:
+    archetypes:
+    - cloud-native
+    - hybrid
+    - enterprise
+  compliance_frameworks:
+  - framework: FinOps Foundation
+    controls:
+    - Usage Optimization
+  - framework: AWS Well-Architected
+    controls:
+    - COST-05
+relationships:
+  commonly_combined:
+  - cost-economics.resource-efficiency.waste-identification
+  - cost-economics.resource-efficiency.utilization-analysis
+  - cost-economics.resource-efficiency.scheduled-scaling
+
+  # Multi-cloud idle resource detection:
+  # AWS:
+  #   aws ec2 describe-instances --filters "Name=instance-state-name,Values=running" --query 'Reservations[].Instances[?LaunchTime<=`'$(date -d '30 days ago' +%Y-%m-%d)'`]'
+  #   aws cloudwatch get-metric-statistics --namespace AWS/EC2 --metric-name CPUUtilization --dimensions Name=InstanceId,Value=${ID} --start-time $(date -d '7 days ago' -Iseconds) --end-time $(date -Iseconds) --period 3600 --statistics Average
+  # Azure:
+  #   az vm list --query "[?powerState=='VM running']" -o table
+  #   az monitor metrics list --resource ${ID} --metric "Percentage CPU" --interval PT1H
+  # GCP:
+  #   gcloud compute instances list --filter="status=RUNNING"
+  #   gcloud monitoring time-series list --filter='metric.type="compute.googleapis.com/instance/cpu/utilization"'
+  # Kubernetes:
+  #   kubectl top nodes
+  #   kubectl describe nodes | grep -A 5 "Allocated resources"

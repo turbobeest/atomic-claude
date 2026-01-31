@@ -1,0 +1,379 @@
+# ============================================================
+# AUDIT: Composition vs Inheritance Analysis
+# ============================================================
+# Evaluates whether the codebase appropriately favors
+# composition over inheritance where applicable.
+# ============================================================
+
+audit:
+  id: "architecture-design.design-principles.composition-vs-inheritance"
+  name: "Composition vs Inheritance Analysis"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "architecture-design"
+  category_number: 7
+  subcategory: "design-principles"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates the use of inheritance versus composition in the
+    codebase. It identifies cases where inheritance is used inappropriately
+    for code reuse rather than expressing true is-a relationships, and where
+    composition would provide better flexibility and maintainability.
+
+  why_it_matters: |
+    Overuse of inheritance causes:
+    - Fragile base class problem - changes to parent break children
+    - Tight coupling through inheritance hierarchies
+    - Inflexibility - can't change parent behavior at runtime
+    - Violation of encapsulation - subclass sees parent internals
+    - Deep hierarchies that are hard to understand
+    Composition provides flexibility, testability, and loose coupling.
+
+  when_to_run:
+    - "When reviewing class hierarchies"
+    - "When experiencing fragile base class issues"
+    - "During architecture reviews"
+    - "When refactoring for flexibility"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Complete source code"
+
+  access_requirements:
+    - "Read access to source code"
+
+discovery:
+  code_patterns:
+    - pattern: "extends\\s+[A-Z][a-zA-Z]+"
+      type: "regex"
+      scope: "source"
+      purpose: "Find inheritance relationships"
+
+    - pattern: "class\\s+\\w+\\s+extends\\s+\\w+\\s+extends"
+      type: "regex"
+      scope: "source"
+      purpose: "Find multi-level inheritance"
+
+    - pattern: "@Override.*super\\."
+      type: "regex"
+      scope: "source"
+      purpose: "Find methods that call super implementation"
+
+  file_patterns:
+    - glob: "**/*Base*.{java,ts,py}"
+      purpose: "Base classes often indicate inheritance hierarchies"
+    - glob: "**/*Abstract*.{java,ts,py}"
+      purpose: "Abstract classes for inheritance"
+
+knowledge_sources:
+  specifications:
+    - id: "composition-over-inheritance"
+      name: "Composition over Inheritance"
+      url: "https://en.wikipedia.org/wiki/Composition_over_inheritance"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "effective-java-inheritance"
+      name: "Effective Java - Favor Composition over Inheritance"
+      url: "https://www.informit.com/articles/article.aspx?p=2984547"
+      offline_cache: true
+
+    - id: "clean-architecture"
+      name: "Clean Architecture"
+      url: "https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html"
+      offline_cache: true
+
+    - id: "clean-code"
+      name: "Clean Code Summary"
+      url: "https://gist.github.com/wojteklu/73c6914cc446146b8b533c0988cf8d29"
+      offline_cache: true
+
+  learning_resources:
+    - id: "effective-java"
+      title: "Effective Java"
+      type: "book"
+      reference: "Joshua Bloch - Item 18"
+
+    - id: "design-patterns"
+      title: "Design Patterns"
+      type: "book"
+      reference: "Gang of Four - Favor composition over class inheritance"
+
+tooling:
+  static_analysis:
+    - tool: "SonarQube"
+      purpose: "Detect inheritance depth and complexity"
+      offline_capable: false
+
+    - tool: "NDepend"
+      purpose: "Analyze inheritance vs composition in .NET"
+      offline_capable: true
+
+    - tool: "Structure101"
+      purpose: "Visualize class hierarchies"
+      offline_capable: true
+
+  scripts:
+    - id: "inheritance-analyzer"
+      language: "bash"
+      purpose: "Analyze inheritance patterns"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Inheritance Declarations ==="
+        grep -rn "extends [A-Z]" --include="*.java" | grep -v Test | head -40
+
+        echo "=== Deep Hierarchies (multiple extends) ==="
+        grep -rn "class.*extends" --include="*.java" | cut -d: -f3 | sort | uniq -c | sort -rn | head -20
+
+        echo "=== Base Classes ==="
+        find . \( find . -name "*Base*.java" -o -name "*Abstract*.java" \) | head -20
+
+signals:
+  critical:
+    - id: "COMP-CRIT-001"
+      signal: "Deep inheritance hierarchy (>3 levels)"
+      evidence_pattern: "A extends B extends C extends D"
+      explanation: |
+        Deep hierarchies create fragile structures where changes to
+        any parent can break all descendants. Understanding behavior
+        requires tracing through multiple classes.
+      remediation: "Flatten hierarchy; extract composition with strategy/delegate"
+
+    - id: "COMP-CRIT-002"
+      signal: "Inheritance used for code reuse without is-a relationship"
+      evidence_pattern: "Stack extends Vector (JDK anti-example)"
+      explanation: |
+        Inheriting for reuse creates inappropriate coupling and exposes
+        parent methods that don't apply to the child concept.
+      remediation: "Use composition - contain the reused class, delegate needed methods"
+
+  high:
+    - id: "COMP-HIGH-001"
+      signal: "Abstract base class with many template method hooks"
+      evidence_pattern: "Base class with 5+ abstract methods for subclasses"
+      explanation: |
+        Too many template hooks create rigid structures and force
+        subclasses to implement many methods, often trivially.
+      remediation: "Consider strategy pattern or functional composition"
+
+    - id: "COMP-HIGH-002"
+      signal: "Protected fields exposed to subclasses"
+      evidence_pattern: "protected List<T> items; in base class"
+      explanation: |
+        Protected fields break encapsulation between parent and child,
+        coupling them tightly and preventing parent evolution.
+      remediation: "Use protected methods instead; better: compose rather than inherit"
+
+  medium:
+    - id: "COMP-MED-001"
+      signal: "Override that completely replaces parent behavior"
+      evidence_pattern: "@Override method that doesn't call super"
+      remediation: "If not calling super, may not be true subtype; consider composition"
+
+    - id: "COMP-MED-002"
+      signal: "Utility/mixin inheritance"
+      evidence_pattern: "Class extends utility class for convenience methods"
+      remediation: "Use composition or static imports instead"
+
+  low:
+    - id: "COMP-LOW-001"
+      signal: "Single-level inheritance from abstract base"
+      remediation: "Acceptable if true is-a relationship"
+
+  positive:
+    - id: "COMP-POS-001"
+      signal: "Strategy pattern used for varying behavior"
+    - id: "COMP-POS-002"
+      signal: "Decorator pattern for extension"
+    - id: "COMP-POS-003"
+      signal: "Shallow inheritance (1-2 levels) for true is-a"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map inheritance hierarchies"
+      description: |
+        Identify all inheritance relationships and map
+        hierarchy depths.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find extends declarations"
+          command: "grep -rn 'extends [A-Z]' --include='*.java' | grep -v Test | head -50"
+        - purpose: "Count hierarchy depths"
+          command: "find . -name '*.java' -exec grep -l 'extends' {} \\; | wc -l"
+      expected_findings:
+        - "Inheritance relationships"
+        - "Hierarchy depths"
+
+    - id: "2"
+      name: "Identify deep hierarchies"
+      description: |
+        Find classes with inheritance depth > 2 levels
+        (excluding framework base classes).
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find base classes"
+          command: "find . -name '*Base*.java' -o -name '*Abstract*.java' | head -20"
+        - purpose: "Find multi-level inheritance"
+          command: "grep -rn 'extends.*Base\\|extends.*Abstract' --include='*.java' | head -30"
+      expected_findings:
+        - "Deep inheritance chains"
+        - "Base class usage"
+
+    - id: "3"
+      name: "Analyze inheritance purpose"
+      description: |
+        For each inheritance relationship, assess whether it
+        represents true is-a or code reuse.
+      duration_estimate: "30 min"
+      questions:
+        - "Is this a true is-a relationship?"
+        - "Could a child instance substitute for parent everywhere?"
+        - "Is inheritance used just to reuse methods?"
+      expected_findings:
+        - "Is-a relationship assessment"
+        - "Code reuse inheritance"
+
+    - id: "4"
+      name: "Check for protected field exposure"
+      description: |
+        Find protected fields that couple parent and child
+        implementation details.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find protected fields"
+          command: "grep -rn 'protected [A-Za-z<>]+ [a-z].*;' --include='*.java' | head -30"
+        - purpose: "Find protected non-final fields"
+          command: "grep -rn 'protected [^f].*[^;{]$' --include='*.java' | head -20"
+      expected_findings:
+        - "Protected field exposure"
+        - "Encapsulation violations"
+
+    - id: "5"
+      name: "Identify composition opportunities"
+      description: |
+        For problematic inheritance, develop composition-based
+        alternatives using patterns like Strategy, Delegate.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find existing delegation"
+          command: "grep -rn 'private final.*delegate\\|private.*strategy' --include='*.java' | head -20"
+      expected_findings:
+        - "Existing composition patterns"
+        - "Refactoring opportunities"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "hierarchy_map"
+      format: "visual"
+      sections:
+        - "Inheritance Tree"
+        - "Problematic Hierarchies"
+        - "Composition Examples"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Inheritance Analysis"
+        - "Composition Recommendations"
+
+  confidence_guidance:
+    high: "Clear inheritance misuse identified"
+    medium: "Potential issue requiring domain review"
+    low: "Structural concern, may be acceptable"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "composition-over-inheritance"
+        priority: "required"
+      - source_id: "effective-java-inheritance"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires hierarchy analysis"
+    full:
+      included: true
+      priority: 2
+    architecture:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "comp-001"
+    item: "No inheritance hierarchies deeper than 3 levels"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "All hierarchies reviewed for depth"
+    expected: "Confirmed by reviewer"
+
+  - id: "comp-002"
+    item: "Inheritance used only for true is-a relationships"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Code reuse inheritance identified for refactoring"
+    expected: "Confirmed by reviewer"
+
+  - id: "comp-003"
+    item: "Protected fields minimized or eliminated"
+    level: "BLOCKING"
+    verification: "grep -rn 'protected [^v]' --include='*.java' | grep -v 'void\\|abstract' | wc -l"
+    expected: "Minimal count or documented"
+
+  - id: "comp-004"
+    item: "Composition patterns used for flexibility"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Strategy/Delegate patterns adopted where appropriate"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Modularity"]
+
+relationships:
+  commonly_combined:
+    - "architecture-design.design-principles.liskov-substitution"
+    - "architecture-design.coupling.tight-coupling-detection"
+    - "architecture-design.architectural-patterns.pattern-appropriateness"

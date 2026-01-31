@@ -1,0 +1,295 @@
+audit:
+  id: cost-economics.resource-efficiency.scheduled-scaling
+  name: Scheduled Scaling Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: cost-economics
+  category_number: 31
+  subcategory: resource-efficiency
+  tier: expert
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: infrastructure
+  default_profiles:
+  - full
+  - finops
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the use of scheduled scaling to automatically
+    adjust capacity based on predictable demand patterns such as
+    business hours, weekends, and seasonal variations. It evaluates
+    current scheduling coverage and identifies opportunities.
+  why_it_matters: |
+    Many workloads have predictable demand patterns - lower traffic
+    at night, on weekends, or during certain seasons. Running full
+    capacity 24/7 when demand is predictably lower wastes resources.
+    Scheduled scaling can reduce costs by 50-75% for dev/test and
+    20-40% for some production workloads.
+  when_to_run:
+  - Quarterly scaling strategy review
+  - When onboarding new workloads
+  - After identifying utilization patterns
+  - During cost optimization initiatives
+prerequisites:
+  required_artifacts:
+  - type: utilization-patterns
+    description: Historical utilization with temporal patterns
+  - type: scaling-configs
+    description: Current auto-scaling configurations
+  - type: workload-requirements
+    description: SLAs and availability requirements
+  access_requirements:
+  - Access to Auto Scaling configurations
+  - Access to utilization metrics with time-of-day breakdown
+  - Access to workload classification
+discovery:
+  scheduling_opportunities:
+  - environment: Development
+    pattern: Business hours only
+    potential_savings: 65-75%
+  - environment: Testing
+    pattern: Business hours only
+    potential_savings: 65-75%
+  - environment: Staging
+    pattern: Extended business hours
+    potential_savings: 50-60%
+  - environment: Production
+    pattern: Reduced capacity off-peak
+    potential_savings: 20-40%
+  file_patterns:
+  - glob: '**/*.tf'
+    purpose: Terraform files
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: CloudFormation templates
+  - glob: '**/*cost*.yaml'
+    purpose: Cost configuration files
+  - glob: '**/*budget*.yaml'
+    purpose: Budget configuration files
+  - glob: '**/*tag*.yaml'
+    purpose: Tagging policy files
+  code_patterns:
+  - pattern: tags\s*[=:]|cost_center|billing|budget
+    type: regex
+    scope: config
+    purpose: Cost/billing references
+  - pattern: reserved_instance|spot_instance|savings_plan
+    type: regex
+    scope: config
+    purpose: Cost optimization patterns
+knowledge_sources:
+  specifications:
+  - id: aws-scheduled-scaling
+    name: AWS Scheduled Scaling
+    url: https://docs.aws.amazon.com/autoscaling/ec2/userguide/ec2-as-scheduled-scaling.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: finops-scheduling
+    name: FinOps - Scheduling Resources
+    url: https://www.finops.org/framework/capabilities/
+    offline_cache: true
+  - id: aws-instance-scheduler
+    name: AWS Instance Scheduler
+    url: https://aws.amazon.com/solutions/implementations/instance-scheduler/
+    offline_cache: true
+tooling:
+  scheduling_tools:
+  - tool: AWS Instance Scheduler
+    purpose: EC2 and RDS scheduling
+  - tool: Auto Scaling Scheduled Actions
+    purpose: ASG capacity scheduling
+  - tool: AWS EventBridge
+    purpose: Custom scheduling triggers
+  - tool: Kubernetes CronJobs
+    purpose: Pod scheduling automation
+  commands:
+  - purpose: List scheduled scaling actions
+    command: |
+      aws autoscaling describe-scheduled-actions \
+        --query 'ScheduledUpdateGroupActions[*].[AutoScalingGroupName,ScheduledActionName,Recurrence]'
+signals:
+  critical:
+  - id: SCHED-CRIT-001
+    signal: Dev/test environments running 24/7 without business need
+    evidence_pattern: Non-production resources without scheduled shutdown
+    explanation: |
+      Development and test environments typically only need to be
+      available during business hours. Running 24/7 wastes approximately
+      75% of the cost (16 hours/day + weekends).
+    remediation: Implement scheduled shutdown for dev/test environments
+  high:
+  - id: SCHED-HIGH-001
+    signal: Clear utilization patterns not addressed by scheduling
+    evidence_pattern: Night/weekend utilization < 20% of peak
+    explanation: |
+      When utilization predictably drops significantly during certain
+      periods, scheduled scaling can capture those savings without
+      impacting users during low-demand times.
+    remediation: Configure scheduled scaling for predictable patterns
+  - id: SCHED-HIGH-002
+    signal: Manual scaling process for predictable events
+    evidence_pattern: Teams manually scaling for known peaks
+    explanation: |
+      Manual scaling is error-prone and often results in either
+      over-provisioning or under-provisioning. Scheduled scaling
+      automates predictable capacity changes.
+    remediation: Convert manual scaling to scheduled actions
+  medium:
+  - id: SCHED-MED-001
+    signal: Scheduled scaling not granular enough
+    evidence_pattern: Only on/off scheduling, no capacity adjustment
+    remediation: Implement gradual capacity adjustments
+  - id: SCHED-MED-002
+    signal: Scheduled scaling not tested for reliability
+    evidence_pattern: No validation of scaling execution
+    remediation: Monitor and alert on scheduled scaling execution
+  low:
+  - id: SCHED-LOW-001
+    signal: No documentation of scheduling rationale
+    evidence_pattern: Scheduling implemented without documentation
+    remediation: Document scheduling decisions and patterns
+  positive:
+  - id: SCHED-POS-001
+    signal: Comprehensive scheduled scaling for non-production
+  - id: SCHED-POS-002
+    signal: Production scaling aligned with demand patterns
+  - id: SCHED-POS-003
+    signal: Scheduled scaling monitored and optimized
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Analyze utilization patterns
+    description: |
+      Review historical utilization to identify predictable
+      patterns by time of day, day of week, and season.
+    duration_estimate: 45 min
+    expected_findings:
+    - Temporal patterns identified
+    - Peak vs off-peak delta
+    - Predictability assessment
+  - id: '2'
+    name: Inventory current scheduling
+    description: |
+      Catalog existing scheduled scaling configurations across
+      Auto Scaling Groups, Instance Scheduler, and other tools.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List ASG scheduled actions
+      command: |
+        aws autoscaling describe-scheduled-actions --output table
+    expected_findings:
+    - Current scheduling inventory
+    - Coverage assessment
+  - id: '3'
+    name: Identify scheduling opportunities
+    description: |
+      Match utilization patterns with workload requirements to
+      identify scheduling opportunities.
+    duration_estimate: 45 min
+    expected_findings:
+    - Scheduling candidates
+    - Appropriate schedules by workload
+  - id: '4'
+    name: Calculate potential savings
+    description: |
+      Estimate cost savings from implementing scheduled scaling
+      for identified opportunities.
+    duration_estimate: 30 min
+    expected_findings:
+    - Savings by workload
+    - Total opportunity
+    - ROI of implementation
+  - id: '5'
+    name: Assess implementation requirements
+    description: |
+      Identify technical and organizational requirements for
+      implementing scheduled scaling.
+    duration_estimate: 30 min
+    expected_findings:
+    - Technical requirements
+    - Stakeholder approval needed
+    - Implementation complexity
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Utilization Pattern Analysis
+    - Scheduling Opportunities
+    - Savings Potential
+    - Implementation Recommendations
+  - type: metrics_dashboard
+    metrics:
+    - Current scheduling coverage
+    - Potential savings from scheduling
+    - Utilization by time period
+  confidence_guidance:
+    high: 14+ days utilization data with clear patterns
+    medium: 7-14 days data
+    low: Limited pattern analysis
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-scheduled-scaling
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires pattern analysis
+    full:
+      included: true
+      priority: 2
+    finops:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: sched-001
+  item: Scheduling opportunities identified
+  level: CRITICAL
+  verification: manual
+  expected: Opportunities documented
+- id: sched-002
+  item: Savings potential calculated
+  level: BLOCKING
+  verification: automated
+  expected: Savings estimate
+- id: sched-003
+  item: Implementation plan created
+  level: WARNING
+  verification: manual
+  expected: Plan with timeline
+governance:
+  applicable_to:
+    archetypes:
+    - cloud-native
+    - development-heavy
+    - enterprise
+  compliance_frameworks:
+  - framework: FinOps Foundation
+    controls:
+    - Usage Optimization
+    - Workload Optimization
+  - framework: AWS Well-Architected
+    controls:
+    - COST-06
+relationships:
+  commonly_combined:
+  - cost-economics.resource-efficiency.utilization-analysis
+  - cost-economics.resource-efficiency.idle-resources
+  - cost-economics.cost-optimization.rightsizing

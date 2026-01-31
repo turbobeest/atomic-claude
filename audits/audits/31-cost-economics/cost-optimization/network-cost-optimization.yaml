@@ -1,0 +1,327 @@
+audit:
+  id: cost-economics.cost-optimization.network-cost-optimization
+  name: Network Cost Optimization Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: cost-economics
+  category_number: 31
+  subcategory: cost-optimization
+  tier: expert
+  estimated_duration: 4-6 hours  # median: 5h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - finops
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines network-related costs including data transfer,
+    NAT Gateway fees, VPN/Direct Connect charges, and cross-region
+    traffic. It identifies architectural patterns that create excessive
+    network costs and recommends optimizations.
+  why_it_matters: |
+    Network costs are often overlooked but can represent a significant
+    portion of cloud spend. Data egress charges, NAT Gateway processing
+    fees, and cross-region transfer costs can surprise organizations.
+    Architectural decisions dramatically impact network costs.
+  when_to_run:
+  - Quarterly network cost review
+  - After architectural changes
+  - When network costs spike unexpectedly
+  - During multi-region deployment planning
+prerequisites:
+  required_artifacts:
+  - type: network-topology
+    description: VPC and network architecture documentation
+  - type: data-transfer-metrics
+    description: Data transfer volumes by source/destination
+  - type: cost-breakdown
+    description: Network-related cost breakdown
+  access_requirements:
+  - Access to VPC Flow Logs
+  - Access to NAT Gateway metrics
+  - Access to Cost Explorer with resource-level detail
+  - Access to CloudFront/CDN usage reports
+discovery:
+  network_cost_categories:
+  - category: Data Transfer Out (Egress)
+    typical_cost: $0.09/GB
+    optimization_potential: High
+  - category: NAT Gateway Processing
+    typical_cost: $0.045/GB
+    optimization_potential: High
+  - category: Cross-Region Transfer
+    typical_cost: $0.01-0.02/GB
+    optimization_potential: Medium
+  - category: Cross-AZ Transfer
+    typical_cost: $0.01/GB each way
+    optimization_potential: Medium
+  - category: VPN/Direct Connect
+    typical_cost: Variable
+    optimization_potential: Medium
+  file_patterns:
+  - glob: '**/*.tf'
+    purpose: Terraform files
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: CloudFormation templates
+  - glob: '**/*cost*.yaml'
+    purpose: Cost configuration files
+  - glob: '**/*budget*.yaml'
+    purpose: Budget configuration files
+  - glob: '**/*tag*.yaml'
+    purpose: Tagging policy files
+  code_patterns:
+  - pattern: tags\s*[=:]|cost_center|billing|budget
+    type: regex
+    scope: config
+    purpose: Cost/billing references
+  - pattern: reserved_instance|spot_instance|savings_plan
+    type: regex
+    scope: config
+    purpose: Cost optimization patterns
+knowledge_sources:
+  specifications:
+  - id: aws-data-transfer-pricing
+    name: AWS Data Transfer Pricing
+    url: https://aws.amazon.com/ec2/pricing/on-demand/#Data_Transfer
+    offline_cache: true
+    priority: required
+  guides:
+  - id: network-cost-optimization
+    name: Reducing Network Costs
+    url: https://docs.aws.amazon.com/vpc/latest/userguide/vpc-nat-gateway.html
+    offline_cache: true
+  - id: finops-network
+    name: FinOps Network Cost Management
+    url: https://www.finops.org/framework/
+    offline_cache: true
+tooling:
+  analysis_tools:
+  - tool: VPC Flow Logs
+    purpose: Analyze traffic patterns
+  - tool: Cost Explorer
+    purpose: Data transfer cost breakdown
+  - tool: VPC Reachability Analyzer
+    purpose: Network path analysis
+signals:
+  critical:
+  - id: NET-CRIT-001
+    signal: NAT Gateway processing fees exceeding $10,000/month
+    evidence_threshold: nat_gateway_cost > $10000
+    explanation: |
+      Extremely high NAT Gateway costs often indicate architectural
+      issues. VPC endpoints for AWS services can eliminate NAT
+      Gateway processing fees for that traffic.
+    remediation: Implement VPC endpoints for high-traffic AWS services
+  - id: NET-CRIT-002
+    signal: Excessive cross-region data transfer
+    evidence_threshold: cross_region_transfer_cost > 20% of compute
+    explanation: |
+      High cross-region transfer costs may indicate poor data
+      locality or architectural inefficiency. Data should be
+      processed close to where it resides.
+    remediation: Evaluate data replication or regional processing
+  high:
+  - id: NET-HIGH-001
+    signal: No VPC endpoints for high-traffic AWS services
+    evidence_pattern: S3, DynamoDB traffic via NAT Gateway
+    explanation: |
+      Traffic to AWS services through NAT Gateway incurs processing
+      fees that can be eliminated with VPC endpoints. Gateway
+      endpoints for S3 and DynamoDB are free.
+    remediation: Deploy VPC Gateway endpoints for S3 and DynamoDB
+  - id: NET-HIGH-002
+    signal: CDN not utilized for static content egress
+    evidence_pattern: Direct S3/EC2 serving static content globally
+    explanation: |
+      Serving static content directly from origin incurs full
+      data transfer rates. CloudFront or other CDNs have lower
+      egress costs and improve performance.
+    remediation: Implement CDN for static content delivery
+  medium:
+  - id: NET-MED-001
+    signal: Unnecessary cross-AZ traffic
+    evidence_pattern: Services communicating across AZs without HA need
+    remediation: Co-locate chatty services in same AZ where appropriate
+  - id: NET-MED-002
+    signal: VPN costs high relative to Direct Connect
+    evidence_pattern: High-volume VPN traffic to on-premises
+    remediation: Evaluate Direct Connect for high-volume connections
+  low:
+  - id: NET-LOW-001
+    signal: Network cost visibility limited
+    evidence_pattern: Cannot attribute network costs to services
+    remediation: Improve network cost attribution through tagging
+  positive:
+  - id: NET-POS-001
+    signal: VPC endpoints deployed for all applicable services
+  - id: NET-POS-002
+    signal: CDN effectively reducing origin egress
+  - id: NET-POS-003
+    signal: Network architecture optimized for data locality
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Analyze network cost breakdown
+    description: |
+      Break down network costs by category (egress, NAT, cross-region,
+      etc.) to identify largest cost drivers.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Get data transfer costs
+      command: |
+        aws ce get-cost-and-usage \
+          --time-period Start=2025-01-01,End=2025-01-22 \
+          --granularity MONTHLY \
+          --filter '{"Dimensions":{"Key":"USAGE_TYPE_GROUP","Values":["EC2: Data Transfer - Internet (Out)","EC2: Data Transfer - Region to Region (Out)","EC2: NAT Gateway"]}}' \
+          --metrics UnblendedCost
+    expected_findings:
+    - Cost breakdown by category
+    - Top cost drivers identified
+  - id: '2'
+    name: Evaluate NAT Gateway usage
+    description: |
+      Analyze NAT Gateway traffic to identify optimization
+      opportunities including VPC endpoint deployment.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Get NAT Gateway metrics
+      command: |
+        aws cloudwatch get-metric-statistics \
+          --namespace AWS/NATGateway \
+          --metric-name BytesOutToDestination \
+          --dimensions Name=NatGatewayId,Value=nat-xxx \
+          --start-time $(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ) \
+          --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
+          --period 3600 --statistics Sum
+    expected_findings:
+    - NAT Gateway traffic volume
+    - Endpoint candidates identified
+  - id: '3'
+    name: Review VPC endpoint coverage
+    description: |
+      Inventory existing VPC endpoints and identify services that
+      should have endpoints configured.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List VPC endpoints
+      command: aws ec2 describe-vpc-endpoints --query 'VpcEndpoints[*].[ServiceName,VpcEndpointId]'
+    expected_findings:
+    - Endpoint inventory
+    - Missing endpoints identified
+  - id: '4'
+    name: Analyze cross-region and cross-AZ traffic
+    description: |
+      Review traffic patterns between regions and availability
+      zones to identify optimization opportunities.
+    duration_estimate: 45 min
+    expected_findings:
+    - Cross-region traffic analysis
+    - Cross-AZ traffic patterns
+    - Data locality opportunities
+  - id: '5'
+    name: Evaluate CDN effectiveness
+    description: |
+      Review CDN usage and origin egress to ensure effective
+      content delivery optimization.
+    duration_estimate: 30 min
+    expected_findings:
+    - CDN coverage assessment
+    - Origin egress analysis
+    - CDN expansion opportunities
+  - id: '6'
+    name: Calculate optimization savings
+    description: |
+      Quantify potential savings from implementing network
+      optimizations.
+    duration_estimate: 30 min
+    expected_findings:
+    - Savings by optimization type
+    - Implementation priority
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Network Cost Breakdown
+    - Optimization Opportunities
+    - VPC Endpoint Recommendations
+    - Architecture Recommendations
+  - type: metrics_dashboard
+    metrics:
+    - Data transfer cost by category
+    - NAT Gateway processing cost
+    - VPC endpoint coverage
+    - CDN hit ratio
+  confidence_guidance:
+    high: Complete VPC Flow Log analysis with cost data
+    medium: Cost data without detailed traffic analysis
+    low: Limited network visibility
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-data-transfer-pricing
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+      reduced_scope: Cost breakdown analysis only
+    full:
+      included: true
+      priority: 1
+    finops:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: net-001
+  item: VPC endpoints deployed for high-traffic AWS services
+  level: CRITICAL
+  verification: automated
+  expected: S3 and DynamoDB endpoints at minimum
+- id: net-002
+  item: Network cost optimization plan documented
+  level: BLOCKING
+  verification: manual
+  expected: Plan with savings estimates
+- id: net-003
+  item: CDN effectiveness validated
+  level: WARNING
+  verification: manual
+  expected: CDN coverage assessed
+governance:
+  applicable_to:
+    archetypes:
+    - cloud-native
+    - data-intensive
+    - multi-region
+  compliance_frameworks:
+  - framework: FinOps Foundation
+    controls:
+    - Workload Optimization
+    - Architecture Optimization
+  - framework: AWS Well-Architected
+    controls:
+    - COST-04
+    - COST-05
+relationships:
+  commonly_combined:
+  - cost-economics.cost-visibility.cost-attribution
+  - cost-economics.resource-efficiency.utilization-analysis
+  - cost-economics.cost-optimization.rightsizing

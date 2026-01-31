@@ -1,0 +1,314 @@
+# ============================================================
+# AUDIT: Request/Response Schema Assessment
+# ============================================================
+# Evaluates API request and response schema design quality
+# ============================================================
+
+audit:
+  id: "api-integration.api-contracts.request-response-schema"
+
+  name: "Request/Response Schema Assessment"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "api-integration"
+  category_number: 9
+  subcategory: "api-contracts"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates request and response schema design including field naming
+    conventions, data types, nullability handling, envelope patterns,
+    consistency across endpoints, and adherence to schema best practices.
+
+  why_it_matters: |
+    Consistent, well-designed schemas improve developer experience, reduce
+    integration errors, and enable reliable code generation. Inconsistent
+    schemas confuse consumers, increase support burden, and make APIs harder
+    to evolve.
+
+  when_to_run:
+    - "During API design reviews"
+    - "Before SDK generation"
+    - "When standardizing APIs"
+    - "After schema-related bugs"
+
+prerequisites:
+  required_artifacts:
+    - type: "api-spec"
+      description: "OpenAPI or JSON Schema definitions"
+    - type: "api-source"
+      description: "DTO/response class definitions"
+
+  access_requirements:
+    - "Read access to API specifications"
+    - "Read access to source code"
+
+discovery:
+  code_patterns:
+    - pattern: "class.*Request|class.*Response|class.*DTO"
+      type: "regex"
+      scope: "source"
+      purpose: "DTO class definitions"
+    - pattern: "interface.*Request|interface.*Response|type.*Request"
+      type: "regex"
+      scope: "source"
+      purpose: "TypeScript interface definitions"
+    - pattern: "components:\\s*schemas:|definitions:"
+      type: "regex"
+      scope: "config"
+      purpose: "OpenAPI schema components"
+
+  file_patterns:
+    - glob: "**/dto/**/*.{java,ts,py}"
+      purpose: "DTO definitions"
+    - glob: "**/models/**/*.{java,ts,py}"
+      purpose: "Model definitions"
+    - glob: "**/*openapi*.{yaml,yml,json}"
+      purpose: "OpenAPI specifications"
+
+knowledge_sources:
+  specifications:
+    - id: "json-schema"
+      name: "JSON Schema Specification"
+      url: "https://json-schema.org/specification"
+      offline_cache: true
+      priority: "required"
+    - id: "openapi-spec"
+      name: "OpenAPI Specification"
+      url: "https://spec.openapis.org/oas/latest.html"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "google-json-style"
+      name: "Google JSON Style Guide"
+      url: "https://google.github.io/styleguide/jsoncstyleguide.xml"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "spectral"
+      purpose: "Lint OpenAPI schemas"
+      offline_capable: true
+    - tool: "ajv"
+      purpose: "Validate JSON schemas"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "SCHEMA-CRIT-001"
+      signal: "Same endpoint returns different response structures"
+      evidence_pattern: "if.*return.*ResponseType1|return.*ResponseType2"
+      explanation: |
+        Inconsistent response structures based on conditions force clients
+        to handle multiple schemas, complicating integration and breaking
+        type safety.
+      remediation: "Normalize responses to single schema; use discriminated unions if needed"
+
+    - id: "SCHEMA-CRIT-002"
+      signal: "Sensitive data in response without explicit marking"
+      evidence_pattern: "password|secret|token|ssn|creditCard"
+      explanation: |
+        Sensitive data in responses may be logged, cached, or displayed
+        inappropriately. Fields should be explicitly marked and handled.
+      remediation: "Never return sensitive data; use masking or separate secure endpoints"
+
+  high:
+    - id: "SCHEMA-HIGH-001"
+      signal: "Inconsistent field naming conventions"
+      evidence_pattern: "camelCase.*snake_case|userId.*user_id"
+      explanation: |
+        Mixed naming conventions (camelCase and snake_case) confuse consumers
+        and break code generators that expect consistent patterns.
+      remediation: "Standardize on one convention (typically camelCase for JSON)"
+
+    - id: "SCHEMA-HIGH-002"
+      signal: "Deeply nested response structures (>4 levels)"
+      evidence_pattern: "\\w+\\.\\w+\\.\\w+\\.\\w+\\.\\w+"
+      explanation: |
+        Deeply nested structures are hard to navigate, process, and evolve.
+        They often indicate data model leakage into API design.
+      remediation: "Flatten structures; use IDs with links for related resources"
+
+  medium:
+    - id: "SCHEMA-MED-001"
+      signal: "No wrapper envelope for responses"
+      evidence_indicators:
+        - "Raw array responses without metadata"
+        - "No pagination info wrapper"
+      remediation: "Use envelope with data, metadata, and pagination fields"
+
+    - id: "SCHEMA-MED-002"
+      signal: "Nullable fields without clear documentation"
+      evidence_pattern: "\\|\\s*null|Optional<|null.*:.*true"
+      remediation: "Document when fields are null and what null means"
+
+  low:
+    - id: "SCHEMA-LOW-001"
+      signal: "No schema reuse (duplicate definitions)"
+      remediation: "Extract common schemas to $ref components"
+
+  positive:
+    - id: "SCHEMA-POS-001"
+      signal: "Consistent naming convention across all schemas"
+    - id: "SCHEMA-POS-002"
+      signal: "Schema reuse with $ref for common patterns"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Catalog Schema Definitions"
+      description: |
+        Identify all request/response schemas in the codebase.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find DTO classes"
+          command: "grep -rn 'class.*\\(Request\\|Response\\|DTO\\)' --include='*.java' --include='*.ts' ."
+        - purpose: "Find OpenAPI schemas"
+          command: "grep -rn 'schemas:\\|\\$ref:' --include='*.yaml' --include='*.yml' ."
+        - purpose: "Count schema definitions"
+          command: "grep -c 'type:\\s*object' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null || echo '0'"
+      expected_findings:
+        - "Schema inventory"
+        - "Schema location patterns"
+
+    - id: "2"
+      name: "Analyze Naming Conventions"
+      description: |
+        Check for consistent field naming across schemas.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find camelCase fields"
+          command: "grep -rEo '[a-z]+[A-Z][a-zA-Z]*:' --include='*.yaml' --include='*.yml' . | head -20"
+        - purpose: "Find snake_case fields"
+          command: "grep -rEo '[a-z]+_[a-z]+:' --include='*.yaml' --include='*.yml' . | head -20"
+        - purpose: "Check Java field naming"
+          command: "grep -rn 'private.*\\w\\+\\s\\+[a-z]' --include='*.java' . | head -20"
+      expected_findings:
+        - "Naming convention usage"
+        - "Inconsistencies"
+
+    - id: "3"
+      name: "Check Response Consistency"
+      description: |
+        Verify response structures are consistent across endpoints.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find response schemas"
+          command: "grep -rn 'responses:\\|content:\\|application/json:' --include='*.yaml' --include='*.yml' ."
+        - purpose: "Check for envelope patterns"
+          command: "grep -rn 'data:\\|result:\\|items:\\|meta:' --include='*.yaml' --include='*.yml' ."
+        - purpose: "Find conditional returns"
+          command: "grep -rn 'if.*return.*Response\\|return.*instanceof' --include='*.java' --include='*.ts' ."
+      expected_findings:
+        - "Response envelope patterns"
+        - "Conditional response structures"
+
+    - id: "4"
+      name: "Evaluate Schema Reuse"
+      description: |
+        Check for proper schema component reuse.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Count $ref usage"
+          command: "grep -c '\\$ref:' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null || echo '0'"
+        - purpose: "Find duplicate schema patterns"
+          command: "grep -rh 'type:\\s*object' --include='*.yaml' --include='*.yml' . | sort | uniq -c | sort -rn | head -5"
+      expected_findings:
+        - "Schema reuse level"
+        - "Potential duplicates"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Schema Inventory"
+        - "Consistency Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Comprehensive schema analysis completed"
+    medium: "Partial schema coverage"
+    low: "Limited schema definitions found"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "json-schema"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed schema analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "reqres-001"
+    item: "Consistent field naming convention"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Reviewer confirms consistent camelCase or snake_case usage"
+    expected: "Confirmed by reviewer"
+
+  - id: "reqres-002"
+    item: "No sensitive data in standard responses"
+    level: "CRITICAL"
+    verification: |
+      if grep -rqiE '(password|secret|ssn|creditCard).*:' --include='*.yaml' --include='*.yml' . 2>/dev/null | grep -v 'description'; then echo "FAIL"; else echo "PASS"; fi
+    expected: "PASS"
+
+  - id: "reqres-003"
+    item: "Response envelope pattern used consistently"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms responses use consistent wrapper structure"
+    expected: "Confirmed by reviewer"
+
+  - id: "reqres-004"
+    item: "Schema reuse via $ref for common patterns"
+    level: "WARNING"
+    verification: |
+      refs=$(grep -c '\$ref:' $(find . -name '*openapi*.yaml' | head -1) 2>/dev/null || echo '0'); if [ "$refs" -gt 5 ]; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["api-service", "microservice", "backend"]
+
+relationships:
+  commonly_combined:
+    - "api-integration.api-contracts.schema-validation"
+    - "api-integration.api-contracts.openapi-swagger-completeness"

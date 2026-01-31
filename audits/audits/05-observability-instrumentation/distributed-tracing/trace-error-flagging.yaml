@@ -1,0 +1,257 @@
+audit:
+  id: observability-instrumentation.distributed-tracing.trace-error-flagging
+  name: Trace Error Flagging Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: distributed-tracing
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Reviews how errors are recorded, flagged, and propagated in distributed
+    traces. Examines error status codes, exception recording, error span
+    attributes, and the ability to quickly identify failed requests.
+  why_it_matters: |
+    Proper error flagging enables rapid incident identification and debugging.
+    Unflagged errors hide in trace data, making it difficult to distinguish
+    successful from failed requests. Missing exception details force engineers
+    to correlate traces with logs, slowing incident response.
+  when_to_run:
+  - After error handling changes
+  - When errors not appearing in traces
+  - New service instrumentation review
+  - Post-incident tracing effectiveness review
+prerequisites:
+  required_artifacts:
+  - type: tracing_backend
+    description: Access to trace error queries
+  - type: error_scenarios
+    description: Known error conditions to test
+  access_requirements:
+  - Trace query interface
+  - Application error handling code
+  - Test environment for error injection
+discovery:
+  metrics_queries:
+  - system: Jaeger
+    query: traces with error tag
+    purpose: Find error-flagged traces
+    threshold: Errors properly tagged
+  - system: Prometheus
+    query: rate(traces_spans_total{error='true'}[5m]) / rate(traces_spans_total[5m])
+    purpose: Calculate trace error rate
+    threshold: Matches application error rate
+  code_patterns:
+  - pattern: span\.SetStatus|span\.record_exception|setError|RecordError
+    type: regex
+    scope: source
+    purpose: Identify error recording code
+  - pattern: StatusCode\.ERROR|SpanStatus\.Error|span\.status
+    type: regex
+    scope: source
+    purpose: Identify error status setting
+  file_patterns:
+  - glob: '**/error_handler*.{py,rb,js,ts,java,go}'
+    purpose: Error handling middleware
+  - glob: '**/exception*.{py,rb,js,ts,java,go}'
+    purpose: Exception handling code
+knowledge_sources:
+  specifications:
+  - id: otel-span-status
+    name: OpenTelemetry Span Status
+    url: https://opentelemetry.io/docs/specs/otel/trace/api/#set-status
+    offline_cache: true
+    priority: required
+  guides:
+  - id: error-recording
+    name: OpenTelemetry Error Recording
+    url: https://opentelemetry.io/docs/specs/otel/trace/exceptions/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: jaeger-query
+    purpose: Query error traces
+    command: curl -s 'http://jaeger:16686/api/traces?service=api&tags={"error":"true"}&limit=100'
+  - tool: test-error
+    purpose: Trigger test error
+    command: curl -s http://api/test/error -w '%{http_code}'
+  monitoring_queries:
+  - system: Prometheus
+    query: sum(rate(spans_total{otel_status_code='ERROR'}[5m])) by (service)
+    purpose: Error rate by service from traces
+signals:
+  critical:
+  - id: TRACE-ERR-CRIT-001
+    signal: HTTP 5xx responses not flagged as errors
+    evidence_pattern: status_code >= 500 AND error tag absent
+    explanation: |
+      Server errors must be flagged in traces for quick identification.
+      Unflagged 5xx responses make it impossible to filter for failed
+      requests during incident investigation.
+    remediation: Add middleware to flag spans for 5xx responses
+  - id: TRACE-ERR-CRIT-002
+    signal: Exceptions not recorded in spans
+    evidence_pattern: Exception thrown but span has no exception event
+    explanation: |
+      Exception details in spans eliminate the need to correlate with
+      logs. Missing exception information forces slow log searches
+      during critical incidents.
+    remediation: Implement record_exception in error handlers
+  high:
+  - id: TRACE-ERR-HIGH-001
+    signal: Error status not propagated to parent spans
+    evidence_pattern: Child error, parent marked OK
+    explanation: |
+      Parent spans should reflect child errors so the root span
+      indicates overall request failure. Without this, filtering
+      for error traces misses failures in downstream calls.
+    remediation: Propagate error status to parent spans
+  - id: TRACE-ERR-HIGH-002
+    signal: Retry attempts not distinguishable
+    evidence_pattern: Multiple attempts appear as separate traces
+    explanation: |
+      Retry logic should be visible within the same trace to understand
+      transient failures and retry behavior patterns.
+    remediation: Add retry attempt as span attribute
+  medium:
+  - id: TRACE-ERR-MED-001
+    signal: Error messages not included in span attributes
+    evidence_pattern: Error flag set but no error.message
+    remediation: Add error.message span attribute
+  - id: TRACE-ERR-MED-002
+    signal: HTTP 4xx not categorized appropriately
+    evidence_pattern: All 4xx treated same as 5xx
+    remediation: Differentiate client errors from server errors
+  low:
+  - id: TRACE-ERR-LOW-001
+    signal: Stack traces not included for exceptions
+    remediation: Add exception.stacktrace attribute
+  positive:
+  - id: TRACE-ERR-POS-001
+    signal: Comprehensive error flagging and exception recording
+    evidence_pattern: All errors flagged with full exception details
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Review error flagging implementation
+    description: |
+      Examine how error handlers set span status and record
+      exception information in the instrumentation code.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find error handling in tracing code
+      command: grep -r 'SetStatus.*ERROR\|record_exception\|RecordError' /app/src/
+    - purpose: Check middleware error handling
+      command: grep -r 'status_code.*500\|Internal.*Error' /app/src/middleware/
+    expected_findings:
+    - Error flagging patterns
+    - Exception recording implementation
+  - id: '2'
+    name: Test error trace creation
+    description: |
+      Trigger known error conditions and verify they appear
+      correctly flagged in traces with full exception details.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Trigger test error
+      command: 'curl -s http://api/test/error -H ''X-Test-Error: true'''
+    - purpose: Query for error traces
+      command: 'curl -s ''http://jaeger:16686/api/traces?service=api&tags={"error":"true"}&limit=10''
+        | jq ''.data[0].spans[] | {op: .operationName, error: .tags[] | select(.key=="error"), exception:
+        .logs}'''
+    expected_findings:
+    - Error flag presence
+    - Exception details
+  - id: '3'
+    name: Compare error rates
+    description: |
+      Compare error rates from traces with error rates from
+      metrics and logs to verify consistency.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Get trace error rate
+      command: curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(spans_total{error="true"}[1h]))/sum(rate(spans_total[1h]))'
+    - purpose: Get HTTP error rate
+      command: curl -s 'http://prometheus:9090/api/v1/query?query=sum(rate(http_requests_total{status=~"5.."}[1h]))/sum(rate(http_requests_total[1h]))'
+    expected_findings:
+    - Error rate comparison
+    - Discrepancy analysis
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Error Flagging Review
+    - Exception Recording Status
+    - Error Rate Consistency
+  confidence_guidance:
+    high: Verified through error injection testing
+    medium: Code review with sample trace inspection
+    low: Configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: otel-span-status
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires error injection testing
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: trace-err-001
+  item: 5xx responses flagged as errors
+  level: CRITICAL
+  verification: manual
+  expected: All 5xx create error spans
+- id: trace-err-002
+  item: Exceptions recorded in spans
+  level: CRITICAL
+  verification: manual
+  expected: Exception events present
+- id: trace-err-003
+  item: Error rates match between traces and metrics
+  level: BLOCKING
+  verification: manual
+  expected: Within 5% variance
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SRE Best Practices
+    controls:
+    - Error Observability
+relationships:
+  commonly_combined:
+  - observability-instrumentation.distributed-tracing.trace-coverage
+  - observability-instrumentation.distributed-tracing.trace-sampling
+  - observability-instrumentation.alerting.alert-slo-alignment

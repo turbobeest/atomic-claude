@@ -1,0 +1,365 @@
+audit:
+  id: reliability-resilience.fault-tolerance.circuit-breaker
+  name: Circuit Breaker Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: fault-tolerance
+  tier: expert
+  estimated_duration: 2.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: architecture
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates circuit breaker implementations across the system.
+    Circuit breakers prevent cascade failures by failing fast when downstream
+    services are unhealthy, then automatically recovering when services return.
+    The audit examines circuit breaker placement, threshold configurations,
+    state transitions, fallback behaviors, and monitoring integration.
+  why_it_matters: |
+    Without circuit breakers, calls to failing services accumulate, exhausting
+    threads, connections, and memory. This cascade failure pattern turns a
+    single service outage into a system-wide catastrophe. Circuit breakers
+    stop the bleeding by failing fast, freeing resources for healthy paths.
+    They also prevent overwhelming recovering services with a thundering herd.
+    Netflix's Hystrix and Resilience4j have proven this pattern at scale.
+  when_to_run:
+  - During architecture design reviews
+  - When adding external service dependencies
+  - After incidents involving cascade failures
+  - Quarterly reliability assessments
+prerequisites:
+  required_artifacts:
+  - type: source-code
+    description: Application source code for circuit breaker analysis
+  - type: configuration
+    description: Circuit breaker configuration files
+  access_requirements:
+  - Read access to application source code
+  - Access to circuit breaker configurations
+  - Access to monitoring dashboards
+  - Access to service dependency maps
+discovery:
+  code_patterns:
+  - pattern: '@CircuitBreaker|CircuitBreakerConfig|circuit.*breaker'
+    type: regex
+    scope: source
+    purpose: Circuit breaker annotations and configurations
+  - pattern: '@HystrixCommand|HystrixCircuitBreaker'
+    type: regex
+    scope: source
+    purpose: Netflix Hystrix circuit breakers
+  - pattern: failureRateThreshold|slowCallRateThreshold
+    type: regex
+    scope: config
+    purpose: Resilience4j threshold settings
+  - pattern: halfOpenCalls|permittedNumberOfCallsInHalfOpenState
+    type: regex
+    scope: config
+    purpose: Half-open state configuration
+  - pattern: waitDurationInOpenState|circuitBreaker.*openState
+    type: regex
+    scope: config
+    purpose: Open state duration settings
+  file_patterns:
+  - glob: '**/src/**/*.{java,go,py,ts,js}'
+    purpose: Application source code
+  - glob: '**/config/**/*.{yaml,json,properties}'
+    purpose: Circuit breaker configurations
+  - glob: '**/resilience/**/*'
+    purpose: Resilience configuration files
+  metrics_queries:
+  - system: Prometheus
+    query: resilience4j_circuitbreaker_state
+    purpose: Current circuit breaker states
+    threshold: 0 (closed) for healthy circuits
+  - system: Prometheus
+    query: resilience4j_circuitbreaker_failure_rate
+    purpose: Failure rates triggering circuit open
+    threshold: < threshold configured
+knowledge_sources:
+  specifications:
+  - id: resilience4j-cb
+    name: Resilience4j Circuit Breaker Guide
+    url: https://resilience4j.readme.io/docs/circuitbreaker
+    offline_cache: true
+    priority: required
+  guides:
+  - id: netflix-hystrix
+    name: Netflix Hystrix Circuit Breaker
+    url: https://github.com/Netflix/Hystrix/wiki/How-it-Works#circuit-breaker
+    offline_cache: true
+  - id: martin-fowler-cb
+    name: Martin Fowler - Circuit Breaker
+    url: https://martinfowler.com/bliki/CircuitBreaker.html
+    offline_cache: true
+  - id: polly-cb
+    name: Polly Circuit Breaker
+    url: https://github.com/App-vNext/Polly/wiki/Circuit-Breaker
+    offline_cache: true
+  - id: release-it
+    name: Michael Nygard - Release It!
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+    offline_cache: true
+  - id: sre-book
+    name: Site Reliability Engineering
+    url: https://sre.google/sre-book/table-of-contents/
+    offline_cache: true
+  learning_resources:
+  - id: release-it
+    title: Release It! Second Edition
+    type: book
+    reference: 'ISBN 978-1680502398 - Chapter 5: Circuit Breaker'
+tooling:
+  static_analysis:
+  - tool: code-analysis
+    purpose: Find circuit breaker implementations
+    offline_capable: true
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      resilience4j_circuitbreaker_calls_total{kind="successful"} /
+      resilience4j_circuitbreaker_calls_total
+    purpose: Circuit breaker success rate
+  - system: Prometheus
+    query: |
+      increase(resilience4j_circuitbreaker_state_transitions_total[1h])
+    purpose: Circuit breaker state transitions
+signals:
+  critical:
+  - id: CB-CRIT-001
+    signal: No circuit breaker on external service calls
+    evidence_pattern: http.*client.*no.*circuitbreaker|api.*call.*unprotected
+    explanation: |
+      External service calls without circuit breakers allow failures to
+      cascade. When an external API becomes slow or fails, threads block,
+      connections exhaust, and the calling service fails. Every external
+      call must be protected by a circuit breaker.
+    remediation: Wrap all external service calls with circuit breakers
+  - id: CB-CRIT-002
+    signal: Circuit breaker thresholds too lenient
+    evidence_pattern: failureRateThreshold.*9[0-9]|threshold.*100
+    explanation: |
+      Thresholds near 100% mean the circuit never opens, defeating its
+      purpose. By the time 90% of calls fail, the downstream service is
+      clearly unhealthy. Typical thresholds are 50% failure rate with
+      at least 5-10 calls in the sliding window.
+    remediation: Configure appropriate thresholds (typically 50% failure rate, 10 minimum calls)
+  high:
+  - id: CB-HIGH-001
+    signal: No fallback when circuit is open
+    evidence_pattern: circuitbreaker.*no.*fallback|open.*state.*exception
+    explanation: |
+      When circuits open, calls should return fallback responses rather
+      than exceptions. Raw exceptions degrade user experience. Fallbacks
+      can return cached data, default values, or degraded functionality.
+    remediation: Implement fallback methods for all circuit breakers
+  - id: CB-HIGH-002
+    signal: Half-open state allows too many requests
+    evidence_pattern: permittedNumberOfCallsInHalfOpenState.*[5-9][0-9]|halfOpen.*100
+    explanation: |
+      The half-open state tests if the downstream service has recovered.
+      Too many permitted calls can overwhelm a recovering service. Typical
+      values are 3-10 calls to verify recovery before fully closing.
+    remediation: Configure permittedNumberOfCallsInHalfOpenState to 3-10
+  - id: CB-HIGH-003
+    signal: Open state duration too short for recovery
+    evidence_pattern: waitDurationInOpenState.*1[sS]|open.*duration.*1000
+    explanation: |
+      Short open durations cause rapid oscillation between open and closed
+      states without allowing recovery. Typical durations are 30-60 seconds
+      to allow downstream services time to recover and stabilize.
+    remediation: Configure waitDurationInOpenState to 30-60 seconds
+  medium:
+  - id: CB-MED-001
+    signal: Circuit breaker state not monitored
+    explanation: |
+      Circuit breaker state changes indicate service health issues. Without
+      monitoring, teams don't know circuits are open and cannot investigate
+      root causes.
+    remediation: Implement alerts on circuit breaker state transitions
+  - id: CB-MED-002
+    signal: Slow call rate threshold not configured
+    explanation: |
+      Services can fail slowly rather than return errors. Slow call rate
+      thresholds detect this pattern and open the circuit before resources
+      are exhausted by slow calls.
+    remediation: Configure slowCallRateThreshold and slowCallDurationThreshold
+  - id: CB-MED-003
+    signal: Circuit breaker metrics not exposed
+    explanation: |
+      Metrics on call counts, failure rates, and state transitions enable
+      tuning and troubleshooting. Without metrics, configuration is guesswork.
+    remediation: Expose circuit breaker metrics to monitoring system
+  low:
+  - id: CB-LOW-001
+    signal: Circuit breaker configurations not documented
+    explanation: |
+      Documenting threshold rationale helps with maintenance and incident
+      response understanding.
+  positive:
+  - id: CB-POS-001
+    signal: All external calls protected by circuit breakers
+  - id: CB-POS-002
+    signal: Fallback responses configured for all circuits
+  - id: CB-POS-003
+    signal: Circuit breaker alerts configured and tested
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory external dependencies
+    description: |
+      Identify all external service dependencies that require
+      circuit breaker protection.
+    duration_estimate: 20 min
+    questions:
+    - What external APIs does the system call?
+    - What databases or caches are accessed?
+    - What internal services are called across network?
+    expected_findings:
+    - External dependency inventory
+    - Dependencies lacking protection
+  - id: '2'
+    name: Audit circuit breaker coverage
+    description: |
+      Verify that circuit breakers are implemented for all
+      identified external dependencies.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find circuit breaker implementations
+      command: |
+        grep -r "@CircuitBreaker\|CircuitBreakerConfig\|HystrixCommand" --include="*.java" --include="*.go" --include="*.py" src/
+    - purpose: Find HTTP clients without circuit breakers
+      command: |
+        grep -r "HttpClient\|RestTemplate\|axios\|fetch" --include="*.java" --include="*.ts" --include="*.js" src/
+    expected_findings:
+    - Circuit breaker coverage
+    - Unprotected external calls
+  - id: '3'
+    name: Review threshold configurations
+    description: |
+      Examine circuit breaker thresholds and validate they are
+      appropriate for the use case.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find threshold configurations
+      command: |
+        grep -r "failureRateThreshold\|slowCallRateThreshold\|minimumNumberOfCalls\|waitDurationInOpenState" --include="*.yaml" --include="*.properties" config/
+    expected_findings:
+    - Threshold values per circuit
+    - Configuration inconsistencies
+  - id: '4'
+    name: Verify fallback implementations
+    description: |
+      Ensure all circuit breakers have appropriate fallback
+      behaviors configured.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find fallback methods
+      command: |
+        grep -r "fallback\|Fallback" --include="*.java" --include="*.go" --include="*.py" src/
+    questions:
+    - What happens when circuits open?
+    - Are fallbacks returning appropriate responses?
+    expected_findings:
+    - Fallback coverage
+    - Fallback appropriateness
+  - id: '5'
+    name: Assess monitoring and alerting
+    description: |
+      Verify circuit breaker states are monitored and alerts
+      are configured for state transitions.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check Prometheus metrics
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/label/__name__/values' | jq '.data[] | select(contains("circuitbreaker"))'
+    expected_findings:
+    - Available metrics
+    - Alerting configuration
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Circuit Breaker Coverage
+    - Configuration Analysis
+    - Fallback Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Code review with metrics validation
+    medium: Configuration review with limited runtime data
+    low: Code review only
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: resilience4j-cb
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive code analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: cb-001
+  item: All external service calls protected by circuit breakers
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify circuit breakers on HTTP clients, database calls, etc.
+  expected: Confirmed by reviewer
+- id: cb-002
+  item: Failure rate thresholds appropriately configured
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify thresholds between 40-60% with minimum call counts
+  expected: Confirmed by reviewer
+- id: cb-003
+  item: Fallback responses configured for all circuits
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify fallback methods return appropriate responses
+  expected: Confirmed by reviewer
+- id: cb-004
+  item: Circuit breaker state changes trigger alerts
+  level: WARNING
+  verification: manual
+  verification_notes: Verify alerts fire on circuit open transitions
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.1
+relationships:
+  commonly_combined:
+  - reliability-resilience.fault-tolerance.fallback-strategy
+  - reliability-resilience.fault-tolerance.timeout-configuration
+  - reliability-resilience.fault-tolerance.retry-policy

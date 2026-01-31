@@ -1,0 +1,336 @@
+# ============================================================
+# DOM SIZE AUDIT
+# ============================================================
+# Evaluates DOM complexity and size for performance impact
+# on rendering, memory usage, and interactivity.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.frontend-performance.dom-size"
+  name: "DOM Size Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "frontend-performance"
+
+  tier: "expert"
+  estimated_duration: "1.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes the size and depth of the Document Object Model (DOM) including
+    total element count, maximum depth, parent elements with excessive children,
+    and dynamically added content. Examines patterns that lead to DOM bloat.
+
+  why_it_matters: |
+    Large DOM trees increase memory consumption and slow down DOM queries,
+    style calculations, layout, and paint operations. Every interaction
+    (scrolling, clicking, typing) becomes slower. Google recommends keeping
+    the DOM under 1,500 nodes for optimal performance.
+
+  when_to_run:
+    - "When page interactions feel sluggish"
+    - "When memory usage is high"
+    - "After adding complex UI components"
+    - "During performance optimization"
+
+prerequisites:
+  required_artifacts:
+    - type: "deployed_application"
+      description: "Running application for testing"
+    - type: "source_code"
+      description: "Component source code"
+
+  access_requirements:
+    - "Access to Chrome DevTools"
+    - "Read access to source code"
+
+discovery:
+  code_patterns:
+    - pattern: "map\\(.*=>.*<"
+      type: "regex"
+      scope: "source"
+      purpose: "Find list rendering that may create many elements"
+
+    - pattern: "innerHTML\\s*[+=]"
+      type: "regex"
+      scope: "source"
+      purpose: "Find bulk DOM insertion"
+
+    - pattern: "v-for|\\*ngFor|{#each}"
+      type: "regex"
+      scope: "source"
+      purpose: "Find loop rendering in frameworks"
+
+  file_patterns:
+    - glob: "**/*.tsx"
+      purpose: "React components"
+    - glob: "**/*.vue"
+      purpose: "Vue components"
+    - glob: "**/*.html"
+      purpose: "HTML templates"
+
+knowledge_sources:
+  guides:
+    - id: "dom-size-guide"
+      name: "Avoid an Excessive DOM Size"
+      url: "https://web.dev/dom-size/"
+      offline_cache: true
+
+    - id: "render-performance"
+      name: "Rendering Performance"
+      url: "https://developers.google.com/web/fundamentals/performance/rendering"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "Lighthouse"
+      purpose: "DOM size audit"
+      offline_capable: false
+
+    - tool: "Chrome DevTools"
+      purpose: "DOM inspection and profiling"
+      offline_capable: false
+
+  scripts:
+    - id: "count-dom-elements"
+      language: "javascript"
+      purpose: "Count DOM elements at runtime"
+      source: "inline"
+      code: |
+        // Run in browser console
+        const stats = {
+          total: document.getElementsByTagName('*').length,
+          maxDepth: 0,
+          maxChildren: 0
+        };
+        function walk(node, depth) {
+          if (depth > stats.maxDepth) stats.maxDepth = depth;
+          if (node.children.length > stats.maxChildren) {
+            stats.maxChildren = node.children.length;
+          }
+          for (const child of node.children) walk(child, depth + 1);
+        }
+        walk(document.body, 0);
+        console.log(stats);
+
+signals:
+  critical:
+    - id: "DOM-CRIT-001"
+      signal: "DOM contains over 3,000 elements"
+      evidence_threshold: "document.getElementsByTagName('*').length > 3000"
+      explanation: |
+        A DOM with over 3,000 elements significantly impacts all rendering
+        operations. Style calculations, layout, and paint become expensive.
+        Interactions feel sluggish and memory usage is high.
+      remediation: "Virtualize long lists, remove hidden elements, simplify structure"
+
+    - id: "DOM-CRIT-002"
+      signal: "DOM depth exceeds 32 levels"
+      evidence_threshold: "DOM depth > 32"
+      explanation: |
+        Deeply nested DOM trees make CSS selector matching slow and increase
+        layout complexity. Style calculation time increases with depth.
+      remediation: "Flatten component hierarchy, remove unnecessary wrapper elements"
+
+  high:
+    - id: "DOM-HIGH-001"
+      signal: "DOM contains 1,500-3,000 elements"
+      evidence_threshold: "1500 < elements <= 3000"
+      explanation: |
+        DOM size is above Google's recommendation of 1,500 nodes. Performance
+        may be noticeably impacted on lower-end devices.
+      remediation: "Consider virtualization, lazy loading, or simplifying structure"
+
+    - id: "DOM-HIGH-002"
+      signal: "Single element has over 60 children"
+      evidence_threshold: "element.children.length > 60"
+      explanation: |
+        Elements with many direct children are expensive to update. Inserting,
+        removing, or reordering children triggers expensive layout operations.
+      remediation: "Use virtualization or pagination for long lists"
+
+    - id: "DOM-HIGH-003"
+      signal: "Long list rendered without virtualization"
+      evidence_pattern: "map\\(.*\\).slice\\(0,\\s*[0-9]{3,}\\)|v-for.*items"
+      explanation: |
+        Rendering hundreds or thousands of list items creates a huge DOM.
+        Virtual scrolling renders only visible items.
+      remediation: "Implement virtual scrolling (react-window, vue-virtual-scroller)"
+
+  medium:
+    - id: "DOM-MED-001"
+      signal: "Excessive wrapper elements"
+      evidence_pattern: "<div>\\s*<div>\\s*<div>"
+      remediation: "Reduce unnecessary nesting, use CSS Grid/Flexbox instead of wrapper divs"
+
+    - id: "DOM-MED-002"
+      signal: "Hidden elements still in DOM"
+      evidence_pattern: "display:\\s*none|visibility:\\s*hidden"
+      remediation: "Remove elements from DOM when not needed, or lazy load"
+
+  low:
+    - id: "DOM-LOW-001"
+      signal: "Tables with excessive rows without virtualization"
+      evidence_pattern: "<tr.*>.*100"
+      remediation: "Implement pagination or virtual scrolling for large tables"
+
+  positive:
+    - id: "DOM-POS-001"
+      signal: "Virtual scrolling implemented"
+      evidence_pattern: "react-window|react-virtualized|virtual-scroller"
+
+    - id: "DOM-POS-002"
+      signal: "Lazy loading for off-screen content"
+      evidence_pattern: "IntersectionObserver|loading=\"lazy\""
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Measure DOM size"
+      description: |
+        Count total elements, depth, and elements with many children.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Run Lighthouse DOM audit"
+          command: "lighthouse URL --only-audits=dom-size --output=json"
+      expected_findings:
+        - "Total element count"
+        - "Maximum depth"
+        - "Maximum children per element"
+
+    - id: "2"
+      name: "Identify large subtrees"
+      description: |
+        Find which components/sections contribute most to DOM size.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Count elements per section (run in console)"
+          command: "document.querySelectorAll('section, main, aside').forEach(s => console.log(s.id || s.className, s.querySelectorAll('*').length))"
+      expected_findings:
+        - "Element counts per section"
+        - "Bloat sources"
+
+    - id: "3"
+      name: "Find list rendering patterns"
+      description: |
+        Locate code that may generate many elements.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find list rendering in React"
+          command: "grep -rn '\\.map(' --include='*.tsx' --include='*.jsx' . | head -20"
+        - purpose: "Find list rendering in Vue"
+          command: "grep -rn 'v-for' --include='*.vue' ."
+      expected_findings:
+        - "List rendering locations"
+        - "Virtualization opportunities"
+
+    - id: "4"
+      name: "Check for hidden elements"
+      description: |
+        Find elements hidden but still in DOM.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find hidden elements"
+          command: "grep -rn 'display.*none\\|visibility.*hidden' --include='*.css' --include='*.tsx' ."
+      expected_findings:
+        - "Hidden elements"
+        - "Candidates for removal/lazy loading"
+
+    - id: "5"
+      name: "Evaluate virtualization"
+      description: |
+        Check if long lists use virtualization.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find virtualization libraries"
+          command: "grep -rn 'react-window\\|react-virtualized\\|virtual' package.json"
+      expected_findings:
+        - "Virtualization usage"
+        - "Implementation gaps"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "DOM Statistics"
+        - "Problem Areas"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "DevTools/Lighthouse shows clear DOM size metrics"
+    medium: "Code patterns suggest potential issues"
+    low: "Requires runtime testing to confirm"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "dom-size-guide"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "dom-001"
+    item: "DOM under 1,500 elements"
+    level: "CRITICAL"
+    verification: "lighthouse URL --only-audits=dom-size"
+    expected: "< 1500 elements"
+
+  - id: "dom-002"
+    item: "DOM depth under 32 levels"
+    level: "BLOCKING"
+    verification: "lighthouse URL --only-audits=dom-size"
+    expected: "< 32 levels"
+
+  - id: "dom-003"
+    item: "Long lists use virtualization"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Lists with 50+ items use virtual scrolling"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["webapp", "spa"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.frontend-performance.layout-thrashing"
+    - "performance-efficiency.frontend-performance.memory-leak-client-side"

@@ -1,0 +1,326 @@
+# ============================================================
+# AUDIT: Data Deletion Implementation
+# ============================================================
+# Evaluates how data deletion is implemented including completeness,
+# cascading effects, and compliance with deletion requests.
+# ============================================================
+
+audit:
+  id: "data-state-management.data-lifecycle.data-deletion-implementation"
+
+  name: "Data Deletion Implementation"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "data-lifecycle"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "security"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates data deletion implementation including how deletion
+    requests are processed, completeness of deletion across all data stores,
+    handling of related data, and verification that deletion is complete.
+    It examines both user-initiated deletion (GDPR right to erasure) and
+    system-initiated deletion (retention enforcement).
+
+  why_it_matters: |
+    Incomplete data deletion violates user privacy rights and regulatory
+    requirements. Personal data left in backups, logs, or derived datasets
+    after "deletion" exposes the organization to compliance violations and
+    breach risks. Complete deletion requires tracking all data locations
+    and verifying removal from each.
+
+  when_to_run:
+    - "When implementing deletion functionality"
+    - "During privacy compliance audits"
+    - "After data breach incidents"
+    - "When adding new data stores"
+
+prerequisites:
+  required_artifacts:
+    - type: "deletion-implementation"
+      description: "Code implementing data deletion"
+    - type: "data-map"
+      description: "Map of all data stores containing personal data"
+
+  access_requirements:
+    - "Read access to deletion code"
+    - "Access to data store inventory"
+    - "Access to deletion request logs"
+
+discovery:
+  code_patterns:
+    - pattern: "DELETE FROM|delete\\(|destroy\\(|remove\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Identify deletion operations"
+    - pattern: "gdpr|erasure|rightToBeForget|deletion.*request"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify GDPR-related deletion"
+    - pattern: "CASCADE|ON DELETE"
+      type: "keyword"
+      scope: "source"
+      purpose: "Identify cascading deletion behavior"
+
+  file_patterns:
+    - glob: "**/deletion/**/*"
+      purpose: "Deletion-related code"
+    - glob: "**/gdpr/**/*"
+      purpose: "GDPR compliance code"
+    - glob: "**/privacy/**/*"
+      purpose: "Privacy-related implementations"
+
+knowledge_sources:
+  specifications:
+    - id: "gdpr-erasure"
+      name: "GDPR Article 17 - Right to Erasure"
+      url: "https://gdpr.eu/article-17-right-to-be-forgotten/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "data-deletion-best-practices"
+      name: "Complete Data Deletion Best Practices"
+      url: "https://www.onetrust.com/blog/gdpr-data-deletion/"
+      offline_cache: true
+
+tooling:
+  scripts:
+    - id: "find-deletion-code"
+      language: "bash"
+      purpose: "Find all deletion implementations"
+      source: "inline"
+      code: |
+        grep -riE '(DELETE FROM|\.delete\(|\.destroy\(|\.remove\()' \
+          --include='*.ts' --include='*.py' --include='*.java' --include='*.sql' . 2>/dev/null
+
+signals:
+  critical:
+    - id: "DELET-CRIT-001"
+      signal: "Deletion doesn't cover all data stores"
+      evidence_pattern: "Deletion from primary DB but not backups, logs, or analytics"
+      explanation: |
+        Incomplete deletion violates GDPR right to erasure. Personal data
+        remaining in any store after deletion request means the request
+        was not honored. Regulators can fine for incomplete deletion.
+      remediation: "Map all data stores; implement deletion across all stores; verify completeness"
+
+    - id: "DELET-CRIT-002"
+      signal: "No verification that deletion completed"
+      evidence_pattern: "Deletion fires without confirming success across all stores"
+      explanation: |
+        Without verification, deletion failures go undetected. Users believe
+        their data is deleted while copies persist. This creates compliance
+        exposure and user trust issues.
+      remediation: "Implement deletion verification; log deletion results from each store; alert on failures"
+
+  high:
+    - id: "DELET-HIGH-001"
+      signal: "Cascading deletion doesn't cover related entities"
+      evidence_pattern: "User deletion without deleting user's comments, uploads, etc."
+      explanation: |
+        Related data that references deleted entities often contains personal
+        information. Comments authored by a deleted user still identify
+        the user. All related personal data must be deleted or anonymized.
+      remediation: "Map all related entities; implement cascading deletion or anonymization"
+
+    - id: "DELET-HIGH-002"
+      signal: "Deletion request processing not tracked or auditable"
+      evidence_pattern: "No log of deletion requests, processing status, completion"
+      explanation: |
+        Without audit trails, you cannot prove deletion requests were
+        processed. Regulators require demonstration that requests were
+        handled within required timeframes.
+      remediation: "Log all deletion requests with timestamps, status, and completion proof"
+
+  medium:
+    - id: "DELET-MED-001"
+      signal: "Asynchronous deletion without guaranteed completion"
+      evidence_pattern: "Deletion queued but may be lost if queue fails"
+      remediation: "Use reliable queue with retry; implement dead letter handling; track completion"
+
+    - id: "DELET-MED-002"
+      signal: "No deletion from derived datasets or ML models"
+      evidence_pattern: "Personal data deleted but ML model trained on it retained"
+      remediation: "Track data lineage; retrain models after deletion; or document legal basis for retention"
+
+  low:
+    - id: "DELET-LOW-001"
+      signal: "Deletion performance not optimized for bulk operations"
+
+  positive:
+    - id: "DELET-POS-001"
+      signal: "Complete deletion across all data stores with verification"
+    - id: "DELET-POS-002"
+      signal: "Comprehensive audit trail for deletion requests"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Deletion Code Discovery"
+      description: |
+        Identify all deletion implementations in the codebase
+        including database, cache, and file deletions.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find DELETE statements"
+          command: "grep -riE 'DELETE FROM' --include='*.sql' --include='*.ts' --include='*.py' . 2>/dev/null | head -40"
+        - purpose: "Find ORM deletion"
+          command: "grep -riE '\\.delete\\(|\\.destroy\\(|\\.remove\\(' --include='*.ts' --include='*.py' --include='*.java' . 2>/dev/null | head -40"
+        - purpose: "Find GDPR/erasure endpoints"
+          command: "grep -riE 'gdpr|erasure|deleteUser|deleteAccount|rightToForget' --include='*.ts' --include='*.py' --include='*.java' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Deletion implementations"
+        - "GDPR-specific deletion handling"
+
+    - id: "2"
+      name: "Data Store Coverage Analysis"
+      description: |
+        Verify deletion covers all data stores where personal
+        data may reside.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find different data store interactions"
+          command: "grep -riE 'redis|elasticsearch|s3|mongodb|postgres|mysql|dynamodb' --include='*.ts' --include='*.py' --include='*.java' . 2>/dev/null | head -40"
+        - purpose: "Find deletion in each store type"
+          command: "grep -riE '(redis|elastic|s3|mongo).*delete|delete.*(redis|elastic|s3|mongo)' --include='*.ts' --include='*.py' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Data stores in use"
+        - "Deletion coverage per store"
+
+    - id: "3"
+      name: "Cascading Deletion Analysis"
+      description: |
+        Analyze how deletion cascades to related entities
+        and dependent data.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find CASCADE behaviors"
+          command: "grep -riE 'ON DELETE CASCADE|ON DELETE SET NULL|cascade.*delete' --include='*.sql' --include='*.prisma' --include='*.ts' . 2>/dev/null | head -30"
+        - purpose: "Find manual cascade logic"
+          command: "grep -riE 'deleteRelated|deleteAssociated|cascadeDelete' --include='*.ts' --include='*.py' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Cascade behaviors"
+        - "Related entity handling"
+
+    - id: "4"
+      name: "Audit Trail Analysis"
+      description: |
+        Verify deletion creates auditable records for
+        compliance demonstration.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find deletion logging"
+          command: "grep -riE 'log.*delet|audit.*delet|deletion.*complete|deleted.*success' --include='*.ts' --include='*.py' --include='*.java' . 2>/dev/null | head -30"
+        - purpose: "Find deletion request tracking"
+          command: "grep -riE 'deletionRequest|deletion.*status|request.*id.*deletion' --include='*.ts' --include='*.py' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Deletion audit logging"
+        - "Request tracking mechanism"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Deletion Coverage"
+        - "Cascade Analysis"
+        - "Audit Trail Assessment"
+        - "Compliance Gaps"
+
+  confidence_guidance:
+    high: "Clear evidence of incomplete deletion or missing verification"
+    medium: "Deletion exists but coverage uncertain for some stores"
+    low: "Deletion appears complete but testing needed"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "gdpr-erasure"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive deletion analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "delet-001"
+    item: "All data stores covered by deletion"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Reviewer should verify deletion implemented for each data store"
+    expected: "Confirmed by reviewer"
+
+  - id: "delet-002"
+    item: "Deletion verification mechanism exists"
+    level: "BLOCKING"
+    verification: "grep -riE 'verify.*delet|delet.*success|complete.*delet' --include='*.ts' --include='*.py' . 2>/dev/null | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "delet-003"
+    item: "Audit trail for deletion requests"
+    level: "WARNING"
+    verification: "grep -riE 'log.*delet|audit.*delet' --include='*.ts' --include='*.py' . 2>/dev/null | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "GDPR"
+      controls: ["Art-17"]
+    - framework: "CCPA"
+      controls: ["1798.105"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.data-lifecycle.soft-delete-vs-hard-delete"
+    - "data-state-management.data-lifecycle.data-retention-policy"

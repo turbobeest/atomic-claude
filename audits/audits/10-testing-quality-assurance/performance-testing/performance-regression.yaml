@@ -1,0 +1,327 @@
+# ============================================================
+# AUDIT: Performance Regression Testing
+# ============================================================
+# Evaluates automated detection of performance regressions
+# through continuous comparison against baselines.
+# ============================================================
+
+audit:
+  id: "testing-quality-assurance.performance-testing.performance-regression"
+  name: "Performance Regression Testing"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "testing-quality-assurance"
+  category_number: 10
+  subcategory: "performance-testing"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "yes"
+  severity: "critical"
+  scope: "testing"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: true
+  parallelizable: true
+
+description:
+  what: |
+    Examines performance regression testing practices including automated
+    detection, baseline comparison, threshold configuration, and CI/CD
+    integration. Reviews how performance changes are detected, reported,
+    and prevented from reaching production.
+
+  why_it_matters: |
+    Performance regressions compound over time. Small degradations in each
+    release accumulate into significant slowdowns. Without automated
+    regression detection, systems gradually become slower until users
+    complain or systems fail. Catching regressions early prevents costly
+    remediation and user impact.
+
+  when_to_run:
+    - "Every CI/CD pipeline run"
+    - "Before releases"
+    - "After dependency updates"
+    - "When performance complaints arise"
+
+prerequisites:
+  required_artifacts:
+    - type: "performance-baselines"
+      description: "Established performance baselines for comparison"
+    - type: "ci-pipeline"
+      description: "CI/CD pipeline with performance test stages"
+
+  access_requirements:
+    - "CI/CD system access"
+    - "Performance test results history"
+    - "Baseline repository access"
+
+discovery:
+  file_patterns:
+    - glob: "**/.github/workflows/**"
+      purpose: "GitHub Actions workflows"
+    - glob: "**/performance/**"
+      purpose: "Performance test directories"
+    - glob: "**/*regression*.{js,py,yaml}"
+      purpose: "Regression test files"
+
+  code_patterns:
+    - pattern: "regression|compare.*baseline|threshold"
+      type: "keyword"
+      scope: "config"
+      purpose: "Regression detection configuration"
+    - pattern: "fail.*if|assert.*performance|block.*deploy"
+      type: "regex"
+      scope: "config"
+      purpose: "Performance gates"
+    - pattern: "delta|diff|change.*percent"
+      type: "regex"
+      scope: "config"
+      purpose: "Change detection thresholds"
+
+knowledge_sources:
+  guides:
+    - id: "github-bencher"
+      name: "Continuous Benchmarking with GitHub Actions"
+      url: "https://bencher.dev/docs/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "cont-perf"
+      title: "Continuous Performance Testing"
+      type: "article"
+      reference: "https://martinfowler.com/articles/continuousIntegration.html"
+
+tooling:
+  static_analysis:
+    - tool: "bencher"
+      purpose: "Continuous benchmarking and regression detection"
+      offline_capable: true
+    - tool: "codspeed"
+      purpose: "Performance regression detection in CI"
+      offline_capable: false
+    - tool: "k6"
+      purpose: "Load testing with threshold-based regression detection"
+      offline_capable: true
+
+  scripts:
+    - id: "regression-check"
+      language: "bash"
+      purpose: "Compare performance against baseline"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Compare current results against baseline
+        BASELINE=$(cat baseline.json | jq '.p95_latency')
+        CURRENT=$(cat current.json | jq '.p95_latency')
+        THRESHOLD=1.1  # 10% degradation allowed
+
+        if (( $(echo "$CURRENT > $BASELINE * $THRESHOLD" | bc -l) )); then
+          echo "FAIL: Performance regression detected"
+          exit 1
+        fi
+        echo "PASS: Performance within threshold"
+
+signals:
+  critical:
+    - id: "REGR-CRIT-001"
+      signal: "No automated performance regression detection"
+      evidence_pattern: "Absence of performance comparison in CI/CD pipeline"
+      explanation: |
+        Without automated regression detection, performance degradations
+        accumulate unnoticed. By the time users complain, the system may
+        be significantly slower than its original baseline.
+      remediation: "Implement automated performance regression testing in CI/CD"
+
+    - id: "REGR-CRIT-002"
+      signal: "Performance regressions don't block deployments"
+      evidence_pattern: "Performance tests run but failures don't prevent release"
+      explanation: |
+        Non-blocking performance tests provide information but not protection.
+        Known regressions still reach production, impacting users and
+        requiring hotfixes.
+      remediation: "Configure performance regression thresholds as deployment gates"
+
+  high:
+    - id: "REGR-HIGH-001"
+      signal: "Regression thresholds too permissive"
+      evidence_pattern: "Thresholds allowing >20% degradation"
+      explanation: |
+        Overly permissive thresholds allow significant regressions to pass.
+        While some tolerance is necessary for measurement noise, allowing
+        large degradations defeats the purpose of regression testing.
+      remediation: "Configure thresholds between 5-15% depending on metric stability"
+
+    - id: "REGR-HIGH-002"
+      signal: "Historical regression trends not tracked"
+      evidence_pattern: "No storage of performance trends over time"
+      explanation: |
+        Without historical tracking, gradual degradation across many releases
+        goes undetected. Each release may be within threshold of the previous,
+        but the cumulative effect is significant.
+      remediation: "Track and visualize performance trends across releases"
+
+  medium:
+    - id: "REGR-MED-001"
+      signal: "Regression tests don't cover all critical paths"
+      evidence_pattern: "Limited coverage of performance-critical endpoints"
+      remediation: "Expand regression testing to cover all critical user journeys"
+
+    - id: "REGR-MED-002"
+      signal: "No notification on regression detection"
+      evidence_pattern: "Silent failures or results only visible in CI logs"
+      remediation: "Configure alerts and notifications for regression detection"
+
+  low:
+    - id: "REGR-LOW-001"
+      signal: "Regression reports lack root cause analysis"
+      remediation: "Include profiling or flamegraph generation on regression detection"
+
+  positive:
+    - id: "REGR-POS-001"
+      signal: "Automated regression detection with blocking thresholds"
+    - id: "REGR-POS-002"
+      signal: "Historical performance tracking with trend analysis"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify regression testing in CI/CD"
+      description: |
+        Search for performance regression detection in CI/CD pipeline
+        configurations and test infrastructure.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check GitHub Actions for performance tests"
+          command: "grep -r 'performance\\|benchmark\\|k6\\|load.*test' .github/workflows/ 2>/dev/null"
+        - purpose: "Check for regression comparison logic"
+          command: "grep -r 'regression\\|baseline.*compare\\|threshold' . --include='*.yaml' --include='*.js' 2>/dev/null | head -20"
+      expected_findings:
+        - "CI/CD performance test stages"
+        - "Regression comparison configuration"
+
+    - id: "2"
+      name: "Review threshold configuration"
+      description: |
+        Examine regression thresholds to verify they are appropriately
+        strict while accounting for measurement noise.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find threshold definitions"
+          command: "grep -r 'threshold\\|maxDelta\\|tolerance' --include='*.yaml' --include='*.js' --include='*.json' 2>/dev/null"
+        - purpose: "Check for blocking behavior"
+          command: "grep -r 'fail.*on\\|block.*if\\|exit.*1' --include='*.yaml' --include='*.sh' 2>/dev/null | head -20"
+      expected_findings:
+        - "Threshold value configurations"
+        - "Failure/blocking behavior"
+
+    - id: "3"
+      name: "Verify deployment gates"
+      description: |
+        Check that performance regression failures actually block
+        deployments and releases.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check for required status checks"
+          command: "cat .github/workflows/*.yml 2>/dev/null | grep -A5 'if.*failure\\|needs:' | head -30"
+      expected_findings:
+        - "Performance tests as required checks"
+        - "Deployment dependencies on performance"
+
+    - id: "4"
+      name: "Review historical tracking"
+      description: |
+        Verify that performance results are stored and trends
+        are tracked over time.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check for result storage"
+          command: "grep -r 'artifact\\|upload\\|store.*result' --include='*.yaml' 2>/dev/null"
+      expected_findings:
+        - "Result storage configuration"
+        - "Trend tracking setup"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Regression Detection Coverage"
+        - "Threshold Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Regression detection verified, thresholds reviewed, blocking behavior confirmed"
+    medium: "Configuration reviewed but behavior not observed"
+    low: "Limited visibility into regression testing"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "github-bencher"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires CI/CD analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "performance-regression-001"
+    item: "Automated regression detection in CI/CD"
+    level: "CRITICAL"
+    verification: "grep -r 'performance\\|benchmark' .github/workflows/ 2>/dev/null | grep -q . && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "performance-regression-002"
+    item: "Regression thresholds configured"
+    level: "BLOCKING"
+    verification: "grep -r 'threshold\\|maxDelta' --include='*.yaml' --include='*.js' 2>/dev/null | grep -q . && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "performance-regression-003"
+    item: "Regressions block deployments"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms performance failures block production deployments"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["web-application", "api-service", "microservices"]
+
+  compliance_frameworks:
+    - framework: "Internal"
+      controls: ["PERF-002"]
+
+relationships:
+  commonly_combined:
+    - "testing-quality-assurance.performance-testing.performance-baseline"
+    - "testing-quality-assurance.performance-testing.benchmark-testing"
+    - "testing-quality-assurance.test-automation.ci-integration"

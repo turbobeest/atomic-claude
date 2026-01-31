@@ -1,0 +1,390 @@
+# ============================================================
+# AUDIT: Metric Aggregation
+# ============================================================
+# Category: 05 - Observability & Instrumentation
+# Subcategory: Metrics
+# ============================================================
+
+audit:
+  id: "observability-instrumentation.metrics.metric-aggregation"
+  name: "Metric Aggregation Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "observability-instrumentation"
+  category_number: 5
+  subcategory: "metrics"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "metrics"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the correctness and efficiency of metric aggregation strategies
+    including recording rules, federation queries, and cross-service aggregations.
+    This audit examines whether aggregations preserve statistical validity,
+    identifies missing pre-aggregations that cause query performance issues,
+    and validates that recording rules align with actual query patterns.
+
+  why_it_matters: |
+    Incorrect aggregations produce misleading data - averaging averages,
+    summing rates incorrectly, or aggregating percentiles across dimensions
+    all produce mathematically invalid results. Missing recording rules force
+    expensive real-time aggregations that cause dashboard timeouts and alert
+    delays. Poor aggregation design is a hidden source of both inaccuracy
+    and performance problems.
+
+  when_to_run:
+    - "Recording rule design review"
+    - "Dashboard performance optimization"
+    - "SLO calculation validation"
+    - "Query performance issues investigation"
+
+prerequisites:
+  required_artifacts:
+    - type: "metrics-system"
+      description: "Access to Prometheus with recording rules"
+    - type: "dashboards"
+      description: "Dashboard definitions showing query patterns"
+
+  access_requirements:
+    - "Prometheus recording rules access"
+    - "Dashboard query access"
+    - "Query performance metrics"
+
+discovery:
+  code_patterns:
+    - pattern: "record:|rules:"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find recording rule definitions"
+    - pattern: "sum.*by|avg.*by|count.*by"
+      type: "regex"
+      scope: "config"
+      purpose: "Find aggregation patterns"
+    - pattern: "rate\\(|increase\\("
+      type: "regex"
+      scope: "config"
+      purpose: "Find rate calculations for proper aggregation"
+
+  file_patterns:
+    - glob: "**/recording_rules.yaml"
+      purpose: "Prometheus recording rules"
+    - glob: "**/rules/*.yaml"
+      purpose: "Alert and recording rules"
+    - glob: "**/dashboards/*.json"
+      purpose: "Grafana dashboards with queries"
+
+  metrics_queries:
+    - system: "Prometheus"
+      query: "ALERTS"
+      purpose: "Check alert rule aggregations"
+      threshold: "Validate aggregation correctness"
+    - system: "Prometheus"
+      query: "prometheus_rule_evaluation_duration_seconds"
+      purpose: "Check recording rule performance"
+      threshold: "< scrape interval"
+
+knowledge_sources:
+  specifications:
+    - id: "prometheus-rules"
+      name: "Prometheus Recording Rules"
+      url: "https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "aggregation-guide"
+      name: "Correct Metric Aggregation"
+      url: "https://www.robustperception.io/rate-then-sum-never-sum-then-rate"
+      offline_cache: true
+    - id: "recording-rules-guide"
+      name: "When to Use Recording Rules"
+      url: "https://prometheus.io/docs/practices/rules/"
+      offline_cache: true
+
+  papers:
+    - id: "statistics-pitfalls"
+      title: "Statistical Pitfalls in Monitoring"
+      url: "https://research.google/pubs/"
+
+tooling:
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        # Find slow queries that need recording rules
+        topk(10, prometheus_engine_query_duration_seconds{quantile="0.99"})
+      purpose: "Identify queries needing pre-aggregation"
+    - system: "Prometheus"
+      query: |
+        # Check recording rule latency
+        prometheus_rule_group_last_duration_seconds
+      purpose: "Monitor recording rule performance"
+    - system: "Prometheus"
+      query: |
+        # Failed rule evaluations
+        prometheus_rule_evaluation_failures_total
+      purpose: "Detect broken recording rules"
+
+  static_analysis:
+    - tool: "promtool"
+      purpose: "Validate recording rules syntax"
+      offline_capable: true
+
+  scripts:
+    - id: "aggregation-validator"
+      language: "python"
+      purpose: "Detect common aggregation anti-patterns"
+      source: "inline"
+      code: |
+        import re
+
+        ANTIPATTERNS = [
+            (r'avg\(avg\(', 'Averaging averages produces incorrect results'),
+            (r'sum\(sum\(', 'Double sum may indicate aggregation error'),
+            (r'avg\(.*histogram_quantile', 'Averaging percentiles is invalid'),
+            (r'sum\(rate\(', 'OK pattern - rate then sum'),
+            (r'rate\(sum\(', 'ANTI-PATTERN: sum then rate is incorrect'),
+        ]
+
+        def validate_aggregation(query):
+            issues = []
+            for pattern, message in ANTIPATTERNS:
+                if 'ANTI-PATTERN' in message and re.search(pattern, query):
+                    issues.append(message)
+            return issues
+
+signals:
+  critical:
+    - id: "AGG-CRIT-001"
+      signal: "Averaging percentiles or histograms"
+      evidence_pattern: "avg(histogram_quantile(...))"
+      explanation: |
+        Percentiles cannot be averaged - avg(p99) is not p99. This is
+        mathematically invalid and produces meaningless numbers that may
+        be used for SLO compliance. Always aggregate histograms before
+        calculating percentiles.
+      remediation: "Use histogram_quantile(0.99, sum(rate(...)) by (le))"
+
+    - id: "AGG-CRIT-002"
+      signal: "Sum then rate instead of rate then sum"
+      evidence_pattern: "rate(sum(...))"
+      explanation: |
+        Rate must be calculated before aggregation because counter resets
+        affect individual series. Summing then taking rate produces
+        incorrect results when any series resets.
+      remediation: "Change to sum(rate(...)) instead of rate(sum(...))"
+
+  high:
+    - id: "AGG-HIGH-001"
+      signal: "Missing recording rules for expensive queries"
+      evidence_pattern: "Dashboard query > 5 seconds execution"
+      explanation: |
+        Expensive queries computed at query time cause dashboard timeouts
+        and increase Prometheus load. Recording rules pre-compute results
+        at regular intervals.
+      remediation: "Create recording rules for frequently-used expensive queries"
+
+    - id: "AGG-HIGH-002"
+      signal: "Aggregating across incompatible dimensions"
+      evidence_pattern: "Sum across different units or scales"
+      explanation: |
+        Aggregating metrics with different units or scales produces
+        meaningless results. Ensure aggregations combine comparable data.
+      remediation: "Normalize units before aggregation or separate calculations"
+
+  medium:
+    - id: "AGG-MED-001"
+      signal: "Recording rules don't match query patterns"
+      evidence_pattern: "Pre-aggregations exist but dashboards use different dimensions"
+      remediation: "Align recording rules with actual dashboard query patterns"
+
+    - id: "AGG-MED-002"
+      signal: "Duplicate aggregation logic"
+      evidence_pattern: "Same aggregation in multiple recording rules"
+      remediation: "Consolidate recording rules to single source of truth"
+
+    - id: "AGG-MED-003"
+      signal: "Missing label preservation in aggregations"
+      evidence_pattern: "Important labels dropped by aggregation"
+      remediation: "Use by() clause to preserve necessary labels"
+
+  low:
+    - id: "AGG-LOW-001"
+      signal: "Recording rule naming inconsistent"
+      remediation: "Follow naming convention: level:metric:operations"
+
+  positive:
+    - id: "AGG-POS-001"
+      signal: "Recording rules follow rate-then-sum pattern"
+    - id: "AGG-POS-002"
+      signal: "Pre-aggregations aligned with dashboard queries"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory recording rules"
+      description: |
+        Collect all recording rules and document their aggregation
+        patterns and purposes.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "List recording rules"
+          command: "curl -s 'http://prometheus:9090/api/v1/rules' | jq '.data.groups[].rules[] | select(.type==\"recording\")'"
+        - purpose: "Get rule configurations"
+          command: "cat /etc/prometheus/rules/*.yaml | grep -A5 'record:'"
+      expected_findings:
+        - "Recording rule inventory"
+        - "Aggregation patterns used"
+
+    - id: "2"
+      name: "Validate aggregation correctness"
+      description: |
+        Check each aggregation for mathematical validity - no averaging
+        of percentiles, rate before sum, etc.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find potential anti-patterns"
+          command: "grep -rn 'avg.*histogram_quantile\\|rate(sum(' /etc/prometheus/rules/"
+      expected_findings:
+        - "Invalid aggregation patterns"
+        - "Corrected query recommendations"
+
+    - id: "3"
+      name: "Analyze query performance"
+      description: |
+        Identify expensive queries that could benefit from recording
+        rules.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find slow queries"
+          command: "curl -s 'http://prometheus:9090/api/v1/query?query=topk(10,prometheus_engine_query_duration_seconds)' | jq '.data.result'"
+      expected_findings:
+        - "Slow query candidates"
+        - "Recording rule recommendations"
+
+    - id: "4"
+      name: "Match recording rules to dashboards"
+      description: |
+        Compare recording rule outputs with dashboard query patterns
+        to identify alignment gaps.
+      duration_estimate: "45 min"
+      questions:
+        - "Do dashboards use recording rule outputs?"
+        - "Are there frequently-used queries without recording rules?"
+        - "Do recording rules preserve needed dimensions?"
+      expected_findings:
+        - "Recording rule utilization"
+        - "Missing pre-aggregations"
+
+    - id: "5"
+      name: "Review SLO calculations"
+      description: |
+        Validate that SLO-related aggregations are mathematically
+        correct and produce accurate compliance numbers.
+      duration_estimate: "30 min"
+      questions:
+        - "How are error budgets calculated?"
+        - "Are availability calculations using correct aggregation?"
+        - "Do latency SLOs properly aggregate histograms?"
+      expected_findings:
+        - "SLO calculation accuracy"
+        - "Aggregation corrections needed"
+
+output:
+  deliverables:
+    - type: "aggregation_analysis"
+      format: "structured"
+      description: "Recording rule and aggregation pattern analysis"
+
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Aggregation Correctness Review"
+        - "Performance Optimization Opportunities"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Query validation and mathematical verification"
+    medium: "Pattern matching without result validation"
+    low: "Configuration review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "prometheus-rules"
+        priority: "required"
+      - source_id: "aggregation-guide"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed aggregation analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "aggregation-001"
+    item: "No averaging of percentiles or quantiles"
+    level: "CRITICAL"
+    verification: "grep -rn 'avg.*histogram_quantile' /etc/prometheus/rules/ | wc -l"
+    expected: "0"
+
+  - id: "aggregation-002"
+    item: "Rate calculated before sum aggregation"
+    level: "CRITICAL"
+    verification: "grep -rn 'rate(sum(' /etc/prometheus/rules/ | wc -l"
+    expected: "0"
+
+  - id: "aggregation-003"
+    item: "Recording rules exist for expensive dashboard queries"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify queries > 5s have recording rules"
+    expected: "Confirmed by reviewer"
+
+  - id: "aggregation-004"
+    item: "SLO calculations use correct aggregation"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Validate SLO query mathematical correctness"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "observability-instrumentation.metrics.histogram-vs-summary"
+    - "observability-instrumentation.metrics.sli-definition"
+    - "observability-instrumentation.visualization-dashboards.query-performance"

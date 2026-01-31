@@ -1,0 +1,321 @@
+audit:
+  id: scalability-capacity.database-scalability.read-replica
+  name: Read Replica Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: scalability-capacity
+  category_number: 4
+  subcategory: database-scalability
+  tier: phd
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the read replica architecture including replica
+    count and placement, replication lag monitoring and handling,
+    read/write splitting logic, connection pooling, and failover
+    mechanisms. It assesses whether the read scaling strategy
+    effectively distributes load while maintaining data consistency.
+  why_it_matters: |
+    Read replicas are the primary mechanism for scaling read-heavy
+    workloads. Misconfigured replicas lead to stale reads, inconsistent
+    user experiences, wasted resources on underutilized replicas, or
+    primary database overload. Replication lag during peak loads can
+    cause application errors and data inconsistency.
+  when_to_run:
+  - When read latency increases under load
+  - Before scaling read capacity
+  - After adding new read replicas
+  - When experiencing replication lag issues
+  - During capacity planning for read-heavy features
+prerequisites:
+  required_artifacts:
+  - type: database-configuration
+    description: Replica configuration and connection strings
+  - type: monitoring-access
+    description: Database monitoring dashboards and metrics
+  - type: application-code
+    description: Database connection and routing logic
+  access_requirements:
+  - Database cluster read access
+  - Replication monitoring metrics
+  - Application database configuration
+  - Load balancer configuration for database tier
+discovery:
+  code_patterns:
+  - pattern: read[_-]?replica|replica[_-]?set|secondary|follower
+    type: regex
+    scope: config
+    purpose: Identify replica configuration
+  - pattern: replication[_-]?lag|lag[_-]?threshold|stale[_-]?read
+    type: regex
+    scope: source
+    purpose: Find replication lag handling
+  - pattern: read[_-]?write[_-]?split|route[_-]?to[_-]?replica
+    type: regex
+    scope: source
+    purpose: Detect read/write routing logic
+  file_patterns:
+  - glob: '**/database*.{yaml,yml,json,conf}'
+    purpose: Database configuration files
+  - glob: '**/replication*.{yaml,yml,json}'
+    purpose: Replication-specific configuration
+  metrics_queries:
+  - system: Database Monitoring
+    query: replication_lag_seconds
+    purpose: Measure current replication lag
+    threshold: < 1 second for OLTP, < 60 seconds for analytics
+  - system: Database Monitoring
+    query: replica_connections_active by replica
+    purpose: Assess load distribution across replicas
+    threshold: Even distribution within 20%
+knowledge_sources:
+  specifications:
+  - id: postgres-replication
+    name: PostgreSQL Streaming Replication
+    url: https://www.postgresql.org/docs/current/warm-standby.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-rds-replicas
+    name: Amazon RDS Read Replicas
+    url: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_ReadRepl.html
+    offline_cache: true
+  - id: mysql-replication
+    name: MySQL Replication
+    url: https://dev.mysql.com/doc/refman/8.0/en/replication.html
+    offline_cache: true
+  papers:
+  - id: cap-theorem
+    title: Brewer's Conjecture and the Feasibility of Consistent, Available, Partition-Tolerant Web Services
+    url: https://users.ece.cmu.edu/~adrian/731-sp04/readings/GL-cap.pdf
+tooling:
+  infrastructure_tools:
+  - tool: pg_stat_replication
+    purpose: PostgreSQL replication status
+    command: SELECT * FROM pg_stat_replication;
+  - tool: SHOW REPLICA STATUS
+    purpose: MySQL replication status
+    command: SHOW REPLICA STATUS\G
+  monitoring_queries:
+  - system: Prometheus
+    query: pg_replication_lag_seconds
+    purpose: Track replication lag over time
+  - system: Prometheus
+    query: sum(rate(pg_stat_database_tup_fetched[5m])) by (instance)
+    purpose: Read load distribution across replicas
+  scripts:
+  - id: replica-health-check
+    language: bash
+    purpose: Check health of all read replicas
+    source: inline
+    code: |
+      #!/bin/bash
+      # Check replica health and lag
+      for replica in $(cat /etc/db/replicas.txt); do
+        lag=$(psql -h $replica -c "SELECT EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp()))::int" -t)
+        echo "$replica: lag=${lag}s"
+        if [ "$lag" -gt 5 ]; then
+          echo "WARNING: High replication lag on $replica"
+        fi
+      done
+signals:
+  critical:
+  - id: REPLICA-CRIT-001
+    signal: Replication lag exceeds 30 seconds during normal operation
+    evidence_threshold: avg(replication_lag_seconds) > 30
+    explanation: |
+      Sustained high replication lag indicates the replica cannot keep up
+      with write load. Users reading from replicas see severely stale data,
+      causing confusion and potential data integrity issues in the application.
+    remediation: Scale replica resources, optimize heavy write queries, or add more replicas
+  - id: REPLICA-CRIT-002
+    signal: No replication lag monitoring or alerting
+    evidence_indicators:
+    - No lag metrics in monitoring system
+    - No alerts configured for replication lag
+    - Application unaware of replica lag state
+    explanation: |
+      Without lag monitoring, stale reads go undetected. The application
+      may serve incorrect data without any visibility into the problem.
+    remediation: Implement comprehensive lag monitoring with alerts at 1s, 5s, 30s thresholds
+  high:
+  - id: REPLICA-HIGH-001
+    signal: All reads go to single replica
+    explanation: Defeats purpose of read scaling; creates single point of failure
+    remediation: Implement proper load balancing across read replicas
+  - id: REPLICA-HIGH-002
+    signal: Application reads from replica immediately after write
+    explanation: Causes read-your-write consistency violations
+    remediation: Implement session affinity or read-from-primary after write
+  medium:
+  - id: REPLICA-MED-001
+    signal: No automatic replica failover
+    remediation: Configure automated failover with health checks
+  - id: REPLICA-MED-002
+    signal: Replica in same availability zone as primary
+    remediation: Distribute replicas across availability zones
+  low:
+  - id: REPLICA-LOW-001
+    signal: Replica specifications differ significantly from primary
+  positive:
+  - id: REPLICA-POS-001
+    signal: Lag-aware routing implemented
+  - id: REPLICA-POS-002
+    signal: Geographic replica placement matches user distribution
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory Read Replicas
+    description: |
+      Document all read replicas including location, specifications,
+      connection details, and intended purpose.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List all replica instances
+      command: aws rds describe-db-instances --query 'DBInstances[?ReadReplicaSourceDBInstanceIdentifier!=null]'
+    - purpose: Check replication status
+      command: psql -c 'SELECT * FROM pg_stat_replication;'
+    expected_findings:
+    - Complete replica inventory
+    - Replica specifications and locations
+  - id: '2'
+    name: Analyze Replication Lag Patterns
+    description: |
+      Review historical replication lag data to identify patterns,
+      peak lag periods, and correlations with workload.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Query lag metrics from monitoring
+      command: prometheus_query 'avg_over_time(pg_replication_lag_seconds[7d])'
+    - purpose: Identify peak lag periods
+      command: prometheus_query 'max_over_time(pg_replication_lag_seconds[7d])'
+    expected_findings:
+    - Average and peak replication lag
+    - Correlation between lag and write patterns
+    - Lag trends over time
+  - id: '3'
+    name: Review Read/Write Routing Logic
+    description: |
+      Examine application code and infrastructure to understand how
+      reads are routed to replicas and writes to primary.
+    duration_estimate: 60 min
+    commands:
+    - purpose: Find database routing code
+      command: grep -r 'read_replica\|write_primary\|route.*database' src/
+    - purpose: Check connection pool configuration
+      command: cat config/database.yml | grep -A10 'replica'
+    expected_findings:
+    - Read/write splitting mechanism
+    - Lag-awareness in routing
+    - Connection pool configuration
+  - id: '4'
+    name: Test Failover Scenarios
+    description: |
+      Evaluate failover procedures and test replica promotion
+      capabilities in non-production environment.
+    duration_estimate: 45 min
+    questions:
+    - What happens when primary fails?
+    - How long does replica promotion take?
+    - How does application handle replica failure?
+    - Is there automated failover configured?
+    expected_findings:
+    - Failover procedure documentation
+    - Expected failover time
+    - Application behavior during failover
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Replica Architecture Overview
+    - Replication Lag Analysis
+    - Load Distribution Assessment
+    - Failover Readiness
+    - Recommendations
+  confidence_guidance:
+    high: Direct measurement of replica metrics and code review
+    medium: Analysis based on configuration with limited runtime data
+    low: Inference from architecture documents only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: postgres-replication
+      priority: required
+    - source_id: aws-rds-replicas
+      priority: recommended
+  limitations:
+  - Cannot measure live replication lag
+  - Load distribution requires runtime metrics
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires runtime metrics analysis
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: read-replica-001
+  item: Replication lag monitoring is active
+  level: CRITICAL
+  verification: curl -s monitoring/api/v1/query?query=pg_replication_lag_seconds | jq '.status' | grep
+    -q success && echo PASS || echo FAIL
+  expected: PASS
+- id: read-replica-002
+  item: Average replication lag under 5 seconds
+  level: CRITICAL
+  verification: prometheus_query 'avg(pg_replication_lag_seconds)' | test $(cat) -lt 5 && echo PASS ||
+    echo FAIL
+  expected: PASS
+- id: read-replica-003
+  item: Read load distributed across replicas
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify grafana dashboard shows even distribution
+  expected: Confirmed by reviewer
+- id: read-replica-004
+  item: Failover procedure documented and tested
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm runbook exists and last test date within 6 months
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - high-scale-saas
+    - enterprise
+    - data-platform
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - A1.2
+relationships:
+  commonly_combined:
+  - scalability-capacity.database-scalability.connection-scaling
+  - scalability-capacity.database-scalability.write-scaling
+  - reliability-resilience.disaster-recovery.database-backup

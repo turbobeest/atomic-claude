@@ -1,0 +1,344 @@
+audit:
+  id: api-integration.pagination-filtering.field-selection
+  name: Field Selection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: api-integration
+  category_number: 9
+  subcategory: pagination-filtering
+  tier: phd
+  estimated_duration: 75 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - api
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates API field selection capabilities including sparse fieldsets,
+    field whitelisting, nested field selection, computed field handling,
+    and over-fetching prevention. Analyzes whether clients can efficiently
+    request only the data they need.
+  why_it_matters: |
+    Without field selection, APIs return all fields on every request,
+    causing bandwidth waste, slower responses, and potential data exposure.
+    GraphQL solved this with built-in field selection; REST APIs need
+    explicit implementation. Poor field selection also enables data
+    exfiltration of sensitive fields.
+  when_to_run:
+  - API design or review
+  - Performance optimization
+  - Bandwidth reduction initiatives
+  - Security assessments
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: API endpoint implementations
+  - type: documentation
+    description: API specification or schema
+  access_requirements:
+  - Read access to API source code
+  - Access to API documentation
+discovery:
+  code_patterns:
+  - pattern: fields|select|include|exclude|sparse
+    type: regex
+    scope: source
+    purpose: Detect field selection
+  - pattern: projection|\$project|select\(
+    type: regex
+    scope: source
+    purpose: Detect database-level field selection
+  - pattern: allowedFields|selectableFields|hiddenFields
+    type: regex
+    scope: source
+    purpose: Detect field access control
+  file_patterns:
+  - glob: '**/api/**'
+    purpose: API implementations
+  - glob: '**/serializers/**'
+    purpose: Serialization logic
+  - glob: '**/resolvers/**'
+    purpose: GraphQL resolvers
+knowledge_sources:
+  specifications:
+  - id: json-api-sparse
+    name: JSON:API Sparse Fieldsets
+    url: https://jsonapi.org/format/#fetching-sparse-fieldsets
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: graphql-fields
+    name: GraphQL Field Selection
+    url: https://graphql.org/learn/queries/
+    offline_cache: true
+  - id: rest-fields
+    name: REST API Field Selection
+    url: https://www.vinaysahni.com/best-practices-for-a-pragmatic-restful-api
+    offline_cache: true
+  learning_resources:
+  - id: overfetching
+    title: Understanding Over-fetching and Under-fetching
+    type: article
+    reference: Apollo GraphQL Blog
+tooling:
+  static_analysis:
+  - tool: graphql-inspector
+    purpose: Analyze GraphQL field usage
+    offline_capable: true
+  scripts:
+  - id: field-selection-scan
+    language: bash
+    purpose: Analyze field selection patterns
+    source: inline
+    code: |
+      echo "=== Field Selection Analysis ==="
+      echo "--- Field parameters ---"
+      grep -rn "fields\|select\|include\|exclude" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -30
+
+      echo "--- Database projection ---"
+      grep -rn "projection\|select\(\|\\$project" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+
+      echo "--- Field whitelisting ---"
+      grep -rn "allowedFields\|hiddenFields\|exposedFields" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+signals:
+  critical:
+  - id: FS-CRIT-001
+    signal: Sensitive fields exposed without field selection
+    evidence_pattern: password_hash, api_key, secret in default response
+    explanation: |
+      When APIs return all fields by default and sensitive fields are
+      not filtered, private data can be inadvertently exposed. Even
+      with field selection, sensitive fields should be blocked.
+    remediation: Implement field blacklist for sensitive data regardless of selection
+  - id: FS-CRIT-002
+    signal: Field selection allows access to internal fields
+    evidence_pattern: Client can select _internal or __private fields
+    explanation: |
+      Allowing clients to select internal fields exposes implementation
+      details and potentially sensitive system information.
+    remediation: Filter out internal fields from selection options
+  high:
+  - id: FS-HIGH-001
+    signal: No field selection capability in REST API
+    evidence_pattern: All fields returned on every request
+    explanation: |
+      Without field selection, APIs always return full objects,
+      wasting bandwidth, increasing latency, and potentially exposing
+      more data than necessary.
+    remediation: Implement sparse fieldsets or fields parameter
+  - id: FS-HIGH-002
+    signal: Field selection without database projection
+    evidence_pattern: Fields filtered in application after full fetch
+    explanation: |
+      Fetching all fields from database then filtering in application
+      wastes database bandwidth and memory. Selection should push
+      down to database query.
+    remediation: Use database projection to select only requested fields
+  - id: FS-HIGH-003
+    signal: Nested field selection without depth limits
+    evidence_pattern: Deep nested field selection causing N+1 queries
+    explanation: |
+      Unlimited nested field selection can cause exponential query
+      complexity and N+1 query problems in GraphQL or relation-heavy APIs.
+    remediation: Limit selection depth and use dataloader patterns
+  medium:
+  - id: FS-MED-001
+    signal: Default response includes rarely-used large fields
+    evidence_pattern: Description, content, or blob fields in default
+    remediation: Exclude large fields from default response
+  - id: FS-MED-002
+    signal: Computed fields calculated even when not selected
+    evidence_pattern: Expensive computations run regardless of selection
+    remediation: Defer computed field calculation until selected
+  - id: FS-MED-003
+    signal: Inconsistent field selection across endpoints
+    evidence_pattern: Some endpoints support fields, others do not
+    remediation: Standardize field selection across API
+  low:
+  - id: FS-LOW-001
+    signal: Field selection syntax not documented
+    evidence_pattern: No documentation of fields parameter
+    remediation: Document field selection syntax and available fields
+  positive:
+  - id: FS-POS-001
+    signal: Sparse fieldsets implemented
+    evidence_pattern: Fields parameter with whitelist validation
+  - id: FS-POS-002
+    signal: Database projection used
+    evidence_pattern: SELECT only requested columns
+  - id: FS-POS-003
+    signal: Sensitive fields blocked from selection
+    evidence_pattern: Field blacklist for private data
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Field Selection Patterns
+    description: |
+      Find how field selection is implemented.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find field parameters
+      command: |
+        grep -rn "fields\|select\|include\|exclude" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | grep -v test | head -40
+    expected_findings:
+    - Field selection mechanism
+    - Parameter format
+  - id: '2'
+    name: Analyze Database Projection
+    description: |
+      Check if field selection pushes down to database.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find projection usage
+      command: |
+        grep -rn "projection\|select\(\|\\$project\|SELECT.*FROM" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Database-level selection
+    - Application-level filtering
+  - id: '3'
+    name: Review Field Access Control
+    description: |
+      Check for field whitelists and blacklists.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find field restrictions
+      command: |
+        grep -rn "allowedFields\|hiddenFields\|blacklist\|whitelist" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    - purpose: Find sensitive field handling
+      command: |
+        grep -rn "password\|secret\|apiKey\|token" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -i "exclude\|hidden\|filter" | grep -v node_modules | head -20
+    expected_findings:
+    - Access control implementation
+    - Sensitive field handling
+  - id: '4'
+    name: Check Default Response Content
+    description: |
+      Analyze what fields are included by default.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find serializers/transformers
+      command: |
+        grep -rn "serialize\|transform\|toJSON\|toResponse" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Default field sets
+    - Large fields inclusion
+  - id: '5'
+    name: Evaluate Computed Field Handling
+    description: |
+      Check if computed fields are lazily evaluated.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find computed properties
+      command: |
+        grep -rn "get \|computed\|@computed\|@property" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Computed field patterns
+    - Lazy evaluation usage
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - field_selection_capability
+    - projection_usage
+    - access_control_gaps
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Selection Capabilities
+    - Security Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Clear sensitive field exposure or no selection support
+    medium: Selection exists but coverage uncertain
+    low: Requires API testing to confirm issues
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: json-api-sparse
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed analysis
+    full:
+      included: true
+      priority: 1
+    api:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: fs-001
+  item: Sensitive fields blocked from selection
+  level: CRITICAL
+  verification: |
+    grep -rn "password\|secret\|apiKey" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -i "exclude\|hidden\|blacklist" | grep -v node_modules | \
+      wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: fs-002
+  item: Field selection supported in API
+  level: BLOCKING
+  verification: |
+    grep -rn "fields\|select\|sparse\|projection" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: fs-003
+  item: Database projection used for selection
+  level: WARNING
+  verification: |
+    grep -rn "projection\|SELECT.*FROM\|select\(" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP
+    controls:
+    - A01:2021-Broken Access Control
+  - framework: ISO 25010
+    controls:
+    - Performance Efficiency
+relationships:
+  commonly_combined:
+  - api-integration.pagination-filtering.pagination-strategy
+  - api-integration.pagination-filtering.query-complexity-limits
+  - security-trust.data-exposure.information-disclosure

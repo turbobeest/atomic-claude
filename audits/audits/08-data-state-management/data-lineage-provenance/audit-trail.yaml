@@ -1,0 +1,398 @@
+# ============================================================
+# AUDIT: Audit Trail
+# ============================================================
+
+audit:
+  id: "data-state-management.data-lineage-provenance.audit-trail"
+  name: "Audit Trail Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "data-lineage-provenance"
+
+  tier: "expert"
+  estimated_duration: "90 minutes"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "security"
+    - "compliance"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the implementation of audit trails for tracking who did what,
+    when, and why. Analyzes coverage of auditable events, audit log content,
+    immutability, retention, and searchability. Ensures audit trails meet
+    compliance requirements and support forensic investigation.
+
+  why_it_matters: |
+    Audit trails are essential for security forensics, compliance reporting,
+    and accountability. Without proper audit trails, security incidents cannot
+    be investigated, regulatory audits fail, and there's no accountability
+    for data changes. Many regulations (SOX, HIPAA, PCI-DSS) explicitly
+    require comprehensive audit logging.
+
+  when_to_run:
+    - "Security audits"
+    - "Compliance assessments"
+    - "Before production deployment"
+    - "After security incidents"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application code with audit logging"
+    - type: "audit_logs"
+      description: "Sample audit log entries"
+    - type: "compliance_requirements"
+      description: "Audit requirements from regulations"
+
+  access_requirements:
+    - "Read access to application source code"
+    - "Access to audit log configuration"
+    - "Understanding of compliance requirements"
+
+discovery:
+  code_patterns:
+    - pattern: "audit|AuditLog|auditTrail|tracking"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect audit logging"
+
+    - pattern: "who|when|what|action|event|changed"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect audit event capture"
+
+    - pattern: "@Audited|@Audit|auditEntity|trackChanges"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect audit annotations"
+
+  file_patterns:
+    - glob: "**/audit/**"
+      purpose: "Audit modules"
+    - glob: "**/logging/**"
+      purpose: "Logging configuration"
+    - glob: "**/*audit*.ts"
+      purpose: "Audit implementations"
+
+knowledge_sources:
+  specifications:
+    - id: "nist-audit"
+      name: "NIST SP 800-92 Guide to Computer Security Log Management"
+      url: "https://csrc.nist.gov/publications/detail/sp/800-92/final"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "owasp-logging"
+      name: "OWASP Logging Cheat Sheet"
+      url: "https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html"
+      offline_cache: true
+
+  learning_resources:
+    - id: "audit-logging"
+      title: "Security Audit Logging Best Practices"
+      type: "article"
+      reference: "SANS Institute"
+
+tooling:
+  static_analysis:
+    - tool: "audit-log-analyzer"
+      purpose: "Analyze audit log coverage"
+      offline_capable: true
+
+  scripts:
+    - id: "audit-trail-scan"
+      language: "bash"
+      purpose: "Analyze audit trail implementation"
+      source: "inline"
+      code: |
+        echo "=== Audit Trail Analysis ==="
+        echo "--- Audit logging code ---"
+        grep -rn "audit\|AuditLog\|trackChange" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+
+        echo "--- Audit event capture ---"
+        grep -rn "createdBy\|modifiedBy\|changedBy\|userId\|action" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+
+        echo "--- Audit decorators/annotations ---"
+        grep -rn "@Audited\|@Audit\|@Track\|auditable" \
+          --include="*.ts" --include="*.java" . 2>/dev/null | \
+          grep -v node_modules | head -20
+
+signals:
+  critical:
+    - id: "AT-CRIT-001"
+      signal: "No audit trail for sensitive data changes"
+      evidence_pattern: "PII/financial data modified without audit logging"
+      explanation: |
+        Changes to sensitive data must be auditable for compliance and
+        security. Without audit trails, unauthorized changes go undetected
+        and data subject access requests cannot be fulfilled.
+      remediation: "Implement comprehensive audit logging for all sensitive data changes"
+
+    - id: "AT-CRIT-002"
+      signal: "Audit logs can be modified or deleted"
+      evidence_pattern: "Audit log table has UPDATE/DELETE permissions"
+      explanation: |
+        Mutable audit logs are useless for forensics - attackers can
+        cover their tracks. Audit logs must be append-only and
+        protected from tampering.
+      remediation: "Make audit logs immutable; use separate audit database or WORM storage"
+
+  high:
+    - id: "AT-HIGH-001"
+      signal: "Missing actor identification in audit logs"
+      evidence_pattern: "Audit log records what but not who"
+      explanation: |
+        Audit trails must identify who performed each action. Without
+        actor identification, accountability is impossible and
+        investigations are hindered.
+      remediation: "Include authenticated user ID in all audit entries"
+
+    - id: "AT-HIGH-002"
+      signal: "Authentication events not audited"
+      evidence_pattern: "Login/logout/failed login not logged"
+      explanation: |
+        Authentication events are critical for security monitoring.
+        Failed login attempts indicate brute force attacks; successful
+        logins establish session context for subsequent actions.
+      remediation: "Audit all authentication events including failures"
+
+    - id: "AT-HIGH-003"
+      signal: "Insufficient audit retention"
+      evidence_pattern: "Audit logs deleted after 30 days"
+      explanation: |
+        Many regulations require 7+ years of audit retention. Insufficient
+        retention makes historical investigation impossible and causes
+        compliance failures.
+      remediation: "Implement retention policies meeting compliance requirements"
+
+  medium:
+    - id: "AT-MED-001"
+      signal: "Audit logs not searchable"
+      evidence_pattern: "Logs in files without indexing"
+      remediation: "Use searchable audit log storage (Elasticsearch, CloudWatch)"
+
+    - id: "AT-MED-002"
+      signal: "No before/after values in data changes"
+      evidence_pattern: "Audit shows change occurred but not what changed"
+      remediation: "Capture old and new values for data modifications"
+
+    - id: "AT-MED-003"
+      signal: "Audit log timestamps not synchronized"
+      evidence_pattern: "Different servers log with different times"
+      remediation: "Use NTP synchronization and UTC timestamps"
+
+  low:
+    - id: "AT-LOW-001"
+      signal: "No audit log documentation"
+      evidence_pattern: "Audit format not documented"
+      remediation: "Document audit log schema and event types"
+
+    - id: "AT-LOW-002"
+      signal: "Audit log format not standardized"
+      evidence_pattern: "Different modules log differently"
+      remediation: "Standardize audit log format across application"
+
+  positive:
+    - id: "AT-POS-001"
+      signal: "Comprehensive audit logging with immutability"
+      evidence_pattern: "All sensitive operations logged to append-only storage"
+
+    - id: "AT-POS-002"
+      signal: "Before/after values captured"
+      evidence_pattern: "Data change audit includes old and new values"
+
+    - id: "AT-POS-003"
+      signal: "Audit logs integrated with SIEM"
+      evidence_pattern: "Audit events forwarded to security monitoring"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Auditable Events"
+      description: |
+        Catalog what events should be audited.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find sensitive operations"
+          command: |
+            grep -rn "password\|payment\|credit\|ssn\|delete\|admin" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | grep -v test | head -40
+        - purpose: "Find authentication code"
+          command: |
+            grep -rn "login\|logout\|authenticate\|session" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Auditable event inventory"
+        - "Sensitive operation list"
+
+    - id: "2"
+      name: "Review Audit Implementation"
+      description: |
+        Examine how audit logging is implemented.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find audit logging code"
+          command: |
+            grep -rn "audit\|AuditLog\|createAudit\|logAudit" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -40
+        - purpose: "Find audit entity definitions"
+          command: |
+            grep -rn "@Entity.*Audit\|class.*AuditLog\|AuditEntry" \
+              --include="*.ts" --include="*.java" . 2>/dev/null | head -20
+
+      expected_findings:
+        - "Audit implementation pattern"
+        - "Audit data model"
+
+    - id: "3"
+      name: "Check Audit Coverage"
+      description: |
+        Verify all sensitive operations are audited.
+      duration_estimate: "25 min"
+      questions:
+        - "Are all data modifications audited?"
+        - "Are authentication events logged?"
+        - "Are admin actions tracked?"
+        - "Are API access patterns logged?"
+      expected_findings:
+        - "Coverage assessment"
+        - "Gap identification"
+
+    - id: "4"
+      name: "Assess Audit Log Security"
+      description: |
+        Review audit log protection and retention.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find audit storage configuration"
+          command: |
+            grep -rn "audit.*database\|audit.*storage\|retention" \
+              --include="*.yaml" --include="*.json" --include="*.ts" . 2>/dev/null | head -20
+
+      expected_findings:
+        - "Storage security"
+        - "Retention configuration"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "auditable_events"
+        - "coverage_assessment"
+        - "security_gaps"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Auditable Events"
+        - "Coverage Analysis"
+        - "Security Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear absence of audit logging for sensitive operations"
+    medium: "Audit logging exists but may have gaps"
+    low: "Requires detailed review to confirm completeness"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "nist-audit"
+        priority: "required"
+      - source_id: "owasp-logging"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive security review"
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    compliance:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "at-001"
+    item: "Audit logging implemented for sensitive operations"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "audit\|AuditLog" --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "at-002"
+    item: "Audit logs include actor identification"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "userId\|createdBy\|modifiedBy\|actor" --include="*.ts" --include="*.java" . 2>/dev/null | \
+        grep -i "audit" | grep -v node_modules | wc -l | \
+        xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "at-003"
+    item: "Audit logs are immutable"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify audit logs cannot be modified or deleted by application"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOX"
+      controls: ["Audit Trail Requirements"]
+    - framework: "HIPAA"
+      controls: ["164.312(b)"]
+    - framework: "PCI DSS"
+      controls: ["10.1", "10.2", "10.3"]
+    - framework: "GDPR"
+      controls: ["Article 30"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.data-lineage-provenance.change-history"
+    - "security-trust.logging.security-event-logging"
+    - "observability-instrumentation.logging.structured-logging"

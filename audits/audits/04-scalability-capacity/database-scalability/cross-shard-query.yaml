@@ -1,0 +1,359 @@
+audit:
+  id: scalability-capacity.database-scalability.cross-shard-query
+  name: Cross-Shard Query Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: scalability-capacity
+  category_number: 4
+  subcategory: database-scalability
+  tier: phd
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines cross-shard query patterns in sharded database
+    architectures, including scatter-gather operations, distributed
+    joins, cross-shard aggregations, and global ordering requirements.
+    It evaluates the frequency, performance impact, and optimization
+    strategies for queries that must touch multiple shards.
+  why_it_matters: |
+    Cross-shard queries are the Achilles heel of sharded architectures.
+    They require coordination across multiple database nodes, increase
+    latency, consume more resources, and don't scale linearly with shard
+    count. A single poorly-optimized cross-shard query can negate all
+    the benefits of horizontal scaling and become a system-wide bottleneck.
+  when_to_run:
+  - During initial sharding design
+  - When cross-shard query latency increases
+  - Before adding features requiring global data access
+  - When shard count increases significantly
+  - During query optimization efforts
+prerequisites:
+  required_artifacts:
+  - type: application-code
+    description: Query routing and coordination logic
+  - type: query-logs
+    description: Query patterns and execution statistics
+  - type: architecture-documentation
+    description: Sharding topology and query flow diagrams
+  access_requirements:
+  - Query routing layer access
+  - Cross-shard query metrics
+  - Distributed query execution plans
+  - Shard coordinator logs
+discovery:
+  code_patterns:
+  - pattern: scatter[_-]?gather|fan[_-]?out|all[_-]?shards
+    type: regex
+    scope: source
+    purpose: Identify scatter-gather query patterns
+  - pattern: cross[_-]?shard|distributed[_-]?query|global[_-]?query
+    type: regex
+    scope: source
+    purpose: Find cross-shard query implementations
+  - pattern: merge[_-]?results|aggregate[_-]?shards|combine[_-]?results
+    type: regex
+    scope: source
+    purpose: Detect result aggregation logic
+  file_patterns:
+  - glob: '**/query/**/*coordinator*.{py,java,go,ts}'
+    purpose: Query coordination implementations
+  - glob: '**/shard/**/*router*.{py,java,go,ts}'
+    purpose: Shard routing logic
+  metrics_queries:
+  - system: Application Monitoring
+    query: cross_shard_query_count / total_query_count
+    purpose: Percentage of queries that are cross-shard
+    threshold: < 10% of total queries
+  - system: Application Monitoring
+    query: histogram_quantile(0.99, cross_shard_query_duration_seconds)
+    purpose: P99 latency for cross-shard queries
+    threshold: < 500ms for user-facing queries
+knowledge_sources:
+  specifications:
+  - id: vitess-scatter
+    name: Vitess Scatter Queries
+    url: https://vitess.io/docs/concepts/query-routing/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: citus-distributed
+    name: Citus Distributed Query Processing
+    url: https://docs.citusdata.com/en/stable/develop/reference_processing.html
+    offline_cache: true
+  - id: cockroach-distributed
+    name: CockroachDB Distributed SQL
+    url: https://www.cockroachlabs.com/docs/stable/architecture/sql-layer.html
+    offline_cache: true
+  papers:
+  - id: distributed-query
+    title: Query Processing in Distributed Database Systems
+    url: https://courses.cs.washington.edu/courses/cse544/10au/papers/kossmann-survey.pdf
+tooling:
+  infrastructure_tools:
+  - tool: vtexplain
+    purpose: Analyze Vitess query routing
+    command: vtexplain -shards 8 -vschema-file vschema.json -sql 'SELECT ...'
+  - tool: EXPLAIN ANALYZE DISTRIBUTED
+    purpose: Distributed query execution plan
+    command: EXPLAIN ANALYZE SELECT * FROM distributed_table WHERE ...
+  monitoring_queries:
+  - system: Prometheus
+    query: sum(rate(cross_shard_queries_total[5m])) by (query_type)
+    purpose: Cross-shard query rate by type
+  - system: Prometheus
+    query: histogram_quantile(0.95, sum(rate(scatter_gather_shard_count_bucket[5m])) by (le))
+    purpose: P95 number of shards touched per query
+  scripts:
+  - id: cross-shard-analyzer
+    language: python
+    purpose: Analyze cross-shard query patterns and identify optimization opportunities
+    source: inline
+    code: |
+      #!/usr/bin/env python3
+      """Analyze cross-shard query patterns."""
+      from collections import defaultdict
+
+      def analyze_cross_shard_queries(query_log: list) -> dict:
+          """
+          Analyze cross-shard query patterns.
+
+          Args:
+              query_log: List of dicts with query, shards_touched, duration_ms
+
+          Returns:
+              Analysis results with recommendations
+          """
+          patterns = defaultdict(lambda: {
+              'count': 0,
+              'total_shards': 0,
+              'total_duration': 0,
+              'max_shards': 0
+          })
+
+          for entry in query_log:
+              if entry['shards_touched'] > 1:
+                  pattern = extract_query_pattern(entry['query'])
+                  patterns[pattern]['count'] += 1
+                  patterns[pattern]['total_shards'] += entry['shards_touched']
+                  patterns[pattern]['total_duration'] += entry['duration_ms']
+                  patterns[pattern]['max_shards'] = max(
+                      patterns[pattern]['max_shards'],
+                      entry['shards_touched']
+                  )
+
+          results = []
+          for pattern, stats in patterns.items():
+              avg_shards = stats['total_shards'] / stats['count']
+              avg_duration = stats['total_duration'] / stats['count']
+              results.append({
+                  'pattern': pattern,
+                  'count': stats['count'],
+                  'avg_shards_touched': avg_shards,
+                  'avg_duration_ms': avg_duration,
+                  'max_shards_touched': stats['max_shards'],
+                  'optimization_priority': stats['count'] * avg_shards * avg_duration
+              })
+
+          return sorted(results, key=lambda x: -x['optimization_priority'])
+signals:
+  critical:
+  - id: XSHARD-CRIT-001
+    signal: High-frequency query touches all shards
+    evidence_threshold: query_frequency > 100/sec AND shards_touched == total_shards
+    explanation: |
+      Queries that must touch every shard on every execution create
+      O(shards) overhead. As shard count grows for scalability, these
+      queries become slower. This is antithetical to the purpose of
+      sharding and will eventually become the system bottleneck.
+    remediation: Redesign query to include shard key; consider denormalization or caching
+  - id: XSHARD-CRIT-002
+    signal: Cross-shard JOIN without optimization
+    evidence_indicators:
+    - JOIN between tables with different shard keys
+    - No co-location strategy for related tables
+    - Cartesian-like join across shards
+    explanation: |
+      Cross-shard JOINs require shuffling data between nodes, causing
+      network overhead and memory pressure. Without optimization like
+      co-location or broadcast joins, these become exponentially worse
+      with data growth.
+    remediation: Co-locate related tables on same shard key; use broadcast for small dimension tables
+  high:
+  - id: XSHARD-HIGH-001
+    signal: Cross-shard aggregations without pushdown
+    explanation: All data transferred to coordinator; doesn't scale
+    remediation: Implement two-phase aggregation with partial results per shard
+  - id: XSHARD-HIGH-002
+    signal: Global ORDER BY with LIMIT across shards
+    explanation: Each shard must return LIMIT rows; memory grows with shard count
+    remediation: Implement streaming merge sort; consider pagination redesign
+  medium:
+  - id: XSHARD-MED-001
+    signal: No metrics for cross-shard query percentage
+    remediation: Add instrumentation to track cross-shard vs single-shard queries
+  - id: XSHARD-MED-002
+    signal: Cross-shard query timeout same as single-shard
+    remediation: Configure appropriate timeouts for distributed operations
+  low:
+  - id: XSHARD-LOW-001
+    signal: Cross-shard query results not cached
+  positive:
+  - id: XSHARD-POS-001
+    signal: Reference tables broadcast to all shards
+  - id: XSHARD-POS-002
+    signal: Cross-shard queries <5% of total queries
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Cross-Shard Query Patterns
+    description: |
+      Catalog all queries that require data from multiple shards
+      and understand their frequency and purpose.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find scatter-gather query implementations
+      command: grep -rn 'scatter\|fan_out\|all_shards' src/
+    - purpose: Analyze query routing metrics
+      command: prometheus_query 'sum(rate(queries_total[24h])) by (routing_type)'
+    expected_findings:
+    - List of cross-shard query patterns
+    - Frequency of each pattern
+    - Purpose and caller for each pattern
+  - id: '2'
+    name: Measure Cross-Shard Query Performance
+    description: |
+      Collect performance metrics for cross-shard queries including
+      latency, shard fan-out, and resource consumption.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Get cross-shard query latency distribution
+      command: prometheus_query 'histogram_quantile(0.99, cross_shard_query_duration_bucket)'
+    - purpose: Average shards touched per query type
+      command: prometheus_query 'avg(shards_touched) by (query_pattern)'
+    expected_findings:
+    - P50, P95, P99 latency for cross-shard queries
+    - Average and max shards touched
+    - Resource consumption metrics
+  - id: '3'
+    name: Analyze Query Execution Plans
+    description: |
+      Generate distributed query execution plans to understand
+      data movement and optimization opportunities.
+    duration_estimate: 60 min
+    commands:
+    - purpose: Get distributed query plan
+      command: vtexplain -sql '<cross_shard_query>' -vschema-file vschema.json
+    - purpose: Analyze data shuffling
+      command: grep -E 'scatter|gather|shuffle|broadcast' query_plan.txt
+    expected_findings:
+    - Data movement patterns
+    - Opportunities for pushdown optimization
+    - Inefficient execution patterns
+  - id: '4'
+    name: Evaluate Optimization Strategies
+    description: |
+      Assess current and potential optimization strategies for
+      reducing cross-shard query overhead.
+    duration_estimate: 45 min
+    questions:
+    - Can queries be redesigned to include shard key?
+    - Are reference tables broadcast to all shards?
+    - Can related tables be co-located on same shard?
+    - Is caching viable for cross-shard results?
+    expected_findings:
+    - Viable optimization strategies
+    - Expected performance improvements
+    - Implementation complexity assessment
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Cross-Shard Query Inventory
+    - Performance Analysis
+    - Execution Plan Review
+    - Optimization Recommendations
+    - Implementation Roadmap
+  confidence_guidance:
+    high: Direct measurement of distributed query metrics
+    medium: Analysis based on query patterns with limited execution data
+    low: Code review without runtime performance data
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: vitess-scatter
+      priority: required
+    - source_id: citus-distributed
+      priority: recommended
+  limitations:
+  - Cannot analyze distributed execution plans without runtime
+  - Performance metrics require production monitoring
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed distributed query analysis
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: cross-shard-query-001
+  item: Cross-shard queries <10% of total queries
+  level: CRITICAL
+  verification: prometheus_query 'cross_shard_queries / total_queries < 0.1' && echo PASS || echo FAIL
+  expected: PASS
+- id: cross-shard-query-002
+  item: No high-frequency scatter-gather to all shards
+  level: CRITICAL
+  verification: manual
+  verification_notes: Review top queries by frequency; none should touch all shards
+  expected: Confirmed by reviewer
+- id: cross-shard-query-003
+  item: Reference tables broadcast to all shards
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify vschema or equivalent shows reference tables as broadcast
+  expected: Confirmed by reviewer
+- id: cross-shard-query-004
+  item: Cross-shard query metrics tracked
+  level: WARNING
+  verification: curl -s prometheus/api/v1/query?query=cross_shard_queries_total | jq '.status' | grep
+    -q success && echo PASS || echo FAIL
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - high-scale-saas
+    - data-platform
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+relationships:
+  commonly_combined:
+  - scalability-capacity.database-scalability.sharding-strategy
+  - scalability-capacity.database-scalability.query-scalability
+  - performance.distributed-systems.coordination-overhead

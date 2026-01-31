@@ -1,0 +1,383 @@
+# ============================================================
+# AUDIT: Mock/Stub Appropriateness
+# ============================================================
+
+audit:
+  id: "code-quality.test-code-quality.mock-stub-appropriateness"
+  name: "Mock/Stub Appropriateness Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "code-quality"
+  category_number: 6
+  subcategory: "test-code-quality"
+
+  tier: "expert"
+  estimated_duration: "60 minutes"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "testing"
+
+  default_profiles:
+    - "full"
+    - "quality"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates whether mocks, stubs, spies, and fakes are used appropriately
+    in the test suite. This includes checking for over-mocking (mocking too
+    much), under-mocking (not isolating external dependencies), mocking
+    implementation details, and ensuring mocks accurately represent the
+    interfaces they replace.
+
+  why_it_matters: |
+    Inappropriate mocking is a primary cause of tests that pass but don't
+    catch bugs. Over-mocking creates tests that don't verify real behavior.
+    Under-mocking creates slow, flaky tests. Mocking implementation details
+    creates brittle tests that break during refactoring. Poor mock accuracy
+    leads to false confidence.
+
+  when_to_run:
+    - "During code reviews"
+    - "When tests pass but bugs reach production"
+    - "Test reliability improvement"
+    - "Refactoring preparation"
+
+prerequisites:
+  required_artifacts:
+    - type: "test_code"
+      description: "Test files"
+
+  access_requirements:
+    - "Read access to test directories"
+
+discovery:
+  code_patterns:
+    - pattern: "jest\\.mock\\(|mock\\.patch|Mock\\(|MagicMock"
+      type: "regex"
+      scope: "testing"
+      purpose: "Detect mock usage"
+
+    - pattern: "jest\\.spyOn|sinon\\.spy|@patch"
+      type: "regex"
+      scope: "testing"
+      purpose: "Detect spy usage"
+
+    - pattern: "mockImplementation|mock_return_value|return_value\\s*="
+      type: "regex"
+      scope: "testing"
+      purpose: "Detect mock setup patterns"
+
+  file_patterns:
+    - glob: "**/*.test.{js,ts,jsx,tsx}"
+      purpose: "Jest/Vitest test files"
+    - glob: "**/*.spec.{js,ts,jsx,tsx}"
+      purpose: "Spec files"
+    - glob: "**/test_*.py"
+      purpose: "Python test files"
+    - glob: "**/__mocks__/**"
+      purpose: "Jest manual mocks"
+
+knowledge_sources:
+  learning_resources:
+    - id: "growing-software"
+      title: "Growing Object-Oriented Software, Guided by Tests"
+      type: "book"
+      reference: "Steve Freeman & Nat Pryce"
+
+    - id: "mocks-arent-stubs"
+      title: "Mocks Aren't Stubs"
+      type: "article"
+      reference: "Martin Fowler - https://martinfowler.com/articles/mocksArentStubs.html"
+
+  guides:
+    - id: "jest-mocking"
+      name: "Jest Mocking Documentation"
+      url: "https://jestjs.io/docs/mock-functions"
+      offline_cache: true
+
+    - id: "xunit-patterns"
+      name: "xUnit Test Patterns: Refactoring Test Code"
+      url: "https://www.amazon.com/xUnit-Test-Patterns-Refactoring-Code/dp/0131495054"
+      offline_cache: false
+
+    - id: "working-effectively-legacy"
+      name: "Working Effectively with Legacy Code"
+      url: "https://www.oreilly.com/library/view/working-effectively-with/0131177052/"
+      offline_cache: false
+
+tooling:
+  static_analysis:
+    - tool: "eslint-plugin-jest"
+      purpose: "Jest mock usage rules"
+      offline_capable: true
+
+  scripts:
+    - id: "mock-analysis"
+      language: "bash"
+      purpose: "Analyze mock usage patterns"
+      source: "inline"
+      code: |
+        echo "=== Mock Usage Analysis ==="
+        echo "--- Total mock usages ---"
+        grep -rn "jest\.mock\|mock\.patch\|@patch\|Mock(" \
+          --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | wc -l
+
+        echo "--- Files with many mocks (>5) ---"
+        for f in $(find . -name "*.test.js" -o -name "*.spec.ts" -o -name "test_*.py" | head -50); do
+          count=$(grep -c "mock\|Mock\|spy" "$f" 2>/dev/null || echo "0")
+          if [ "$count" -gt 5 ]; then
+            echo "$f: $count mocks"
+          fi
+        done
+
+        echo "--- Manual mocks directory ---"
+        find . -type d -name "__mocks__" 2>/dev/null
+
+signals:
+  critical:
+    - id: "MOCK-CRIT-001"
+      signal: "Mocking the system under test"
+      evidence_pattern: "jest\\.mock\\(.*/src/.*\\).*describe.*same file"
+      explanation: |
+        Mocking the code you're trying to test defeats the purpose. The
+        test verifies nothing about actual behavior.
+      remediation: "Mock dependencies, not the system under test"
+
+    - id: "MOCK-CRIT-002"
+      signal: "Mocks return different types than real implementations"
+      evidence_pattern: "mockReturnValue with wrong type"
+      explanation: |
+        Mocks that return different types than real code will pass tests
+        but fail in production with type errors.
+      remediation: "Ensure mocks return realistic responses with correct types"
+
+  high:
+    - id: "MOCK-HIGH-001"
+      signal: "Over-mocking (>5 mocks per test)"
+      evidence_pattern: "Multiple jest\\.mock calls in single test file"
+      explanation: |
+        Tests with many mocks are testing mock interactions, not real
+        behavior. They're brittle and provide false confidence.
+      remediation: "Use integration tests or reduce dependencies"
+
+    - id: "MOCK-HIGH-002"
+      signal: "Mocking implementation details"
+      evidence_pattern: "jest\\.spyOn\\(.*private|mock\\.patch.*_method"
+      explanation: |
+        Mocking private/internal methods creates tight coupling to
+        implementation. Tests break during refactoring.
+      remediation: "Test public interfaces, not implementation details"
+
+    - id: "MOCK-HIGH-003"
+      signal: "Not verifying mock calls"
+      evidence_pattern: "jest\\.mock without toHaveBeenCalled assertions"
+      explanation: |
+        Creating mocks without asserting they were called correctly
+        doesn't verify the expected interactions.
+      remediation: "Add toHaveBeenCalledWith assertions for important mocks"
+
+  medium:
+    - id: "MOCK-MED-001"
+      signal: "Mocking third-party libraries incorrectly"
+      evidence_pattern: "jest\\.mock\\('axios'\\) without realistic response"
+      remediation: "Use mock implementations that match real API behavior"
+
+    - id: "MOCK-MED-002"
+      signal: "Using spies when stubs would suffice"
+      evidence_pattern: "jest\\.spyOn followed by mockImplementation"
+      remediation: "Use jest.mock for full replacement, spyOn for partial"
+
+    - id: "MOCK-MED-003"
+      signal: "Mocks not reset between tests"
+      evidence_pattern: "Mock without jest.clearAllMocks or afterEach"
+      remediation: "Reset mocks in beforeEach or afterEach"
+
+  low:
+    - id: "MOCK-LOW-001"
+      signal: "Inline mocks instead of reusable fixtures"
+      evidence_pattern: "Same mock setup repeated in multiple tests"
+      remediation: "Extract common mocks to fixtures or __mocks__ directory"
+
+    - id: "MOCK-LOW-002"
+      signal: "Using any/unknown types for mock returns"
+      evidence_pattern: "mockReturnValue\\(\\{\\} as any\\)"
+      remediation: "Provide properly typed mock return values"
+
+  positive:
+    - id: "MOCK-POS-001"
+      signal: "Mocks limited to external boundaries"
+      evidence_pattern: "Only mocking HTTP, DB, filesystem, time"
+
+    - id: "MOCK-POS-002"
+      signal: "Mock verification with specific arguments"
+      evidence_pattern: "toHaveBeenCalledWith with specific expected args"
+
+    - id: "MOCK-POS-003"
+      signal: "Reusable mock factories"
+      evidence_pattern: "__mocks__ directory with consistent patterns"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Mock Usage"
+      description: |
+        Catalog all mock/stub/spy usage across the test suite.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Count mock usages by file"
+          command: |
+            for f in $(find . -name "*.test.js" -o -name "*.spec.ts" -not -path "*/node_modules/*" | head -30); do
+              count=$(grep -c "mock\|Mock\|spy" "$f" 2>/dev/null || echo "0")
+              echo "$count $f"
+            done | sort -rn | head -20
+        - purpose: "Find heavily mocked tests"
+          command: |
+            grep -rn "jest\.mock\|@patch\|mock\.patch" \
+              --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | \
+              cut -d: -f1 | sort | uniq -c | sort -rn | head -20
+
+      expected_findings:
+        - "Mock density per file"
+        - "Most heavily mocked tests"
+
+    - id: "2"
+      name: "Analyze Mock Patterns"
+      description: |
+        Evaluate what is being mocked and whether it's appropriate.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find what's being mocked"
+          command: |
+            grep -rn "jest\.mock(\|@patch(" \
+              --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | head -40
+        - purpose: "Check for internal mocking"
+          command: |
+            grep -rn "jest\.mock.*\.\./\|@patch.*src\." \
+              --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | head -20
+
+      expected_findings:
+        - "External vs internal mocking ratio"
+        - "Potentially inappropriate mocks"
+
+    - id: "3"
+      name: "Check Mock Verification"
+      description: |
+        Evaluate whether mocks are properly verified.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find mock assertions"
+          command: |
+            grep -rn "toHaveBeenCalled\|assert_called\|call_count" \
+              --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | head -30
+        - purpose: "Compare mocks to assertions"
+          command: |
+            echo "Mock setups:" && grep -rn "jest\.mock\|@patch" --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | wc -l
+            echo "Mock assertions:" && grep -rn "toHaveBeenCalled\|assert_called" --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | wc -l
+
+      expected_findings:
+        - "Mock verification coverage"
+        - "Unverified mock usage"
+
+    - id: "4"
+      name: "Review Mock Resets"
+      description: |
+        Check that mocks are properly reset between tests.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Find mock reset patterns"
+          command: |
+            grep -rn "clearAllMocks\|resetAllMocks\|restoreAllMocks\|reset_mock" \
+              --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | head -20
+
+      expected_findings:
+        - "Reset pattern usage"
+        - "Potential mock leakage"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "mock_inventory"
+        - "over_mocking_violations"
+        - "unverified_mocks"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Mock Usage Analysis"
+        - "Appropriateness Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear anti-pattern detected"
+    medium: "Potential issue requiring context review"
+    low: "Subjective mocking appropriateness"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "mocks-arent-stubs"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires careful analysis"
+    full:
+      included: true
+      priority: 1
+    quality:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "mock-001"
+    item: "No tests mocking the system under test"
+    level: "CRITICAL"
+    verification: "Mock targets reviewed"
+    expected: "Mocks only on external dependencies"
+
+  - id: "mock-002"
+    item: "High-usage mocks verified"
+    level: "HIGH"
+    verification: "All frequently used mocks have assertions"
+    expected: "Mock verification coverage"
+
+  - id: "mock-003"
+    item: "Mocks reset between tests"
+    level: "WARNING"
+    verification: "clearAllMocks or equivalent used"
+    expected: "No mock leakage"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Testability", "Maintainability"]
+
+relationships:
+  commonly_combined:
+    - "code-quality.test-code-quality.test-independence"
+    - "code-quality.test-code-quality.flaky-test-detection"

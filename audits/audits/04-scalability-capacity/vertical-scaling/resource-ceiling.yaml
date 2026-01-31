@@ -1,0 +1,305 @@
+# ============================================================
+# AUDIT: Resource Ceiling Audit
+# Category: Scalability & Capacity > Vertical Scaling
+# ============================================================
+
+audit:
+  id: "scalability-capacity.vertical-scaling.resource-ceiling"
+  name: "Resource Ceiling Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "vertical-scaling"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the maximum resource limits available for vertical scaling and
+    identifies constraints. Reviews cloud provider instance type limits,
+    Kubernetes resource quotas, physical hardware constraints, and license
+    limitations that bound vertical scaling potential.
+
+  why_it_matters: |
+    Every system has a vertical scaling ceiling - understanding it is critical
+    for capacity planning. Hitting unexpected limits during growth or incidents
+    prevents emergency scaling. Knowing ceilings helps plan when to shift from
+    vertical to horizontal scaling strategies.
+
+  when_to_run:
+    - "During initial capacity planning"
+    - "Before major traffic increases"
+    - "When evaluating architecture changes"
+    - "After approaching current resource limits"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure_config"
+      description: "Cloud/infrastructure configuration"
+    - type: "resource_quotas"
+      description: "Kubernetes or cloud resource quotas"
+
+  access_requirements:
+    - "Cloud console access for limit review"
+    - "Kubernetes cluster admin access"
+    - "Cost/billing access for understanding financial limits"
+
+discovery:
+  code_patterns:
+    - pattern: "(resourceQuota|limitRange|instance.*type)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect resource quota configurations"
+
+    - pattern: "(requests|limits):"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect resource requests and limits"
+
+  file_patterns:
+    - glob: "**/k8s/**/*quota*.yaml"
+      purpose: "Kubernetes quota files"
+    - glob: "**/terraform/**/*.tf"
+      purpose: "Terraform infrastructure"
+
+knowledge_sources:
+  guides:
+    - id: "aws-instance-types"
+      name: "AWS EC2 Instance Types"
+      url: "https://aws.amazon.com/ec2/instance-types/"
+      offline_cache: true
+
+    - id: "k8s-quotas"
+      name: "Kubernetes Resource Quotas"
+      url: "https://kubernetes.io/docs/concepts/policy/resource-quotas/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Check resource quotas"
+      command: "kubectl describe resourcequota -A"
+
+    - tool: "aws-cli"
+      purpose: "Check service limits"
+      command: "aws service-quotas list-service-quotas --service-code ec2"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "kube_resourcequota / kube_resourcequota_hard"
+      purpose: "Check quota utilization"
+      threshold: "< 0.8 for headroom"
+
+  scripts:
+    - id: "ceiling-analyzer"
+      language: "bash"
+      purpose: "Analyze resource ceilings"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Kubernetes Resource Quotas ==="
+        kubectl get resourcequota -A
+        echo "=== Node Capacity ==="
+        kubectl get nodes -o custom-columns='NAME:.metadata.name,CPU:.status.capacity.cpu,MEM:.status.capacity.memory'
+        echo "=== Largest Available Instance Types ==="
+        aws ec2 describe-instance-types --filters "Name=current-generation,Values=true" \
+          --query 'InstanceTypes[*].[InstanceType,VCpuInfo.DefaultVCpus,MemoryInfo.SizeInMiB]' \
+          --output table | sort -k3 -rn | head -20
+
+signals:
+  critical:
+    - id: "CEIL-CRIT-001"
+      signal: "Current usage approaching maximum instance size"
+      evidence_threshold: "resource_usage > 80% of largest_available_instance"
+      explanation: |
+        When already using the largest available instance type, vertical scaling
+        is no longer possible. Horizontal scaling becomes mandatory.
+      remediation: "Plan horizontal scaling strategy; investigate larger instance types or regions"
+
+    - id: "CEIL-CRIT-002"
+      signal: "No headroom in resource quotas"
+      evidence_threshold: "quota_usage > 90% of quota_limit"
+      explanation: |
+        Exhausted quotas prevent scaling even when infrastructure capacity exists.
+        Emergency scaling becomes impossible.
+      remediation: "Request quota increases proactively; set up quota alerts"
+
+  high:
+    - id: "CEIL-HIGH-001"
+      signal: "Cloud service limits constraining scaling"
+      evidence_indicators:
+        - "Approaching EC2 vCPU limits"
+        - "Near EBS volume limits"
+        - "API rate limits affecting provisioning"
+      explanation: |
+        Service limits can block scaling at inconvenient times. Limits vary
+        by account age and history.
+      remediation: "Request limit increases before needed; track limits in capacity planning"
+
+    - id: "CEIL-HIGH-002"
+      signal: "License limits on vertical scaling"
+      evidence_indicators:
+        - "Database licenses limiting CPU/memory"
+        - "Software licensing based on instance size"
+      explanation: |
+        Some software licenses charge by resource size, creating financial
+        or contractual vertical scaling limits.
+      remediation: "Review licensing terms; budget for license scaling costs"
+
+  medium:
+    - id: "CEIL-MED-001"
+      signal: "Lack of documented resource ceilings"
+      evidence_indicators:
+        - "No capacity planning documentation"
+        - "Unknown maximum instance sizes"
+      remediation: "Document all resource ceilings and review quarterly"
+
+  positive:
+    - id: "CEIL-POS-001"
+      signal: "Documented capacity limits with alerts"
+      evidence_pattern: "capacity.*plan|resource.*ceiling"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify current resource usage"
+      description: |
+        Collect current resource utilization across compute, memory,
+        storage, and network.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Current pod resource usage"
+          command: "kubectl top pods -A --sort-by=cpu"
+        - purpose: "Node resource usage"
+          command: "kubectl top nodes"
+      expected_findings:
+        - "Current resource utilization levels"
+        - "Identification of resource-constrained services"
+
+    - id: "2"
+      name: "Map resource ceilings"
+      description: |
+        Identify all vertical scaling limits from cloud providers,
+        Kubernetes quotas, and licenses.
+      duration_estimate: "60 min"
+      commands:
+        - purpose: "Check Kubernetes quotas"
+          command: "kubectl describe resourcequota -A"
+        - purpose: "List available instance types"
+          command: "aws ec2 describe-instance-types --query 'InstanceTypes[*].InstanceType'"
+      expected_findings:
+        - "Maximum available instance sizes"
+        - "Quota limits and current usage"
+
+    - id: "3"
+      name: "Calculate headroom"
+      description: |
+        Calculate remaining vertical scaling headroom and identify
+        when ceiling will be reached at current growth rate.
+      duration_estimate: "30 min"
+      questions:
+        - "What percentage of maximum capacity is currently used?"
+        - "At current growth rate, when will ceiling be reached?"
+        - "What is the cost of scaling to maximum capacity?"
+      expected_findings:
+        - "Vertical scaling headroom percentage"
+        - "Projected time to ceiling"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Current Resource Utilization"
+        - "Vertical Scaling Ceilings"
+        - "Headroom Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct measurement of limits and current usage"
+    medium: "Documented limits without runtime verification"
+    low: "Estimated limits based on cloud documentation"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-instance-types"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires infrastructure analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "resource-ceiling-001"
+    item: "Resource ceilings documented"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify documentation of all vertical scaling limits"
+    expected: "Documentation exists and is current"
+
+  - id: "resource-ceiling-002"
+    item: "At least 20% headroom to ceiling"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Calculate current usage vs maximum available"
+    expected: "Usage < 80% of ceiling"
+
+  - id: "resource-ceiling-003"
+    item: "Alerts configured for approaching limits"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify alerts exist for quota and resource approaching limits"
+    expected: "Alerts configured at 70% and 90%"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "AWS Well-Architected"
+      controls: ["REL-1", "COST-3"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.vertical-scaling.memory-scaling-limits"
+    - "scalability-capacity.vertical-scaling.cpu-scaling-limits"
+    - "scalability-capacity.vertical-scaling.oversizing-rightsizing"

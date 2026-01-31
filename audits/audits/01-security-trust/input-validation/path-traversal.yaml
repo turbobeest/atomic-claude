@@ -1,0 +1,476 @@
+audit:
+  id: security-trust.input-validation.path-traversal
+  name: Path Traversal Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: input-validation
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  - quick
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    This audit examines the codebase for path traversal vulnerabilities (CWE-22) -
+    instances where user-controlled input is used to construct file paths without
+    proper validation. It identifies "dot-dot-slash" (../) attacks, absolute path
+    injection, and null byte truncation vulnerabilities.
+  why_it_matters: |
+    Path traversal allows attackers to access files outside intended directories,
+    leading to sensitive data disclosure (configuration files, credentials),
+    source code exposure, and in some cases arbitrary file write/deletion.
+    The consequences are severe: data breaches, system compromise, and loss of
+    user trust. OWASP treats CWE-22 as a critical vulnerability class.
+  when_to_run:
+  - Initial security audit of file-handling applications
+  - Code review for file operations changes
+  - Before production deployment
+  - When adding file upload/download features
+  - When implementing file serving functionality
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Source code with file handling operations
+  access_requirements:
+  - Read access to source code repositories
+discovery:
+  code_patterns:
+  - pattern: open\s*\(.*request|open\s*\(.*user|open\s*\(.*\+
+    type: regex
+    scope: source
+    purpose: Detect file open with user input
+  - pattern: os\.path\.join.*request|os\.path\.join.*user
+    type: regex
+    scope: source
+    purpose: Detect path join with user input
+  - pattern: pathlib\.Path.*request|Path\(.*request
+    type: regex
+    scope: source
+    purpose: Detect pathlib with user input
+  - pattern: (read|write|delete|remove|unlink|rename|move|copy).*\+.*file
+    type: regex
+    scope: source
+    purpose: Detect file operations with dynamic paths
+  - pattern: send_file\s*\(.*request|send_from_directory.*request
+    type: regex
+    scope: source
+    purpose: Detect Flask file serving with user input
+  - pattern: res\.sendFile.*req\.|res\.download.*req\.
+    type: regex
+    scope: source
+    purpose: Detect Express.js file serving with user input
+  - pattern: (file_get_contents|file_put_contents|include|require|fopen).*\$_(GET|POST|REQUEST)
+    type: regex
+    scope: source
+    purpose: Detect PHP file operations with user input
+  - pattern: new\s+File\s*\(.*request|FileInputStream.*request
+    type: regex
+    scope: source
+    purpose: Detect Java file operations with user input
+  - pattern: render_template.*request|include.*request|require.*request
+    type: regex
+    scope: source
+    purpose: Detect dynamic template inclusion
+  - pattern: (url|path|filename|file)\s*=.*request\.path|request\.url
+    type: regex
+    scope: source
+    purpose: Detect URL to file path conversion
+  - pattern: \.\./|\.\.\\|%2e%2e|%252e
+    type: regex
+    scope: source
+    purpose: Detect hardcoded traversal sequences
+  - pattern: os\.path\.basename|path\.basename|basename\(
+    type: regex
+    scope: source
+    purpose: Detect filename sanitization (positive)
+  - pattern: os\.path\.realpath|os\.path\.abspath|resolve\(
+    type: regex
+    scope: source
+    purpose: Detect path resolution (positive)
+  - pattern: startswith.*base|starts_with.*base|normalize.*contains
+    type: regex
+    scope: source
+    purpose: Detect path containment checks (positive)
+  file_patterns:
+  - glob: '**/*file*.py'
+    purpose: Python file handling modules
+  - glob: '**/*upload*.py'
+    purpose: Upload handling modules
+  - glob: '**/*download*.py'
+    purpose: Download handling modules
+  - glob: '**/controllers/*.py'
+    purpose: Controller files
+  - glob: '**/routes/*.js'
+    purpose: Route files
+  - glob: '**/handlers/*.go'
+    purpose: Handler files
+knowledge_sources:
+  specifications:
+  - id: cwe-22
+    name: 'CWE-22: Improper Limitation of a Pathname to a Restricted Directory'
+    url: https://cwe.mitre.org/data/definitions/22.html
+    offline_cache: true
+    priority: required
+  - id: cwe-23
+    name: 'CWE-23: Relative Path Traversal'
+    url: https://cwe.mitre.org/data/definitions/23.html
+    offline_cache: true
+    priority: recommended
+  - id: cwe-36
+    name: 'CWE-36: Absolute Path Traversal'
+    url: https://cwe.mitre.org/data/definitions/36.html
+    offline_cache: true
+    priority: recommended
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-path-traversal
+    name: OWASP Path Traversal Attack
+    url: https://owasp.org/www-community/attacks/Path_Traversal
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect path traversal patterns
+    offline_capable: true
+  - tool: bandit
+    purpose: Python security linting including path issues
+    offline_capable: true
+  - tool: eslint-plugin-security
+    purpose: JavaScript path traversal detection
+    offline_capable: true
+  scripts:
+  - id: detect-path-traversal
+    language: bash
+    purpose: Detect potential path traversal vulnerabilities
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Path Traversal Detection ==="
+
+      echo "--- File operations with user input ---"
+      grep -rn --include="*.py" -E "(open|read|write)\s*\(.*request" . 2>/dev/null | head -20
+
+      echo "--- os.path.join with request ---"
+      grep -rn --include="*.py" "os\.path\.join.*request" . 2>/dev/null | head -20
+
+      echo "--- send_file/send_from_directory ---"
+      grep -rn --include="*.py" "(send_file|send_from_directory).*request" . 2>/dev/null | head -20
+
+      echo "--- Express.js sendFile ---"
+      grep -rn --include="*.js" "sendFile.*req\." . 2>/dev/null | head -20
+
+      echo "--- PHP file operations ---"
+      grep -rn --include="*.php" "(file_get_contents|include|require).*\$_" . 2>/dev/null | head -20
+signals:
+  critical:
+  - id: PATH-CRIT-001
+    signal: User input directly used in file path
+    cwe: CWE-22
+    evidence_pattern: open\s*\(.*request\.|open\s*\(.*\+.*user|open\s*\(\s*f["']
+    explanation: |
+      Direct use of user input in file operations allows attackers to use
+      "../" sequences to traverse outside the intended directory. This can
+      expose sensitive files like /etc/passwd, configuration files, or
+      source code.
+    remediation: |
+      1. Use os.path.basename() to extract only the filename
+      2. Validate against an allowlist of permitted filenames
+      3. Resolve paths and verify they start with the intended base:
+         resolved = os.path.realpath(os.path.join(base_dir, user_input))
+         if not resolved.startswith(os.path.realpath(base_dir)):
+             raise ValueError("Path traversal detected")
+  - id: PATH-CRIT-002
+    signal: File serving endpoint with user-controlled path
+    cwe: CWE-22
+    evidence_pattern: send_file.*request\.(args|form|path)|sendFile.*req\.(params|query)
+    explanation: |
+      File serving endpoints that accept user-controlled paths can serve
+      arbitrary files from the server. Attackers can download configuration
+      files, credentials, or source code.
+    remediation: |
+      Use safe_join() (Flask) or similar path validation:
+      from werkzeug.security import safe_join
+      safe_path = safe_join(base_dir, user_filename)
+      Or use send_from_directory() with a fixed directory.
+  - id: PATH-CRIT-003
+    signal: PHP include/require with user input
+    cwe: CWE-98
+    evidence_pattern: (include|require|include_once|require_once)\s*\(.*\$_(GET|POST|REQUEST)
+    explanation: |
+      PHP include with user input is a Local File Inclusion (LFI) or
+      Remote File Inclusion (RFI) vulnerability. Attackers can include
+      arbitrary files or even remote code.
+    remediation: |
+      Never use user input directly in include/require. Use a whitelist:
+      $allowed = ['page1.php', 'page2.php'];
+      if (in_array($_GET['page'], $allowed)) {
+          include($_GET['page']);
+      }
+  - id: PATH-CRIT-004
+    signal: File deletion with user-controlled path
+    cwe: CWE-22
+    evidence_pattern: (unlink|remove|delete|rmdir).*request|os\.remove.*user
+    explanation: |
+      File deletion with user input can allow attackers to delete arbitrary
+      files, including system files, database files, or application code.
+    remediation: |
+      Strictly validate paths before deletion:
+      1. Resolve the full path
+      2. Verify it's within the allowed directory
+      3. Verify the file type/extension is expected
+      4. Consider soft deletes instead of hard deletes
+  high:
+  - id: PATH-HIGH-001
+    signal: os.path.join with user input without validation
+    cwe: CWE-22
+    evidence_pattern: os\.path\.join\s*\([^,]+,\s*(request|user|input)
+    explanation: |
+      os.path.join() does not prevent path traversal - if the second
+      argument starts with "/" or contains "..", the path can escape
+      the base directory.
+    remediation: |
+      Validate after joining:
+      full_path = os.path.join(base_dir, user_input)
+      real_path = os.path.realpath(full_path)
+      if not real_path.startswith(os.path.realpath(base_dir)):
+          raise ValueError("Invalid path")
+  - id: PATH-HIGH-002
+    signal: File upload destination from user input
+    cwe: CWE-22
+    evidence_pattern: (save|save_to|write|upload).*request\.(filename|path)
+    explanation: |
+      Using user-supplied filenames for uploads can allow writing files
+      outside the intended upload directory or overwriting existing files.
+    remediation: |
+      Generate safe filenames server-side:
+      safe_name = secure_filename(user_filename)
+      Or use UUIDs: filename = f"{uuid.uuid4()}.{extension}"
+  - id: PATH-HIGH-003
+    signal: Template path from user input
+    cwe: CWE-22
+    evidence_pattern: render_template.*request|render.*\+.*template
+    explanation: |
+      Template paths from user input can lead to template injection or
+      exposing templates from outside the expected directory.
+    remediation: |
+      Use a whitelist of allowed template names.
+      Never construct template paths from user input.
+  medium:
+  - id: PATH-MED-001
+    signal: Path construction without realpath validation
+    cwe: CWE-22
+    evidence_pattern: os\.path\.join(?!.*realpath|.*abspath)
+    explanation: |
+      Path construction without resolution and validation may be vulnerable
+      if user input ever reaches the path construction.
+    remediation: |
+      Always resolve and validate constructed paths:
+      resolved = os.path.realpath(constructed_path)
+      assert resolved.startswith(os.path.realpath(base))
+  - id: PATH-MED-002
+    signal: Symbolic link following not prevented
+    cwe: CWE-59
+    evidence_pattern: follow_symlinks\s*=\s*True|not.*islink
+    explanation: |
+      Following symbolic links can allow attackers to access files outside
+      the intended directory via symlinks they've created.
+    remediation: |
+      Use os.path.realpath() to resolve symlinks, then validate.
+      Or check os.path.islink() and reject symbolic links.
+  low:
+  - id: PATH-LOW-001
+    signal: Hardcoded traversal sequences in code
+    evidence_pattern: \.\./|\.\.\\
+    explanation: |
+      Hardcoded traversal sequences may indicate incomplete testing or
+      awareness of the vulnerability pattern.
+    remediation: |
+      Remove hardcoded traversal sequences and use proper path handling.
+  positive:
+  - id: PATH-POS-001
+    signal: Path resolution and validation implemented
+    evidence_pattern: realpath.*startswith|abspath.*startswith|normalize.*startsWith
+    explanation: |
+      The codebase resolves paths and validates containment within
+      the expected directory.
+  - id: PATH-POS-002
+    signal: basename used for filename sanitization
+    evidence_pattern: os\.path\.basename|path\.basename|basename\(
+    explanation: |
+      basename() extracts only the filename, preventing directory traversal.
+  - id: PATH-POS-003
+    signal: secure_filename used for uploads
+    evidence_pattern: secure_filename|sanitize.*filename
+    explanation: |
+      secure_filename() or similar functions remove dangerous characters
+      from user-supplied filenames.
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Find all file operations
+    description: |
+      Identify all locations where files are read, written, deleted,
+      or served to users.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find file operations
+      command: |
+        grep -rn --include="*.py" --include="*.js" --include="*.php" --include="*.java" \
+          -E "(open|read|write|delete|remove|send_file|sendFile|include|require)" . 2>/dev/null | head -100
+    expected_findings:
+    - Inventory of file operations
+    - Classification by operation type
+  - id: '2'
+    name: Trace user input to file paths
+    description: |
+      Identify where user input is used in file path construction.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find user input in file operations
+      command: |
+        grep -rn --include="*.py" --include="*.js" --include="*.php" \
+          -E "(request|req\.|params|query|args).*(\\.path|file|name)" . 2>/dev/null | head -50
+    expected_findings:
+    - User input paths to file operations
+    - Risk assessment for each path
+  - id: '3'
+    name: Check path validation
+    description: |
+      Verify that path sanitization is implemented.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find path sanitization
+      command: |
+        grep -rn --include="*.py" --include="*.js" \
+          -E "(basename|realpath|abspath|secure_filename|startswith)" . 2>/dev/null | head -30
+    expected_findings:
+    - Path validation coverage
+    - Gaps in validation
+  - id: '4'
+    name: Run static analysis
+    description: |
+      Execute security-focused static analysis for path traversal.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Run Semgrep path traversal rules
+      command: |
+        semgrep --config=p/path-traversal . 2>/dev/null | head -100 || echo "Semgrep not available"
+    expected_findings:
+    - Static analysis findings
+    - Additional patterns from tooling
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Critical Path Traversal Vulnerabilities
+    - File Operation Assessment
+    - Remediation Roadmap
+  confidence_guidance:
+    high: Direct evidence of user input in file path without validation
+    medium: File operations with dynamic paths, source unclear
+    low: Potential issues based on patterns, needs data flow analysis
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-22
+      priority: required
+    - source_id: owasp-path-traversal
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: Path traversal is critical and commonly exploited
+      priority: 1
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: path-001
+  item: No direct file open with user input
+  level: CRITICAL
+  verification: |
+    ! grep -rn --include="*.py" "open\s*\(.*request\." . 2>/dev/null | grep -v test && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: path-002
+  item: Path validation with realpath/startswith implemented
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.py" "realpath.*startswith" . 2>/dev/null && echo "PASS" || echo "NEEDS_REVIEW"
+  expected: PASS
+- id: path-003
+  item: secure_filename used for uploads
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.py" "secure_filename" . 2>/dev/null || \
+    grep -rn --include="*.py" "uuid.*filename" . 2>/dev/null && echo "PASS" || echo "NEEDS_REVIEW"
+  expected: PASS
+- id: path-004
+  item: No PHP include/require with user input
+  level: CRITICAL
+  verification: |
+    ! grep -rn --include="*.php" "(include|require).*\$_" . 2>/dev/null && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP Top 10
+    controls:
+    - A01:2021 - Broken Access Control
+  - framework: CWE
+    controls:
+    - CWE-22
+    - CWE-23
+    - CWE-36
+    - CWE-59
+  - framework: SANS Top 25
+    controls:
+    - CWE-22
+  - framework: PCI DSS
+    controls:
+    - 6.5.8
+relationships:
+  commonly_combined:
+  - security-trust.input-validation.command-injection
+  - security-trust.authorization.file-access-control
+  - security-trust.input-validation.xml-xxe-injection

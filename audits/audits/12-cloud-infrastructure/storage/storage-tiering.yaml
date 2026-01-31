@@ -1,0 +1,370 @@
+audit:
+  id: cloud-infrastructure.storage.storage-tiering
+  name: Storage Tiering
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: storage
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates storage tiering implementation across cloud infrastructure
+    including S3 storage classes, EBS volume types, EFS performance modes,
+    and managed database storage tiers. Examines alignment between storage
+    tier selection and actual access patterns to optimize cost and performance.
+  why_it_matters: |
+    Storage costs can represent 20-40% of cloud spend, with significant
+    savings possible through proper tiering. Data stored in wrong tiers
+    incurs either unnecessary costs (hot storage for cold data) or
+    performance issues (cold storage for frequently accessed data).
+    Automated tiering policies can reduce storage costs by 50-80% for
+    archival data while maintaining access when needed.
+  when_to_run:
+  - Monthly cost optimization reviews
+  - After significant data growth
+  - When implementing new data pipelines
+  - During storage architecture reviews
+prerequisites:
+  required_artifacts:
+  - type: cloud_access
+    description: Read access to storage configurations
+  - type: metrics_access
+    description: Access to storage access pattern metrics
+  - type: billing_access
+    description: Storage cost breakdown access
+  access_requirements:
+  - S3/GCS/Blob storage configuration access
+  - Storage Lens or equivalent analytics
+  - Cost allocation reports
+discovery:
+  metrics_queries:
+  - system: S3 Storage Lens
+    query: |
+      SELECT bucket_name, storage_class, total_storage_bytes,
+             get_requests, put_requests
+      FROM storage_lens_metrics
+      WHERE time > NOW() - INTERVAL '30 days'
+    purpose: Identify storage class distribution and access patterns
+    threshold: Standard class with < 1 access/month suggests tiering opportunity
+  - system: CloudWatch
+    query: |
+      SELECT AVG(VolumeReadOps), AVG(VolumeWriteOps)
+      FROM EBS
+      WHERE VolumeId = '{volume_id}'
+      GROUP BY VolumeId
+    purpose: Identify EBS volume access patterns
+    threshold: Low IOPS may indicate wrong volume type
+  file_patterns:
+  - glob: '**/terraform/**/*s3*.tf'
+    purpose: Find S3 bucket configurations
+  - glob: '**/terraform/**/*storage*.tf'
+    purpose: Find storage configurations
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: Find CloudFormation storage definitions
+knowledge_sources:
+  specifications:
+  - id: aws-s3-storage-classes
+    name: AWS S3 Storage Classes
+    url: https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-class-intro.html
+    offline_cache: true
+    priority: required
+  - id: aws-ebs-volumes
+    name: AWS EBS Volume Types
+    url: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-volume-types.html
+    offline_cache: true
+    priority: required
+  - id: gcp-storage-classes
+    name: GCP Storage Classes
+    url: https://cloud.google.com/storage/docs/storage-classes
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-storage-optimization
+    name: AWS Storage Cost Optimization
+    url: https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-class-intro.html#sc-optimize
+    offline_cache: true
+  - id: s3-intelligent-tiering
+    name: S3 Intelligent-Tiering Guide
+    url: https://docs.aws.amazon.com/AmazonS3/latest/userguide/intelligent-tiering.html
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS CLI
+    purpose: List S3 bucket configurations
+    command: aws s3api list-buckets | jq '.Buckets[].Name' | xargs -I{} aws s3api get-bucket-lifecycle-configuration
+      --bucket {}
+  - tool: AWS CLI
+    purpose: Get S3 storage metrics
+    command: aws s3api list-buckets --query 'Buckets[].Name' --output text | xargs -I{} aws cloudwatch
+      get-metric-statistics --namespace AWS/S3 --metric-name BucketSizeBytes --dimensions Name=BucketName,Value={}
+      Name=StorageType,Value=StandardStorage --start-time $(date -d '1 day ago' -u +%Y-%m-%dT%H:%M:%SZ)
+      --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) --period 86400 --statistics Average
+  - tool: Storage Lens
+    purpose: Comprehensive storage analytics
+    command: aws s3control get-storage-lens-configuration --account-id {account_id} --config-id default-account-dashboard
+  scripts:
+  - id: storage-tier-analyzer
+    language: bash
+    purpose: Analyze storage tier distribution
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Storage Tier Analysis ==="
+
+      # S3 bucket storage class distribution
+      echo "S3 Storage Class Distribution:"
+      for bucket in $(aws s3api list-buckets --query 'Buckets[].Name' --output text); do
+        echo "--- Bucket: $bucket ---"
+        aws s3api list-objects-v2 --bucket "$bucket" --query 'Contents[].StorageClass' --output text 2>/dev/null | tr '\t' '\n' | sort | uniq -c || echo "Empty or inaccessible"
+      done
+
+      # EBS volume types
+      echo "EBS Volume Type Distribution:"
+      aws ec2 describe-volumes \
+        --query 'Volumes[].{Type:VolumeType,Size:Size,State:State}' \
+        --output table
+
+      # EBS volume IOPS utilization
+      echo "EBS gp2 Volumes (consider gp3):"
+      aws ec2 describe-volumes \
+        --filters "Name=volume-type,Values=gp2" \
+        --query 'Volumes[].{ID:VolumeId,Size:Size,State:State}' \
+        --output table
+signals:
+  critical:
+  - id: TIERING-CRIT-001
+    signal: Large volumes of infrequently accessed data in hot storage
+    evidence_threshold: TB of Standard class data with < 0.1 accesses/object/month
+    explanation: |
+      Storing rarely accessed data in expensive hot storage tiers wastes
+      significant money. S3 Standard costs ~$0.023/GB while Glacier costs
+      ~$0.004/GB - an 80%+ potential savings.
+    remediation: Implement lifecycle policies to transition cold data to appropriate tiers
+  - id: TIERING-CRIT-002
+    signal: Frequently accessed data in archive storage causing retrieval delays
+    evidence_indicators:
+    - High retrieval requests from Glacier/Archive tiers
+    - Application timeouts waiting for data restoration
+    explanation: |
+      Archive tiers have retrieval latency from minutes to hours.
+      Frequently accessed data in these tiers causes application
+      performance issues and retrieval costs.
+    remediation: Move frequently accessed data to Standard or Intelligent-Tiering
+  high:
+  - id: TIERING-HIGH-001
+    signal: No lifecycle policies on large buckets
+    evidence_pattern: Buckets > 100GB without lifecycle configurations
+    explanation: |
+      Without lifecycle policies, data accumulates in hot storage
+      indefinitely, even when access patterns change over time.
+    remediation: Implement lifecycle policies based on access patterns
+  - id: TIERING-HIGH-002
+    signal: gp2 EBS volumes where gp3 would be more cost-effective
+    evidence_pattern: gp2 volumes not using burst credits
+    explanation: |
+      gp3 provides 20% cost savings over gp2 with better baseline
+      performance. Migration is non-disruptive for most workloads.
+    remediation: Migrate gp2 volumes to gp3
+  - id: TIERING-HIGH-003
+    signal: Provisioned IOPS volumes with low actual IOPS usage
+    evidence_threshold: io1/io2 volumes using < 30% of provisioned IOPS
+    explanation: |
+      Provisioned IOPS volumes are expensive. Low utilization indicates
+      over-provisioning or wrong volume type selection.
+    remediation: Resize IOPS or switch to gp3 for moderate IOPS needs
+  medium:
+  - id: TIERING-MED-001
+    signal: S3 Intelligent-Tiering not used where appropriate
+    remediation: Enable Intelligent-Tiering for variable access patterns
+  - id: TIERING-MED-002
+    signal: Storage class analysis not regularly reviewed
+    remediation: Implement monthly storage tier optimization reviews
+  - id: TIERING-MED-003
+    signal: Multipart upload abort policies not configured
+    remediation: Configure lifecycle rules to abort incomplete multipart uploads
+  low:
+  - id: TIERING-LOW-001
+    signal: Storage cost allocation tags not applied
+    remediation: Implement cost allocation tags for storage resources
+  positive:
+  - id: TIERING-POS-001
+    signal: Comprehensive lifecycle policies aligned with access patterns
+  - id: TIERING-POS-002
+    signal: S3 Intelligent-Tiering for unpredictable access patterns
+  - id: TIERING-POS-003
+    signal: Regular storage tier optimization with documented savings
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Storage Inventory
+    description: |
+      Create comprehensive inventory of all storage resources
+      including buckets, volumes, and file systems with current tiers.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List S3 buckets with sizes
+      command: aws s3 ls --summarize
+    - purpose: List EBS volumes by type
+      command: aws ec2 describe-volumes --query 'Volumes[].{ID:VolumeId,Type:VolumeType,Size:Size,IOPS:Iops,State:State}'
+        --output table
+    - purpose: List EFS file systems
+      command: aws efs describe-file-systems --query 'FileSystems[].{ID:FileSystemId,Size:SizeInBytes.Value,Performance:PerformanceMode,Throughput:ThroughputMode}'
+        --output table
+    expected_findings:
+    - Complete storage inventory
+    - Current tier distribution
+  - id: '2'
+    name: Access Pattern Analysis
+    description: |
+      Analyze storage access patterns to identify tiering opportunities
+      based on read/write frequency and retrieval patterns.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Get S3 request metrics
+      command: aws cloudwatch get-metric-statistics --namespace AWS/S3 --metric-name AllRequests --dimensions
+        Name=BucketName,Value={bucket} Name=FilterId,Value=EntireBucket --start-time $(date -d '30 days
+        ago' -u +%Y-%m-%dT%H:%M:%SZ) --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) --period 86400 --statistics
+        Sum
+    - purpose: Get EBS volume metrics
+      command: aws cloudwatch get-metric-statistics --namespace AWS/EBS --metric-name VolumeReadOps --dimensions
+        Name=VolumeId,Value={volume_id} --start-time $(date -d '7 days ago' -u +%Y-%m-%dT%H:%M:%SZ) --end-time
+        $(date -u +%Y-%m-%dT%H:%M:%SZ) --period 3600 --statistics Average
+    expected_findings:
+    - Access frequency per storage resource
+    - Hot vs cold data identification
+  - id: '3'
+    name: Lifecycle Policy Review
+    description: |
+      Examine existing lifecycle policies and their alignment
+      with actual access patterns.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get lifecycle configurations
+      command: for bucket in $(aws s3api list-buckets --query 'Buckets[].Name' --output text); do echo
+        "=== $bucket ==="; aws s3api get-bucket-lifecycle-configuration --bucket $bucket 2>/dev/null ||
+        echo 'No lifecycle policy'; done
+    expected_findings:
+    - Existing lifecycle policies
+    - Gaps in lifecycle coverage
+  - id: '4'
+    name: Cost Analysis
+    description: |
+      Calculate current storage costs by tier and potential
+      savings from optimized tiering.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get storage costs by type
+      command: aws ce get-cost-and-usage --time-period Start=$(date -d '30 days ago' +%Y-%m-%d),End=$(date
+        +%Y-%m-%d) --granularity MONTHLY --metrics BlendedCost --filter '{"Dimensions":{"Key":"SERVICE","Values":["Amazon
+        Simple Storage Service"]}}' --group-by Type=DIMENSION,Key=USAGE_TYPE
+    expected_findings:
+    - Cost breakdown by storage tier
+    - Potential savings calculation
+  - id: '5'
+    name: Recommendations Development
+    description: |
+      Generate specific tiering recommendations with
+      cost impact analysis.
+    duration_estimate: 30 min
+    expected_findings:
+    - Prioritized tiering recommendations
+    - Estimated monthly savings per change
+    - Implementation plan
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Storage Inventory
+    - Access Pattern Analysis
+    - Cost Optimization Opportunities
+    - Recommendations
+  - type: spreadsheet
+    format: csv
+    contents: Storage resources with tiering recommendations
+  confidence_guidance:
+    high: 30+ days of access metrics, complete inventory, cost data
+    medium: 7-30 days of metrics, partial inventory
+    low: Limited metrics access
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-s3-storage-classes
+      priority: required
+    - source_id: aws-ebs-volumes
+      priority: required
+  limitations:
+  - Cannot access live storage metrics offline
+  - Access pattern analysis requires runtime data
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed access pattern analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: tiering-001
+  item: Storage inventory complete
+  level: CRITICAL
+  verification: aws s3api list-buckets --query 'length(Buckets)' | grep -qE '[0-9]+' && echo PASS || echo
+    FAIL
+  expected: PASS
+- id: tiering-002
+  item: Access patterns analyzed
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm access metrics collected for storage resources
+  expected: Confirmed by reviewer
+- id: tiering-003
+  item: Lifecycle policies reviewed
+  level: BLOCKING
+  verification: manual
+  verification_notes: Document existing lifecycle policies and gaps
+  expected: Confirmed by reviewer
+- id: tiering-004
+  item: Savings opportunities quantified
+  level: WARNING
+  verification: manual
+  verification_notes: Each recommendation includes estimated monthly savings
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: FinOps
+    controls:
+    - Storage Optimization
+    - Cost Optimization
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.storage.storage-lifecycle
+  - cloud-infrastructure.storage.storage-cost-optimization
+  - cloud-infrastructure.storage.storage-access-patterns

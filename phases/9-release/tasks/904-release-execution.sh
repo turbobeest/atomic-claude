@@ -24,7 +24,10 @@ task_904_release_execution() {
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     local agents_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/release-agents.json"
-    local agent_repo="${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}"
+    # Check embedded repo first (monorepo deployment), then env var, then default
+    local agent_repo="$ATOMIC_ROOT/repos/agents"
+    [[ -f "$ATOMIC_ROOT/agents/agent-inventory.csv" ]] && agent_repo="$ATOMIC_ROOT/agents"
+    [[ -n "$ATOMIC_AGENT_REPO" ]] && agent_repo="$ATOMIC_AGENT_REPO"
 
     # Agent prompts (loaded from agents repository if available)
     local announcement_agent_prompt=""

@@ -1,0 +1,424 @@
+audit:
+  id: security-trust.input-validation.ldap-injection
+  name: LDAP Injection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: input-validation
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    This audit examines the codebase for LDAP injection vulnerabilities (CWE-90) -
+    instances where user-controlled input is used in LDAP queries without proper
+    escaping. It identifies dynamic LDAP filter construction, DN manipulation,
+    and authentication bypass patterns.
+  why_it_matters: |
+    LDAP injection allows attackers to modify LDAP queries, potentially bypassing
+    authentication, disclosing sensitive directory information, or modifying
+    directory entries. Organizations using Active Directory, OpenLDAP, or similar
+    directory services for authentication are at risk. Unlike SQL, LDAP lacks
+    parameterized query interfaces, making proper escaping critical.
+  when_to_run:
+  - Initial security audit of applications using LDAP
+  - Code review for authentication changes
+  - Before production deployment
+  - When integrating with Active Directory
+  - After adding LDAP-based user lookup features
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Source code with LDAP integration
+  access_requirements:
+  - Read access to source code repositories
+  - Understanding of LDAP directory structure
+discovery:
+  code_patterns:
+  - pattern: import\s+ldap|from\s+ldap|require.*ldap|ldap3|python-ldap
+    type: regex
+    scope: source
+    purpose: Detect LDAP library usage
+  - pattern: \(.*=.*\).*\+|\+.*\(.*=.*\)|f["']\(.*=.*\{
+    type: regex
+    scope: source
+    purpose: Detect dynamic LDAP filter construction
+  - pattern: filter\s*=.*\+|ldap_filter.*request|search_filter.*user
+    type: regex
+    scope: source
+    purpose: Detect LDAP filter with user input
+  - pattern: \.search\s*\(.*request|\.search_s\s*\(.*user
+    type: regex
+    scope: source
+    purpose: Detect LDAP search with user input
+  - pattern: dn\s*=.*\+|dn.*format.*user|f["'].*dn.*\{
+    type: regex
+    scope: source
+    purpose: Detect DN construction with user input
+  - pattern: DirContext|InitialDirContext|LdapContext|search.*filter
+    type: regex
+    scope: source
+    purpose: Detect Java JNDI LDAP usage
+  - pattern: NamingEnumeration|SearchControls|SearchResult
+    type: regex
+    scope: source
+    purpose: Detect Java LDAP search patterns
+  - pattern: ldap_search\s*\(.*\$|ldap_bind.*\$|ldap_connect
+    type: regex
+    scope: source
+    purpose: Detect PHP LDAP functions
+  - pattern: DirectorySearcher|DirectoryEntry|SearchResult|FindAll\(\)
+    type: regex
+    scope: source
+    purpose: Detect .NET LDAP patterns
+  - pattern: \*|\(|\)|\\|NUL
+    type: regex
+    scope: source
+    purpose: Detect LDAP special characters (context-dependent)
+  - pattern: escape_filter_chars|ldap_escape|encodeForLDAP|LdapFilterEncode
+    type: regex
+    scope: source
+    purpose: Detect LDAP escaping functions (positive)
+  - pattern: escape_dn_chars|encodeForDN|LdapDistinguishedNameEncode
+    type: regex
+    scope: source
+    purpose: Detect DN escaping functions (positive)
+  file_patterns:
+  - glob: '**/*ldap*.py'
+    purpose: Python LDAP modules
+  - glob: '**/*ldap*.java'
+    purpose: Java LDAP modules
+  - glob: '**/*auth*.py'
+    purpose: Authentication modules
+  - glob: '**/*directory*.py'
+    purpose: Directory service modules
+  - glob: '**/ad_*.py'
+    purpose: Active Directory modules
+knowledge_sources:
+  specifications:
+  - id: cwe-90
+    name: 'CWE-90: Improper Neutralization of Special Elements used in an LDAP Query'
+    url: https://cwe.mitre.org/data/definitions/90.html
+    offline_cache: true
+    priority: required
+  - id: rfc4515
+    name: 'RFC 4515: LDAP String Representation of Search Filters'
+    url: https://tools.ietf.org/html/rfc4515
+    offline_cache: true
+    priority: recommended
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-ldap-injection
+    name: OWASP LDAP Injection Prevention Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/LDAP_Injection_Prevention_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-ldap-attack
+    name: OWASP LDAP Injection Attack
+    url: https://owasp.org/www-community/attacks/LDAP_Injection
+    offline_cache: true
+  - id: owasp-ldap-testing
+    name: OWASP Testing for LDAP Injection
+    url: https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/07-Input_Validation_Testing/06-Testing_for_LDAP_Injection
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect LDAP injection patterns
+    offline_capable: true
+  - tool: bandit
+    purpose: Python security linting
+    offline_capable: true
+  scripts:
+  - id: detect-ldap-injection
+    language: bash
+    purpose: Detect potential LDAP injection vulnerabilities
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== LDAP Injection Detection ==="
+
+      echo "--- LDAP library usage ---"
+      grep -rn --include="*.py" --include="*.java" --include="*.php" \
+        -E "(import.*ldap|ldap3|python-ldap|DirContext|ldap_)" . 2>/dev/null | head -20
+
+      echo "--- Dynamic LDAP filter construction ---"
+      grep -rn --include="*.py" --include="*.java" --include="*.php" \
+        -E "(filter|Filter).*\+.*user|(filter|Filter).*format" . 2>/dev/null | head -20
+
+      echo "--- LDAP search with user input ---"
+      grep -rn --include="*.py" --include="*.java" \
+        -E "\.search.*request|search.*user.*filter" . 2>/dev/null | head -20
+
+      echo "--- LDAP escaping functions ---"
+      grep -rn --include="*.py" --include="*.java" --include="*.php" \
+        -E "(escape_filter|escape_dn|encodeForLDAP|LdapFilter)" . 2>/dev/null | head -20
+signals:
+  critical:
+  - id: LDAP-CRIT-001
+    signal: User input directly in LDAP filter
+    cwe: CWE-90
+    evidence_pattern: filter.*=.*\+.*request|f["']\(.*=.*\{.*request|\(.*=.*%s.*%.*user
+    explanation: |
+      Direct inclusion of user input in LDAP filters allows injection.
+      An attacker can use special characters like *, (, ), \, and NUL
+      to modify the query. For example, injecting "*)(uid=*" can bypass
+      authentication or enumerate all users.
+    remediation: |
+      Escape all user input before inclusion in LDAP filters:
+      Python ldap3: from ldap3.utils.conv import escape_filter_chars
+      Java: ESAPI.encoder().encodeForLDAP(userInput)
+      .NET: Encoder.LdapFilterEncode(userInput)
+      Filter: "(uid=" + escape_filter_chars(username) + ")"
+  - id: LDAP-CRIT-002
+    signal: Authentication bypass via LDAP filter injection
+    cwe: CWE-90
+    evidence_pattern: \(&\(.*=.*\)\(.*=.*\)\).*user|bind.*filter.*request
+    explanation: |
+      LDAP authentication filters are particularly dangerous. Injecting
+      ")(uid=*" or "*)(|(password=" can bypass password checks or
+      enumerate valid usernames.
+    remediation: |
+      Always escape user input in authentication filters.
+      Consider using bind operations instead of search-based auth:
+      conn.bind(dn, password) instead of searching for (uid=x)(pwd=y)
+  - id: LDAP-CRIT-003
+    signal: User input in Distinguished Name (DN)
+    cwe: CWE-90
+    evidence_pattern: dn.*=.*\+.*user|dn.*format.*request|f["'].*dc=.*\{
+    explanation: |
+      DNs have different escaping rules than filters. Unescaped user
+      input in DNs can allow directory traversal or unauthorized access
+      to different parts of the directory tree.
+    remediation: |
+      Escape DN components separately:
+      Python ldap3: from ldap3.utils.dn import escape_rdn
+      Java: ESAPI.encoder().encodeForDN(userInput)
+      .NET: Encoder.LdapDistinguishedNameEncode(userInput)
+  high:
+  - id: LDAP-HIGH-001
+    signal: String concatenation in LDAP query
+    cwe: CWE-90
+    evidence_pattern: search\s*\(.*\+|filter\s*=\s*["'].*\+|\+.*["']\s*\)
+    explanation: |
+      String concatenation for LDAP queries is dangerous. Any dynamic
+      content could contain injection payloads if not properly escaped.
+    remediation: |
+      Use LDAP escaping for all dynamic content:
+      filter = "(cn=" + escape_filter_chars(name) + ")"
+      Never build filters with raw concatenation.
+  - id: LDAP-HIGH-002
+    signal: LDAP special characters not escaped
+    cwe: CWE-90
+    evidence_pattern: '[\*\(\)\\].*user|user.*[\*\(\)\\]'
+    explanation: |
+      LDAP special characters (*, (, ), \, NUL) in user input must be
+      escaped. Presence of these in code may indicate incomplete escaping.
+    remediation: |
+      Escape these characters according to RFC 4515:
+      * -> \2a, ( -> \28, ) -> \29, \ -> \5c, NUL -> \00
+  - id: LDAP-HIGH-003
+    signal: No LDAP escaping library imported
+    cwe: CWE-90
+    evidence_indicators:
+    - LDAP queries present but no escape functions
+    - No ldap3.utils.conv or similar imports
+    explanation: |
+      LDAP code without escaping library usage suggests potential
+      injection vulnerabilities.
+    remediation: |
+      Import and use appropriate escaping functions:
+      Python: from ldap3.utils.conv import escape_filter_chars
+      Or implement escaping per RFC 4515.
+  medium:
+  - id: LDAP-MED-001
+    signal: LDAP search scope not restricted
+    evidence_pattern: SCOPE_SUBTREE|subtreeScope|SCOPE_ONELEVEL
+    explanation: |
+      Broad search scopes combined with injection can expose more data
+      than intended. SCOPE_SUBTREE searches the entire subtree.
+    remediation: |
+      Use the most restrictive scope needed. Combine with proper
+      escaping and allowlist validation.
+  - id: LDAP-MED-002
+    signal: LDAP bind with constructed DN
+    evidence_pattern: bind\s*\(.*\+|simple_bind.*format
+    explanation: |
+      Binding with dynamically constructed DNs can allow attackers
+      to bind as different users if DN components aren't escaped.
+    remediation: |
+      Escape DN components before binding. Validate username format
+      against allowlist before constructing DN.
+  low:
+  - id: LDAP-LOW-001
+    signal: LDAP connection without TLS
+    evidence_pattern: ldap://(?!localhost)|start_tls.*False
+    explanation: |
+      Unencrypted LDAP connections expose credentials and data to
+      network attackers.
+    remediation: |
+      Use LDAPS (ldaps://) or STARTTLS for all LDAP connections.
+  positive:
+  - id: LDAP-POS-001
+    signal: LDAP filter escaping properly used
+    evidence_pattern: escape_filter_chars|encodeForLDAP|LdapFilterEncode
+    explanation: |
+      The codebase uses proper LDAP filter escaping functions.
+  - id: LDAP-POS-002
+    signal: DN escaping properly used
+    evidence_pattern: escape_rdn|escape_dn|encodeForDN|LdapDistinguishedNameEncode
+    explanation: |
+      The codebase uses proper DN escaping functions.
+  - id: LDAP-POS-003
+    signal: Allowlist validation before LDAP query
+    evidence_pattern: allowlist|whitelist|validate.*before.*ldap
+    explanation: |
+      Input validation with allowlists provides defense-in-depth
+      alongside escaping.
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Find all LDAP operations
+    description: |
+      Identify all locations where LDAP queries are performed.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find LDAP library usage
+      command: |
+        grep -rn --include="*.py" --include="*.java" --include="*.php" --include="*.cs" \
+          -E "(ldap|LDAP|DirContext|DirectorySearcher)" . 2>/dev/null | head -50
+    expected_findings:
+    - Inventory of LDAP operations
+    - Classification by query type
+  - id: '2'
+    name: Identify dynamic query construction
+    description: |
+      Find where LDAP filters or DNs are constructed dynamically.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find dynamic filter construction
+      command: |
+        grep -rn --include="*.py" --include="*.java" --include="*.php" \
+          -E "(filter|Filter).*(\+|format|%s)" . 2>/dev/null | head -30
+    expected_findings:
+    - Dynamic query construction points
+    - User input paths to queries
+  - id: '3'
+    name: Verify escaping implementation
+    description: |
+      Check that LDAP escaping functions are used.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find escaping function usage
+      command: |
+        grep -rn --include="*.py" --include="*.java" --include="*.php" \
+          -E "(escape_filter|escape_dn|encodeForLDAP|LdapFilter)" . 2>/dev/null | head -20
+    expected_findings:
+    - Escaping function coverage
+    - Gaps in escaping
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - LDAP Injection Vulnerabilities
+    - Escaping Assessment
+    - Remediation Roadmap
+  confidence_guidance:
+    high: Direct evidence of user input in LDAP query without escaping
+    medium: Dynamic LDAP construction, escaping unclear
+    low: LDAP code present, needs detailed review
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-90
+      priority: required
+    - source_id: owasp-ldap-injection
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: LDAP is less common, not needed in quick scan
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: ldap-001
+  item: All LDAP filters use escape_filter_chars or equivalent
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.py" "escape_filter_chars\|encodeForLDAP" . 2>/dev/null && echo "PASS" || \
+    ! grep -rn --include="*.py" "ldap.*search.*filter" . 2>/dev/null && echo "NO_LDAP" || echo "NEEDS_REVIEW"
+  expected: PASS
+- id: ldap-002
+  item: All DNs use escape_rdn or equivalent
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.py" "escape_rdn\|escape_dn\|encodeForDN" . 2>/dev/null && echo "PASS" || \
+    ! grep -rn --include="*.py" "dn.*=.*\+" . 2>/dev/null && echo "NO_DYNAMIC_DN" || echo "NEEDS_REVIEW"
+  expected: PASS
+- id: ldap-003
+  item: No string concatenation in LDAP filters
+  level: CRITICAL
+  verification: |
+    ! grep -rn --include="*.py" --include="*.java" "filter.*=.*\+.*user\|filter.*=.*\+.*request" . 2>/dev/null && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP Top 10
+    controls:
+    - A03:2021 - Injection
+  - framework: CWE
+    controls:
+    - CWE-90
+  - framework: SANS Top 25
+    controls:
+    - CWE-90
+  - framework: RFC
+    controls:
+    - RFC 4515
+relationships:
+  commonly_combined:
+  - security-trust.input-validation.sql-injection
+  - security-trust.authentication.active-directory
+  - security-trust.authorization.directory-permissions

@@ -1,0 +1,73 @@
+name: Sync Agents and Audits
+
+on:
+  schedule:
+    # Run every Sunday at midnight UTC
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+    # Allow manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout atomic-claude
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync agents repo
+        run: |
+          # Clone the agents repo
+          git clone --depth 1 https://github.com/turbobeest/agents.git /tmp/agents
+
+          # Remove .git from cloned repo
+          rm -rf /tmp/agents/.git
+
+          # Sync to agents/ directory (delete files not in source)
+          rsync -av --delete --exclude='.git' /tmp/agents/ agents/
+
+          echo "Synced agents/"
+
+      - name: Sync audits repo
+        run: |
+          # Clone the audits repo
+          git clone --depth 1 https://github.com/turbobeest/audits.git /tmp/audits
+
+          # Remove .git from cloned repo
+          rm -rf /tmp/audits/.git
+
+          # Sync to audits/ directory (delete files not in source)
+          rsync -av --delete --exclude='.git' /tmp/audits/ audits/
+
+          echo "Synced audits/"
+
+      - name: Check for changes
+        id: changes
+        run: |
+          git add -A
+          if git diff --staged --quiet; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No changes detected"
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "Changes detected:"
+            git diff --staged --stat
+          fi
+
+      - name: Commit and push
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git commit -m "chore: Sync agents and audits from upstream
+
+          Automated weekly sync from:
+          - turbobeest/agents
+          - turbobeest/audits"
+
+          git push

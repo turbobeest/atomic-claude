@@ -1,0 +1,258 @@
+audit:
+  id: observability-instrumentation.distributed-tracing.trace-sampling
+  name: Trace Sampling Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: distributed-tracing
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Reviews trace sampling configurations including head-based and tail-based
+    sampling strategies, sampling rates by service and endpoint, and ensures
+    that errors and slow requests are always captured regardless of sampling.
+  why_it_matters: |
+    Improper sampling leads to either excessive costs and storage consumption
+    or critical visibility gaps. Over-sampling wastes resources; under-sampling
+    misses important requests. Missing error traces during incidents severely
+    hampers debugging capability.
+  when_to_run:
+  - Tracing cost review
+  - After observability platform changes
+  - When debugging reveals missing traces
+  - Scaling to handle increased traffic
+prerequisites:
+  required_artifacts:
+  - type: tracing_configuration
+    description: Sampler configuration files
+  - type: tracing_backend
+    description: Access to trace storage metrics
+  access_requirements:
+  - OpenTelemetry collector configuration
+  - Jaeger/Zipkin sampler settings
+  - Trace storage utilization metrics
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: rate(otelcol_processor_dropped_spans[5m])
+    purpose: Identify dropped spans from sampling
+    threshold: < 50% of total spans
+  - system: Prometheus
+    query: rate(traces_sampled_total[5m]) / rate(traces_total[5m])
+    purpose: Calculate effective sampling rate
+    threshold: Match configured rate
+  code_patterns:
+  - pattern: Sampler|sampling_rate|trace_id_ratio|probability
+    type: regex
+    scope: config
+    purpose: Identify sampling configuration
+  - pattern: AlwaysOnSampler|AlwaysOffSampler|ParentBased|TraceIdRatio
+    type: regex
+    scope: source
+    purpose: Identify sampler implementations
+  file_patterns:
+  - glob: '**/otel-collector*.yaml'
+    purpose: OpenTelemetry collector config
+  - glob: '**/sampler*.{yaml,yml,json}'
+    purpose: Sampler configuration
+  - glob: '**/tracing*.{yaml,yml}'
+    purpose: Tracing configuration
+knowledge_sources:
+  specifications:
+  - id: otel-sampling
+    name: OpenTelemetry Sampling Specification
+    url: https://opentelemetry.io/docs/specs/otel/trace/sdk/#sampling
+    offline_cache: true
+    priority: required
+  guides:
+  - id: tail-based-sampling
+    name: Tail-Based Sampling Guide
+    url: https://opentelemetry.io/docs/collector/configuration/#tail_sampling-processor
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: otel-collector
+    purpose: Review sampling processor stats
+    command: curl -s http://collector:8888/metrics | grep sampling
+  - tool: jaeger
+    purpose: Check sampler configuration
+    command: curl -s http://jaeger:5778/sampling?service=myservice
+  monitoring_queries:
+  - system: Prometheus
+    query: sum(rate(otelcol_processor_tail_sampling_sampling_decision[5m])) by (decision)
+    purpose: Monitor tail sampling decisions
+signals:
+  critical:
+  - id: TRACE-SAMP-CRIT-001
+    signal: Errors not sampled at 100%
+    evidence_pattern: Error traces missing in backend
+    explanation: |
+      Error traces are essential for debugging. Any sampling that drops
+      error traces creates dangerous blind spots during incident response.
+      All errors must be captured regardless of overall sampling rate.
+    remediation: Configure tail-based sampling to always capture errors
+  - id: TRACE-SAMP-CRIT-002
+    signal: No sampling configured (100% sampling)
+    evidence_pattern: AlwaysOnSampler in production
+    explanation: |
+      Sampling everything in production creates massive storage costs
+      and can impact application performance. This is unsustainable
+      at scale and indicates missing production configuration.
+    remediation: Implement probabilistic sampling with tail-based error capture
+  high:
+  - id: TRACE-SAMP-HIGH-001
+    signal: Sampling rate below 1% without tail sampling
+    evidence_threshold: sampling_rate < 0.01 AND no_tail_sampling
+    explanation: |
+      Very low sampling rates without tail-based sampling likely miss
+      important error traces and make debugging extremely difficult.
+    remediation: Implement tail-based sampling for errors and slow requests
+  - id: TRACE-SAMP-HIGH-002
+    signal: Inconsistent sampling across services
+    evidence_pattern: Different services using different sampling rates
+    explanation: |
+      Inconsistent sampling creates incomplete traces where some
+      services show spans while others don't for the same request.
+    remediation: Implement consistent head-based sampling with parent propagation
+  medium:
+  - id: TRACE-SAMP-MED-001
+    signal: Slow requests not prioritized in sampling
+    evidence_pattern: High latency traces missing
+    remediation: Add latency-based tail sampling rules
+  - id: TRACE-SAMP-MED-002
+    signal: No adaptive sampling implemented
+    evidence_pattern: Static sampling rate regardless of load
+    remediation: Consider rate-limiting sampler for traffic spikes
+  low:
+  - id: TRACE-SAMP-LOW-001
+    signal: Sampling configuration not documented
+    remediation: Document sampling strategy and rationale
+  positive:
+  - id: TRACE-SAMP-POS-001
+    signal: Tail-based sampling with error and latency capture
+    evidence_pattern: Tail sampling configured for errors and p99 latency
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Review sampler configuration
+    description: |
+      Examine sampling configuration in OpenTelemetry SDKs, collectors,
+      and tracing backends to understand current sampling strategy.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Check collector sampling config
+      command: kubectl get configmap otel-collector-config -o yaml | grep -A 20 'processors:'
+    - purpose: Verify SDK sampling settings
+      command: grep -r 'OTEL_TRACES_SAMPLER' /app/config/ || echo 'Not found'
+    expected_findings:
+    - Sampling strategy type (head/tail)
+    - Configured sampling rates
+  - id: '2'
+    name: Verify error capture
+    description: |
+      Confirm that error traces are always captured regardless of
+      base sampling rate by testing error scenarios.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Query error traces
+      command: curl -s 'http://jaeger:16686/api/traces?service=api&tags={"error":"true"}&limit=100'
+    - purpose: Compare error rate to trace count
+      command: curl -s 'http://prometheus:9090/api/v1/query?query=rate(http_requests_total{status=~"5.."}[1h])'
+    expected_findings:
+    - Error trace capture verification
+    - Error trace completeness
+  - id: '3'
+    name: Analyze sampling effectiveness
+    description: |
+      Review trace storage costs, sampling decision metrics, and
+      ensure sampling provides adequate visibility.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Check sampling metrics
+      command: curl -s http://collector:8888/metrics | grep -E 'sampled|dropped'
+    - purpose: Review trace storage size
+      command: 'curl -s ''http://elasticsearch:9200/jaeger-span-*/_stats'' | jq ''.indices | to_entries[]
+        | {index: .key, size: .value.primaries.store.size_in_bytes}'''
+    expected_findings:
+    - Effective sampling rate
+    - Storage utilization
+    - Cost assessment
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Sampling Strategy Review
+    - Error Capture Analysis
+    - Cost-Visibility Tradeoffs
+  confidence_guidance:
+    high: Configuration review combined with runtime verification
+    medium: Configuration review only
+    low: Inferred from trace patterns
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: otel-sampling
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires runtime sampling verification
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: trace-sampling-001
+  item: Sampling configuration documented
+  level: CRITICAL
+  verification: test -f /docs/sampling-strategy.md && echo PASS || echo FAIL
+  expected: PASS
+- id: trace-sampling-002
+  item: Error traces captured at 100%
+  level: CRITICAL
+  verification: manual
+  expected: Error sampling verified
+- id: trace-sampling-003
+  item: Sampling rate appropriate for scale
+  level: BLOCKING
+  verification: manual
+  expected: Sampling rate documented with rationale
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SRE Best Practices
+    controls:
+    - Observability Cost Management
+relationships:
+  commonly_combined:
+  - observability-instrumentation.distributed-tracing.trace-coverage
+  - observability-instrumentation.distributed-tracing.trace-storage-cost
+  - observability-instrumentation.distributed-tracing.trace-retention

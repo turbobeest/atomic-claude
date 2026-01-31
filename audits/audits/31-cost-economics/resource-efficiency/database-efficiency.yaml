@@ -1,0 +1,321 @@
+audit:
+  id: cost-economics.resource-efficiency.database-efficiency
+  name: Database Efficiency Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: cost-economics
+  category_number: 31
+  subcategory: resource-efficiency
+  tier: expert
+  estimated_duration: 4-6 hours  # median: 5h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - finops
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines database resource efficiency across managed
+    database services like RDS, Aurora, DynamoDB, and equivalent
+    Azure/GCP services. It evaluates instance sizing, storage
+    utilization, IOPS provisioning, and workload patterns.
+  why_it_matters: |
+    Database services are often among the highest cloud costs but
+    receive less optimization attention than compute. Databases are
+    frequently over-provisioned for perceived safety. Proper database
+    sizing and configuration can reduce costs by 30-50% while
+    maintaining performance.
+  when_to_run:
+  - Quarterly database review
+  - Before Reserved Instance purchases
+  - When database costs exceed thresholds
+  - After workload migrations
+prerequisites:
+  required_artifacts:
+  - type: database-inventory
+    description: List of all database instances
+  - type: performance-metrics
+    description: CPU, memory, IOPS, storage metrics
+  - type: cost-breakdown
+    description: Database-specific cost data
+  access_requirements:
+  - Access to RDS/database console
+  - Access to CloudWatch metrics
+  - Access to Performance Insights
+  - Access to database cost reports
+discovery:
+  database_services:
+  - service: Amazon RDS
+    cost_components:
+    - Instance hours
+    - Storage
+    - Provisioned IOPS
+    - Data transfer
+  - service: Amazon Aurora
+    cost_components:
+    - Instance hours
+    - Storage (I/O)
+    - Backup storage
+  - service: Amazon DynamoDB
+    cost_components:
+    - Read/Write capacity
+    - Storage
+    - On-demand vs provisioned
+  file_patterns:
+  - glob: '**/*.tf'
+    purpose: Terraform files
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: CloudFormation templates
+  - glob: '**/*cost*.yaml'
+    purpose: Cost configuration files
+  - glob: '**/*budget*.yaml'
+    purpose: Budget configuration files
+  - glob: '**/*tag*.yaml'
+    purpose: Tagging policy files
+  code_patterns:
+  - pattern: tags\s*[=:]|cost_center|billing|budget
+    type: regex
+    scope: config
+    purpose: Cost/billing references
+  - pattern: reserved_instance|spot_instance|savings_plan
+    type: regex
+    scope: config
+    purpose: Cost optimization patterns
+knowledge_sources:
+  specifications:
+  - id: aws-rds-best-practices
+    name: Amazon RDS Best Practices
+    url: https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_BestPractices.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: finops-database
+    name: FinOps - Database Optimization
+    url: https://www.finops.org/framework/
+    offline_cache: true
+  - id: dynamodb-optimization
+    name: DynamoDB Cost Optimization
+    url: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/CostOptimization.html
+    offline_cache: true
+tooling:
+  aws_tools:
+  - tool: RDS Console
+    purpose: Instance configuration and recommendations
+  - tool: Performance Insights
+    purpose: Database workload analysis
+  - tool: Compute Optimizer
+    purpose: RDS rightsizing recommendations
+  commands:
+  - purpose: List RDS instances
+    command: |
+      aws rds describe-db-instances \
+        --query 'DBInstances[*].[DBInstanceIdentifier,DBInstanceClass,Engine,AllocatedStorage]'
+  - purpose: Get RDS CPU utilization
+    command: |
+      aws cloudwatch get-metric-statistics \
+        --namespace AWS/RDS \
+        --metric-name CPUUtilization \
+        --dimensions Name=DBInstanceIdentifier,Value=xxx \
+        --start-time $(date -u -d '14 days ago' +%Y-%m-%dT%H:%M:%SZ) \
+        --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
+        --period 3600 --statistics Average Maximum
+signals:
+  critical:
+  - id: DB-CRIT-001
+    signal: Database instances with < 10% average CPU utilization
+    evidence_threshold: avg_cpu_14d < 10%
+    explanation: |
+      Extremely low database CPU utilization suggests significant
+      over-provisioning. Database instances are expensive, and a
+      smaller instance class may be appropriate.
+    remediation: Evaluate smaller instance class
+  - id: DB-CRIT-002
+    signal: Provisioned IOPS significantly exceeding actual usage
+    evidence_threshold: actual_iops < 20% of provisioned
+    explanation: |
+      Provisioned IOPS is expensive. When actual IOPS is far below
+      provisioned, the organization is paying for unused capacity.
+      gp3 volumes may be more cost-effective.
+    remediation: Switch to gp3 or reduce provisioned IOPS
+  high:
+  - id: DB-HIGH-001
+    signal: Multi-AZ enabled for non-production databases
+    evidence_pattern: Dev/test databases with Multi-AZ
+    explanation: |
+      Multi-AZ doubles database costs for high availability.
+      Non-production databases typically do not require this
+      level of availability.
+    remediation: Disable Multi-AZ for non-production
+  - id: DB-HIGH-002
+    signal: Storage over-provisioned with < 30% utilization
+    evidence_threshold: storage_utilization < 30%
+    explanation: |
+      RDS storage costs scale with provisioned size. Significantly
+      over-provisioned storage wastes money. Storage can be
+      increased but not easily reduced.
+    remediation: Provision storage closer to actual needs (with growth)
+  medium:
+  - id: DB-MED-001
+    signal: DynamoDB tables not using On-Demand or auto-scaling
+    evidence_pattern: Static provisioned capacity without traffic analysis
+    remediation: Evaluate On-Demand or auto-scaling mode
+  - id: DB-MED-002
+    signal: Aurora Serverless not considered for variable workloads
+    evidence_pattern: Provisioned Aurora with highly variable load
+    remediation: Evaluate Aurora Serverless v2 for variable workloads
+  low:
+  - id: DB-LOW-001
+    signal: No database cost allocation by application
+    evidence_pattern: Shared databases without cost attribution
+    remediation: Implement database cost attribution
+  positive:
+  - id: DB-POS-001
+    signal: Database instances rightsized to utilization
+  - id: DB-POS-002
+    signal: Reserved Instances covering stable database workloads
+  - id: DB-POS-003
+    signal: Auto-scaling configured for variable workloads
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory database resources
+    description: |
+      Catalog all database instances including size, storage,
+      and configuration.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List all RDS instances
+      command: |
+        aws rds describe-db-instances \
+          --query 'DBInstances[*].{ID:DBInstanceIdentifier,Class:DBInstanceClass,Engine:Engine,Storage:AllocatedStorage,MultiAZ:MultiAZ}'
+    expected_findings:
+    - Database inventory
+    - Configuration summary
+  - id: '2'
+    name: Analyze utilization metrics
+    description: |
+      Collect and analyze CPU, memory, IOPS, and storage metrics
+      for all databases.
+    duration_estimate: 60 min
+    expected_findings:
+    - Utilization by database
+    - Over-provisioned databases
+  - id: '3'
+    name: Review storage efficiency
+    description: |
+      Assess storage utilization and provisioned IOPS efficiency.
+    duration_estimate: 30 min
+    expected_findings:
+    - Storage utilization
+    - IOPS efficiency
+  - id: '4'
+    name: Evaluate configuration appropriateness
+    description: |
+      Review configurations like Multi-AZ, backup retention,
+      and encryption for appropriateness to environment.
+    duration_estimate: 30 min
+    expected_findings:
+    - Configuration audit
+    - Optimization candidates
+  - id: '5'
+    name: Assess commitment coverage
+    description: |
+      Review Reserved Instance coverage for database workloads.
+    duration_estimate: 30 min
+    expected_findings:
+    - RI coverage for databases
+    - Commitment opportunities
+  - id: '6'
+    name: Calculate optimization savings
+    description: |
+      Quantify potential savings from database optimizations.
+    duration_estimate: 30 min
+    expected_findings:
+    - Savings by optimization type
+    - Priority recommendations
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Database Inventory
+    - Utilization Analysis
+    - Configuration Review
+    - Recommendations
+  - type: metrics_dashboard
+    metrics:
+    - Database cost breakdown
+    - Utilization by database
+    - RI coverage
+    - Optimization savings
+  confidence_guidance:
+    high: 14+ days metrics with Performance Insights
+    medium: 7-14 days metrics
+    low: Point-in-time analysis
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-rds-best-practices
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+      reduced_scope: High-cost databases only
+    full:
+      included: true
+      priority: 1
+    finops:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: db-001
+  item: Over-provisioned databases identified
+  level: CRITICAL
+  verification: automated
+  expected: Analysis complete
+- id: db-002
+  item: Configuration appropriateness reviewed
+  level: BLOCKING
+  verification: manual
+  expected: Review completed
+- id: db-003
+  item: Savings potential quantified
+  level: WARNING
+  verification: automated
+  expected: Savings documented
+governance:
+  applicable_to:
+    archetypes:
+    - cloud-native
+    - data-intensive
+    - enterprise
+  compliance_frameworks:
+  - framework: FinOps Foundation
+    controls:
+    - Workload Optimization
+  - framework: AWS Well-Architected
+    controls:
+    - COST-05
+    - COST-07
+relationships:
+  commonly_combined:
+  - cost-economics.resource-efficiency.utilization-analysis
+  - cost-economics.cost-optimization.reserved-instances
+  - cost-economics.cost-optimization.rightsizing

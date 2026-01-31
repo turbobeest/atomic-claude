@@ -1,0 +1,369 @@
+# ============================================================
+# AUDIT: Abstraction Level Assessment
+# ============================================================
+# Evaluates whether components operate at appropriate
+# abstraction levels for their responsibilities.
+# ============================================================
+
+audit:
+  id: "architecture-design.extensibility-evolution.abstraction-level"
+  name: "Abstraction Level Assessment"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "architecture-design"
+  category_number: 7
+  subcategory: "extensibility-evolution"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates whether components in the architecture operate
+    at appropriate abstraction levels. It identifies leaky abstractions,
+    mixing of abstraction levels, and areas where abstractions are either
+    too high (overgeneral) or too low (implementation detail exposure).
+
+  why_it_matters: |
+    Wrong abstraction levels cause:
+    - Leaky abstractions that expose implementation details
+    - Difficulty understanding component purposes
+    - Tight coupling to implementation choices
+    - Barriers to component replacement
+    - Cognitive overload from mixed abstraction layers
+    Proper abstraction enables understanding, flexibility, and evolution.
+
+  when_to_run:
+    - "During architecture reviews"
+    - "When abstractions seem to leak"
+    - "When components are hard to understand"
+    - "Before major refactoring"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Complete source code"
+    - type: "architecture_documentation"
+      description: "Documentation of intended abstraction levels"
+
+  access_requirements:
+    - "Read access to source code"
+
+discovery:
+  code_patterns:
+    - pattern: "interface\\s+[A-Z]|abstract\\s+class\\s+[A-Z]"
+      type: "regex"
+      scope: "source"
+      purpose: "Find abstraction definitions"
+
+    - pattern: "SQLException|IOException|HttpException"
+      type: "regex"
+      scope: "source"
+      purpose: "Find low-level exception leakage"
+
+    - pattern: "getConnection|HttpClient|FileInputStream"
+      type: "regex"
+      scope: "source"
+      purpose: "Find low-level API usage in high-level code"
+
+  file_patterns:
+    - glob: "**/domain/**/*.{java,ts,py}"
+      purpose: "Domain layer - should be high abstraction"
+    - glob: "**/infrastructure/**/*.{java,ts,py}"
+      purpose: "Infrastructure - implementation details"
+
+knowledge_sources:
+  specifications:
+    - id: "law-of-leaky"
+      name: "The Law of Leaky Abstractions"
+      url: "https://www.joelonsoftware.com/2002/11/11/the-law-of-leaky-abstractions/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "clean-architecture"
+      name: "Clean Architecture"
+      url: "https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html"
+      offline_cache: true
+
+    - id: "refactoring-fowler"
+      name: "Refactoring Catalog"
+      url: "https://refactoring.com/catalog/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "ddd-book"
+      title: "Domain-Driven Design"
+      type: "book"
+      reference: "Eric Evans"
+
+    - id: "posa"
+      title: "Pattern-Oriented Software Architecture"
+      type: "book"
+      reference: "Buschmann et al - Volume 1"
+
+tooling:
+  static_analysis:
+    - tool: "ArchUnit"
+      purpose: "Enforce abstraction level rules"
+      offline_capable: true
+
+    - tool: "Structure101"
+      purpose: "Visualize abstraction layers"
+      offline_capable: true
+
+  scripts:
+    - id: "abstraction-analyzer"
+      language: "bash"
+      purpose: "Find abstraction violations"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Low-level Types in Domain ==="
+        grep -rn "SQLException\|Connection\|ResultSet" $(find . -path "*/domain/*.java") 2>/dev/null | head -20
+
+        echo "=== Infrastructure Imports in Domain ==="
+        grep -rn "import.*jdbc\|import.*http\|import.*io" $(find . -path "*/domain/*.java") 2>/dev/null | head -20
+
+        echo "=== Abstract Classes ==="
+        grep -rn "abstract class" --include="*.java" | head -20
+
+signals:
+  critical:
+    - id: "ABSTRACT-CRIT-001"
+      signal: "Domain layer exposes infrastructure types"
+      evidence_pattern: "Domain service returns SQLException or HttpStatus"
+      explanation: |
+        When domain layer exposes infrastructure types, all callers become
+        coupled to those technical details. The domain loses its purity
+        and flexibility.
+      remediation: "Wrap infrastructure exceptions; use domain types"
+
+    - id: "ABSTRACT-CRIT-002"
+      signal: "High-level API requires low-level knowledge to use"
+      evidence_pattern: "Business service needs caller to manage transactions"
+      explanation: |
+        Abstractions that require callers to handle low-level concerns
+        are not truly abstracting. They shift complexity rather than hiding it.
+      remediation: "Encapsulate low-level details; expose clean high-level API"
+
+  high:
+    - id: "ABSTRACT-HIGH-001"
+      signal: "Leaky abstraction exposing implementation"
+      evidence_pattern: "Repository interface has SQL-specific methods"
+      explanation: |
+        Abstractions that reveal their implementation cannot be easily
+        substituted. The abstraction is not genuine.
+      remediation: "Design interface around use cases, not implementation"
+
+    - id: "ABSTRACT-HIGH-002"
+      signal: "Mixed abstraction levels in same class"
+      evidence_pattern: "Service method has business logic and JDBC code together"
+      explanation: |
+        Mixing levels makes code hard to understand and test. Business
+        logic is obscured by technical details.
+      remediation: "Separate into layers; inject abstractions for low-level operations"
+
+  medium:
+    - id: "ABSTRACT-MED-001"
+      signal: "Overly abstract interfaces"
+      evidence_pattern: "Interface so generic it provides no guidance"
+      remediation: "Add domain-specific methods; consider splitting"
+
+    - id: "ABSTRACT-MED-002"
+      signal: "Thin wrappers adding no value"
+      evidence_pattern: "Wrapper class just delegates without adding behavior"
+      remediation: "Remove unnecessary indirection or add value"
+
+  low:
+    - id: "ABSTRACT-LOW-001"
+      signal: "Inconsistent abstraction naming"
+      remediation: "Standardize naming conventions for abstraction levels"
+
+  positive:
+    - id: "ABSTRACT-POS-001"
+      signal: "Clean separation of abstraction levels"
+    - id: "ABSTRACT-POS-002"
+      signal: "Domain layer free of infrastructure concerns"
+    - id: "ABSTRACT-POS-003"
+      signal: "Abstractions hide implementation details effectively"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map abstraction layers"
+      description: |
+        Identify the intended abstraction layers in the architecture.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find layer packages"
+          command: "find . -type d -name 'domain' -o -name 'application' -o -name 'infrastructure' -o -name 'presentation' | head -20"
+        - purpose: "List abstract classes"
+          command: "grep -rn 'abstract class' --include='*.java' | head -30"
+      expected_findings:
+        - "Layer structure"
+        - "Abstraction inventory"
+
+    - id: "2"
+      name: "Check for leaky abstractions"
+      description: |
+        Find places where low-level details leak through abstractions.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find infrastructure types in domain"
+          command: "grep -rn 'SQLException\\|Connection\\|HttpClient' $(find . -path '*/domain/*.java') 2>/dev/null | head -20"
+        - purpose: "Find low-level imports in domain"
+          command: "grep -rn 'import.*sql\\|import.*http\\|import.*io' $(find . -path '*/domain/*.java') 2>/dev/null | head -20"
+      expected_findings:
+        - "Leakage locations"
+        - "Abstraction violations"
+
+    - id: "3"
+      name: "Assess abstraction quality"
+      description: |
+        Evaluate whether abstractions genuinely hide complexity.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find interface definitions"
+          command: "grep -rn 'interface [A-Z]' --include='*.java' -A10 | head -50"
+        - purpose: "Check for implementation-specific methods"
+          command: "grep -rn 'interface.*Repository' -A15 --include='*.java' | head -40"
+      expected_findings:
+        - "Interface quality"
+        - "Implementation leakage"
+
+    - id: "4"
+      name: "Identify mixed abstraction levels"
+      description: |
+        Find classes or methods that mix different abstraction levels.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find business + technical mix"
+          command: "grep -rn 'Repository' --include='*Service.java' | head -20"
+        - purpose: "Find low-level in business methods"
+          command: "grep -rn 'connection\\|statement\\|query' --include='*Service.java' | head -20"
+      expected_findings:
+        - "Mixed level locations"
+        - "Separation opportunities"
+
+    - id: "5"
+      name: "Develop abstraction improvements"
+      description: |
+        Recommend improvements to abstraction design.
+      duration_estimate: "30 min"
+      questions:
+        - "Which abstractions need strengthening?"
+        - "Where should new abstractions be introduced?"
+        - "What implementation details should be hidden?"
+      expected_findings:
+        - "Improvement recommendations"
+        - "Refactoring priorities"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "abstraction_map"
+      format: "visual"
+      sections:
+        - "Layer Diagram"
+        - "Leakage Points"
+        - "Mixed Level Areas"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Abstraction Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear abstraction violation"
+    medium: "Potential leakage detected"
+    low: "Minor concern requiring review"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "law-of-leaky"
+        priority: "required"
+      - source_id: "clean-architecture"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed layer analysis"
+    full:
+      included: true
+      priority: 2
+    architecture:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "abstract-001"
+    item: "Domain layer free of infrastructure imports"
+    level: "CRITICAL"
+    verification: "grep -rn 'import.*sql\\|import.*http' $(find . -path '*/domain/*.java') 2>/dev/null | wc -l"
+    expected: "0"
+
+  - id: "abstract-002"
+    item: "Interfaces designed around use cases, not implementations"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Repository/Service interfaces are implementation-agnostic"
+    expected: "Confirmed by reviewer"
+
+  - id: "abstract-003"
+    item: "No mixed abstraction levels in classes"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Business logic separate from technical details"
+    expected: "Confirmed by reviewer"
+
+  - id: "abstract-004"
+    item: "Abstractions genuinely hide complexity"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Callers don't need implementation knowledge"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Modularity"]
+
+relationships:
+  commonly_combined:
+    - "architecture-design.design-principles.dependency-inversion"
+    - "architecture-design.coupling.tight-coupling-detection"
+    - "architecture-design.design-principles.single-responsibility"

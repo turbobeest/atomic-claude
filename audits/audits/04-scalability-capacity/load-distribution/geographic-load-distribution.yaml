@@ -1,0 +1,307 @@
+# ============================================================
+# AUDIT FILE: Geographic Load Distribution Audit
+# ============================================================
+
+audit:
+  id: "scalability-capacity.load-distribution.geographic-load-distribution"
+  name: "Geographic Load Distribution Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "load-distribution"
+
+  tier: "expert"
+  estimated_duration: "4 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the effectiveness of geographic traffic distribution across
+    globally distributed infrastructure. Analyzes DNS-based routing, anycast
+    configurations, CDN edge placement, and regional load balancing to ensure
+    users are routed to optimal locations based on latency, availability,
+    and capacity.
+
+  why_it_matters: |
+    Poor geographic distribution leads to unnecessary latency for users,
+    underutilization of regional capacity, and vulnerability to regional
+    outages. Effective geo-distribution improves user experience, enables
+    disaster recovery, and optimizes infrastructure costs by serving
+    traffic from the nearest capable location.
+
+  when_to_run:
+    - "When expanding to new regions"
+    - "After DNS or CDN configuration changes"
+    - "When latency complaints arise from specific regions"
+    - "During disaster recovery planning"
+
+prerequisites:
+  required_artifacts:
+    - type: "configuration"
+      description: "DNS configuration with geo-routing rules"
+    - type: "configuration"
+      description: "CDN configuration showing edge locations"
+    - type: "metrics"
+      description: "Regional traffic metrics and latency data"
+
+  access_requirements:
+    - "DNS management console access"
+    - "CDN analytics dashboard access"
+    - "Global monitoring platform access"
+    - "Cloud provider regional metrics"
+
+discovery:
+  code_patterns:
+    - pattern: "(geolocation|latency-based|geo-proximity)"
+      type: "keyword"
+      scope: "config"
+      purpose: "Identify geo-routing configurations"
+    - pattern: "(failover|health-check|routing-policy)"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find failover routing rules"
+
+  file_patterns:
+    - glob: "**/route53*.tf"
+      purpose: "AWS Route53 Terraform configurations"
+    - glob: "**/cloudflare*.yaml"
+      purpose: "Cloudflare configuration files"
+    - glob: "**/dns*.yaml"
+      purpose: "DNS configuration files"
+
+  metrics_queries:
+    - system: "CloudWatch"
+      query: "HealthCheckStatus by Region"
+      purpose: "Monitor regional health check status"
+    - system: "Datadog"
+      query: "avg:network.latency{*} by {region,client_geo}"
+      purpose: "Measure latency by client geography"
+
+knowledge_sources:
+  specifications:
+    - id: "rfc8499"
+      name: "DNS Terminology"
+      url: "https://tools.ietf.org/html/rfc8499"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "aws-route53-routing"
+      name: "AWS Route53 Routing Policies"
+      url: "https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy.html"
+      offline_cache: true
+    - id: "cloudflare-load-balancing"
+      name: "Cloudflare Load Balancing"
+      url: "https://developers.cloudflare.com/load-balancing/"
+      offline_cache: true
+
+  papers:
+    - id: "anycast-paper"
+      title: "A Study of Anycast"
+      url: "https://research.google/pubs/pub35097/"
+
+tooling:
+  infrastructure_tools:
+    - tool: "dig"
+      purpose: "DNS resolution testing"
+      command: "dig +short @8.8.8.8 example.com"
+    - tool: "aws-cli"
+      purpose: "Route53 configuration review"
+      command: "aws route53 list-resource-record-sets --hosted-zone-id ZONE_ID"
+    - tool: "mtr"
+      purpose: "Network path analysis"
+      command: "mtr --report example.com"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) by (region)"
+      purpose: "Regional latency percentiles"
+    - system: "Custom"
+      query: "Global latency map visualization"
+      purpose: "Visualize geographic latency patterns"
+
+signals:
+  critical:
+    - id: "SCALE-GEO-CRIT-001"
+      signal: "Users routed to distant regions despite local availability"
+      evidence_threshold: "P95 latency >300ms when local region available with <50ms"
+      explanation: |
+        Geo-routing misconfiguration causing users to traverse unnecessary
+        network distance, severely impacting experience and wasting resources
+        in the intended local region.
+      remediation: "Review and fix DNS geo-routing policies; verify health checks"
+
+  high:
+    - id: "SCALE-GEO-HIGH-001"
+      signal: "Single region serving majority of global traffic"
+      explanation: "One region handling >70% of traffic despite multi-region deployment"
+      remediation: "Review geo-routing configuration; enable latency-based routing"
+    - id: "SCALE-GEO-HIGH-002"
+      signal: "No geographic failover configured"
+      explanation: "Regional outage would cause global service disruption"
+      remediation: "Implement DNS failover with health checks"
+
+  medium:
+    - id: "SCALE-GEO-MED-001"
+      signal: "Suboptimal CDN edge utilization"
+      remediation: "Review CDN configuration and caching policies"
+    - id: "SCALE-GEO-MED-002"
+      signal: "DNS TTL too high for failover scenarios"
+      remediation: "Reduce DNS TTL to enable faster failover"
+
+  low:
+    - id: "SCALE-GEO-LOW-001"
+      signal: "Minor routing inefficiencies for edge cases"
+
+  positive:
+    - id: "SCALE-GEO-POS-001"
+      signal: "Users consistently routed to lowest-latency regions"
+    - id: "SCALE-GEO-POS-002"
+      signal: "Automatic failover verified and tested"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Geographic Infrastructure"
+      description: |
+        Document all regions, edge locations, and points of presence
+        where traffic can be served.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "List AWS regions with resources"
+          command: "aws ec2 describe-regions --query 'Regions[].RegionName'"
+      expected_findings:
+        - "Complete list of serving locations"
+        - "Capacity per location"
+
+    - id: "2"
+      name: "Analyze DNS Routing Configuration"
+      description: |
+        Review DNS configuration for geo-routing policies, health checks,
+        and failover rules.
+      duration_estimate: "60 min"
+      commands:
+        - purpose: "Review Route53 health checks"
+          command: "aws route53 list-health-checks"
+        - purpose: "Test DNS resolution from different locations"
+          command: "for loc in 8.8.8.8 1.1.1.1 208.67.222.222; do dig +short @$loc example.com; done"
+      expected_findings:
+        - "Geo-routing policy documentation"
+        - "Health check configuration"
+
+    - id: "3"
+      name: "Measure Regional Latency"
+      description: |
+        Collect latency metrics from various geographic locations to
+        validate routing effectiveness.
+      duration_estimate: "60 min"
+      expected_findings:
+        - "Latency measurements by region"
+        - "Routing efficiency assessment"
+
+    - id: "4"
+      name: "Test Failover Behavior"
+      description: |
+        Verify that geographic failover works correctly when primary
+        regions become unavailable.
+      duration_estimate: "45 min"
+      questions:
+        - "How quickly does DNS failover occur?"
+        - "Are users routed to appropriate backup regions?"
+        - "Is there capacity in backup regions?"
+      expected_findings:
+        - "Failover timing measurements"
+        - "Backup region capacity assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Geographic Infrastructure Map"
+        - "Routing Analysis"
+        - "Failover Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Global synthetic monitoring with measured latencies"
+    medium: "DNS configuration review with limited latency testing"
+    low: "Configuration review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-route53-routing"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires multi-region testing"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "geographic-load-distribution-001"
+    item: "All geographic locations inventoried"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Confirm complete list of regions and edge locations"
+    expected: "Confirmed by reviewer"
+
+  - id: "geographic-load-distribution-002"
+    item: "DNS routing configuration analyzed"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify geo-routing policies documented"
+    expected: "Confirmed by reviewer"
+
+  - id: "geographic-load-distribution-003"
+    item: "Failover behavior tested"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Confirm failover scenarios validated"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["global-application", "multi-region", "cdn-dependent"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.1", "CC9.1"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.load-distribution.cross-zone-balancing"
+    - "scalability-capacity.load-distribution.traffic-distribution"

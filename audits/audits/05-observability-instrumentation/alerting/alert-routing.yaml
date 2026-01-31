@@ -1,0 +1,255 @@
+audit:
+  id: observability-instrumentation.alerting.alert-routing
+  name: Alert Routing Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: alerting
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: operations
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Reviews alert routing configurations including route matching rules,
+    notification channels, team assignments, and delivery verification.
+    Ensures alerts reach the right people through the right channels.
+  why_it_matters: |
+    Misrouted alerts delay incident response as the wrong teams are paged
+    or alerts go to unmonitored channels. Correct routing ensures the team
+    with expertise and authority to fix issues receives alerts promptly,
+    reducing MTTR and improving incident outcomes.
+  when_to_run:
+  - Team structure changes
+  - New service ownership
+  - After routing-related incident delays
+  - Quarterly alerting review
+prerequisites:
+  required_artifacts:
+  - type: alertmanager_config
+    description: AlertManager routing configuration
+  - type: team_ownership
+    description: Service-to-team mapping
+  access_requirements:
+  - AlertManager configuration
+  - Notification channel configuration
+  - On-call rotation schedules
+discovery:
+  metrics_queries:
+  - system: Prometheus
+    query: alertmanager_notifications_failed_total
+    purpose: Track notification delivery failures
+    threshold: Zero failures
+  - system: Prometheus
+    query: alertmanager_notification_latency_seconds
+    purpose: Track notification delivery time
+    threshold: < 30 seconds
+  code_patterns:
+  - pattern: 'route:|receiver:|match:|match_re:'
+    type: regex
+    scope: alertmanager_config
+    purpose: Identify routing rules
+  file_patterns:
+  - glob: '**/alertmanager*.yaml'
+    purpose: AlertManager configuration
+  - glob: '**/receivers*.yaml'
+    purpose: Notification receiver config
+  - glob: '**/routes*.yaml'
+    purpose: Routing configuration
+knowledge_sources:
+  specifications:
+  - id: alertmanager-routing
+    name: AlertManager Routing
+    url: https://prometheus.io/docs/alerting/latest/configuration/#route
+    offline_cache: true
+    priority: required
+  guides:
+  - id: pagerduty-integration
+    name: PagerDuty AlertManager Integration
+    url: https://www.pagerduty.com/docs/guides/prometheus-integration-guide/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: amtool
+    purpose: Test routing configuration
+    command: amtool config routes test --alertmanager.url=http://alertmanager:9093 service=api severity=critical
+  - tool: amtool
+    purpose: Show routing tree
+    command: amtool config routes show --alertmanager.url=http://alertmanager:9093
+  monitoring_queries:
+  - system: Prometheus
+    query: sum by (integration) (alertmanager_notifications_total)
+    purpose: Count notifications by integration
+signals:
+  critical:
+  - id: ALERT-ROUTE-CRIT-001
+    signal: Critical alerts routing to default/catch-all
+    evidence_pattern: Critical severity using fallback route
+    explanation: |
+      Critical alerts must route to specific, monitored channels.
+      Default routes may not be actively monitored, delaying
+      response to the most important incidents.
+    remediation: Add explicit routes for critical alerts to on-call teams
+  - id: ALERT-ROUTE-CRIT-002
+    signal: Notification delivery failures
+    evidence_threshold: notifications_failed > 0
+    explanation: |
+      Failed notifications mean alerts are not reaching responders.
+      This is a silent failure that can cause missed incidents.
+    remediation: Fix notification channel configuration and verify delivery
+  high:
+  - id: ALERT-ROUTE-HIGH-001
+    signal: Service alerts routing to wrong team
+    evidence_pattern: Mismatch between service owner and alert receiver
+    explanation: |
+      Alerts to wrong teams cause delays as responders must
+      find and notify the correct team before resolution.
+    remediation: Update routing to match service ownership
+  - id: ALERT-ROUTE-HIGH-002
+    signal: Single point of failure in routing
+    evidence_pattern: Only one notification channel for critical alerts
+    explanation: |
+      If the single channel fails, critical alerts are lost.
+      Redundant channels ensure delivery reliability.
+    remediation: Add backup notification channels for critical alerts
+  medium:
+  - id: ALERT-ROUTE-MED-001
+    signal: Overly complex routing rules
+    evidence_pattern: Deep nesting or many regex matches
+    remediation: Simplify routing with clear ownership labels
+  - id: ALERT-ROUTE-MED-002
+    signal: No route testing process
+    evidence_pattern: Routes not validated before deployment
+    remediation: Add route testing to CI/CD pipeline
+  low:
+  - id: ALERT-ROUTE-LOW-001
+    signal: Routing documentation missing
+    remediation: Document routing logic and ownership mapping
+  positive:
+  - id: ALERT-ROUTE-POS-001
+    signal: Clear, tested routing with redundant channels
+    evidence_pattern: All alerts routed to specific teams with backup channels
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Review routing configuration
+    description: |
+      Examine AlertManager routing configuration including
+      route hierarchy, matchers, and receivers.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Show routing tree
+      command: amtool config routes show --alertmanager.url=http://alertmanager:9093
+    - purpose: List receivers
+      command: kubectl get secret alertmanager-config -o jsonpath='{.data.alertmanager\.yaml}' | base64
+        -d | grep -A 5 'receivers:'
+    expected_findings:
+    - Route hierarchy
+    - Receiver configuration
+  - id: '2'
+    name: Test routing rules
+    description: |
+      Test routing rules with sample alerts to verify they
+      reach expected receivers.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Test critical route
+      command: amtool config routes test --alertmanager.url=http://alertmanager:9093 severity=critical
+        service=api-gateway
+    - purpose: Test team-specific route
+      command: amtool config routes test --alertmanager.url=http://alertmanager:9093 team=payments severity=high
+    expected_findings:
+    - Route verification
+    - Unexpected routing
+  - id: '3'
+    name: Verify notification delivery
+    description: |
+      Check notification delivery success rates and latency
+      for all configured channels.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Check delivery metrics
+      command: curl -s 'http://prometheus:9090/api/v1/query?query=sum%20by%20(integration)%20(rate(alertmanager_notifications_failed_total[24h]))'
+    - purpose: Check delivery latency
+      command: curl -s 'http://prometheus:9090/api/v1/query?query=histogram_quantile(0.99,%20rate(alertmanager_notification_latency_seconds_bucket[24h]))'
+    expected_findings:
+    - Delivery success rate
+    - Notification latency
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Routing Configuration Review
+    - Delivery Verification
+    - Recommendations
+  confidence_guidance:
+    high: Route testing with delivery verification
+    medium: Configuration review with sample testing
+    low: Configuration review only
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: alertmanager-routing
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: alert-route-001
+  item: Routing configuration reviewed
+  level: CRITICAL
+  verification: amtool config routes show --alertmanager.url=http://alertmanager:9093 && echo PASS ||
+    echo FAIL
+  expected: PASS
+- id: alert-route-002
+  item: Critical alert routing verified
+  level: CRITICAL
+  verification: amtool config routes test --alertmanager.url=http://alertmanager:9093 severity=critical
+    | grep -v 'default' && echo PASS || echo FAIL
+  expected: PASS
+- id: alert-route-003
+  item: Notification delivery verified
+  level: BLOCKING
+  verification: manual
+  expected: Zero delivery failures
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SRE Best Practices
+    controls:
+    - Incident Response
+relationships:
+  commonly_combined:
+  - observability-instrumentation.alerting.alert-escalation
+  - observability-instrumentation.alerting.alert-runbook-linking
+  - observability-instrumentation.alerting.alert-fatigue

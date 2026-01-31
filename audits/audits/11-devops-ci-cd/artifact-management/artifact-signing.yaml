@@ -1,0 +1,365 @@
+# ============================================================
+# AUDIT FILE: Artifact Signing
+# ============================================================
+# Evaluates artifact signing practices for authenticity and
+# integrity verification of build outputs.
+# ============================================================
+
+audit:
+  id: "devops-ci-cd.artifact-management.artifact-signing"
+  name: "Artifact Signing Assessment"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "artifact-management"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "security"
+
+  default_profiles:
+    - "full"
+    - "security"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines artifact signing practices including cryptographic
+    signing, signature verification, key management, and signing automation.
+    It evaluates whether artifacts can be verified for authenticity and
+    integrity before deployment.
+
+  why_it_matters: |
+    Unsigned artifacts cannot be verified for authenticity, enabling supply
+    chain attacks where malicious artifacts replace legitimate ones.
+    Signing provides cryptographic proof of artifact origin and integrity,
+    critical for security and compliance.
+
+  when_to_run:
+    - "When establishing security baselines"
+    - "After supply chain security incidents"
+    - "During compliance audits"
+    - "Quarterly security reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "ci_cd_config"
+      description: "CI/CD pipeline configurations"
+    - type: "key_management"
+      description: "Key management system access"
+
+  access_requirements:
+    - "Read access to signing configurations"
+    - "Access to key management policies"
+    - "Permission to view signing metadata"
+
+discovery:
+  file_patterns:
+    - glob: "**/.github/workflows/*.yaml"
+      purpose: "CI/CD workflow configurations"
+    - glob: "**/cosign*"
+      purpose: "Cosign configurations"
+    - glob: "**/notary*"
+      purpose: "Notary configurations"
+    - glob: "**/.gnupg/**"
+      purpose: "GPG configurations"
+
+  code_patterns:
+    - pattern: "cosign|sigstore|sign|notary|gpg"
+      type: "keyword"
+      scope: "config"
+      purpose: "Signing tool references"
+    - pattern: "verify|attestation|provenance"
+      type: "keyword"
+      scope: "config"
+      purpose: "Verification patterns"
+    - pattern: "COSIGN_KEY|SIGNING_KEY|GPG_KEY"
+      type: "regex"
+      scope: "config"
+      purpose: "Signing key references"
+
+knowledge_sources:
+  specifications:
+    - id: "sigstore"
+      name: "Sigstore"
+      url: "https://www.sigstore.dev/"
+      offline_cache: true
+      priority: "required"
+    - id: "slsa"
+      name: "SLSA Supply Chain Security"
+      url: "https://slsa.dev/"
+      offline_cache: true
+      priority: "required"
+    - id: "nsa-supply-chain"
+      name: "NSA: Securing the Software Supply Chain"
+      url: "https://media.defense.gov/2022/Sep/01/2003068942/-1/-1/0/ESF_SECURING_THE_SOFTWARE_SUPPLY_CHAIN_DEVELOPERS.PDF"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "cosign"
+      name: "Cosign Documentation"
+      url: "https://docs.sigstore.dev/cosign/overview/"
+      offline_cache: true
+    - id: "tuf"
+      name: "The Update Framework"
+      url: "https://theupdateframework.io/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "cosign"
+      purpose: "Sign and verify container images"
+      offline_capable: true
+    - tool: "gpg"
+      purpose: "Sign and verify packages"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "cosign"
+      purpose: "Verify image signatures"
+      command: "cosign verify --key cosign.pub image:tag"
+    - tool: "crane"
+      purpose: "Inspect image attestations"
+      command: "crane manifest image:tag | jq '.config.Labels'"
+
+  scripts:
+    - id: "signing-check"
+      language: "bash"
+      purpose: "Check for signing configurations"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Check for signing tools
+        echo "=== Signing Configurations ==="
+        grep -ri 'cosign\|sign\|notary\|gpg' \
+          --include='*.yaml' --include='*.yml' \
+          .github/workflows/ 2>/dev/null | head -20
+
+signals:
+  critical:
+    - id: "ARTSIG-CRIT-001"
+      signal: "Production artifacts are not signed"
+      evidence_indicators:
+        - "No signing step in build pipeline"
+        - "No signature metadata on production artifacts"
+      explanation: |
+        Unsigned artifacts cannot be verified for authenticity, enabling
+        supply chain attacks where malicious artifacts replace legitimate
+        builds.
+      remediation: "Implement mandatory signing for all production artifacts"
+
+    - id: "ARTSIG-CRIT-002"
+      signal: "Signing keys stored in code repository or CI/CD variables"
+      evidence_pattern: "COSIGN_KEY|SIGNING_KEY|-----BEGIN.*KEY"
+      explanation: |
+        Exposed signing keys enable attackers to sign malicious artifacts
+        that pass verification, completely defeating signing security.
+      remediation: "Use hardware security modules or secret managers for signing keys"
+
+  high:
+    - id: "ARTSIG-HIGH-001"
+      signal: "Signature verification not enforced at deployment"
+      evidence_indicators:
+        - "No verification step before deployment"
+        - "Admission controller not checking signatures"
+      explanation: |
+        Signatures without enforcement provide no protection - unsigned
+        or tampered artifacts can still be deployed.
+      remediation: "Enforce signature verification with admission controllers"
+
+    - id: "ARTSIG-HIGH-002"
+      signal: "Signing key has no rotation policy"
+      evidence_indicators:
+        - "Same signing key used indefinitely"
+        - "No key rotation documentation or automation"
+      explanation: |
+        Unrotated keys increase window of vulnerability if compromised
+        and may violate compliance requirements.
+      remediation: "Implement key rotation policy with automated rotation"
+
+  medium:
+    - id: "ARTSIG-MED-001"
+      signal: "No attestations for build provenance"
+      evidence_pattern: "attestation|provenance|slsa"
+      remediation: "Add SLSA provenance attestations to signed artifacts"
+
+    - id: "ARTSIG-MED-002"
+      signal: "Signing limited to container images only"
+      remediation: "Extend signing to all artifact types (packages, binaries, etc.)"
+
+  low:
+    - id: "ARTSIG-LOW-001"
+      signal: "Signing process not documented"
+
+  positive:
+    - id: "ARTSIG-POS-001"
+      signal: "Keyless signing with Sigstore for transparency and auditability"
+    - id: "ARTSIG-POS-002"
+      signal: "SLSA Level 3+ provenance attestations"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Assess signing coverage"
+      description: |
+        Determine which artifact types are signed and identify
+        gaps in signing coverage.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find signing configurations"
+          command: "grep -ri 'cosign\\|sign\\|notary' --include='*.yaml' --include='*.yml' . 2>/dev/null | head -20"
+        - purpose: "Check for attestation generation"
+          command: "grep -ri 'attestation\\|provenance\\|slsa' --include='*.yaml' . 2>/dev/null | head -15"
+      expected_findings:
+        - "Signing coverage assessment"
+        - "Gap identification"
+
+    - id: "2"
+      name: "Review key management"
+      description: |
+        Evaluate how signing keys are stored, accessed, and rotated.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Check for key references"
+          command: "grep -ri 'KEY\\|secret' --include='*.yaml' .github/workflows/ 2>/dev/null | grep -i sign | head -10"
+      expected_findings:
+        - "Key management assessment"
+        - "Security of key storage"
+
+    - id: "3"
+      name: "Verify enforcement mechanisms"
+      description: |
+        Confirm that signature verification is enforced at
+        deployment time.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find admission controller configs"
+          command: "find . -name '*admission*' -o -name '*policy*' 2>/dev/null | head -10"
+        - purpose: "Check for verification steps"
+          command: "grep -ri 'verify' --include='*.yaml' . 2>/dev/null | head -15"
+      expected_findings:
+        - "Enforcement mechanism status"
+        - "Verification coverage"
+
+    - id: "4"
+      name: "Review attestation coverage"
+      description: |
+        Evaluate build provenance attestations for SLSA
+        compliance.
+      duration_estimate: "30 min"
+      questions:
+        - "Are SLSA provenance attestations generated?"
+        - "What SLSA level is achieved?"
+        - "Are attestations verified at deployment?"
+      expected_findings:
+        - "Attestation assessment"
+        - "SLSA compliance level"
+
+    - id: "5"
+      name: "Test verification process"
+      description: |
+        Verify that signature verification actually blocks
+        unsigned or tampered artifacts.
+      duration_estimate: "30 min"
+      questions:
+        - "Would an unsigned artifact be blocked?"
+        - "Would a tampered artifact be detected?"
+        - "Are verification failures properly alerted?"
+      expected_findings:
+        - "Verification effectiveness"
+        - "Alert coverage"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Signing Coverage Analysis"
+        - "Key Management Review"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct verification testing with key management review"
+    medium: "Configuration analysis with sample verification"
+    low: "Documentation review only"
+
+offline:
+  capability: "partial"
+  cache_manifest:
+    knowledge:
+      - source_id: "sigstore"
+        priority: "required"
+      - source_id: "slsa"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive security review"
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "artsig-001"
+    item: "All production artifacts are signed"
+    level: "CRITICAL"
+    verification: "grep -ri 'cosign.*sign\\|sign' --include='*.yaml' .github/workflows/ 2>/dev/null && echo 'PASS' || echo 'FAIL'"
+    expected: "PASS"
+
+  - id: "artsig-002"
+    item: "Signing keys secured in HSM or secret manager"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify signing keys are not in code or CI/CD variables"
+    expected: "Confirmed by reviewer"
+
+  - id: "artsig-003"
+    item: "Signature verification enforced at deployment"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify admission controller or equivalent enforces signatures"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC6.1", "CC8.1"]
+    - framework: "SLSA"
+      controls: ["Source L2", "Build L2", "Build L3"]
+    - framework: "NIST-CSF"
+      controls: ["PR.DS-6"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.artifact-management.artifact-versioning"
+    - "devops-ci-cd.pipeline-security.supply-chain-security"

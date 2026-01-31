@@ -1,0 +1,330 @@
+# ============================================================
+# AUDIT: Idempotency Design Assessment
+# ============================================================
+# Evaluates API idempotency patterns for safe retry behavior
+# ============================================================
+
+audit:
+  id: "api-integration.api-design.idempotency-design"
+
+  name: "Idempotency Design Assessment"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "api-integration"
+  category_number: 9
+  subcategory: "api-design"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+    - "security"
+
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates API design for proper idempotency handling, including
+    idempotency key implementation, deduplication strategies, at-least-once
+    vs exactly-once semantics, and safe retry patterns. Examines both
+    naturally idempotent operations and those requiring explicit handling.
+
+  why_it_matters: |
+    Network failures, timeouts, and client retries are common in distributed
+    systems. Without proper idempotency, retries can cause duplicate payments,
+    double bookings, or repeated side effects. Idempotent APIs enable reliable
+    retry behavior and are essential for building resilient systems.
+
+  when_to_run:
+    - "Before API releases involving state changes"
+    - "During payment/financial system reviews"
+    - "When designing webhook handlers"
+    - "After incident involving duplicate operations"
+
+prerequisites:
+  required_artifacts:
+    - type: "api-source"
+      description: "API handlers and business logic"
+    - type: "database-schema"
+      description: "Database schemas for deduplication"
+
+  access_requirements:
+    - "Read access to API source code"
+    - "Read access to database schemas"
+
+discovery:
+  code_patterns:
+    - pattern: "idempotency[-_]?key|idempotent[-_]?id|request[-_]?id"
+      type: "regex"
+      scope: "source"
+      purpose: "Idempotency key handling"
+    - pattern: "X-Idempotency-Key|Idempotency-Key"
+      type: "regex"
+      scope: "source"
+      purpose: "Idempotency header usage"
+    - pattern: "ON CONFLICT|INSERT.*IGNORE|UPSERT|MERGE"
+      type: "regex"
+      scope: "source"
+      purpose: "Database-level deduplication"
+    - pattern: "dedup|deduplicate|already[-_]?processed"
+      type: "regex"
+      scope: "source"
+      purpose: "Deduplication logic"
+
+  file_patterns:
+    - glob: "**/controllers/**/*.{java,ts,py}"
+      purpose: "API controllers"
+    - glob: "**/handlers/**/*.{java,ts,py}"
+      purpose: "Request handlers"
+    - glob: "**/middleware/**/*.{js,ts}"
+      purpose: "Middleware implementations"
+
+knowledge_sources:
+  specifications:
+    - id: "rfc-7231"
+      name: "RFC 7231 - HTTP/1.1 Semantics (Idempotent Methods)"
+      url: "https://datatracker.ietf.org/doc/html/rfc7231#section-4.2.2"
+      offline_cache: true
+      priority: "required"
+    - id: "openapi-spec"
+      name: "OpenAPI Specification"
+      url: "https://spec.openapis.org/oas/latest.html"
+      offline_cache: true
+      priority: "recommended"
+    - id: "owasp-api-security"
+      name: "OWASP API Security Top 10"
+      url: "https://owasp.org/API-Security/"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "stripe-idempotency"
+      name: "Stripe API - Idempotent Requests"
+      url: "https://stripe.com/docs/api/idempotent_requests"
+      offline_cache: true
+    - id: "aws-idempotency"
+      name: "AWS - Making Retries Safe with Idempotent APIs"
+      url: "https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "custom-lint"
+      purpose: "Check for idempotency key handling in POST endpoints"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "IDEMP-CRIT-001"
+      signal: "Non-idempotent POST without idempotency key support"
+      evidence_pattern: "@PostMapping.*(create|charge|transfer|payment)"
+      explanation: |
+        POST operations that create resources or trigger side effects without
+        idempotency key support will create duplicates on retry. This is
+        critical for financial operations and data integrity.
+      remediation: "Implement idempotency key header handling with response caching"
+
+    - id: "IDEMP-CRIT-002"
+      signal: "Payment/financial operations without deduplication"
+      evidence_pattern: "(payment|charge|transfer|withdraw|deposit).*save|persist"
+      explanation: |
+        Financial operations without deduplication can result in double charges,
+        duplicate transfers, or financial loss. Network failures during payment
+        processing are common and require idempotent handling.
+      remediation: "Implement idempotency keys with transaction deduplication table"
+
+  high:
+    - id: "IDEMP-HIGH-001"
+      signal: "Webhook handlers without idempotent processing"
+      evidence_pattern: "webhook|callback|notify.*handler"
+      explanation: |
+        Webhook providers often retry failed deliveries. Handlers that don't
+        deduplicate can process the same event multiple times, causing
+        duplicate side effects.
+      remediation: "Store processed webhook IDs and skip duplicates"
+
+    - id: "IDEMP-HIGH-002"
+      signal: "PUT/DELETE operations throwing errors on repeated calls"
+      evidence_pattern: "(already|duplicate|exists).*exception|throw.*conflict"
+      explanation: |
+        PUT and DELETE should be naturally idempotent - repeated calls should
+        have the same effect. Throwing errors on repeated operations breaks
+        retry logic and confuses clients.
+      remediation: "Return success (200/204) for repeated PUT/DELETE operations"
+
+  medium:
+    - id: "IDEMP-MED-001"
+      signal: "No idempotency key expiration/cleanup"
+      evidence_indicators:
+        - "Idempotency records stored without TTL"
+        - "No cleanup of old idempotency keys"
+      remediation: "Implement TTL-based expiration for idempotency records (24-48 hours)"
+
+    - id: "IDEMP-MED-002"
+      signal: "Client-generated IDs accepted without validation"
+      evidence_pattern: "request.*id.*=.*body|uuid.*from.*request"
+      remediation: "Validate client-provided IDs format and uniqueness"
+
+  low:
+    - id: "IDEMP-LOW-001"
+      signal: "Inconsistent idempotency key header name"
+      remediation: "Standardize on Idempotency-Key or X-Request-Id"
+
+  positive:
+    - id: "IDEMP-POS-001"
+      signal: "Idempotency middleware handling all POST operations"
+    - id: "IDEMP-POS-002"
+      signal: "Database-level uniqueness constraints for deduplication"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify State-Changing Operations"
+      description: |
+        Find all API endpoints that modify state or trigger side effects.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find POST/PUT endpoints"
+          command: "grep -rn '@PostMapping\\|@PutMapping\\|app\\.post\\|app\\.put' --include='*.java' --include='*.ts' --include='*.js' ."
+        - purpose: "Find create/update operations"
+          command: "grep -rn '\\.(save\\|create\\|update\\|insert\\|persist)(' --include='*.java' --include='*.ts' --include='*.js' ."
+      expected_findings:
+        - "List of state-changing endpoints"
+        - "Create/update operation locations"
+
+    - id: "2"
+      name: "Check Idempotency Key Handling"
+      description: |
+        Verify idempotency key implementation for critical operations.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find idempotency key usage"
+          command: "grep -rn 'idempotency[-_]?key\\|idempotent[-_]?id\\|X-Idempotency' --include='*.java' --include='*.ts' --include='*.js' ."
+        - purpose: "Find request ID handling"
+          command: "grep -rn 'request[-_]?id\\|X-Request-Id\\|correlation[-_]?id' --include='*.java' --include='*.ts' --include='*.js' ."
+        - purpose: "Check for deduplication tables"
+          command: "grep -rn 'idempotency\\|dedup\\|processed_requests' --include='*.sql' --include='*.java' --include='*.ts' ."
+      expected_findings:
+        - "Idempotency implementation patterns"
+        - "Deduplication storage"
+
+    - id: "3"
+      name: "Evaluate Database-Level Safeguards"
+      description: |
+        Check for database constraints that prevent duplicates.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find unique constraints"
+          command: "grep -rn 'UNIQUE\\|unique\\|UniqueConstraint' --include='*.sql' --include='*.java' --include='*.ts' ."
+        - purpose: "Find upsert patterns"
+          command: "grep -rn 'ON CONFLICT\\|UPSERT\\|INSERT.*IGNORE\\|MERGE INTO' --include='*.sql' --include='*.java' --include='*.ts' ."
+      expected_findings:
+        - "Unique constraint coverage"
+        - "Upsert pattern usage"
+
+    - id: "4"
+      name: "Review Webhook Handlers"
+      description: |
+        Check webhook handlers for idempotent processing.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find webhook handlers"
+          command: "grep -rn 'webhook\\|callback\\|notify' --include='*.java' --include='*.ts' --include='*.js' ."
+        - purpose: "Check for event ID tracking"
+          command: "grep -rn 'event[-_]?id\\|delivery[-_]?id\\|already.*processed' --include='*.java' --include='*.ts' --include='*.js' ."
+      expected_findings:
+        - "Webhook handler implementations"
+        - "Event deduplication logic"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Critical Operations Inventory"
+        - "Idempotency Coverage"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear idempotency patterns (or lack thereof) identified"
+    medium: "Partial coverage of operations analyzed"
+    low: "Limited access to business logic code"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "stripe-idempotency"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed business logic analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "idemp-001"
+    item: "POST operations support idempotency keys"
+    level: "CRITICAL"
+    verification: |
+      if grep -rq 'idempotency[-_]key\|Idempotency-Key' --include='*.java' --include='*.ts' --include='*.js' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi
+    expected: "PASS"
+
+  - id: "idemp-002"
+    item: "Financial operations have deduplication"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Reviewer confirms payment/transfer operations deduplicate"
+    expected: "Confirmed by reviewer"
+
+  - id: "idemp-003"
+    item: "Webhook handlers check for duplicate events"
+    level: "BLOCKING"
+    verification: |
+      if grep -rn 'webhook\|callback' --include='*.java' --include='*.ts' --include='*.js' . 2>/dev/null | head -1 | grep -q .; then if grep -rq 'already.*processed\|event.*id.*check\|dedup' --include='*.java' --include='*.ts' --include='*.js' . 2>/dev/null; then echo "PASS"; else echo "FAIL"; fi; else echo "PASS"; fi
+    expected: "PASS"
+
+  - id: "idemp-004"
+    item: "Idempotency records have TTL/expiration"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms idempotency storage has cleanup mechanism"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["api-service", "payment-service", "microservice"]
+
+  compliance_frameworks:
+    - framework: "PCI-DSS"
+      controls: ["6.5.8"]
+
+relationships:
+  commonly_combined:
+    - "api-integration.api-design.http-method-usage"
+    - "api-integration.error-handling.retry-guidance"

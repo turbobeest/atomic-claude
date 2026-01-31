@@ -1,0 +1,390 @@
+audit:
+  id: security-trust.authorization.permission-boundary
+  name: Permission Boundary Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: authorization
+  tier: phd
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Examines permission delegation controls to ensure that users cannot
+    grant permissions beyond their own. Analyzes permission inheritance,
+    delegation limits, and boundary enforcement to prevent privilege
+    escalation through permission sharing. Verifies that permission
+    boundaries are enforced at all grant operations.
+  why_it_matters: |
+    Without permission boundaries, users with permission granting capability
+    can create new users or grant permissions that exceed their own authority.
+    This leads to privilege escalation and unauthorized access. AWS IAM
+    permission boundaries and similar concepts are essential for limiting
+    the scope of delegated permissions.
+  when_to_run:
+  - After implementing permission delegation
+  - When adding user management features
+  - During privilege escalation assessment
+  - After changes to permission model
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application with permission delegation
+  - type: configuration
+    description: Permission boundary definitions
+  access_requirements:
+  - Read access to source code repository
+  - Access to permission model
+discovery:
+  code_patterns:
+  - pattern: (grant|delegate|share|transfer).*permission
+    type: regex
+    scope: source
+    purpose: Find permission granting patterns
+  - pattern: (boundary|limit|max|cap).*permission
+    type: regex
+    scope: source
+    purpose: Locate boundary enforcement
+  - pattern: (canGrant|canDelegate|canShare|hasGrantPermission)
+    type: regex
+    scope: source
+    purpose: Find grant authorization checks
+  - pattern: permission.*inherit|inherit.*permission
+    type: regex
+    scope: source
+    purpose: Locate permission inheritance
+  - pattern: (subset|superset|contains|includes).*permission
+    type: regex
+    scope: source
+    purpose: Find permission comparison logic
+  file_patterns:
+  - glob: '**/permissions/**'
+    purpose: Permission management modules
+  - glob: '**/authorization/**'
+    purpose: Authorization logic
+  - glob: '**/grants/**'
+    purpose: Permission grant modules
+  - glob: '**/delegation/**'
+    purpose: Delegation implementation
+knowledge_sources:
+  specifications:
+  - id: cwe-266
+    name: 'CWE-266: Incorrect Privilege Assignment'
+    url: https://cwe.mitre.org/data/definitions/266.html
+    offline_cache: true
+    priority: required
+  - id: cwe-269
+    name: 'CWE-269: Improper Privilege Management'
+    url: https://cwe.mitre.org/data/definitions/269.html
+    offline_cache: true
+    priority: required
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: NIST SP 800-207 Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-permission-boundary
+    name: AWS IAM Permission Boundaries
+    url: https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html
+    offline_cache: true
+  - id: owasp-authz
+    name: OWASP Authorization Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect unbounded permission grants
+    offline_capable: true
+  scripts:
+  - id: permission-boundary-search
+    language: bash
+    purpose: Find permission boundary patterns
+    source: inline
+    code: |
+      # Search for permission granting and boundaries
+      grep -rn --include="*.{js,ts,py,java,go,rb,cs}" \
+        -E "(grant|delegate|boundary|limit).*permission" .
+signals:
+  critical:
+  - id: BOUND-CRIT-001
+    signal: Permission grant without boundary check
+    evidence_pattern: grant.*permission\(.*\)(?!.*boundary|limit|canGrant|subset)
+    cwe: CWE-266
+    explanation: |
+      Permissions are granted without verifying that the granting user
+      has authority to grant those permissions. Users can grant
+      permissions they don't possess, leading to privilege escalation.
+    remediation: Verify grantedPermissions.isSubsetOf(grantor.permissions)
+  - id: BOUND-CRIT-002
+    signal: User can create admin accounts
+    evidence_pattern: create.*user.*role.*admin(?!.*isAdmin|superuser)
+    cwe: CWE-269
+    explanation: |
+      Non-admin users can create accounts with admin privileges,
+      enabling vertical privilege escalation.
+    remediation: Restrict admin account creation to existing admins with boundary checks
+  - id: BOUND-CRIT-003
+    signal: Permission delegation without depth limit
+    evidence_pattern: delegate.*permission(?!.*depth|level|generation)
+    cwe: CWE-266
+    explanation: |
+      Delegated permissions can be re-delegated indefinitely,
+      losing track of the original permission source and authority.
+    remediation: Implement delegation depth limits (e.g., max 2 levels)
+  high:
+  - id: BOUND-HIGH-001
+    signal: No intersection of effective and boundary permissions
+    evidence_pattern: permission(?!.*intersect|.*AND|.*\&)
+    cwe: CWE-266
+    explanation: |
+      Effective permissions should be the intersection of granted
+      permissions and boundary permissions. Without this, boundaries
+      can be bypassed.
+    remediation: Compute effectivePermissions = grantedPermissions AND boundaryPermissions
+  - id: BOUND-HIGH-002
+    signal: Wildcard permissions without restriction
+    evidence_pattern: permission.*\*|\*.*permission|all.*permission
+    cwe: CWE-266
+    explanation: |
+      Wildcard or 'all' permissions are granted without restriction,
+      potentially exceeding intended authority.
+    remediation: Avoid wildcard permissions; enumerate specific permissions
+  - id: BOUND-HIGH-003
+    signal: Permission boundary not enforced at service layer
+    evidence_pattern: service\.(grant|create|delegate)(?!.*boundary)
+    cwe: CWE-266
+    explanation: |
+      Permission boundaries are checked at API layer but not service
+      layer, allowing bypass through internal calls.
+    remediation: Enforce permission boundaries at service layer
+  medium:
+  - id: BOUND-MED-001
+    signal: Missing permission revocation cascade
+    evidence_pattern: revoke.*permission(?!.*cascade|.*delegated)
+    cwe: CWE-269
+    remediation: Cascade permission revocation to delegated grants
+  - id: BOUND-MED-002
+    signal: No audit of permission delegation
+    evidence_pattern: (grant|delegate).*permission(?!.*audit|log)
+    cwe: CWE-778
+    remediation: Log all permission grants with grantor, grantee, and permissions
+  low:
+  - id: BOUND-LOW-001
+    signal: Permission boundaries not documented
+    evidence_pattern: boundary(?!.*comment|description|doc)
+    remediation: Document permission boundary configuration
+  positive:
+  - id: BOUND-POS-001
+    signal: Permission subset validation
+    evidence_pattern: (subset|contains|includes|isSubset).*permission
+  - id: BOUND-POS-002
+    signal: Delegation depth limit enforced
+    evidence_pattern: (depth|level|generation).*(limit|max|<)
+  - id: BOUND-POS-003
+    signal: Permission intersection computed
+    evidence_pattern: (intersect|AND|\&).*permission.*boundary
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Permission Grant Points
+    description: |
+      Locate all code paths where permissions are granted,
+      delegated, or shared.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find permission granting
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(grant|delegate|share|assign|add).*[pP]ermission" .
+    - purpose: Find role assignment
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(assignRole|grantRole|addToRole)" .
+    expected_findings:
+    - Permission granting mechanisms
+    - Role assignment points
+  - id: '2'
+    name: Analyze Boundary Enforcement
+    description: |
+      Verify that permission boundaries are defined and
+      enforced at grant operations.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find boundary definitions
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(boundary|limit|max|cap).*permission" .
+    - purpose: Check grant authorization
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(canGrant|hasGrantPermission|subset)" .
+    expected_findings:
+    - Boundary definitions
+    - Grant authorization checks
+  - id: '3'
+    name: Verify Permission Intersection
+    description: |
+      Ensure effective permissions are computed as intersection
+      of grants and boundaries.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find intersection logic
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(intersect|AND|\\&).*(permission|boundary)" .
+    - purpose: Find effective permission computation
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(effective|resolved|final).*[pP]ermission" .
+    expected_findings:
+    - Permission intersection logic
+    - Effective permission computation
+  - id: '4'
+    name: Check Delegation Limits
+    description: |
+      Verify that permission delegation has depth limits
+      and source tracking.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find delegation depth handling
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(depth|level|generation).*(delegate|grant)" .
+    - purpose: Find delegation source tracking
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(source|origin|grantedBy).*permission" .
+    expected_findings:
+    - Delegation depth limits
+    - Grant source tracking
+  - id: '5'
+    name: Audit Revocation Cascade
+    description: |
+      Verify that permission revocation cascades to
+      delegated grants.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find revocation logic
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(revoke|remove|delete).*permission" .
+    - purpose: Check cascade behavior
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(cascade|propagate|revoke.*delegated)" .
+    expected_findings:
+    - Revocation cascade mechanism
+    - Delegated permission cleanup
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Permission Boundary Analysis
+    - Delegation Risk Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Permission boundaries enforced with intersection and limits
+    medium: Some boundary checks present but incomplete
+    low: Permission granting found but boundaries unclear
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-266
+      priority: required
+    - source_id: owasp-authz
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Permission boundary audit requires thorough analysis
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: bound-001
+  item: Permission grants check grantor authority
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "grant.*permission" . | wc -l && \
+    grep -rn --include="*.{js,ts,py,java,go}" "(canGrant\|subset\|boundary).*permission" . | wc -l
+  expected: Boundary checks present if granting exists
+- id: bound-002
+  item: No wildcard permission grants
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "permission.*['\"]\\*['\"]" . | wc -l
+  expected: 0 or properly restricted
+- id: bound-003
+  item: Delegation depth limited
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "(depth\|level\|generation).*delegat" . | wc -l
+  expected: Greater than 0 if delegation exists
+- id: bound-004
+  item: Permission delegation audited
+  level: WARNING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "(grant\|delegate).*permission.*(log\|audit)" . | wc -l
+  expected: Greater than 0
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-266
+    - CWE-269
+  - framework: NIST SP 800-53
+    controls:
+    - AC-6(5)
+  - framework: AWS Well-Architected
+    controls:
+    - SEC02-BP05
+relationships:
+  commonly_combined:
+  - security-trust.authorization.rbac-implementation
+  - security-trust.authorization.privilege-escalation
+  - security-trust.authorization.admin-access

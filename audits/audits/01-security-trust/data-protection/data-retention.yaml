@@ -1,0 +1,519 @@
+audit:
+  id: security-trust.data-protection.data-retention
+  name: Data Retention Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: data-protection
+  tier: phd
+  estimated_duration: 2-4 hours  # median: 3h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the implementation and enforcement of data retention
+    policies across the organization. It evaluates:
+    - Retention period definitions for different data categories
+    - Automated data deletion or anonymization mechanisms
+    - Legal hold implementation for litigation or compliance
+    - Retention schedule documentation and communication
+    - Audit trails for retention enforcement
+    - Backup data inclusion in retention policies
+  why_it_matters: |
+    GDPR Article 5(1)(e) establishes the storage limitation principle: personal
+    data must be "kept in a form which permits identification of data subjects
+    for no longer than is necessary." Failure to implement retention policies
+    results in:
+    - GDPR and CCPA compliance violations with significant fines
+    - Increased breach exposure (more data = more damage if breached)
+    - Higher storage costs for unnecessarily retained data
+    - Inability to respond to data subject deletion requests
+    - Legal discovery complications with excessive data retention
+
+    The ICO has consistently enforced storage limitation violations. Organizations
+    must be able to justify retention periods and demonstrate enforcement.
+  when_to_run:
+  - Initial compliance assessment
+  - During GDPR or CCPA audits
+  - When implementing new data collection systems
+  - After legal hold requirements change
+  - During annual data governance reviews
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Source code including data lifecycle management
+  - type: retention_policies
+    description: Data retention policy documentation
+  - type: database_schemas
+    description: Database schemas with timestamp fields
+  access_requirements:
+  - Read access to all source code repositories
+  - Access to data retention policy documents
+  - Access to scheduled job configurations
+  - Access to backup retention configurations
+discovery:
+  code_patterns:
+  - pattern: (retention|expire|ttl|time_?to_?live).*[=:].*\d+.*(day|week|month|year)
+    type: regex
+    scope: source
+    purpose: Detect retention period configurations
+  - pattern: (delete|purge|remove|archive).*WHERE.*(created|updated|timestamp).*<
+    type: regex
+    scope: source
+    purpose: Detect automated deletion queries
+  - pattern: (cron|schedule|job).*?(delete|purge|cleanup|retention)
+    type: regex
+    scope: config
+    purpose: Detect scheduled deletion jobs
+  - pattern: (legal_?hold|litigation_?hold|preserve|hold_?flag)
+    type: regex
+    scope: source
+    purpose: Detect legal hold implementations
+  - pattern: (created_?at|updated_?at|deleted_?at|expires_?at)
+    type: regex
+    scope: source
+    purpose: Detect lifecycle timestamp fields
+  - pattern: (soft_?delete|is_?deleted|deleted_?flag)
+    type: regex
+    scope: source
+    purpose: Detect soft delete implementations
+  - pattern: retention.*[=:].*(-1|null|never|indefinite|forever)
+    type: regex
+    scope: config
+    purpose: Detect indefinite retention configurations
+  file_patterns:
+  - glob: '**/retention*.{yaml,yml,json,md}'
+    purpose: Retention policy configuration files
+  - glob: '**/cleanup/**/*.{py,rb,js,sql}'
+    purpose: Data cleanup scripts
+  - glob: '**/jobs/**/*purge*.{py,rb,js}'
+    purpose: Purge job implementations
+  - glob: '**/migrations/**/*.sql'
+    purpose: Schema migrations with retention-related changes
+  - glob: '**/*schedule*.{yaml,cron}'
+    purpose: Scheduled job configurations
+knowledge_sources:
+  specifications:
+  - id: gdpr-article-5
+    name: 'GDPR Article 5: Principles relating to processing'
+    url: https://gdpr-info.eu/art-5-gdpr/
+    offline_cache: true
+    priority: required
+  - id: gdpr-article-17
+    name: 'GDPR Article 17: Right to erasure'
+    url: https://gdpr-info.eu/art-17-gdpr/
+    offline_cache: true
+    priority: required
+  - id: ccpa-1798-105
+    name: 'CCPA Section 1798.105: Consumer right to deletion'
+    url: https://oag.ca.gov/privacy/ccpa
+    offline_cache: true
+    priority: required
+  - id: ico-storage-limitation
+    name: 'ICO: Storage Limitation Guidance'
+    url: https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/data-protection-principles/a-guide-to-the-data-protection-principles/storage-limitation/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: nist-record-retention
+    name: NIST Guidelines on Media Protection
+    url: https://csrc.nist.gov/publications/detail/sp/800-88/rev-1/final
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect retention-related code patterns
+    offline_capable: true
+  - tool: custom-retention-scanner
+    purpose: Scan for retention period configurations
+    offline_capable: true
+  infrastructure_tools:
+  - tool: aws-s3-lifecycle
+    purpose: S3 lifecycle policies for retention
+    command: aws s3api get-bucket-lifecycle-configuration --bucket $BUCKET
+  - tool: postgres-age-partition
+    purpose: PostgreSQL partition management for retention
+    command: SELECT * FROM pg_partitions WHERE tablename LIKE '%_archive'
+  scripts:
+  - id: retention-policy-scanner
+    language: bash
+    purpose: Scan for retention configurations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Data Retention Policy Scan ==="
+      echo "Looking for retention configurations..."
+      grep -rniE "(retention|ttl|expire|purge).*=.*\\d+" \
+        --include="*.yaml" --include="*.json" --include="*.py" \
+        --include="*.env" . 2>/dev/null | head -50
+signals:
+  critical:
+  - id: DRET-CRIT-001
+    signal: No retention periods defined for personal data
+    evidence_indicators:
+    - No retention policy documentation found
+    - No expiration or TTL fields in schemas containing PII
+    - No automated deletion mechanisms for user data
+    explanation: |
+      GDPR Article 5(1)(e) explicitly requires storage limitation - personal
+      data cannot be kept indefinitely without justification. Absence of
+      defined retention periods is a clear compliance violation that regulators
+      consistently enforce.
+    remediation: |
+      - Define retention periods for all personal data categories
+      - Document legal basis for each retention period
+      - Implement automated deletion or anonymization
+      - Create retention schedule documentation
+    cwe: CWE-359
+  - id: DRET-CRIT-002
+    signal: Retention periods exceed legal justification
+    evidence_pattern: retention.*(user|customer|personal).*[=:].*[5-9][0-9]|\d{3,}.*(year|month)
+    explanation: |
+      Retaining personal data longer than necessary violates the storage
+      limitation principle. Organizations must be able to justify each
+      retention period. Multi-decade retention of customer data without
+      legal requirement is unjustifiable.
+    remediation: |
+      - Review and reduce retention periods to minimum necessary
+      - Document legal basis for extended retention
+      - Implement automated deletion for expired data
+      - Consider anonymization as alternative to deletion
+    cwe: CWE-359
+  high:
+  - id: DRET-HIGH-001
+    signal: Backup data excluded from retention policies
+    evidence_indicators:
+    - No backup retention limits configured
+    - Backups kept indefinitely while source data is deleted
+    - No backup purge procedures documented
+    explanation: |
+      If personal data is deleted from production but retained in backups
+      indefinitely, the deletion is ineffective. Backup data must be included
+      in retention policies to achieve actual data minimization.
+    remediation: |
+      - Align backup retention with data retention policies
+      - Implement backup rotation based on retention periods
+      - Document backup retention in privacy policies
+      - Consider encrypted backup with key destruction
+  - id: DRET-HIGH-002
+    signal: No legal hold implementation
+    evidence_indicators:
+    - No litigation hold flags in data models
+    - No mechanism to suspend deletion for legal matters
+    - Automated deletion continues during litigation
+    explanation: |
+      Organizations must be able to preserve data subject to legal holds
+      even when normal retention would trigger deletion. Deleting relevant
+      data during litigation constitutes spoliation and creates legal liability.
+    remediation: |
+      - Implement legal hold flags on data records
+      - Create process to suspend deletion for held data
+      - Document legal hold procedures
+      - Train relevant personnel on hold procedures
+    cwe: CWE-404
+  - id: DRET-HIGH-003
+    signal: Soft-deleted data retained indefinitely
+    evidence_pattern: (soft_?delete|is_?deleted)(?!.*(purge|retention|expire))
+    explanation: |
+      Soft deletion (marking records as deleted without removing them) does
+      not satisfy data deletion requirements. If soft-deleted records are
+      never hard-deleted, the data is still being retained in violation of
+      storage limitation principles.
+    remediation: |
+      - Implement hard deletion for soft-deleted records after grace period
+      - Define purge schedule for soft-deleted data
+      - Ensure soft-deleted data is excluded from queries
+      - Document soft-delete as temporary state only
+  - id: DRET-HIGH-004
+    signal: No audit trail for retention enforcement
+    evidence_indicators:
+    - No logging of data deletion operations
+    - Cannot demonstrate retention compliance to regulators
+    - No records of what data was deleted and when
+    explanation: |
+      GDPR accountability principle requires organizations to demonstrate
+      compliance. Without audit trails of retention enforcement, organizations
+      cannot prove they are actually deleting data as required.
+    remediation: |
+      - Log all automated deletion operations
+      - Track retention policy enforcement metrics
+      - Create compliance reports for retention
+      - Maintain deletion audit trail for required period
+  medium:
+  - id: DRET-MED-001
+    signal: Retention periods not communicated to data subjects
+    evidence_indicators:
+    - Privacy policy lacks specific retention periods
+    - Retention information not provided at data collection
+    - Vague retention language ('as long as necessary')
+    explanation: |
+      GDPR Article 13 requires organizations to inform data subjects of
+      the period for which personal data will be stored, or the criteria
+      used to determine that period. Vague statements are insufficient.
+    remediation: |
+      - Update privacy policy with specific retention periods
+      - Communicate retention at point of collection
+      - Replace vague language with specific timeframes
+      - Provide retention information by data category
+  - id: DRET-MED-002
+    signal: Inconsistent retention across data copies
+    evidence_indicators:
+    - Data in analytics has different retention than source
+    - Exported data copies not covered by retention
+    - Third-party systems retain data longer than primary
+    explanation: |
+      Data copied for analytics, reporting, or integration must follow
+      the same retention policies as the source. Inconsistent retention
+      creates compliance gaps and complicates deletion requests.
+    remediation: |
+      - Inventory all data copies and downstream systems
+      - Align retention across all copies
+      - Include data copies in deletion procedures
+      - Update data sharing agreements with retention requirements
+  - id: DRET-MED-003
+    signal: No automated enforcement of retention policies
+    evidence_pattern: retention.*manual|document.*retention(?!.*automat)
+    explanation: |
+      Manual retention enforcement is error-prone and often neglected.
+      Documented policies without automated enforcement create compliance
+      risk as data accumulates beyond retention periods.
+    remediation: |
+      - Implement automated deletion jobs
+      - Schedule regular retention enforcement runs
+      - Create alerting for retention job failures
+      - Monitor retention compliance metrics
+  low:
+  - id: DRET-LOW-001
+    signal: Retention periods not aligned with business needs
+    evidence_indicators:
+    - Data deleted that business still needs
+    - Retention set arbitrarily without analysis
+    - Frequent requests to recover deleted data
+    explanation: |
+      While over-retention is a compliance issue, under-retention causes
+      business disruption. Retention periods should balance compliance
+      requirements with legitimate business needs.
+    remediation: |
+      - Conduct retention requirements analysis
+      - Engage business stakeholders in retention decisions
+      - Document business justification for retention periods
+      - Implement grace periods before final deletion
+  positive:
+  - id: DRET-POS-001
+    signal: Comprehensive retention schedule implemented
+    evidence_indicators:
+    - Documented retention periods for all data categories
+    - Automated deletion with audit logging
+    - Regular retention compliance reporting
+  - id: DRET-POS-002
+    signal: Legal hold system properly implemented
+    evidence_indicators:
+    - Hold flags integrated with deletion processes
+    - Hold management procedures documented
+    - Hold audit trail maintained
+  - id: DRET-POS-003
+    signal: Retention includes all data copies
+    evidence_indicators:
+    - Backup rotation aligned with retention
+    - Analytics data included in retention
+    - Third-party data sharing includes retention requirements
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Retention Policy Documentation Review
+    description: |
+      Locate and review data retention policy documentation to understand
+      defined retention periods and their legal basis.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find retention policy documentation
+      command: |
+        find . -type f \( -name "*retention*" -o -name "*privacy*" \
+          -o -name "*data-governance*" \) 2>/dev/null | head -20
+    - purpose: Search for retention period definitions
+      command: |
+        grep -rniE "(retention|expire|ttl).*[=:].*\\d+.*(day|week|month|year)" \
+          --include="*.yaml" --include="*.json" --include="*.py" \
+          --include="*.md" . 2>/dev/null | head -40
+    expected_findings:
+    - Retention policy documents
+    - Configured retention periods
+    - Legal basis documentation
+  - id: '2'
+    name: Automated Deletion Mechanism Assessment
+    description: |
+      Identify automated deletion jobs, scheduled tasks, and data
+      lifecycle management implementations.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find deletion/purge implementations
+      command: |
+        grep -rniE "(delete|purge|cleanup|archive).*WHERE.*(created|timestamp|date)" \
+          --include="*.py" --include="*.sql" --include="*.rb" . 2>/dev/null | head -40
+    - purpose: Find scheduled jobs related to retention
+      command: |
+        find . -type f \( -name "*cron*" -o -name "*schedule*" \
+          -o -name "*job*" \) -exec grep -l -iE "delete|purge|retention" {} \; 2>/dev/null
+    expected_findings:
+    - Automated deletion queries/scripts
+    - Scheduled job configurations
+    - Job monitoring and alerting
+  - id: '3'
+    name: Legal Hold Implementation Check
+    description: |
+      Verify that legal hold mechanisms exist to preserve data
+      during litigation or regulatory investigation.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find legal hold implementations
+      command: |
+        grep -rniE "(legal_?hold|litigation|preserve|hold_?flag)" \
+          --include="*.py" --include="*.js" --include="*.sql" \
+          --include="*.yaml" . 2>/dev/null | head -30
+    - purpose: Check for hold integration with deletion
+      command: |
+        grep -rniE "delete.*NOT.*hold|WHERE.*hold.*FALSE" \
+          --include="*.py" --include="*.sql" . 2>/dev/null | head -20
+    expected_findings:
+    - Legal hold flag implementations
+    - Hold-aware deletion queries
+    - Hold management procedures
+  - id: '4'
+    name: Backup Retention Assessment
+    description: |
+      Verify that backup data is included in retention policies
+      and has appropriate lifecycle management.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find backup configurations
+      command: |
+        find . -type f \( -name "*backup*" -o -name "*snapshot*" \) \
+          -exec grep -l -iE "retention|expire|lifecycle" {} \; 2>/dev/null
+    - purpose: Check cloud storage lifecycle configs
+      command: |
+        find . -type f -name "*.tf" -exec grep -l -iE "lifecycle|retention" {} \; 2>/dev/null
+    expected_findings:
+    - Backup retention configurations
+    - Cloud storage lifecycle policies
+    - Backup rotation schedules
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Retention Policy Assessment
+    - Automated Enforcement Status
+    - Legal Hold Evaluation
+    - Recommendations
+  - type: retention_schedule
+    format: table
+    description: Data categories with retention periods and enforcement status
+  confidence_guidance:
+    high: Retention configuration directly observed with enforcement verified
+    medium: Retention policy documented but enforcement not verified
+    low: Retention status unclear, requires manual verification
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: gdpr-article-5
+      priority: required
+    - source_id: ico-storage-limitation
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Retention audit requires thorough analysis
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: dret-001
+  item: Retention periods defined for personal data categories
+  level: CRITICAL
+  verification: |
+    find . -type f \( -name "*retention*" -o -name "*policy*" \) \
+      -exec grep -l -iE "(customer|user|personal).*\\d+.*(day|month|year)" {} \; 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: dret-002
+  item: Automated deletion mechanism exists
+  level: CRITICAL
+  verification: |
+    grep -rniE "(delete|purge).*schedule|cron.*(delete|purge|cleanup)" \
+      --include="*.py" --include="*.yaml" --include="*.sh" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: dret-003
+  item: Legal hold mechanism implemented
+  level: BLOCKING
+  verification: |
+    grep -rniE "(legal_?hold|litigation_?hold|preserve)" \
+      --include="*.py" --include="*.js" --include="*.sql" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: dret-004
+  item: Backup data included in retention policies
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify backup retention aligns with data retention policies
+  expected: Confirmed by reviewer
+- id: dret-005
+  item: Retention enforcement audit trail exists
+  level: WARNING
+  verification: |
+    grep -rniE "log.*(delete|purge|retention)|audit.*(delete|purge)" \
+      --include="*.py" --include="*.js" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: GDPR
+    controls:
+    - Article 5(1)(e)
+    - Article 13
+    - Article 17
+  - framework: CCPA
+    controls:
+    - '1798.105'
+    - '1798.100'
+  - framework: HIPAA
+    controls:
+    - 164.530(j)
+  - framework: SOX
+    controls:
+    - Section 802
+  - framework: ISO 27001
+    controls:
+    - A.8.3.2
+    - A.18.1.3
+relationships:
+  commonly_combined:
+  - security-trust.data-protection.pii-handling
+  - security-trust.data-protection.data-deletion
+  - security-trust.data-protection.data-classification

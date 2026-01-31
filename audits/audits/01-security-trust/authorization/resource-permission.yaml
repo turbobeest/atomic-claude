@@ -1,0 +1,398 @@
+audit:
+  id: security-trust.authorization.resource-permission
+  name: Resource-Level Permission Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: authorization
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Examines fine-grained permission controls at the individual resource level.
+    Verifies that permission checks are performed for specific actions on
+    specific resources, not just role membership. Analyzes permission models,
+    access control lists (ACLs), capability-based security, and resource-action
+    permission matrices.
+  why_it_matters: |
+    Role-based checks alone are insufficient when different resources require
+    different permissions. Resource-level permissions enable fine-grained
+    access control for operations like view, edit, delete, share on individual
+    documents, records, or objects. Missing resource-level checks lead to
+    unauthorized data access and modification (CWE-285, CWE-863).
+  when_to_run:
+  - Initial security assessment
+  - After changes to permission model
+  - When adding new resource types
+  - During access control review
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application with resource access control
+  - type: configuration
+    description: Permission definitions and ACL configurations
+  access_requirements:
+  - Read access to source code repository
+  - Access to permission configuration
+  - Understanding of resource ownership model
+discovery:
+  code_patterns:
+  - pattern: (permission|Permission|PERMISSION)\.(check|has|can|verify)
+    type: regex
+    scope: source
+    purpose: Find permission verification calls
+  - pattern: (canRead|canWrite|canDelete|canShare|canView|canEdit)
+    type: regex
+    scope: source
+    purpose: Locate resource action checks
+  - pattern: (acl|ACL|accessControl)\.(check|has|verify|allow)
+    type: regex
+    scope: source
+    purpose: Find ACL-based permission checks
+  - pattern: '@(PreAuthorize|PostAuthorize)\(.*#[a-z]+\.'
+    type: regex
+    scope: source
+    purpose: Find Spring Security resource-level checks
+  - pattern: (resource|object)\.(permissions?|access|allowed)
+    type: regex
+    scope: source
+    purpose: Locate resource-attached permissions
+  file_patterns:
+  - glob: '**/permissions/**'
+    purpose: Permission definition modules
+  - glob: '**/acl/**'
+    purpose: ACL implementation files
+  - glob: '**/authorization/**'
+    purpose: Authorization logic
+  - glob: '**/policies/**'
+    purpose: Policy definition files
+  - glob: '**/access/**'
+    purpose: Access control modules
+knowledge_sources:
+  specifications:
+  - id: cwe-285
+    name: 'CWE-285: Improper Authorization'
+    url: https://cwe.mitre.org/data/definitions/285.html
+    offline_cache: true
+    priority: required
+  - id: cwe-863
+    name: 'CWE-863: Incorrect Authorization'
+    url: https://cwe.mitre.org/data/definitions/863.html
+    offline_cache: true
+    priority: required
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: NIST SP 800-207 Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-authz
+    name: OWASP Authorization Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html
+    offline_cache: true
+  - id: owasp-access-control
+    name: OWASP Access Control Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Access_Control_Cheat_Sheet.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect missing permission checks
+    offline_capable: true
+  - tool: CodeQL
+    purpose: Analyze permission enforcement flow
+    offline_capable: true
+  scripts:
+  - id: permission-search
+    language: bash
+    purpose: Find permission check patterns
+    source: inline
+    code: |
+      # Search for permission-related patterns
+      grep -rn --include="*.{js,ts,py,java,go,rb,cs}" \
+        -E "(permission|can[A-Z]|hasAccess|checkAccess)" .
+signals:
+  critical:
+  - id: PERM-CRIT-001
+    signal: Resource access without permission check
+    evidence_pattern: getById\(.*\)(?!.*permission|checkAccess|can|authorize)
+    cwe: CWE-862
+    explanation: |
+      Resources are accessed without verifying the user's permission
+      for that specific resource. Role membership alone does not
+      authorize access to individual resources.
+    remediation: 'Add resource-level permission check: checkPermission(user, resource, ''read'')'
+  - id: PERM-CRIT-002
+    signal: Resource modification without write permission
+    evidence_pattern: (update|save|put).*(?!.*canWrite|canEdit|permission.*write)
+    cwe: CWE-863
+    explanation: |
+      Resources are modified without verifying write permission,
+      allowing users with read-only access to modify data.
+    remediation: Verify write permission before modification
+  - id: PERM-CRIT-003
+    signal: Permission bypass through direct object access
+    evidence_pattern: repository\.(find|get).*(?!.*permission)
+    cwe: CWE-639
+    explanation: |
+      Direct repository access bypasses permission layer, allowing
+      unauthorized resource access through ORM or data layer.
+    remediation: Enforce permissions in repository layer or use permission-aware query wrappers
+  high:
+  - id: PERM-HIGH-001
+    signal: Inconsistent permission enforcement across endpoints
+    evidence_pattern: '@(Get|Post)Mapping.*(?!@PreAuthorize.*#)'
+    cwe: CWE-863
+    explanation: |
+      Some endpoints check resource permissions while others don't,
+      creating bypass opportunities through alternative access paths.
+    remediation: Apply consistent permission checks to all resource endpoints
+  - id: PERM-HIGH-002
+    signal: Permission check after resource access
+    evidence_pattern: resource.*=.*get.*\n.*check.*permission
+    cwe: CWE-285
+    explanation: |
+      Permission is checked after resource retrieval, potentially
+      leaking resource existence information through timing.
+    remediation: Check permissions before accessing resources
+  - id: PERM-HIGH-003
+    signal: Cached permissions not invalidated on change
+    evidence_pattern: cache.*(permission|acl)(?!.*invalidat|.*refresh)
+    cwe: CWE-613
+    explanation: |
+      Cached permissions are not invalidated when underlying
+      permissions change, allowing stale access.
+    remediation: Invalidate permission cache on ACL updates
+  medium:
+  - id: PERM-MED-001
+    signal: Permission model lacks action granularity
+    evidence_pattern: permission.*['"]access['"]|hasAccess(?!.*['"]read|write|delete)
+    cwe: CWE-285
+    remediation: Define specific actions (read, write, delete, share) not generic 'access'
+  - id: PERM-MED-002
+    signal: Permission inheritance not properly implemented
+    evidence_pattern: permission.*parent|inherit.*permission(?!.*recursive)
+    cwe: CWE-863
+    remediation: Implement proper permission inheritance with explicit override handling
+  low:
+  - id: PERM-LOW-001
+    signal: Permission checks not logged for audit
+    evidence_pattern: checkPermission|canAccess(?!.*log|audit)
+    remediation: Log permission check results for security audit
+  positive:
+  - id: PERM-POS-001
+    signal: Centralized permission service
+    evidence_pattern: (class|interface).*(PermissionService|ACLService|AccessControl)
+  - id: PERM-POS-002
+    signal: Resource-attached permissions (ACL)
+    evidence_pattern: resource\.(permissions|acl|access)
+  - id: PERM-POS-003
+    signal: Action-based permission model
+    evidence_pattern: (action|operation).*permission|permission.*(action|operation)
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Map Permission Model
+    description: |
+      Identify the permission model used (ACL, capability-based,
+      permission matrix) and how permissions are defined.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find permission definitions
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(enum.*Permission|type.*Permission|const.*PERMISSION)" .
+    - purpose: Find ACL implementations
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(ACL|acl|AccessControlList)" .
+    expected_findings:
+    - Permission model definition
+    - Permission types/actions
+  - id: '2'
+    name: Analyze Permission Check Points
+    description: |
+      Locate all points where resource permissions are verified
+      and ensure complete coverage.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find permission check calls
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(checkPermission|hasPermission|canAccess|can[A-Z][a-z]+\\()" .
+    - purpose: Find resource access points
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(findById|getById|repository\\.find)" . | head -40
+    expected_findings:
+    - Permission checks at resource access points
+    - Consistent permission enforcement
+  - id: '3'
+    name: Verify Action-Level Permissions
+    description: |
+      Ensure that different actions (read, write, delete, share)
+      have separate permission checks.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find action-specific permission checks
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(canRead|canWrite|canDelete|canShare|canEdit|canView)" .
+    - purpose: Check write operations for permission
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -B3 -A3 \
+          "(update|save|delete).*repository" . | grep -E "(can|permission|authorize)"
+    expected_findings:
+    - Action-specific permission enforcement
+    - Write permissions on modifications
+  - id: '4'
+    name: Review Permission Assignment
+    description: |
+      Verify how permissions are granted to users for
+      specific resources.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find permission granting patterns
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(grantPermission|addPermission|shareWith|setACL)" .
+    - purpose: Check for owner permission assignment
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(owner|creator).*permission" .
+    expected_findings:
+    - Controlled permission granting
+    - Owner gets appropriate permissions
+  - id: '5'
+    name: Audit Permission Caching
+    description: |
+      Verify that permission caching includes proper
+      invalidation on changes.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find permission caching
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "cache.*(permission|acl|access)" .
+    - purpose: Check for cache invalidation
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(invalidate|clear|refresh).*(permission|acl)" .
+    expected_findings:
+    - Permission caching with invalidation
+    - Cache TTL or refresh mechanism
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Permission Model Analysis
+    - Coverage Gaps
+    - Recommendations
+  confidence_guidance:
+    high: Comprehensive resource-level permissions with consistent enforcement
+    medium: Permission checks present but incomplete coverage
+    low: Permission patterns found but enforcement unclear
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-285
+      priority: required
+    - source_id: owasp-authz
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Resource permission audit requires thorough analysis
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: perm-001
+  item: All resource access has permission checks
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "findById\|getById" . | wc -l && \
+    grep -rn --include="*.{js,ts,py,java,go}" "(findById\|getById).*permission\|checkAccess" . | wc -l
+  expected: Counts should be close
+- id: perm-002
+  item: Write operations require write permission
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "(update\|save\|delete).*repository" . | wc -l && \
+    grep -rn --include="*.{js,ts,py,java,go}" "(canWrite\|canEdit\|canDelete)" . | wc -l
+  expected: Action checks exist for write operations
+- id: perm-003
+  item: Centralized permission service exists
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "(PermissionService\|ACLService\|AccessControl)" . | wc -l
+  expected: Greater than 0
+- id: perm-004
+  item: Permission cache has invalidation
+  level: WARNING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "cache.*permission.*invalidat" . | wc -l
+  expected: Greater than 0 if caching used
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-285
+    - CWE-862
+    - CWE-863
+  - framework: OWASP Top 10 2021
+    controls:
+    - A01:2021
+  - framework: NIST SP 800-53
+    controls:
+    - AC-3
+    - AC-6
+relationships:
+  commonly_combined:
+  - security-trust.authorization.rbac-implementation
+  - security-trust.authorization.bola-prevention
+  - security-trust.authorization.abac-implementation

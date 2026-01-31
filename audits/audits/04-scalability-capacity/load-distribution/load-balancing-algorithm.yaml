@@ -1,0 +1,301 @@
+# ============================================================
+# AUDIT FILE: Load Balancing Algorithm Audit
+# ============================================================
+
+audit:
+  id: "scalability-capacity.load-distribution.load-balancing-algorithm"
+  name: "Load Balancing Algorithm Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "load-distribution"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the load balancing algorithms deployed across the infrastructure,
+    analyzing their effectiveness in distributing traffic evenly across backend
+    instances. Reviews algorithm selection (round-robin, least connections,
+    weighted, IP hash, etc.), configuration parameters, and actual distribution
+    behavior under various traffic patterns.
+
+  why_it_matters: |
+    Suboptimal load balancing algorithms can create uneven workload distribution,
+    leading to some instances being overwhelmed while others sit idle. This
+    results in degraded response times, increased error rates, and inefficient
+    resource utilization, directly impacting user experience and infrastructure
+    costs.
+
+  when_to_run:
+    - "After load balancer configuration changes"
+    - "When performance variance is observed across instances"
+    - "During capacity planning reviews"
+    - "Before major traffic events"
+
+prerequisites:
+  required_artifacts:
+    - type: "configuration"
+      description: "Load balancer configuration files"
+    - type: "metrics"
+      description: "Request distribution metrics per backend instance"
+
+  access_requirements:
+    - "Load balancer admin access (read-only)"
+    - "Monitoring system access for traffic metrics"
+    - "Backend server metrics access"
+
+discovery:
+  code_patterns:
+    - pattern: "(upstream|backend|server_group)\\s*\\{"
+      type: "regex"
+      scope: "config"
+      purpose: "Identify load balancer upstream definitions"
+    - pattern: "(balance|lb_method|load_balancing_mode)\\s*[=:]"
+      type: "regex"
+      scope: "config"
+      purpose: "Find algorithm configuration directives"
+
+  file_patterns:
+    - glob: "**/nginx*.conf"
+      purpose: "Nginx load balancer configurations"
+    - glob: "**/haproxy*.cfg"
+      purpose: "HAProxy configurations"
+    - glob: "**/envoy*.yaml"
+      purpose: "Envoy proxy configurations"
+    - glob: "**/traefik*.yaml"
+      purpose: "Traefik configurations"
+
+  metrics_queries:
+    - system: "Prometheus"
+      query: "sum(rate(requests_total[5m])) by (backend_instance)"
+      purpose: "Measure request distribution across backends"
+      threshold: "Coefficient of variation < 0.15"
+    - system: "Prometheus"
+      query: "histogram_quantile(0.99, rate(request_duration_seconds_bucket[5m])) by (backend)"
+      purpose: "Compare latency distribution across backends"
+
+knowledge_sources:
+  specifications:
+    - id: "rfc7230"
+      name: "HTTP/1.1 Message Syntax and Routing"
+      url: "https://tools.ietf.org/html/rfc7230"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "nginx-lb-guide"
+      name: "NGINX Load Balancing Guide"
+      url: "https://docs.nginx.com/nginx/admin-guide/load-balancer/"
+      offline_cache: true
+    - id: "haproxy-lb-guide"
+      name: "HAProxy Load Balancing Documentation"
+      url: "https://www.haproxy.com/documentation/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "lb-algorithms-book"
+      title: "High Performance Browser Networking - Load Balancing"
+      type: "book"
+      reference: "O'Reilly Media, Chapter on Load Balancing"
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Inspect Kubernetes service load balancing"
+      command: "kubectl get endpoints -o wide"
+    - tool: "aws-cli"
+      purpose: "Review ALB/NLB target group settings"
+      command: "aws elbv2 describe-target-groups"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "stddev(rate(http_requests_total[5m])) by (service) / avg(rate(http_requests_total[5m])) by (service)"
+      purpose: "Calculate distribution coefficient of variation"
+
+signals:
+  critical:
+    - id: "SCALE-LB-CRIT-001"
+      signal: "Extreme load imbalance causing instance overload"
+      evidence_threshold: "Single instance receiving >50% of traffic with >3 backends"
+      explanation: |
+        Severe load imbalance indicates misconfigured or inappropriate algorithm
+        selection. This can cause cascading failures as overloaded instances
+        degrade, potentially triggering further imbalance.
+      remediation: "Review and adjust load balancing algorithm; consider least-connections or weighted algorithms"
+
+  high:
+    - id: "SCALE-LB-HIGH-001"
+      signal: "Algorithm mismatch for workload characteristics"
+      explanation: "Round-robin used for variable-duration requests causing uneven load"
+      remediation: "Switch to least-connections algorithm for workloads with variable request durations"
+    - id: "SCALE-LB-HIGH-002"
+      signal: "No health-aware load balancing"
+      explanation: "Traffic sent to unhealthy or degraded backends"
+      remediation: "Enable active health checks with algorithm integration"
+
+  medium:
+    - id: "SCALE-LB-MED-001"
+      signal: "Suboptimal weight configuration"
+      remediation: "Adjust weights based on actual instance capacity"
+    - id: "SCALE-LB-MED-002"
+      signal: "Missing slow-start configuration"
+      remediation: "Configure slow-start for newly added instances"
+
+  low:
+    - id: "SCALE-LB-LOW-001"
+      signal: "Algorithm not documented"
+
+  positive:
+    - id: "SCALE-LB-POS-001"
+      signal: "Adaptive load balancing with real-time metrics integration"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Load Balancers"
+      description: |
+        Identify all load balancing components in the infrastructure,
+        including hardware, software, and cloud-managed load balancers.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find nginx configurations"
+          command: "find /etc/nginx -name '*.conf' -exec grep -l 'upstream' {} \\;"
+        - purpose: "List Kubernetes services"
+          command: "kubectl get services -A -o wide"
+      expected_findings:
+        - "Complete inventory of load balancing components"
+
+    - id: "2"
+      name: "Document Algorithm Configuration"
+      description: |
+        Extract and document the load balancing algorithm configured
+        for each upstream/backend pool.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Extract nginx upstream configs"
+          command: "grep -A 20 'upstream' /etc/nginx/nginx.conf"
+      expected_findings:
+        - "Algorithm type for each backend pool"
+        - "Configuration parameters and weights"
+
+    - id: "3"
+      name: "Analyze Distribution Metrics"
+      description: |
+        Collect and analyze actual traffic distribution metrics to
+        assess algorithm effectiveness.
+      duration_estimate: "45 min"
+      expected_findings:
+        - "Request count distribution across backends"
+        - "Coefficient of variation calculations"
+        - "Latency variance analysis"
+
+    - id: "4"
+      name: "Evaluate Algorithm Suitability"
+      description: |
+        Assess whether selected algorithms match workload characteristics
+        and traffic patterns.
+      duration_estimate: "30 min"
+      questions:
+        - "Does request duration vary significantly?"
+        - "Are backend instances heterogeneous?"
+        - "Is session affinity required?"
+      expected_findings:
+        - "Algorithm suitability assessment"
+        - "Recommendations for optimization"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Algorithm Inventory"
+        - "Distribution Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct metrics analysis with statistical validation"
+    medium: "Configuration review with limited runtime verification"
+    low: "Configuration review only, no runtime metrics available"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "nginx-lb-guide"
+        priority: "recommended"
+      - source_id: "haproxy-lb-guide"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed metrics analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "load-balancing-algorithm-001"
+    item: "All load balancers inventoried"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Confirm complete inventory of all load balancing components"
+    expected: "Confirmed by reviewer"
+
+  - id: "load-balancing-algorithm-002"
+    item: "Distribution metrics analyzed"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify coefficient of variation calculated for all backend pools"
+    expected: "Confirmed by reviewer"
+
+  - id: "load-balancing-algorithm-003"
+    item: "Algorithm suitability assessed"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Confirm algorithm recommendations documented"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["microservices", "web-application", "api-platform"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.1"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.load-distribution.traffic-distribution"
+    - "scalability-capacity.load-distribution.hot-spot-detection"

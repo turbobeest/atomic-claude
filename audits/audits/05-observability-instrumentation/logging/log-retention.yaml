@@ -1,0 +1,298 @@
+audit:
+  id: observability-instrumentation.logging.log-retention
+  name: Log Retention Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: logging
+  tier: expert
+  estimated_duration: 45 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Reviews log retention policies across all logging systems to ensure
+    appropriate retention periods are configured. Examines retention settings
+    for different log types (application, security, audit), archive strategies,
+    and compliance with regulatory requirements.
+  why_it_matters: |
+    Insufficient log retention leaves organizations unable to investigate
+    incidents discovered after the fact or meet compliance audit requirements.
+    Excessive retention wastes storage costs and may increase liability exposure.
+    Retention policies must balance operational needs, compliance requirements,
+    and cost considerations.
+  when_to_run:
+  - Compliance audit preparation
+  - Log storage capacity planning
+  - After regulatory requirement changes
+  - During cost optimization initiatives
+prerequisites:
+  required_artifacts:
+  - type: infrastructure_config
+    description: Log storage and retention configuration
+  - type: policy_documents
+    description: Data retention policies and compliance requirements
+  access_requirements:
+  - Access to log aggregation system settings
+  - Access to storage lifecycle policies
+  - Knowledge of applicable compliance requirements
+discovery:
+  code_patterns:
+  - pattern: retention|ttl|expire|lifecycle|max.?age
+    type: regex
+    scope: config
+    purpose: Find retention configuration settings
+  - pattern: delete.?after|purge|cleanup
+    type: regex
+    scope: config
+    purpose: Find automated deletion settings
+  file_patterns:
+  - glob: '**/elasticsearch/*.yml'
+    purpose: Elasticsearch retention settings
+  - glob: '**/logrotate.d/*'
+    purpose: Logrotate configuration
+  - glob: '**/lifecycle*.json'
+    purpose: ILM policy definitions
+  documents_to_review:
+  - type: Data retention policy
+    purpose: Understand organizational retention requirements
+  - type: Compliance documentation
+    purpose: Identify regulatory retention mandates
+knowledge_sources:
+  specifications:
+  - id: pci-dss-logging
+    name: PCI-DSS Logging Requirements
+    url: https://www.pcisecuritystandards.org/
+    offline_cache: true
+    priority: required
+  - id: gdpr-retention
+    name: GDPR Data Retention Guidelines
+    url: https://gdpr.eu/data-retention/
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: elk-ilm
+    name: Elasticsearch Index Lifecycle Management
+    url: https://www.elastic.co/guide/en/elasticsearch/reference/current/index-lifecycle-management.html
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: curl
+    purpose: Query Elasticsearch ILM policies
+    command: curl -s 'elasticsearch:9200/_ilm/policy'
+  - tool: aws cli
+    purpose: Check S3 lifecycle policies for log archives
+    command: aws s3api get-bucket-lifecycle-configuration --bucket logs-bucket
+  scripts:
+  - id: check-retention
+    language: bash
+    purpose: Summarize retention settings across systems
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Elasticsearch ILM Policies ==="
+      curl -s 'elasticsearch:9200/_ilm/policy' | jq 'to_entries[] | {name: .key, delete_after: .value.policy.phases.delete.min_age}'
+      echo "=== S3 Lifecycle Rules ==="
+      aws s3api get-bucket-lifecycle-configuration --bucket logs-archive 2>/dev/null || echo "No S3 lifecycle configured"
+signals:
+  critical:
+  - id: LOG-RET-CRIT-001
+    signal: No log retention policy defined
+    evidence_indicators:
+    - Missing ILM policies
+    - No logrotate configuration
+    - Unlimited log growth
+    explanation: |
+      Without retention policies, logs either grow unbounded (causing storage
+      exhaustion) or are deleted arbitrarily, potentially violating compliance
+      requirements and losing forensic data.
+    remediation: Define and implement explicit retention policies for all log types
+  - id: LOG-RET-CRIT-002
+    signal: Security/audit logs retained less than compliance minimum
+    evidence_indicators:
+    - Audit log retention < 1 year (PCI-DSS)
+    - Security logs deleted before investigation window
+    explanation: Insufficient retention violates compliance requirements and impedes investigations
+    remediation: Extend security log retention to meet compliance requirements
+  high:
+  - id: LOG-RET-HIGH-001
+    signal: Different retention for same log type across environments
+    explanation: Inconsistent policies make compliance verification difficult
+    remediation: Standardize retention policies across all environments
+  - id: LOG-RET-HIGH-002
+    signal: No archive strategy for long-term retention
+    explanation: Hot storage for long-term logs wastes expensive resources
+    remediation: Implement tiered storage with archive to cold storage
+  medium:
+  - id: LOG-RET-MED-001
+    signal: Retention policy not documented
+    remediation: Document retention periods and rationale
+  - id: LOG-RET-MED-002
+    signal: No alerting when retention policies fail to execute
+    remediation: Add monitoring for retention policy execution
+  low:
+  - id: LOG-RET-LOW-001
+    signal: Retention periods not aligned with business requirements
+  positive:
+  - id: LOG-RET-POS-001
+    signal: Tiered retention with hot/warm/cold storage
+  - id: LOG-RET-POS-002
+    signal: Compliance-aligned retention periods documented
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify compliance requirements
+    description: |
+      Determine which regulatory frameworks apply and their
+      specific log retention requirements.
+    duration_estimate: 10 min
+    questions:
+    - Which compliance frameworks apply (PCI-DSS, HIPAA, SOC2, GDPR)?
+    - What are the minimum retention periods required?
+    - Are there different requirements for different log types?
+    expected_findings:
+    - Applicable compliance frameworks
+    - Minimum retention requirements
+  - id: '2'
+    name: Discover retention configurations
+    description: |
+      Find all log retention settings across logging infrastructure
+      including ILM policies, logrotate, and storage lifecycle rules.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Get Elasticsearch ILM policies
+      command: curl -s 'elasticsearch:9200/_ilm/policy' | jq
+    - purpose: Check logrotate configurations
+      command: cat /etc/logrotate.d/* 2>/dev/null | grep -E 'rotate|daily|weekly'
+    expected_findings:
+    - Current retention settings per log type
+    - Retention policy mechanisms in use
+  - id: '3'
+    name: Compare retention to requirements
+    description: |
+      Map current retention settings against compliance requirements
+      and identify any gaps.
+    duration_estimate: 10 min
+    questions:
+    - Do security logs meet 1-year retention (PCI-DSS)?
+    - Are audit logs archived appropriately?
+    - Is there differentiation between log types?
+    expected_findings:
+    - Compliance gaps
+    - Excessive retention areas
+  - id: '4'
+    name: Review archive and tiering strategy
+    description: |
+      Evaluate whether long-term logs are appropriately moved to
+      cost-effective storage tiers.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Check S3 lifecycle policies
+      command: aws s3api get-bucket-lifecycle-configuration --bucket logs-archive
+    - purpose: Check Elasticsearch index age distribution
+      command: curl -s 'elasticsearch:9200/_cat/indices?v&s=creation.date'
+    expected_findings:
+    - Tiered storage implementation
+    - Archive accessibility
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Compliance Requirements Map
+    - Current Retention Analysis
+    - Gap Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Retention settings directly verified in configuration
+    medium: Retention inferred from policy documents or defaults
+    low: Retention assumed based on system defaults
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: pci-dss-logging
+      priority: required
+    - source_id: elk-ilm
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires compliance context
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: log-ret-001
+  item: Retention policies defined for all log types
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify ILM policies or equivalent exist for application, security, and audit logs
+  expected: Confirmed by reviewer
+- id: log-ret-002
+  item: Security logs retained for compliance minimum
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify security log retention meets applicable compliance requirements (e.g., 1
+    year for PCI-DSS)
+  expected: Retention >= compliance minimum
+- id: log-ret-003
+  item: Retention policy execution is monitored
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm alerts exist for retention policy failures
+  expected: Confirmed by reviewer
+- id: log-ret-004
+  item: Tiered storage implemented for long-term retention
+  level: WARNING
+  verification: manual
+  verification_notes: Verify logs transition to cold storage for cost optimization
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: PCI-DSS
+    controls:
+    - '10.7'
+  - framework: SOC2
+    controls:
+    - CC7.4
+  - framework: HIPAA
+    controls:
+    - 164.312(b)
+  - framework: GDPR
+    controls:
+    - Article 5(1)(e)
+relationships:
+  commonly_combined:
+  - observability-instrumentation.logging.log-storage-cost
+  - observability-instrumentation.logging.log-aggregation
+  - observability-instrumentation.logging.sensitive-data-in-logs

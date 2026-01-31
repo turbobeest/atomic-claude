@@ -1,0 +1,322 @@
+# ============================================================
+# CDN CACHE AUDIT
+# ============================================================
+# Evaluates Content Delivery Network caching configuration,
+# edge caching strategies, and cache invalidation mechanisms.
+
+audit:
+  id: "performance-efficiency.caching.cdn-cache"
+  name: "CDN Cache Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "caching"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes CDN caching configuration including edge caching rules,
+    origin shield settings, cache key configuration, and purge mechanisms.
+    Reviews hit ratio, geographic distribution, and TTL configurations
+    at the edge layer.
+
+  why_it_matters: |
+    CDN is the first line of defense for traffic at scale. Poor CDN
+    configuration means origin servers handle unnecessary load, latency
+    increases for global users, and infrastructure costs explode.
+    Well-configured CDN can handle 90%+ of traffic at the edge.
+
+  when_to_run:
+    - "CDN setup or migration"
+    - "Performance optimization"
+    - "Cost reduction initiatives"
+    - "Global expansion planning"
+
+prerequisites:
+  required_artifacts:
+    - type: "cdn_config"
+      description: "CDN configuration (CloudFront, Cloudflare, Fastly, etc.)"
+    - type: "deployed_application"
+      description: "Live application behind CDN"
+
+  access_requirements:
+    - "CDN management console access"
+    - "CDN analytics/metrics access"
+    - "Origin server configuration access"
+
+discovery:
+  metrics_queries:
+    - system: "CloudFront"
+      query: "CacheHitRate metric"
+      purpose: "Measure edge cache effectiveness"
+      threshold: "> 80%"
+
+    - system: "Cloudflare"
+      query: "Analytics API - Cache status"
+      purpose: "Cache hit/miss breakdown"
+      threshold: "> 80% hit rate"
+
+  file_patterns:
+    - glob: "**/cloudfront*.{json,yaml,tf}"
+      purpose: "CloudFront configuration"
+    - glob: "**/cloudflare*.{json,yaml,tf}"
+      purpose: "Cloudflare configuration"
+    - glob: "**/fastly*.{vcl,tf}"
+      purpose: "Fastly VCL configuration"
+    - glob: "**/cdn*.{yaml,json,tf}"
+      purpose: "Generic CDN configuration"
+
+knowledge_sources:
+  guides:
+    - id: "cloudfront-caching"
+      name: "Amazon CloudFront Caching"
+      url: "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/ConfiguringCaching.html"
+      offline_cache: true
+
+    - id: "cloudflare-caching"
+      name: "Cloudflare Caching Documentation"
+      url: "https://developers.cloudflare.com/cache/"
+      offline_cache: true
+
+    - id: "fastly-caching"
+      name: "Fastly Caching Documentation"
+      url: "https://docs.fastly.com/en/guides/caching"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "curl"
+      purpose: "Check CDN cache status"
+      command: "curl -sI https://example.com/ | grep -iE 'x-cache|cf-cache-status|x-served-by|age'"
+
+    - tool: "curl"
+      purpose: "Test cache from different regions"
+      command: "curl -sI --resolve example.com:443:CDN_IP https://example.com/"
+
+    - tool: "aws cloudfront"
+      purpose: "Check CloudFront distribution"
+      command: "aws cloudfront get-distribution --id DISTRIBUTION_ID"
+
+  monitoring_queries:
+    - system: "CloudWatch"
+      query: "AWS/CloudFront CacheHitRate"
+      purpose: "Monitor CDN cache effectiveness"
+
+signals:
+  critical:
+    - id: "CDN-CRIT-001"
+      signal: "CDN cache hit rate below 50%"
+      evidence_threshold: "cache_hit_rate < 0.50"
+      explanation: |
+        A CDN with less than 50% hit rate is failing to serve its purpose.
+        More than half of requests are passing through to origin, defeating
+        the point of having a CDN and incurring full latency.
+      remediation: "Review cache key configuration, increase TTLs, check origin headers"
+
+    - id: "CDN-CRIT-002"
+      signal: "Sensitive data cached at CDN edge"
+      evidence_pattern: "User-specific or authenticated content with x-cache: HIT"
+      explanation: |
+        CDN caching user-specific data serves one user's private data to
+        other users, creating severe security and privacy violations.
+      remediation: "Configure proper cache key with user identifier or bypass cache for authenticated content"
+
+  high:
+    - id: "CDN-HIGH-001"
+      signal: "Cache key includes unnecessary query parameters"
+      evidence_pattern: "Cache varies on analytics/tracking parameters"
+      explanation: |
+        Including analytics parameters (utm_*, fbclid) in cache key creates
+        unnecessary cache fragmentation, reducing hit rate dramatically.
+      remediation: "Configure CDN to ignore non-essential query parameters"
+
+    - id: "CDN-HIGH-002"
+      signal: "No origin shield configured for multi-region"
+      evidence_pattern: "Multiple edge POPs hitting origin directly"
+      explanation: |
+        Without origin shield, each edge location makes separate requests
+        to origin for the same content, multiplying origin load.
+      remediation: "Enable origin shield to consolidate origin requests"
+
+  medium:
+    - id: "CDN-MED-001"
+      signal: "TTL mismatch between CDN and origin"
+      evidence_pattern: "CDN caching longer than origin Cache-Control"
+      remediation: "Align CDN TTL with origin cache headers or document override rationale"
+
+    - id: "CDN-MED-002"
+      signal: "Slow cache invalidation mechanism"
+      evidence_threshold: "Purge propagation > 60 seconds"
+      remediation: "Implement faster invalidation or use versioned URLs"
+
+  low:
+    - id: "CDN-LOW-001"
+      signal: "No cache analytics monitoring"
+      remediation: "Enable CDN analytics and set up hit rate dashboards"
+
+  positive:
+    - id: "CDN-POS-001"
+      signal: "Cache hit rate above 90%"
+
+    - id: "CDN-POS-002"
+      signal: "Proper cache key configuration ignoring non-essential parameters"
+
+    - id: "CDN-POS-003"
+      signal: "Origin shield enabled with optimal region selection"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Analyze CDN cache hit rates"
+      description: |
+        Collect cache hit/miss statistics from CDN analytics to establish
+        baseline effectiveness.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Check cache status headers"
+          command: "for i in {1..5}; do curl -sI https://example.com/ | grep -iE 'x-cache|cf-cache|age'; done"
+        - purpose: "Check different content types"
+          command: "curl -sI https://example.com/static/app.js | grep -iE 'x-cache|cf-cache|age'"
+
+      expected_findings:
+        - "Overall hit rate percentage"
+        - "Hit rate by content type"
+
+    - id: "2"
+      name: "Review cache key configuration"
+      description: |
+        Examine what factors contribute to cache key (URL, headers, cookies,
+        query parameters) and identify fragmentation issues.
+      duration_estimate: "30 min"
+
+      expected_findings:
+        - "Cache key composition"
+        - "Unnecessary fragmentation sources"
+
+    - id: "3"
+      name: "Verify security of cached content"
+      description: |
+        Ensure no private, authenticated, or user-specific content is
+        being cached at the CDN edge.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Test authenticated endpoint caching"
+          command: "curl -sI https://example.com/api/user/profile | grep -iE 'x-cache|cf-cache|cache-control'"
+
+      expected_findings:
+        - "Private content caching audit"
+        - "Cache bypass verification"
+
+    - id: "4"
+      name: "Test cache invalidation"
+      description: |
+        Verify that cache purge/invalidation mechanisms work correctly
+        and propagate within acceptable timeframes.
+      duration_estimate: "20 min"
+
+      expected_findings:
+        - "Invalidation propagation time"
+        - "Purge mechanism effectiveness"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Hit Rate Analysis"
+        - "Cache Key Review"
+        - "Security Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct CDN analytics with production traffic analysis"
+    medium: "Configuration review with spot-check testing"
+    low: "Configuration review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "cloudfront-caching"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires production traffic analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "cdn-cache-001"
+    item: "CDN cache hit rate is acceptable"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify hit rate > 70% from CDN analytics dashboard"
+    expected: "Confirmed by reviewer"
+
+  - id: "cdn-cache-002"
+    item: "No private data is cached at edge"
+    level: "CRITICAL"
+    verification: "curl -sI https://example.com/api/user/me | grep -iqE 'x-cache.*hit|cf-cache.*hit' && echo FAIL || echo PASS"
+    expected: "PASS"
+
+  - id: "cdn-cache-003"
+    item: "Cache key is optimally configured"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Confirm analytics parameters excluded from cache key"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Performance"
+      controls: ["Edge Caching"]
+    - framework: "Privacy"
+      controls: ["Data Caching Security"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.caching.browser-cache"
+    - "performance-efficiency.caching.multi-layer-cache"
+    - "performance-efficiency.latency.geographic-latency"

@@ -1,0 +1,429 @@
+audit:
+  id: operational-excellence.on-call-operations.alert-fatigue
+  name: Alert Fatigue Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: operational-excellence
+  category_number: 25
+  subcategory: on-call-operations
+  tier: phd
+  estimated_duration: 3-4 hours  # median: 3h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines alert fatigue indicators including:
+    - Alert volume per on-call shift
+    - Non-actionable alert percentage
+    - Alert noise ratio
+    - Duplicate and flapping alerts
+    - False positive rate
+    - Alert acknowledgment patterns
+    - Ticket-to-alert ratio
+    - Alert suppression and grouping
+  why_it_matters: |
+    Alert fatigue is a leading cause of incident response failures:
+    - Overwhelmed responders miss critical alerts
+    - Constant interruptions reduce focus and increase errors
+    - High alert volume causes desensitization
+    - Non-actionable alerts waste responder time
+
+    Google SRE targets fewer than 2 pages per on-call shift. Research
+    shows that alert fatigue leads to longer response times, increased
+    error rates, and responder burnout.
+  when_to_run:
+  - Monthly alert health reviews
+  - When on-call complaints increase
+  - After alert configuration changes
+  - During operational reviews
+  - When MTTR increases
+prerequisites:
+  required_artifacts:
+  - type: alert_data
+    description: Historical alert and incident data
+  - type: alert_configuration
+    description: Alert rule definitions
+  - type: response_data
+    description: Alert acknowledgment and resolution data
+  access_requirements:
+  - Alert history access (30+ days)
+  - Alert configuration access
+  - Incident correlation data
+  - On-call shift data
+discovery:
+  code_patterns:
+  - pattern: (alert|alarm|page|notify).*(rule|threshold|condition)
+    type: regex
+    scope: config
+    purpose: Detect alert rule definitions
+  - pattern: (suppress|silence|mute|snooze)
+    type: regex
+    scope: config
+    purpose: Detect alert suppression
+  - pattern: (group|correlat|dedup|aggregate)
+    type: regex
+    scope: config
+    purpose: Detect alert grouping
+  file_patterns:
+  - glob: '**/alerts/**/*.yaml'
+    purpose: Alert definitions
+  - glob: '**/rules/**/*.yaml'
+    purpose: Alert rules
+  - glob: '**/prometheus/**/*.yaml'
+    purpose: Prometheus alert rules
+knowledge_sources:
+  specifications:
+  - id: google-sre-alerting
+    name: Google SRE - Practical Alerting
+    url: https://sre.google/sre-book/practical-alerting/
+    offline_cache: true
+    priority: required
+  - id: google-sre-oncall
+    name: Google SRE - Being On-Call
+    url: https://sre.google/sre-book/being-on-call/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: datadog-alert-fatigue
+    name: Datadog Alert Fatigue Guide
+    url: https://www.datadoghq.com/blog/alert-fatigue/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: pagerduty
+    purpose: Alert analytics
+    command: pd analytics alerts
+  - tool: prometheus
+    purpose: Alert rule management
+    command: promtool check rules alert-rules.yaml
+  scripts:
+  - id: alert-volume-scanner
+    language: bash
+    purpose: Find alert configurations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Alert Configuration Scan ==="
+      find . -type f \( -name "*alert*" -o -name "*rule*" \) \
+        \( -name "*.yaml" -o -name "*.yml" \) 2>/dev/null | wc -l
+      echo "alert configuration files found"
+signals:
+  critical:
+  - id: AF-CRIT-001
+    signal: Alert volume exceeds sustainable levels
+    evidence_indicators:
+    - More than 10 pages per on-call shift
+    - Multiple alerts per hour on average
+    - Constant interruptions during shifts
+    explanation: |
+      Google SRE targets fewer than 2 pages per shift for sustainability.
+      More than 10 pages per shift indicates serious alert hygiene problems.
+      High volume leads to desensitization where critical alerts are missed
+      or ignored.
+    remediation: |
+      - Audit all paging alerts for necessity
+      - Convert informational alerts to non-paging
+      - Implement alert grouping and correlation
+      - Tune thresholds to reduce false positives
+      - Eliminate duplicate alerts
+  - id: AF-CRIT-002
+    signal: Majority of alerts are non-actionable
+    evidence_indicators:
+    - More than 50% of alerts require no action
+    - Alerts acknowledged and closed without investigation
+    - Alert-to-incident ratio very low
+    explanation: |
+      Alerts should be actionable - requiring immediate human intervention.
+      Non-actionable alerts train responders to ignore all alerts, creating
+      risk that critical alerts will also be ignored.
+    remediation: |
+      - Review each alert for actionability
+      - Remove alerts that never require action
+      - Convert to logging or metrics instead
+      - Require action documentation for all alerts
+      - Measure actionability rate
+  high:
+  - id: AF-HIGH-001
+    signal: High false positive rate
+    evidence_indicators:
+    - Many alerts resolve before acknowledgment
+    - Frequent alert-then-clear patterns
+    - Thresholds triggering spuriously
+    explanation: |
+      False positives waste responder time and attention. Each false
+      positive reduces trust in alerting and increases likelihood of
+      ignoring real issues. False positive rate should be below 20%.
+    remediation: |
+      - Tune thresholds based on historical data
+      - Add for-duration requirements
+      - Implement better detection logic
+      - Remove unreliable alerts
+      - Track and target false positive rate
+  - id: AF-HIGH-002
+    signal: Alert flapping without suppression
+    evidence_indicators:
+    - Same alert firing and clearing repeatedly
+    - No hysteresis or dead-band configured
+    - Flapping alerts generate multiple pages
+    explanation: |
+      Flapping alerts multiply alert volume unnecessarily. A single
+      unstable condition can generate dozens of alerts. Hysteresis
+      and suppression prevent repeated notifications for the same issue.
+    remediation: |
+      - Implement alert hysteresis
+      - Configure dead-band thresholds
+      - Enable flap detection and suppression
+      - Use for-duration to filter transients
+      - Group related flapping alerts
+  - id: AF-HIGH-003
+    signal: No alert grouping or correlation
+    evidence_indicators:
+    - Related alerts fire individually
+    - Cascading failures generate separate pages
+    - No alert aggregation configured
+    explanation: |
+      A single root cause can trigger many symptoms. Without grouping,
+      responders receive separate alerts for each symptom, multiplying
+      noise. Correlation identifies related alerts as a single event.
+    remediation: |
+      - Implement alert grouping rules
+      - Configure correlation by service
+      - Group cascading failure symptoms
+      - Identify and alert on root causes
+      - Use intelligent alert aggregation
+  medium:
+  - id: AF-MED-001
+    signal: Informational alerts routed as pages
+    evidence_indicators:
+    - Low-severity alerts paging on-call
+    - No differentiation between urgent and informational
+    - All alerts treated equally
+    explanation: |
+      Not all alerts require immediate human attention. Informational
+      alerts (warnings, capacity notices) should not page but rather
+      notify during business hours or create tickets.
+    remediation: |
+      - Classify alerts by urgency
+      - Route only critical/urgent alerts to pager
+      - Create tickets for lower severity
+      - Configure notification channels by severity
+      - Review severity classifications
+  - id: AF-MED-002
+    signal: Alerts not reviewed for relevance
+    evidence_indicators:
+    - Old alerts never cleaned up
+    - Alerts for decommissioned services
+    - No alert review process
+    explanation: |
+      Alert configurations accumulate over time. Without regular review,
+      alerts become stale, irrelevant, or misconfigured. Review ensures
+      alerts remain valuable and current.
+    remediation: |
+      - Implement quarterly alert review
+      - Remove alerts for retired services
+      - Verify alert ownership
+      - Update thresholds based on baselines
+      - Document alert review process
+  low:
+  - id: AF-LOW-001
+    signal: Alert metrics not tracked
+    evidence_indicators:
+    - Volume trends unknown
+    - False positive rate not measured
+    - No alert health dashboard
+    explanation: |
+      Without metrics, alert fatigue problems go unnoticed until severe.
+      Tracking volume, false positive rate, and actionability enables
+      proactive management.
+    remediation: |
+      - Implement alert volume tracking
+      - Measure false positive rate
+      - Track actionability percentage
+      - Create alert health dashboard
+      - Report metrics in operational reviews
+  positive:
+  - id: AF-POS-001
+    signal: Low alert volume with high signal quality
+    evidence_indicators:
+    - Fewer than 2 pages per on-call shift
+    - High actionability rate (>80%)
+    - Low false positive rate (<20%)
+  - id: AF-POS-002
+    signal: Proactive alert hygiene program
+    evidence_indicators:
+    - Regular alert review conducted
+    - Alert metrics tracked and reported
+    - Continuous improvement in alert quality
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Alert Volume Analysis
+    description: |
+      Assess alert volume and distribution.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Count alert rules
+      command: |
+        find . -type f \( -name "*alert*" -o -name "*rule*" \) \
+          -name "*.yaml" -exec grep -l -iE "(alert|expr)" {} \; 2>/dev/null | wc -l
+    - purpose: Find severity distributions
+      command: |
+        grep -rniE "severity.*(critical|warning|info|page)" \
+          --include="*.yaml" . 2>/dev/null | head -30
+    expected_findings:
+    - Alert rule count
+    - Severity distribution
+    - Volume indicators
+  - id: '2'
+    name: Alert Quality Assessment
+    description: |
+      Evaluate alert actionability and signal quality.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find alert annotations
+      command: |
+        grep -rniE "(runbook|playbook|description|action)" \
+          --include="*alert*.yaml" . 2>/dev/null | head -30
+    - purpose: Check for duration requirements
+      command: |
+        grep -rniE "(for:|duration|pending)" \
+          --include="*alert*.yaml" --include="*rule*.yaml" . 2>/dev/null | head -30
+    expected_findings:
+    - Alert documentation
+    - Duration filters
+    - Action guidance
+  - id: '3'
+    name: Grouping and Correlation Review
+    description: |
+      Assess alert grouping and correlation configuration.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find grouping configurations
+      command: |
+        grep -rniE "(group|aggregat|correlat|dedup)" \
+          --include="*.yaml" . 2>/dev/null | head -30
+    - purpose: Find suppression rules
+      command: |
+        grep -rniE "(suppress|inhibit|silence|mute)" \
+          --include="*.yaml" . 2>/dev/null | head -20
+    expected_findings:
+    - Grouping rules
+    - Suppression configuration
+    - Correlation settings
+  - id: '4'
+    name: Routing and Severity Review
+    description: |
+      Evaluate alert routing and severity configuration.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find routing configurations
+      command: |
+        grep -rniE "(route|receiver|channel|notification)" \
+          --include="*.yaml" . 2>/dev/null | head -30
+    - purpose: Check paging vs non-paging
+      command: |
+        grep -rniE "(pagerduty|opsgenie|page|slack|email)" \
+          --include="*.yaml" . 2>/dev/null | head -30
+    expected_findings:
+    - Routing rules
+    - Notification channels
+    - Paging vs non-paging distribution
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Volume Analysis
+    - Quality Assessment
+    - Grouping Review
+    - Recommendations
+  - type: alert_matrix
+    format: table
+    description: Alert categories and their fatigue indicators
+  confidence_guidance:
+    high: Alert configurations and historical data available
+    medium: Configuration access, limited historical data
+    low: Limited visibility, requires runtime analysis
+offline:
+  capability: partial
+  runtime_required_for:
+  - Volume measurement
+  - False positive analysis
+  - Actionability assessment
+  cache_manifest:
+    knowledge:
+    - source_id: google-sre-alerting
+      priority: required
+    - source_id: google-sre-oncall
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Alert fatigue audit requires data analysis
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: af-001
+  item: Alert volume is sustainable (<10 pages/shift)
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify historical alert volume per shift
+  expected: Confirmed by reviewer
+- id: af-002
+  item: Alert actionability rate is acceptable (>80%)
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify alerts lead to action or investigation
+  expected: Confirmed by reviewer
+- id: af-003
+  item: Alert grouping is configured
+  level: BLOCKING
+  verification: |
+    grep -rniE "(group|aggregat|correlat)" \
+      --include="*.yaml" . 2>/dev/null | wc -l | \
+      xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: af-004
+  item: Alert review process exists
+  level: WARNING
+  verification: manual
+  verification_notes: Verify regular alert review is conducted
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.4
+  - framework: ITIL 4
+    controls:
+    - Event Management
+relationships:
+  commonly_combined:
+  - operational-excellence.on-call-operations.on-call-rotation
+  - operational-excellence.operational-metrics.toil-measurement
+  - operational-excellence.incident-management.incident-response-process

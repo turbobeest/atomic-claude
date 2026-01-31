@@ -1,0 +1,393 @@
+audit:
+  id: security-trust.application-security.open-redirect
+  name: Open Redirect Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: application-security
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines open redirect vulnerabilities where user-controlled
+    input determines redirect destinations. It evaluates URL validation,
+    allowlist implementation, and redirect handling across login flows,
+    OAuth callbacks, and general redirects.
+  why_it_matters: |
+    Open redirects (CWE-601) enable phishing attacks by allowing attackers
+    to create legitimate-looking URLs that redirect to malicious sites.
+    Users trust the initial domain, making phishing more effective. Open
+    redirects are classified under OWASP A03:2021 Injection and are
+    commonly exploited in credential theft campaigns.
+  when_to_run:
+  - Login/logout implementation
+  - OAuth integration
+  - Any redirect functionality
+  - Security assessment
+  - Phishing prevention review
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Code handling redirects
+  - type: running_application
+    description: Application for testing redirects
+  access_requirements:
+  - Source code access
+  - Application access for testing
+discovery:
+  code_patterns:
+  - pattern: redirect|location.*=|302|301|res\.redirect
+    type: regex
+    scope: source
+    purpose: Identify redirect operations
+  - pattern: return_url|returnTo|next|redirect_uri|callback
+    type: regex
+    scope: source
+    purpose: Identify redirect parameters
+  - pattern: req\.query\..*url|params\[.*url|request\.GET.*url
+    type: regex
+    scope: source
+    purpose: Identify user-controlled redirect URLs
+  file_patterns:
+  - glob: '**/auth*.js'
+    purpose: Authentication redirect handling
+  - glob: '**/login*.py'
+    purpose: Login redirect logic
+  - glob: '**/oauth*.java'
+    purpose: OAuth callback handling
+knowledge_sources:
+  specifications:
+  - id: cwe-601
+    name: 'CWE-601: URL Redirection to Untrusted Site'
+    url: https://cwe.mitre.org/data/definitions/601.html
+    offline_cache: true
+    priority: required
+  - id: owasp-top-10
+    name: OWASP Top 10 Web Application Security Risks
+    url: https://owasp.org/www-project-top-ten/
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  - id: cisa-known-exploited
+    name: CISA Known Exploited Vulnerabilities Catalog
+    url: https://www.cisa.gov/known-exploited-vulnerabilities-catalog
+    offline_cache: false
+    priority: required
+  guides:
+  - id: owasp-redirect-cheatsheet
+    name: OWASP Unvalidated Redirects and Forwards Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Unvalidated_Redirects_and_Forwards_Cheat_Sheet.html
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: curl
+    purpose: Test redirect behavior
+    command: curl -v 'https://target/login?return_url=https://evil.com'
+  - tool: burp
+    purpose: Intercept and modify redirect parameters
+    command: Manual testing with Burp Suite
+  scripts:
+  - id: redirect-test
+    language: bash
+    purpose: Test open redirect payloads
+    source: inline
+    code: |
+      #!/bin/bash
+      URL=$1
+      PAYLOADS=(
+        "https://evil.com"
+        "//evil.com"
+        "https://evil.com%2f"
+        "https://target.evil.com"
+        "/\\evil.com"
+        "https://evil.com?.target.com"
+        "https://evil.com#.target.com"
+      )
+      for payload in "${PAYLOADS[@]}"; do
+        echo -n "$payload: "
+        location=$(curl -s -I "$URL?return_url=$payload" | grep -i location | cut -d' ' -f2)
+        echo "$location"
+      done
+signals:
+  critical:
+  - id: REDIR-CRIT-001
+    signal: No redirect URL validation
+    cwe_id: CWE-601
+    evidence_indicators:
+    - User URL directly used in redirect
+    - No URL validation on return_url parameter
+    - Arbitrary external URLs accepted
+    explanation: |
+      Without URL validation, attackers can construct URLs that redirect
+      users to malicious sites, enabling credential phishing using the
+      trusted domain's reputation.
+    remediation: Implement strict allowlist-based URL validation for redirects
+  - id: REDIR-CRIT-002
+    signal: OAuth redirect_uri allows arbitrary URLs
+    cwe_id: CWE-601
+    evidence_indicators:
+    - redirect_uri parameter unvalidated
+    - OAuth token sent to attacker URL
+    - Loose redirect_uri matching
+    explanation: |
+      Open redirect in OAuth flows allows token theft. Attackers receive
+      authorization codes or tokens at their controlled URL, compromising
+      user accounts.
+    remediation: Strictly validate redirect_uri against registered callbacks
+  high:
+  - id: REDIR-HIGH-001
+    signal: Validation uses substring matching
+    cwe_id: CWE-601
+    evidence_pattern: url\.includes|url\.startsWith|url\.indexOf
+    explanation: |
+      Substring matching is bypassable. Checking for 'example.com' allows
+      'example.com.attacker.com' or 'attacker.com/example.com'.
+    remediation: Use exact URL matching or proper URL parsing with domain validation
+  - id: REDIR-HIGH-002
+    signal: Protocol-relative URLs accepted
+    cwe_id: CWE-601
+    evidence_pattern: //[^/]|^//
+    explanation: |
+      Protocol-relative URLs (//evil.com) inherit the current protocol
+      and redirect to external sites while appearing as relative paths.
+    remediation: Block protocol-relative URLs; require absolute paths or full URLs
+  - id: REDIR-HIGH-003
+    signal: URL encoding bypass possible
+    cwe_id: CWE-601
+    evidence_indicators:
+    - URL not decoded before validation
+    - Double encoding accepted
+    - '%2f%2f (encoded //) not blocked'
+    explanation: |
+      Attackers can bypass validation using URL encoding. Double encoding
+      or unicode encoding may bypass simple string checks.
+    remediation: Decode URLs fully before validation; normalize encoding
+  - id: REDIR-HIGH-004
+    signal: Login redirect vulnerable
+    cwe_id: CWE-601
+    evidence_indicators:
+    - Post-login redirect to user-provided URL
+    - return_url parameter on login form
+    - next parameter unvalidated
+    explanation: |
+      Login redirects are high-value targets. Users expect to enter
+      credentials, making post-login redirect phishing highly effective.
+    remediation: Validate login redirects; only allow same-origin or allowlisted URLs
+  medium:
+  - id: REDIR-MED-001
+    signal: Allowlist includes broad domain patterns
+    cwe_id: CWE-601
+    evidence_indicators:
+    - Wildcard subdomains allowed
+    - Multiple external domains in allowlist
+    - Partner domains with loose control
+    explanation: |
+      Broad allowlists expand attack surface. If any allowed domain is
+      compromised or has its own open redirect, attacks chain through.
+    remediation: Minimize allowlist; validate subdomain ownership
+  - id: REDIR-MED-002
+    signal: Redirect via JavaScript instead of HTTP
+    cwe_id: CWE-601
+    evidence_pattern: window\.location|location\.href|location\.assign
+    explanation: |
+      JavaScript-based redirects can sometimes bypass server-side
+      validation if the destination is determined client-side.
+    remediation: Validate redirect URLs server-side before sending to client
+  - id: REDIR-MED-003
+    signal: Meta refresh redirect used
+    cwe_id: CWE-601
+    evidence_pattern: meta.*refresh.*url|http-equiv.*refresh
+    explanation: |
+      Meta refresh redirects may bypass some security controls and
+      are harder to audit than HTTP redirects.
+    remediation: Use HTTP 302 redirects instead of meta refresh
+  low:
+  - id: REDIR-LOW-001
+    signal: No intermediate warning page
+    evidence_indicators:
+    - Direct redirect to external sites
+    - No disclaimer page
+    - User not informed of external redirect
+    explanation: |
+      Warning pages inform users they're leaving the site, providing
+      opportunity to detect phishing attempts.
+    remediation: Consider adding warning page for external redirects
+  positive:
+  - id: REDIR-POS-001
+    signal: Strict allowlist with exact matching
+    explanation: Only explicitly allowed URLs permitted for redirects
+  - id: REDIR-POS-002
+    signal: Indirect reference map for redirects
+    explanation: Redirects use ID lookup instead of URL parameter
+  - id: REDIR-POS-003
+    signal: Same-origin redirects only
+    explanation: Only relative URLs or same-origin allowed
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Redirect Functionality
+    description: |
+      Locate all redirect operations and their trigger conditions.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find redirect code
+      command: grep -rn 'redirect\|res\.redirect\|location.*=' src/
+    - purpose: Find URL parameters
+      command: grep -rn 'return_url\|returnTo\|next\|redirect_uri\|callback' src/
+    - purpose: Find login redirects
+      command: grep -rn 'login.*redirect\|post.*login.*url' src/
+    expected_findings:
+    - Redirect locations
+    - URL parameter names
+  - id: '2'
+    name: Test Redirect Validation
+    description: |
+      Test if redirects can be manipulated to external sites.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Test external URL redirect
+      command: curl -v 'https://target/login?return_url=https://evil.com'
+    - purpose: Test protocol-relative URL
+      command: curl -v 'https://target/login?return_url=//evil.com'
+    - purpose: Test subdomain confusion
+      command: curl -v 'https://target/login?return_url=https://target.evil.com'
+    expected_findings:
+    - Redirect behavior
+    - Validation bypass possibilities
+  - id: '3'
+    name: Test Encoding Bypasses
+    description: |
+      Attempt to bypass validation using URL encoding tricks.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Test URL encoding
+      command: curl -v 'https://target/login?return_url=https%3a%2f%2fevil.com'
+    - purpose: Test double encoding
+      command: curl -v 'https://target/login?return_url=https%253a%252f%252fevil.com'
+    - purpose: Test mixed encoding
+      command: curl -v 'https://target/login?return_url=https://evil.com%252f.target.com'
+    expected_findings:
+    - Encoding handling
+    - Bypass vulnerabilities
+  - id: '4'
+    name: Review Validation Code
+    description: |
+      Examine the URL validation implementation for weaknesses.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find URL validation
+      command: grep -rn 'validate.*url\|isValid.*Url\|allowedUrls' src/
+    - purpose: Check validation method
+      command: grep -rn 'includes\|startsWith\|indexOf.*url' src/
+    - purpose: Find allowlist
+      command: grep -rn 'allowed.*urls\|whitelist.*redirect' src/
+    expected_findings:
+    - Validation approach
+    - Allowlist contents
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Redirect Analysis
+    - Validation Review
+    - Phishing Risk
+    - Recommendations
+  confidence_guidance:
+    high: Direct testing confirms vulnerability, code reviewed
+    medium: Testing completed without code access
+    low: Based on configuration review only
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-redirect-cheatsheet
+      priority: required
+    - source_id: cwe-601
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Redirect audit requires comprehensive payload testing
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: redir-001
+  item: Redirect URLs validated against allowlist
+  level: CRITICAL
+  verification: curl -s -I 'https://$HOST/login?return_url=https://evil.com' | grep -qi 'location.*evil.com'
+    && echo 'FAIL' || echo 'PASS'
+  expected: PASS
+- id: redir-002
+  item: OAuth redirect_uri strictly validated
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify redirect_uri validates against registered callbacks
+  expected: Confirmed by reviewer
+- id: redir-003
+  item: Protocol-relative URLs blocked
+  level: BLOCKING
+  verification: curl -s -I 'https://$HOST/login?return_url=//evil.com' | grep -qi 'location.*evil.com'
+    && echo 'FAIL' || echo 'PASS'
+  expected: PASS
+- id: redir-004
+  item: URL validation uses proper parsing
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify validation uses URL parsing, not substring matching
+  expected: Confirmed by reviewer
+- id: redir-005
+  item: Login redirect restricted to same-origin
+  level: WARNING
+  verification: manual
+  verification_notes: Verify post-login redirects only to same origin or allowlist
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP-ASVS
+    controls:
+    - 5.1.4
+    - 5.1.5
+  - framework: PCI-DSS
+    controls:
+    - 6.5.10
+  - framework: NIST-CSF
+    controls:
+    - PR.DS-5
+relationships:
+  commonly_combined:
+  - security-trust.application-security.ssrf-prevention
+  - security-trust.authentication.oauth-implementation
+  - security-trust.input-validation.url-validation

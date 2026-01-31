@@ -1,0 +1,330 @@
+audit:
+  id: devops-ci-cd.build-pipeline.dependency-management
+  name: Dependency Management
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: devops-ci-cd
+  category_number: 11
+  subcategory: build-pipeline
+  tier: expert
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Audits the project's dependency management practices including
+    declaration methods, version pinning strategies, lockfile usage,
+    vulnerability scanning, update policies, and dependency hygiene.
+    Examines both direct and transitive dependencies across all
+    package managers in use.
+  why_it_matters: |
+    Dependencies account for 80-90% of most codebases and are a primary
+    attack vector. Poor dependency management leads to security
+    vulnerabilities (Log4Shell, event-stream), broken builds from
+    unexpected updates, licensing compliance issues, and supply chain
+    attacks. Proper management is essential for security and stability.
+  when_to_run:
+  - Initial project audit
+  - Monthly security reviews
+  - After adding new dependencies
+  - Before major releases
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Project source code with dependency declarations
+  access_requirements:
+  - Package manifest files (package.json, requirements.txt, etc.)
+  - Lockfiles if they exist
+discovery:
+  code_patterns:
+  - pattern: '"\*"|''\*''|>=|>|~|\^'
+    type: regex
+    scope: config
+    purpose: Detect unpinned or loosely pinned dependency versions
+  - pattern: git\+|github:|http://|https://
+    type: regex
+    scope: config
+    purpose: Detect git dependencies and URL-based dependencies
+  file_patterns:
+  - glob: '**/package.json'
+    purpose: npm/Node.js dependencies
+  - glob: '**/requirements*.txt'
+    purpose: Python pip dependencies
+  - glob: '**/Pipfile'
+    purpose: Python Pipenv dependencies
+  - glob: '**/pyproject.toml'
+    purpose: Python modern packaging dependencies
+  - glob: '**/go.mod'
+    purpose: Go module dependencies
+  - glob: '**/Cargo.toml'
+    purpose: Rust dependencies
+  - glob: '**/pom.xml'
+    purpose: Maven/Java dependencies
+  - glob: '**/build.gradle*'
+    purpose: Gradle/Java dependencies
+  - glob: '**/Gemfile'
+    purpose: Ruby dependencies
+knowledge_sources:
+  specifications:
+  - id: semver
+    name: Semantic Versioning 2.0.0
+    url: https://semver.org/
+    offline_cache: true
+    priority: required
+  - id: nsa-cicd-security
+    name: 'NSA/CISA: Defending CI/CD Environments'
+    url: https://media.defense.gov/2023/Jun/28/2003249466/-1/-1/0/CSI_DEFENDING_CI_CD_ENVIRONMENTS.PDF
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-dep-check
+    name: OWASP Dependency Check
+    url: https://owasp.org/www-project-dependency-check/
+    offline_cache: true
+  - id: npm-security
+    name: npm Security Best Practices
+    url: https://docs.npmjs.com/packages-and-modules/securing-your-code
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: npm audit
+    purpose: Check for known vulnerabilities in npm dependencies
+    offline_capable: false
+  - tool: pip-audit
+    purpose: Check for known vulnerabilities in Python dependencies
+    offline_capable: false
+  - tool: snyk
+    purpose: Comprehensive dependency vulnerability scanning
+    offline_capable: false
+  - tool: trivy
+    purpose: Vulnerability scanner for dependencies and containers
+    offline_capable: true
+  - tool: dependency-check
+    purpose: OWASP dependency vulnerability scanner
+    offline_capable: true
+  scripts:
+  - id: check-unpinned
+    language: bash
+    purpose: Find unpinned dependencies in package.json
+    source: inline
+    code: |
+      #!/bin/bash
+      if [[ -f package.json ]]; then
+        jq -r '.dependencies // {} | to_entries[] |
+        select(.value | test("^[\\^~*]|>=|>")) |
+        "\(.key): \(.value)"' package.json
+      fi
+signals:
+  critical:
+  - id: CICD-DEP-CRIT-001
+    signal: Known high/critical vulnerabilities in dependencies
+    explanation: |
+      Known vulnerabilities in dependencies can be exploited by attackers.
+      High and critical severity vulnerabilities require immediate attention
+      as they often allow remote code execution or data exfiltration.
+    remediation: Update affected dependencies or apply patches immediately
+    evidence_description: npm audit --json | jq '.vulnerabilities | to_entries[] | select(.value.severity=="high"
+      or .value.severity=="critical")'
+  - id: CICD-DEP-CRIT-002
+    signal: No lockfiles committed to repository
+    evidence_pattern: Missing package-lock.json, yarn.lock, Pipfile.lock
+    explanation: |
+      Without lockfiles, each build may resolve to different dependency
+      versions, leading to inconsistent builds and potential security
+      issues from unexpected dependency changes.
+    remediation: Generate lockfiles and commit them to the repository
+  high:
+  - id: CICD-DEP-HIGH-001
+    signal: Dependencies pinned with ranges allowing major version updates
+    evidence_pattern: '"*" or ">" without upper bound in dependency versions'
+    explanation: |
+      Star (*) or greater-than (>) without upper bounds allow arbitrary
+      version changes that may include breaking changes or malicious code.
+    remediation: Pin to specific versions or use conservative ranges (^, ~)
+  - id: CICD-DEP-HIGH-002
+    signal: Git dependencies without commit SHA pinning
+    evidence_pattern: git+https://.*#(?!=[a-f0-9]{40})
+    explanation: |
+      Git dependencies pointing to branches or tags can change unexpectedly,
+      introducing malicious code or breaking changes.
+    remediation: Pin git dependencies to specific commit SHAs
+  medium:
+  - id: CICD-DEP-MED-001
+    signal: Dependencies significantly out of date (>6 months)
+    evidence_pattern: npm outdated showing major version differences
+    remediation: Establish regular dependency update schedule
+  - id: CICD-DEP-MED-002
+    signal: No automated dependency update process
+    evidence_pattern: No Dependabot, Renovate, or similar configuration
+    remediation: Configure automated dependency update tooling
+  low:
+  - id: CICD-DEP-LOW-001
+    signal: Unused dependencies in manifest
+  - id: CICD-DEP-LOW-002
+    signal: Development dependencies included in production builds
+  positive:
+  - id: CICD-DEP-POS-001
+    signal: All dependencies pinned to exact versions with lockfiles
+  - id: CICD-DEP-POS-002
+    signal: Automated dependency updates with vulnerability alerts enabled
+  - id: CICD-DEP-POS-003
+    signal: Dependency audit integrated into CI pipeline
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory dependency manifests
+    description: |
+      Identify all package managers and dependency declaration files
+      in the project. Note the ecosystems in use.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find all dependency manifests
+      command: |
+        find . -name 'package.json' -o -name 'requirements*.txt' -o -name 'Pipfile' -o -name 'go.mod' -o -name 'Cargo.toml' -o -name 'pom.xml' -o -name 'Gemfile' 2>/dev/null | head -50
+    expected_findings:
+    - Complete list of dependency declaration files
+  - id: '2'
+    name: Check lockfile presence
+    description: |
+      Verify lockfiles exist for each package manager and are
+      committed to the repository (not gitignored).
+    duration_estimate: 10 min
+    commands:
+    - purpose: Check for lockfiles
+      command: |
+        ls -la package-lock.json yarn.lock pnpm-lock.yaml Pipfile.lock poetry.lock go.sum Cargo.lock Gemfile.lock 2>/dev/null || echo "No lockfiles found"
+    - purpose: Check if lockfiles are gitignored
+      command: |
+        grep -E 'lock|Lock' .gitignore 2>/dev/null || echo "No lock patterns in gitignore"
+    expected_findings:
+    - Lockfile status for each package manager
+  - id: '3'
+    name: Scan for vulnerabilities
+    description: |
+      Run vulnerability scanners appropriate for each ecosystem.
+      Document all high and critical findings.
+    duration_estimate: 20 min
+    commands:
+    - purpose: npm vulnerability scan
+      command: npm audit --json 2>/dev/null | jq '.metadata.vulnerabilities'
+    - purpose: Python vulnerability scan
+      command: pip-audit 2>/dev/null || echo 'pip-audit not installed'
+    expected_findings:
+    - Vulnerability counts by severity
+  - id: '4'
+    name: Analyze version pinning strategy
+    description: |
+      Review how dependencies are pinned. Identify any using
+      dangerous patterns like *, >, or git branches.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check for unpinned npm dependencies
+      command: |
+        jq -r '(.dependencies // {}) + (.devDependencies // {}) | to_entries[] | select(.value | test("^[\\*]$|^>|^>=")) | "\(.key): \(.value)"' package.json 2>/dev/null || echo "No package.json"
+    expected_findings:
+    - List of dependencies with risky version specifications
+  - id: '5'
+    name: Check for automated updates
+    description: |
+      Verify if automated dependency update tooling is configured.
+    duration_estimate: 5 min
+    commands:
+    - purpose: Check for Dependabot configuration
+      command: |
+        cat .github/dependabot.yml 2>/dev/null || echo "No Dependabot config"
+    - purpose: Check for Renovate configuration
+      command: |
+        cat renovate.json .renovaterc 2>/dev/null || echo "No Renovate config"
+    expected_findings:
+    - Status of automated dependency update configuration
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Vulnerability Assessment
+    - Version Pinning Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Full vulnerability scan completed with lockfile analysis
+    medium: Vulnerability scan completed but lockfiles missing
+    low: Based on manifest review only, no scanning performed
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: semver
+      priority: required
+    - source_id: owasp-dep-check
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: dependency-management-001
+  item: No critical or high severity vulnerabilities
+  level: CRITICAL
+  verification: |
+    npm audit --json 2>/dev/null | jq '.metadata.vulnerabilities.high + .metadata.vulnerabilities.critical' | grep -q '^0$' && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: dependency-management-002
+  item: Lockfiles present and committed
+  level: CRITICAL
+  verification: |
+    git ls-files | grep -E 'lock\.json|yarn\.lock|Pipfile\.lock|go\.sum|Cargo\.lock' && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: dependency-management-003
+  item: No wildcard (*) version specifications
+  level: BLOCKING
+  verification: |
+    grep -r '"\\*"' package.json */package.json 2>/dev/null && echo "FAIL" || echo "PASS"
+  expected: PASS
+- id: dependency-management-004
+  item: Automated dependency updates configured
+  level: WARNING
+  verification: |
+    [[ -f .github/dependabot.yml ]] || [[ -f renovate.json ]] || [[ -f .renovaterc ]] && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP
+    controls:
+    - A06:2021 - Vulnerable Components
+  - framework: SLSA
+    controls:
+    - Dependencies Complete
+  - framework: SOC2
+    controls:
+    - CC6.1
+relationships:
+  commonly_combined:
+  - devops-ci-cd.build-pipeline.build-reproducibility
+  - security.supply-chain.sbom-generation

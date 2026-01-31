@@ -1,0 +1,273 @@
+audit:
+  id: performance-efficiency.algorithmic-efficiency.pagination-strategy
+  name: Pagination Strategy Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: algorithmic-efficiency
+  tier: expert
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Analyzes pagination implementation across APIs and data access layers.
+    Compares offset-based, cursor-based, and keyset pagination approaches.
+    Evaluates total count queries, page size limits, and consistency
+    during concurrent modifications.
+  why_it_matters: |
+    Poor pagination causes database performance degradation at scale
+    (OFFSET scanning), inconsistent results during updates (phantom reads),
+    and API abuse through unlimited page requests. Proper pagination is
+    essential for systems handling large datasets.
+  when_to_run:
+  - API design review
+  - Database performance optimization
+  - Large dataset handling
+  - After pagination-related issues
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code with API and data access
+  access_requirements:
+  - Source code repository access
+  - Database schema access
+discovery:
+  code_patterns:
+  - pattern: OFFSET\s+\d+|LIMIT.*OFFSET|skip\(|offset\(
+    type: regex
+    scope: source
+    purpose: Find offset-based pagination
+  - pattern: cursor|after:|before:|keyset|seek
+    type: regex
+    scope: source
+    purpose: Find cursor-based pagination
+  - pattern: page_?size|per_?page|pageSize|limit
+    type: regex
+    scope: source
+    purpose: Find page size configuration
+  - pattern: COUNT\(\*\)|count\(|totalCount|total_count
+    type: regex
+    scope: source
+    purpose: Find total count queries
+  file_patterns:
+  - glob: '**/api/**/*.{py,js,ts,java,go}'
+    purpose: API handlers
+  - glob: '**/repository/**/*.{py,js,ts,java}'
+    purpose: Data access layer
+  - glob: '**/graphql/**/*.{py,js,ts}'
+    purpose: GraphQL resolvers
+knowledge_sources:
+  guides:
+  - id: cursor-pagination
+    name: Cursor-based Pagination
+    url: https://relay.dev/graphql/connections.htm
+    offline_cache: true
+  - id: pagination-patterns
+    name: API Pagination Best Practices
+    url: https://www.moesif.com/blog/technical/api-design/REST-API-Design-Filtering-Sorting-and-Pagination/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: grep/ripgrep
+    purpose: Find pagination patterns
+    offline_capable: true
+  scripts:
+  - id: pagination-finder
+    language: bash
+    purpose: Catalog pagination implementations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Offset Pagination ==="
+      rg -n 'OFFSET|offset\(|skip\(' --type py --type js --type java
+      echo
+      echo "=== Cursor Pagination ==="
+      rg -n 'cursor|after=|before=' --type py --type js --type java
+      echo
+      echo "=== Page Size ==="
+      rg -n 'page_?size|per_?page|limit' --type py --type js
+signals:
+  critical:
+  - id: PAGINATION-CRIT-001
+    signal: No page size limit enforced
+    evidence_pattern: Page size from user input without validation/cap
+    explanation: |
+      Without page size limits, malicious or careless clients can request
+      millions of records, exhausting database and application resources.
+      This is a denial-of-service vulnerability.
+    remediation: Enforce maximum page size (e.g., 100-1000) server-side
+  - id: PAGINATION-CRIT-002
+    signal: OFFSET pagination on large tables
+    evidence_pattern: OFFSET > 10000 possible on tables with millions of rows
+    explanation: |
+      OFFSET must scan and discard all skipped rows. OFFSET 1000000 on
+      a table requires scanning 1 million rows before returning results.
+      This degrades linearly and kills database performance.
+    remediation: Use cursor/keyset pagination for large datasets
+  high:
+  - id: PAGINATION-HIGH-001
+    signal: COUNT(*) query on every page request
+    explanation: |
+      COUNT(*) on large tables is expensive and often doesn't benefit
+      from indexes. Executing it on every page request multiplies the
+      performance impact.
+    remediation: Cache counts, use estimates, or omit total count
+    evidence_description: SELECT COUNT(*) executed for total in pagination
+  - id: PAGINATION-HIGH-002
+    signal: Pagination inconsistent during concurrent updates
+    evidence_pattern: Offset pagination without stable sort order
+    explanation: |
+      If data is inserted/deleted between page requests, offset pagination
+      can skip or duplicate items. Users see inconsistent data.
+    remediation: Use cursor pagination or add created_at to sort order
+  medium:
+  - id: PAGINATION-MED-001
+    signal: No default page size
+    evidence_pattern: Page size required from client, no default
+    explanation: |
+      Missing defaults force all clients to specify page size, increasing
+      API complexity and risk of client mistakes.
+    remediation: Provide sensible default page size
+  - id: PAGINATION-MED-002
+    signal: Inconsistent pagination across endpoints
+    evidence_pattern: Different pagination styles in same API
+    explanation: |
+      Mixing pagination styles confuses API consumers and complicates
+      client code.
+    remediation: Standardize pagination style across API
+  low:
+  - id: PAGINATION-LOW-001
+    signal: No documentation for pagination parameters
+    remediation: Document pagination in API documentation
+  positive:
+  - id: PAGINATION-POS-001
+    signal: Cursor-based pagination with stable ordering
+  - id: PAGINATION-POS-002
+    signal: Page size limits enforced server-side
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory pagination implementations
+    description: |
+      Find all paginated endpoints and data queries, noting the
+      pagination strategy used.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find offset pagination
+      command: rg -n 'OFFSET|offset\(|skip\(' --type py --type js --type java
+    - purpose: Find cursor pagination
+      command: rg -n 'cursor|after:|before:' --type py --type js --type java
+    - purpose: Find page parameters
+      command: rg -n 'page|per_page|pageSize' --type py --type js --type java | head -30
+    expected_findings:
+    - Pagination style inventory
+    - Endpoint mapping
+  - id: '2'
+    name: Check page size limits
+    description: |
+      Verify that all paginated endpoints enforce maximum page sizes
+      to prevent resource exhaustion.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find page size validation
+      command: rg -n 'max.*page|page.*max|limit.*100|min\(.*limit' --type py --type js
+    expected_findings:
+    - Page size limit enforcement
+    - Validation locations
+  - id: '3'
+    name: Analyze count query patterns
+    description: |
+      Identify total count queries and evaluate their performance
+      impact and necessity.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find count queries
+      command: rg -n 'COUNT\(\*\)|count\(|totalCount' --type py --type js --type java
+    expected_findings:
+    - Count query locations
+    - Performance impact assessment
+  - id: '4'
+    name: Review consistency handling
+    description: |
+      Evaluate how pagination handles concurrent modifications and
+      whether results remain consistent across pages.
+    duration_estimate: 20 min
+    expected_findings:
+    - Consistency mechanism analysis
+    - Phantom read risk assessment
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Pagination Inventory
+    - Performance Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Code analysis with query plan review
+    medium: Code analysis with estimated data volumes
+    low: Pattern matching without context
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cursor-pagination
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: pagination-001
+  item: Page size limits enforced server-side
+  level: CRITICAL
+  verification: rg -l 'max.*page|page.*max|min\(.*limit|limit.*<' --type py --type js | wc -l | awk '{if($1>0)print
+    "PASS"; else print "FAIL"}'
+  expected: PASS
+- id: pagination-002
+  item: Large tables use cursor pagination
+  level: CRITICAL
+  verification: manual
+  verification_notes: Tables > 100K rows don't use OFFSET pagination
+  expected: Confirmed by reviewer
+- id: pagination-003
+  item: Count queries optimized or avoided
+  level: BLOCKING
+  verification: manual
+  verification_notes: COUNT(*) not called on every pagination request for large tables
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: API Design
+    controls:
+    - Pagination Best Practices
+relationships:
+  commonly_combined:
+  - performance-efficiency.database-performance.query-optimization
+  - performance-efficiency.algorithmic-efficiency.time-complexity
+  - security.api-security.rate-limiting

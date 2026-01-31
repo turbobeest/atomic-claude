@@ -1,0 +1,347 @@
+audit:
+  id: api-integration.integration-patterns.webhook-design
+  name: Webhook Design Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: api-integration
+  category_number: 9
+  subcategory: integration-patterns
+  tier: phd
+  estimated_duration: 90 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - api
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates webhook implementation including event types, payload
+    format, delivery guarantees, retry logic, signature verification,
+    and endpoint management. Analyzes whether webhooks are reliable,
+    secure, and developer-friendly.
+  why_it_matters: |
+    Webhooks enable real-time integrations without polling overhead.
+    But poorly designed webhooks cause missed events, security
+    vulnerabilities, and reliability issues. Webhooks without
+    signatures can be spoofed; webhooks without retries lose events.
+  when_to_run:
+  - Webhook implementation review
+  - Security assessments
+  - Reliability audits
+  - After webhook delivery issues
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Webhook sending implementation
+  - type: documentation
+    description: Webhook event documentation
+  access_requirements:
+  - Read access to webhook source code
+  - Access to event documentation
+discovery:
+  code_patterns:
+  - pattern: webhook|Webhook|WEBHOOK
+    type: regex
+    scope: source
+    purpose: Detect webhook implementations
+  - pattern: hmac|signature|verify|sign
+    type: regex
+    scope: source
+    purpose: Detect signature handling
+  - pattern: retry|backoff|deliver
+    type: regex
+    scope: source
+    purpose: Detect delivery logic
+  file_patterns:
+  - glob: '**/webhooks/**'
+    purpose: Webhook implementations
+  - glob: '**/events/**'
+    purpose: Event definitions
+  - glob: '**/callbacks/**'
+    purpose: Callback handling
+knowledge_sources:
+  specifications:
+  - id: building-microservices
+    name: Sam Newman - Building Microservices
+    url: https://www.oreilly.com/library/view/building-microservices-2nd/9781492034018/
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: webhook-security
+    name: Webhook Security Best Practices
+    url: https://www.twilio.com/blog/protect-webhooks
+    offline_cache: true
+  - id: webhook-design
+    name: Webhook Design Guide
+    url: https://stripe.com/docs/webhooks/best-practices
+    offline_cache: true
+  learning_resources:
+  - id: webhook-patterns
+    title: Webhook Patterns
+    type: article
+    reference: Stripe Developer Blog
+tooling:
+  static_analysis:
+  - tool: asyncapi
+    purpose: Validate async API specifications
+    offline_capable: true
+  scripts:
+  - id: webhook-scan
+    language: bash
+    purpose: Analyze webhook implementation
+    source: inline
+    code: |
+      echo "=== Webhook Design Analysis ==="
+      echo "--- Webhook definitions ---"
+      grep -rn "webhook\|Webhook" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -30
+
+      echo "--- Signature handling ---"
+      grep -rn "hmac\|signature\|verify\|sign" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+
+      echo "--- Retry logic ---"
+      grep -rn "retry\|backoff\|attempt" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+signals:
+  critical:
+  - id: WD-CRIT-001
+    signal: Webhooks sent without signature
+    evidence_pattern: No HMAC or signature in webhook headers
+    explanation: |
+      Without signatures, recipients cannot verify webhook authenticity.
+      Attackers can forge webhooks to trigger unauthorized actions or
+      inject malicious data into recipient systems.
+    remediation: Sign all webhooks with HMAC-SHA256 and include signature header
+  - id: WD-CRIT-002
+    signal: Webhook secrets stored in plaintext
+    evidence_pattern: Signing key in configuration or code
+    explanation: |
+      Exposed webhook secrets allow attackers to forge valid signatures.
+      This defeats the entire purpose of webhook signing.
+    remediation: Store webhook secrets in secure secret management
+  high:
+  - id: WD-HIGH-001
+    signal: No webhook retry mechanism
+    evidence_pattern: Webhook delivery fails permanently on first error
+    explanation: |
+      Without retries, transient failures cause permanent event loss.
+      Network blips or temporary recipient downtime should not lose
+      critical events.
+    remediation: Implement exponential backoff retry (e.g., 5 attempts over 24 hours)
+  - id: WD-HIGH-002
+    signal: No webhook delivery logging
+    evidence_pattern: No record of webhook attempts or failures
+    explanation: |
+      Without delivery logs, debugging webhook issues is impossible.
+      Neither provider nor consumer can verify what was sent or why
+      it failed.
+    remediation: Log all webhook delivery attempts with status and response
+  - id: WD-HIGH-003
+    signal: Webhook payload contains sensitive data
+    evidence_pattern: PII or secrets included in webhook body
+    explanation: |
+      Webhook payloads may be logged or stored by recipients.
+      Sensitive data in webhooks can leak through recipient systems
+      or logs.
+    remediation: Send event references, not full sensitive data; require API fetch
+  medium:
+  - id: WD-MED-001
+    signal: No event type versioning
+    evidence_pattern: Event payloads can change without notice
+    remediation: Version event schemas and maintain backward compatibility
+  - id: WD-MED-002
+    signal: No webhook endpoint management UI
+    evidence_pattern: Endpoints must be configured manually
+    remediation: Provide self-service webhook endpoint management
+  - id: WD-MED-003
+    signal: No webhook delivery history
+    evidence_pattern: Users cannot see past webhook deliveries
+    remediation: Provide webhook delivery history in dashboard
+  low:
+  - id: WD-LOW-001
+    signal: Webhook events not documented
+    evidence_pattern: No documentation of event types and payloads
+    remediation: Document all webhook events with example payloads
+  positive:
+  - id: WD-POS-001
+    signal: HMAC-SHA256 signature on all webhooks
+    evidence_pattern: X-Signature header with HMAC
+  - id: WD-POS-002
+    signal: Exponential backoff retry implemented
+    evidence_pattern: Increasing delay between retry attempts
+  - id: WD-POS-003
+    signal: Webhook delivery dashboard available
+    evidence_pattern: Users can view delivery history and retry
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Webhook Implementation
+    description: |
+      Find webhook sending and receiving code.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find webhook code
+      command: |
+        grep -rn "webhook\|Webhook" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -40
+    expected_findings:
+    - Webhook implementations
+    - Event types
+  - id: '2'
+    name: Analyze Signature Implementation
+    description: |
+      Review webhook signing and verification.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find signing code
+      command: |
+        grep -rn "hmac\|signature\|sign\|verify" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    - purpose: Find secret handling
+      command: |
+        grep -rn "secret\|key\|WEBHOOK" \
+          --include="*.ts" --include="*.java" --include="*.py" --include="*.env*" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    expected_findings:
+    - Signature method
+    - Secret storage
+  - id: '3'
+    name: Review Retry Logic
+    description: |
+      Check delivery retry implementation.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find retry logic
+      command: |
+        grep -rn "retry\|backoff\|attempt\|deliver" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Retry strategy
+    - Backoff configuration
+  - id: '4'
+    name: Check Logging and Monitoring
+    description: |
+      Verify webhook delivery is logged.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find webhook logging
+      command: |
+        grep -rn "log\|Log\|LOG" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -i "webhook" | grep -v node_modules | head -20
+    expected_findings:
+    - Logging implementation
+    - Audit trail
+  - id: '5'
+    name: Review Payload Security
+    description: |
+      Check for sensitive data in payloads.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find webhook payload construction
+      command: |
+        grep -rn "payload\|body\|data" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -i "webhook" | grep -v node_modules | head -30
+    expected_findings:
+    - Payload contents
+    - Sensitive data handling
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - webhook_inventory
+    - security_assessment
+    - reliability_analysis
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Security Analysis
+    - Reliability Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Clear security gap or missing retry logic
+    medium: Implementation exists but quality uncertain
+    low: Requires delivery testing to confirm reliability
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: webhook-security
+      priority: required
+    - source_id: webhook-design
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: wd-001
+  item: Webhooks include signature
+  level: CRITICAL
+  verification: |
+    grep -rn "hmac\|signature\|sign" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: wd-002
+  item: Webhook retry mechanism exists
+  level: CRITICAL
+  verification: |
+    grep -rn "retry\|backoff" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: wd-003
+  item: Webhook delivery logged
+  level: WARNING
+  verification: |
+    grep -rn "log.*webhook\|webhook.*log" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP
+    controls:
+    - A04:2021-Insecure Design
+  - framework: ISO 25010
+    controls:
+    - Security
+    - Reliability
+relationships:
+  commonly_combined:
+  - api-integration.integration-patterns.callback-security
+  - api-integration.integration-patterns.retry-pattern
+  - security-trust.authentication.webhook-authentication

@@ -1,0 +1,363 @@
+audit:
+  id: api-integration.integration-patterns.callback-security
+  name: Callback Security Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: api-integration
+  category_number: 9
+  subcategory: integration-patterns
+  tier: phd
+  estimated_duration: 90 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates security of callback URLs and webhook endpoints including
+    URL validation, SSRF prevention, signature verification, replay
+    attack protection, and TLS enforcement. Analyzes whether callback
+    mechanisms are protected against common attack vectors.
+  why_it_matters: |
+    Callback URLs are a major attack surface. SSRF vulnerabilities
+    allow attackers to access internal services. Missing signature
+    verification enables spoofed callbacks. Replay attacks can cause
+    duplicate processing. Proper callback security is critical.
+  when_to_run:
+  - Security assessments
+  - Webhook implementation review
+  - After security incidents
+  - Before production deployment
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Callback handling implementation
+  - type: configuration
+    description: Security configuration
+  access_requirements:
+  - Read access to callback code
+  - Access to security configuration
+discovery:
+  code_patterns:
+  - pattern: callback|callbackUrl|webhook_url
+    type: regex
+    scope: source
+    purpose: Detect callback URL handling
+  - pattern: verify|signature|hmac|validate
+    type: regex
+    scope: source
+    purpose: Detect verification logic
+  - pattern: allowlist|whitelist|blocklist|blacklist
+    type: regex
+    scope: source
+    purpose: Detect URL filtering
+  file_patterns:
+  - glob: '**/webhooks/**'
+    purpose: Webhook handlers
+  - glob: '**/callbacks/**'
+    purpose: Callback implementations
+  - glob: '**/security/**'
+    purpose: Security configuration
+knowledge_sources:
+  specifications:
+  - id: owasp-ssrf
+    name: OWASP SSRF Prevention
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html
+    offline_cache: true
+    priority: required
+  - id: building-microservices
+    name: Sam Newman - Building Microservices
+    url: https://www.oreilly.com/library/view/building-microservices-2nd/9781492034018/
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: webhook-security
+    name: Webhook Security
+    url: https://stripe.com/docs/webhooks/signatures
+    offline_cache: true
+  - id: callback-validation
+    name: Callback URL Validation
+    url: https://cwe.mitre.org/data/definitions/918.html
+    offline_cache: true
+  learning_resources:
+  - id: ssrf-attacks
+    title: SSRF Attack Patterns
+    type: article
+    reference: PortSwigger Web Security
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect SSRF patterns
+    offline_capable: true
+  - tool: snyk
+    purpose: Security vulnerability scanning
+    offline_capable: false
+  scripts:
+  - id: callback-security-scan
+    language: bash
+    purpose: Analyze callback security
+    source: inline
+    code: |
+      echo "=== Callback Security Analysis ==="
+      echo "--- Callback URL handling ---"
+      grep -rn "callback\|callbackUrl\|webhook_url" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -30
+
+      echo "--- URL validation ---"
+      grep -rn "validate.*url\|URL.*valid\|allowlist\|whitelist" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+
+      echo "--- Signature verification ---"
+      grep -rn "verify\|signature\|hmac\|sign" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+signals:
+  critical:
+  - id: CS-CRIT-001
+    signal: Callback URL not validated for SSRF
+    evidence_pattern: User-provided URL used directly in HTTP request
+    explanation: |
+      SSRF allows attackers to make requests to internal services,
+      cloud metadata endpoints, or other protected resources. This
+      can lead to data exfiltration, credential theft, or RCE.
+    remediation: Validate callback URLs against allowlist of domains/IPs
+  - id: CS-CRIT-002
+    signal: Callback URLs allow internal IP addresses
+    evidence_pattern: No blocking of 127.0.0.1, 10.x, 169.254.x, etc.
+    explanation: |
+      Allowing internal IPs in callbacks enables SSRF attacks against
+      internal services, cloud metadata (169.254.169.254), and
+      localhost services.
+    remediation: Block all private, loopback, and link-local IP addresses
+  - id: CS-CRIT-003
+    signal: Incoming webhooks not verified
+    evidence_pattern: No signature check on received callbacks
+    explanation: |
+      Without verification, attackers can forge callbacks to trigger
+      unauthorized actions. Any attacker can send POST requests that
+      appear to be legitimate webhooks.
+    remediation: Verify webhook signatures before processing
+  high:
+  - id: CS-HIGH-001
+    signal: Callback URLs allow HTTP (not HTTPS)
+    evidence_pattern: No TLS enforcement for callback delivery
+    explanation: |
+      HTTP callbacks expose sensitive data in transit. Attackers on
+      the network path can intercept callback contents including
+      secrets and PII.
+    remediation: Require HTTPS for all callback URLs
+  - id: CS-HIGH-002
+    signal: No replay attack protection
+    evidence_pattern: Same callback can be replayed multiple times
+    explanation: |
+      Without replay protection, attackers can capture and resend
+      valid callbacks to cause duplicate processing. For payment
+      callbacks, this could mean duplicate charges or refunds.
+    remediation: Include timestamp and nonce; reject replayed callbacks
+  - id: CS-HIGH-003
+    signal: Callback secret shared across all clients
+    evidence_pattern: Single webhook secret for all endpoints
+    explanation: |
+      Shared secrets mean any client can forge callbacks for other
+      clients. If one client's secret leaks, all clients are
+      compromised.
+    remediation: Generate unique secret per client/endpoint
+  medium:
+  - id: CS-MED-001
+    signal: No callback URL domain allowlisting
+    evidence_pattern: Any external domain accepted
+    remediation: Consider allowlisting known callback domains
+  - id: CS-MED-002
+    signal: Callback response not validated
+    evidence_pattern: Any 2xx response considered success
+    remediation: Validate callback response status and content
+  - id: CS-MED-003
+    signal: Callback timeout too long
+    evidence_pattern: Callback requests wait > 30 seconds
+    remediation: Set short timeout (5-10 seconds) for callback delivery
+  low:
+  - id: CS-LOW-001
+    signal: Callback verification not documented
+    evidence_pattern: No docs on how to verify signatures
+    remediation: Document callback verification process
+  positive:
+  - id: CS-POS-001
+    signal: URL allowlist enforced
+    evidence_pattern: Only approved domains/IPs accepted
+  - id: CS-POS-002
+    signal: HMAC signature verification implemented
+    evidence_pattern: SHA256 signature checked before processing
+  - id: CS-POS-003
+    signal: Replay protection via timestamp
+    evidence_pattern: Callbacks rejected if timestamp too old
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Callback Entry Points
+    description: |
+      Find all callback URL handling code.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find callback URL handling
+      command: |
+        grep -rn "callback\|callbackUrl\|webhook_url\|notify_url" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -40
+    expected_findings:
+    - Callback entry points
+    - URL handling code
+  - id: '2'
+    name: Analyze SSRF Protection
+    description: |
+      Check for URL validation and SSRF prevention.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find URL validation
+      command: |
+        grep -rn "validate.*url\|URL.*valid\|isValidUrl\|parseUrl" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    - purpose: Find IP blocking
+      command: |
+        grep -rn "private\|internal\|localhost\|127\.\|10\.\|192\.168\|169\.254" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    expected_findings:
+    - URL validation presence
+    - IP blocking implementation
+  - id: '3'
+    name: Review Signature Verification
+    description: |
+      Check incoming callback verification.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find verification code
+      command: |
+        grep -rn "verify\|signature\|hmac" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Verification implementation
+    - Algorithm used
+  - id: '4'
+    name: Check Replay Protection
+    description: |
+      Verify protection against replay attacks.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find timestamp/nonce handling
+      command: |
+        grep -rn "timestamp\|nonce\|idempotency\|replay" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    expected_findings:
+    - Replay protection
+    - Idempotency handling
+  - id: '5'
+    name: Verify TLS Enforcement
+    description: |
+      Check if HTTPS is required for callbacks.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find TLS enforcement
+      command: |
+        grep -rn "https\|TLS\|ssl\|secure" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -i "callback\|webhook" | grep -v node_modules | head -20
+    expected_findings:
+    - TLS requirements
+    - Protocol enforcement
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - ssrf_assessment
+    - verification_status
+    - security_gaps
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - SSRF Analysis
+    - Authentication Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Clear SSRF vulnerability or missing verification
+    medium: Protection exists but may have gaps
+    low: Requires penetration testing to confirm
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-ssrf
+      priority: required
+    - source_id: webhook-security
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Security-critical analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: cs-001
+  item: Callback URLs validated for SSRF
+  level: CRITICAL
+  verification: |
+    grep -rn "validate.*url\|allowlist\|whitelist\|block.*ip" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: cs-002
+  item: Incoming callbacks verified
+  level: CRITICAL
+  verification: |
+    grep -rn "verify.*signature\|hmac.*verify\|validateSignature" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: cs-003
+  item: HTTPS required for callbacks
+  level: BLOCKING
+  verification: |
+    grep -rn "https\|require.*tls\|secure.*only" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -i "callback\|webhook" | grep -v node_modules | \
+      wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP
+    controls:
+    - A10:2021-SSRF
+  - framework: PCI DSS
+    controls:
+    - 6.5.9
+relationships:
+  commonly_combined:
+  - api-integration.integration-patterns.webhook-design
+  - security-trust.injection-prevention.ssrf-prevention
+  - security-trust.authentication.api-authentication

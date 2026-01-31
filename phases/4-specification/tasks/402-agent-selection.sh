@@ -7,7 +7,10 @@
 task_402_agent_selection() {
     local roster_file="$ATOMIC_ROOT/.claude/agent-roster.json"
     local tasks_file="$ATOMIC_ROOT/.taskmaster/tasks/tasks.json"
-    local agent_repo="${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}"
+    # Check embedded repo first (monorepo deployment), then env var, then default
+    local agent_repo="$ATOMIC_ROOT/repos/agents"
+    [[ -f "$ATOMIC_ROOT/agents/agent-inventory.csv" ]] && agent_repo="$ATOMIC_ROOT/agents"
+    [[ -n "$ATOMIC_AGENT_REPO" ]] && agent_repo="$ATOMIC_AGENT_REPO"
     local csv_path="$agent_repo/agent-inventory.csv"
 
     atomic_step "Agent Selection"

@@ -1,0 +1,391 @@
+# ============================================================
+# AUDIT: Function Timeout Audit
+# ============================================================
+# Category 4: Scalability & Capacity
+# Subcategory 4.7: Serverless & Edge Scaling
+# ============================================================
+
+# ============================================================
+# SECTION 1: IDENTITY & METADATA
+# ============================================================
+
+audit:
+  id: "scalability-capacity.serverless-edge-scaling.function-timeout"
+
+  name: "Function Timeout Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "serverless-edge-scaling"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+# ============================================================
+# SECTION 2: EXECUTION CLASSIFICATION
+# ============================================================
+
+execution:
+  automatable: "partial"
+
+  severity: "high"
+
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+# ============================================================
+# SECTION 3: DESCRIPTION & RATIONALE
+# ============================================================
+
+description:
+  what: |
+    Evaluates function timeout configurations for serverless functions,
+    analyzing the relationship between timeout settings, actual execution
+    times, and upstream/downstream timeout chains. Examines timeout
+    distribution patterns, identifies functions at risk of timeout failures,
+    and assesses the impact of timeouts on retry behavior and resource usage.
+
+  why_it_matters: |
+    Timeout configurations directly impact reliability and cost. Timeouts
+    set too short cause premature failures and retries, wasting resources
+    and degrading user experience. Timeouts set too long allow runaway
+    functions to consume resources and may cause cascading timeouts in
+    calling services. Proper timeout configuration ensures reliable
+    execution while preventing resource waste.
+
+  when_to_run:
+    - "During serverless architecture review"
+    - "When experiencing timeout-related failures"
+    - "After adding new external dependencies to functions"
+    - "During cost optimization reviews"
+
+# ============================================================
+# SECTION 4: PREREQUISITES
+# ============================================================
+
+prerequisites:
+  required_artifacts:
+    - type: "function_configurations"
+      description: "Serverless function timeout settings"
+    - type: "execution_metrics"
+      description: "Function duration metrics and timeout events"
+    - type: "integration_configs"
+      description: "API Gateway and upstream service timeout settings"
+
+  access_requirements:
+    - "Access to serverless function configurations"
+    - "Access to function execution metrics"
+    - "Access to API Gateway and integration configurations"
+
+# ============================================================
+# SECTION 5: DISCOVERY SPECIFICATION
+# ============================================================
+
+discovery:
+  code_patterns:
+    - pattern: "timeout|Timeout|TIMEOUT"
+      type: "regex"
+      scope: "config"
+      purpose: "Find timeout configurations"
+    - pattern: "async.*await|Promise|setTimeout"
+      type: "regex"
+      scope: "source"
+      purpose: "Find async operations that may cause timeouts"
+    - pattern: "http\\.get|fetch|axios|request"
+      type: "regex"
+      scope: "source"
+      purpose: "Find external calls that may timeout"
+
+  file_patterns:
+    - glob: "**/serverless.{yml,yaml}"
+      purpose: "Serverless framework configurations"
+    - glob: "**/template.{yml,yaml}"
+      purpose: "SAM template configurations"
+    - glob: "**/lambda*.tf"
+      purpose: "Terraform Lambda configurations"
+
+  metrics_queries:
+    - system: "CloudWatch"
+      query: "Duration / Timeout * 100"
+      purpose: "Execution time as percentage of timeout"
+      threshold: "P99 should be < 80% of timeout"
+    - system: "CloudWatch"
+      query: "filter @message like /Task timed out/"
+      purpose: "Timeout events"
+      threshold: "Should be zero under normal operation"
+
+# ============================================================
+# SECTION 6: EXTERNAL KNOWLEDGE SOURCES
+# ============================================================
+
+knowledge_sources:
+  guides:
+    - id: "lambda-timeout"
+      name: "AWS Lambda Timeout Configuration"
+      url: "https://docs.aws.amazon.com/lambda/latest/dg/configuration-function-common.html"
+      offline_cache: true
+    - id: "apigw-timeout"
+      name: "API Gateway Timeout Limits"
+      url: "https://docs.aws.amazon.com/apigateway/latest/developerguide/limits.html"
+      offline_cache: true
+
+# ============================================================
+# SECTION 7: TOOLING & AUTOMATION
+# ============================================================
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws lambda get-function-configuration"
+      purpose: "Check function timeout setting"
+      command: "aws lambda get-function-configuration --function-name <name> --query 'Timeout'"
+    - tool: "aws apigateway get-integration"
+      purpose: "Check API Gateway integration timeout"
+      command: "aws apigateway get-integration --rest-api-id <id> --resource-id <id> --http-method GET"
+
+  monitoring_queries:
+    - system: "CloudWatch Insights"
+      query: "filter @type = 'REPORT' | stats percentile(@duration, 99) as p99, max(@duration) as max by @log"
+      purpose: "Duration distribution per function"
+    - system: "CloudWatch"
+      query: "Errors where message contains 'Task timed out'"
+      purpose: "Timeout error frequency"
+
+  scripts:
+    - id: "timeout-analyzer"
+      language: "bash"
+      purpose: "List function timeout configurations"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "Analyzing function timeout configurations..."
+        aws lambda list-functions --query 'Functions[*].[FunctionName,Timeout]' --output table
+
+# ============================================================
+# SECTION 8: SIGNALS & FINDINGS TAXONOMY
+# ============================================================
+
+signals:
+  critical:
+    - id: "TIMEOUT-CRIT-001"
+      signal: "Function timeout exceeds API Gateway limit (29 seconds)"
+      evidence_threshold: "Lambda timeout > 29s for API-triggered function"
+      explanation: |
+        API Gateway has a hard 29-second timeout limit. Functions with
+        longer timeouts will still be terminated by API Gateway, but
+        continue running in Lambda, wasting resources and potentially
+        causing duplicate processing on retries.
+      remediation: "Reduce function timeout or use async patterns"
+    - id: "TIMEOUT-CRIT-002"
+      signal: "P99 duration exceeds 90% of timeout"
+      evidence_threshold: "p99_duration > (timeout * 0.9)"
+      explanation: |
+        Functions regularly approaching timeout are at high risk of
+        timeout failures during any performance variance or load increase.
+      remediation: "Increase timeout or optimize function performance"
+
+  high:
+    - id: "TIMEOUT-HIGH-001"
+      signal: "Default timeout not customized for function requirements"
+      explanation: "3-second default may be too short or too long"
+      remediation: "Set timeout based on expected execution time + buffer"
+    - id: "TIMEOUT-HIGH-002"
+      signal: "Downstream timeout longer than function timeout"
+      explanation: "Function may timeout before downstream call completes"
+      remediation: "Align timeouts: function > downstream + processing time"
+
+  medium:
+    - id: "TIMEOUT-MED-001"
+      signal: "No timeout on external HTTP calls within function"
+      remediation: "Add explicit timeouts to all external calls"
+    - id: "TIMEOUT-MED-002"
+      signal: "Timeout events not monitored or alerted"
+      remediation: "Add CloudWatch alarms for timeout errors"
+
+  low:
+    - id: "TIMEOUT-LOW-001"
+      signal: "Timeout rationale not documented"
+
+  positive:
+    - id: "TIMEOUT-POS-001"
+      signal: "Function timeout calibrated to P99 + 50% buffer"
+    - id: "TIMEOUT-POS-002"
+      signal: "Timeout chain properly configured (upstream > function > downstream)"
+
+# ============================================================
+# SECTION 9: EXECUTION PROCEDURE
+# ============================================================
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Function Timeouts"
+      description: |
+        List all serverless functions with their timeout
+        configurations and trigger types.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "List Lambda timeouts"
+          command: "aws lambda list-functions --query 'Functions[*].[FunctionName,Timeout,Runtime]' --output table"
+      expected_findings:
+        - "Complete timeout inventory"
+        - "Functions using default timeout"
+
+    - id: "2"
+      name: "Analyze Duration Metrics"
+      description: |
+        Review execution duration metrics to identify functions
+        approaching their timeout limits.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Duration percentiles per function"
+        - "Functions at timeout risk"
+
+    - id: "3"
+      name: "Map Timeout Chains"
+      description: |
+        Identify timeout relationships between callers and callees,
+        including API Gateway, Step Functions, and downstream services.
+      duration_estimate: "30 min"
+      questions:
+        - "What is the upstream timeout (API Gateway, etc.)?"
+        - "What downstream calls does the function make?"
+        - "Are timeouts properly layered?"
+      expected_findings:
+        - "Timeout chain mapping"
+        - "Misaligned timeout relationships"
+
+    - id: "4"
+      name: "Review Timeout Incidents"
+      description: |
+        Analyze historical timeout events to identify patterns
+        and root causes.
+      duration_estimate: "20 min"
+      expected_findings:
+        - "Timeout frequency by function"
+        - "Common timeout causes"
+
+    - id: "5"
+      name: "Evaluate External Call Timeouts"
+      description: |
+        Review function code for external calls and their
+        timeout configurations.
+      duration_estimate: "20 min"
+      expected_findings:
+        - "External calls with/without timeouts"
+        - "Timeout alignment with function limit"
+
+# ============================================================
+# SECTION 10: OUTPUT SPECIFICATION
+# ============================================================
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Timeout Inventory"
+        - "Duration Analysis"
+        - "Timeout Chain Mapping"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Complete metrics and configuration reviewed"
+    medium: "Configuration reviewed with limited metrics history"
+    low: "Configuration review only"
+
+# ============================================================
+# SECTION 11: OFFLINE SUPPORT
+# ============================================================
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "lambda-timeout"
+        priority: "required"
+
+# ============================================================
+# SECTION 12: PROFILES
+# ============================================================
+
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+# ============================================================
+# SECTION 13: DETERMINISTIC VERIFICATION
+# ============================================================
+
+closeout_checklist:
+  - id: "timeout-001"
+    item: "Function timeouts respect upstream limits (API Gateway 29s)"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "API-triggered functions have timeout <= 29s"
+    expected: "Confirmed by reviewer"
+
+  - id: "timeout-002"
+    item: "P99 duration is less than 80% of configured timeout"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify p99_duration < (timeout * 0.8) for all functions"
+    expected: "Confirmed by reviewer"
+
+  - id: "timeout-003"
+    item: "Timeout events are monitored and alerted"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "CloudWatch alarms exist for timeout errors"
+    expected: "Confirmed by reviewer"
+
+# ============================================================
+# SECTION 14: GOVERNANCE
+# ============================================================
+
+governance:
+  applicable_to:
+    archetypes: ["serverless", "api-gateway", "event-driven"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.1"]
+
+# ============================================================
+# SECTION 15: RELATIONSHIPS
+# ============================================================
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.serverless-edge-scaling.cold-start-impact"
+    - "scalability-capacity.serverless-edge-scaling.concurrency-limits"

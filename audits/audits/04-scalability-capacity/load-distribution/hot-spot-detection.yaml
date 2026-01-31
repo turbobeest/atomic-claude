@@ -1,0 +1,295 @@
+# ============================================================
+# AUDIT FILE: Hot Spot Detection Audit
+# ============================================================
+
+audit:
+  id: "scalability-capacity.load-distribution.hot-spot-detection"
+  name: "Hot Spot Detection Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "load-distribution"
+
+  tier: "expert"
+  estimated_duration: "4 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "metrics"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Identifies and analyzes hot spots in the system - components receiving
+    disproportionate load that may become bottlenecks or failure points.
+    Examines traffic patterns, resource utilization, and data distribution
+    to detect concentration points across compute, storage, and network
+    layers.
+
+  why_it_matters: |
+    Hot spots create performance bottlenecks, increase failure risk, and
+    prevent effective horizontal scaling. A single overloaded component
+    can degrade the entire system. Early detection enables proactive
+    remediation before hot spots cause outages or severe performance
+    degradation.
+
+  when_to_run:
+    - "During performance troubleshooting"
+    - "When scaling efforts show diminishing returns"
+    - "Before major traffic events"
+    - "As part of regular capacity reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "metrics"
+      description: "Resource utilization metrics at component level"
+    - type: "metrics"
+      description: "Traffic distribution metrics"
+    - type: "metrics"
+      description: "Data distribution metrics for stateful services"
+
+  access_requirements:
+    - "Monitoring system access with granular metrics"
+    - "Database metrics access"
+    - "Cache metrics access"
+    - "Network flow logs"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus"
+      query: "topk(5, rate(http_requests_total[5m])) / ignoring(instance) group_left avg(rate(http_requests_total[5m]))"
+      purpose: "Identify instances receiving above-average traffic"
+      threshold: "Top instance < 2x average"
+    - system: "Prometheus"
+      query: "topk(5, avg_over_time(cpu_usage_percent[1h]))"
+      purpose: "Find highest CPU utilization components"
+    - system: "Database"
+      query: "SELECT table_name, row_count FROM information_schema.tables ORDER BY row_count DESC"
+      purpose: "Identify data distribution hot spots"
+
+  file_patterns:
+    - glob: "**/sharding*.yaml"
+      purpose: "Data sharding configurations"
+    - glob: "**/partition*.yaml"
+      purpose: "Partition configurations"
+
+knowledge_sources:
+  guides:
+    - id: "aws-hot-spots"
+      name: "Identifying Hot Spots in DynamoDB"
+      url: "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-design.html"
+      offline_cache: true
+    - id: "redis-hot-keys"
+      name: "Redis Hot Keys Detection"
+      url: "https://redis.io/docs/manual/optimization/hot-keys/"
+      offline_cache: true
+
+  papers:
+    - id: "slicer-paper"
+      title: "Slicer: Auto-Sharding for Datacenter Applications"
+      url: "https://research.google/pubs/pub44830/"
+
+tooling:
+  infrastructure_tools:
+    - tool: "redis-cli"
+      purpose: "Detect hot keys in Redis"
+      command: "redis-cli --hotkeys"
+    - tool: "aws-cli"
+      purpose: "Check DynamoDB partition metrics"
+      command: "aws cloudwatch get-metric-statistics --namespace AWS/DynamoDB --metric-name ConsumedReadCapacityUnits"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])) by (endpoint)"
+      purpose: "Identify slow endpoints indicating hot spots"
+    - system: "Custom"
+      query: "Heatmap of request distribution by key/partition"
+      purpose: "Visualize hot spot patterns"
+
+signals:
+  critical:
+    - id: "SCALE-HS-CRIT-001"
+      signal: "Single component at capacity while others idle"
+      evidence_threshold: "One component >90% utilization while average <50%"
+      explanation: |
+        Severe hot spot creating a system-wide bottleneck. The overloaded
+        component limits overall throughput and is at high risk of failure,
+        which would cascade to dependent components.
+      remediation: "Implement sharding/partitioning; redistribute load; add caching"
+
+  high:
+    - id: "SCALE-HS-HIGH-001"
+      signal: "Data hot spots in distributed database"
+      explanation: "Specific partitions receiving majority of queries"
+      remediation: "Redesign partition key; implement key salting; add read replicas"
+    - id: "SCALE-HS-HIGH-002"
+      signal: "Cache hot keys causing cluster imbalance"
+      explanation: "Popular keys concentrated on specific cache nodes"
+      remediation: "Implement key replication; add local caching; use consistent hashing"
+
+  medium:
+    - id: "SCALE-HS-MED-001"
+      signal: "API endpoint hot spots"
+      remediation: "Implement rate limiting; add caching; optimize endpoint"
+    - id: "SCALE-HS-MED-002"
+      signal: "Network path hot spots"
+      remediation: "Add network capacity; implement traffic engineering"
+
+  low:
+    - id: "SCALE-HS-LOW-001"
+      signal: "Minor temporal hot spots during specific periods"
+
+  positive:
+    - id: "SCALE-HS-POS-001"
+      signal: "Even distribution across all components"
+    - id: "SCALE-HS-POS-002"
+      signal: "Hot spot detection alerting in place"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Potential Hot Spot Locations"
+      description: |
+        Map system components that could become hot spots: databases,
+        caches, API endpoints, network paths, and compute instances.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Inventory of potential hot spot locations"
+        - "Component criticality assessment"
+
+    - id: "2"
+      name: "Collect Utilization Metrics"
+      description: |
+        Gather resource utilization metrics at granular level to identify
+        components with disproportionate load.
+      duration_estimate: "60 min"
+      commands:
+        - purpose: "Query CPU utilization distribution"
+          command: "curl -s 'http://prometheus:9090/api/v1/query?query=topk(10,avg_over_time(cpu_usage{job=\"app\"}[1h]))'"
+      expected_findings:
+        - "Utilization distribution across components"
+        - "Outlier identification"
+
+    - id: "3"
+      name: "Analyze Data Distribution"
+      description: |
+        Examine data distribution in databases and caches to identify
+        partition or key hot spots.
+      duration_estimate: "60 min"
+      commands:
+        - purpose: "Check Redis hot keys"
+          command: "redis-cli --hotkeys"
+      expected_findings:
+        - "Data distribution patterns"
+        - "Hot key/partition identification"
+
+    - id: "4"
+      name: "Correlate Hot Spots with Traffic Patterns"
+      description: |
+        Analyze traffic patterns to understand root causes of hot spots
+        and predict future occurrences.
+      duration_estimate: "60 min"
+      questions:
+        - "Are hot spots correlated with specific traffic patterns?"
+        - "Are they predictable or random?"
+        - "What would cause them to worsen?"
+      expected_findings:
+        - "Hot spot causation analysis"
+        - "Prediction model for future hot spots"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Hot Spot Inventory"
+        - "Root Cause Analysis"
+        - "Impact Assessment"
+        - "Remediation Recommendations"
+
+    - type: "visualization"
+      format: "heatmap"
+      sections:
+        - "Resource Utilization Heatmap"
+        - "Data Distribution Visualization"
+
+  confidence_guidance:
+    high: "Multi-dimensional metrics analysis with correlation"
+    medium: "Single-dimension metrics analysis"
+    low: "Configuration review without runtime metrics"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-hot-spots"
+        priority: "recommended"
+      - source_id: "redis-hot-keys"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive metrics analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "hot-spot-detection-001"
+    item: "Potential hot spot locations identified"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Confirm component inventory completed"
+    expected: "Confirmed by reviewer"
+
+  - id: "hot-spot-detection-002"
+    item: "Utilization metrics analyzed"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify metrics collected and analyzed"
+    expected: "Confirmed by reviewer"
+
+  - id: "hot-spot-detection-003"
+    item: "Data distribution analyzed"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Confirm database/cache distribution reviewed"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["distributed-system", "high-traffic", "data-intensive"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.1", "CC7.2"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.load-distribution.traffic-distribution"
+    - "scalability-capacity.capacity-planning.bottleneck-identification"

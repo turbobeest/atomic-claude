@@ -1,0 +1,326 @@
+audit:
+  id: cost-economics.resource-efficiency.waste-identification
+  name: Waste Identification Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: cost-economics
+  category_number: 31
+  subcategory: resource-efficiency
+  tier: expert
+  estimated_duration: 3-5 hours  # median: 4h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: organizational
+  default_profiles:
+  - full
+  - finops
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit systematically identifies cloud resource waste across
+    multiple dimensions: orphaned resources, unattached volumes,
+    unused elastic IPs, old snapshots, idle load balancers, and
+    resources in stopped states incurring charges.
+  why_it_matters: |
+    Cloud waste typically represents 20-35% of cloud spend according
+    to industry studies. Unlike under-utilization, waste provides
+    zero value. Identifying and eliminating waste is the highest-ROI
+    cost optimization activity because it has no performance impact.
+  when_to_run:
+  - Weekly automated waste scans
+  - Monthly waste elimination campaigns
+  - After team offboarding
+  - During cost reduction initiatives
+prerequisites:
+  required_artifacts:
+  - type: resource-inventory
+    description: Complete cloud resource inventory
+  - type: usage-logs
+    description: Resource access and usage logs
+  - type: billing-data
+    description: Cost data for waste quantification
+  access_requirements:
+  - Read access to all cloud resources
+  - Access to CloudTrail or equivalent activity logs
+  - Access to Cost Explorer or billing data
+discovery:
+  waste_categories:
+  - category: Orphaned Resources
+    examples:
+    - Unattached EBS volumes
+    - Unused Elastic IPs
+    - Orphaned snapshots
+    - Detached ENIs
+  - category: Idle Resources
+    examples:
+    - Stopped EC2 instances with EBS
+    - Idle RDS instances
+    - Empty S3 buckets with fees
+    - Unused NAT Gateways
+  - category: Legacy Resources
+    examples:
+    - Old AMIs with snapshots
+    - Deprecated instance generations
+    - Legacy EBS volume types
+  file_patterns:
+  - glob: '**/*.tf'
+    purpose: Terraform files
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: CloudFormation templates
+  - glob: '**/*cost*.yaml'
+    purpose: Cost configuration files
+  - glob: '**/*budget*.yaml'
+    purpose: Budget configuration files
+  - glob: '**/*tag*.yaml'
+    purpose: Tagging policy files
+  code_patterns:
+  - pattern: tags\s*[=:]|cost_center|billing|budget
+    type: regex
+    scope: config
+    purpose: Cost/billing references
+  - pattern: reserved_instance|spot_instance|savings_plan
+    type: regex
+    scope: config
+    purpose: Cost optimization patterns
+knowledge_sources:
+  specifications:
+  - id: aws-trusted-advisor-waste
+    name: AWS Trusted Advisor Cost Optimization
+    url: https://docs.aws.amazon.com/awssupport/latest/user/cost-optimization-checks.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: finops-waste
+    name: FinOps - Eliminating Waste
+    url: https://www.finops.org/framework/capabilities/
+    offline_cache: true
+  - id: cloud-waste-reduction
+    name: Cloud Waste Reduction Strategies
+    url: https://aws.amazon.com/blogs/aws-cost-management/
+    offline_cache: true
+tooling:
+  aws_tools:
+  - tool: AWS Trusted Advisor
+    purpose: Built-in waste detection
+  - tool: AWS Cost Explorer
+    purpose: Quantify waste cost
+  - tool: AWS Config
+    purpose: Resource compliance and inventory
+  commands:
+  - purpose: Find unattached EBS volumes
+    command: |
+      aws ec2 describe-volumes \
+        --filters Name=status,Values=available \
+        --query 'Volumes[*].[VolumeId,Size,CreateTime]'
+  - purpose: Find unused Elastic IPs
+    command: |
+      aws ec2 describe-addresses \
+        --query 'Addresses[?AssociationId==null].[PublicIp,AllocationId]'
+  - purpose: Find orphaned snapshots
+    command: |
+      aws ec2 describe-snapshots --owner-ids self \
+        --query 'Snapshots[*].[SnapshotId,VolumeId,StartTime,VolumeSize]'
+signals:
+  critical:
+  - id: WASTE-CRIT-001
+    signal: Waste exceeding 20% of total cloud spend
+    evidence_threshold: waste_percentage > 20%
+    explanation: |
+      When waste exceeds 20% of spend, the organization is effectively
+      burning one in five dollars with zero return. This level of waste
+      requires immediate attention and systematic remediation.
+    remediation: Implement automated waste detection and remediation
+  - id: WASTE-CRIT-002
+    signal: Large unattached EBS volumes persisting for 90+ days
+    evidence_threshold: unattached_volume_age > 90 days AND size > 500GB
+    explanation: |
+      Large, long-standing unattached volumes are almost certainly
+      orphaned. At $0.10/GB/month, a 1TB volume costs $1,200/year
+      for nothing.
+    remediation: Snapshot and delete orphaned volumes
+  high:
+  - id: WASTE-HIGH-001
+    signal: Stopped instances with expensive EBS for 30+ days
+    evidence_threshold: stopped_instance_age > 30 days
+    explanation: |
+      Stopped instances continue to incur EBS charges. Long-stopped
+      instances should be evaluated for termination or snapshot-only
+      retention.
+    remediation: Terminate or snapshot stopped instances
+  - id: WASTE-HIGH-002
+    signal: Unused load balancers with no healthy targets
+    evidence_pattern: ALB/NLB with 0 healthy targets for 7+ days
+    explanation: |
+      Load balancers without healthy targets are not serving traffic
+      but incur hourly charges. These may be from deleted applications.
+    remediation: Delete unused load balancers
+  medium:
+  - id: WASTE-MED-001
+    signal: Unused Elastic IPs incurring charges
+    evidence_pattern: Elastic IPs not associated with instances
+    remediation: Release unused Elastic IPs
+  - id: WASTE-MED-002
+    signal: Old AMIs with associated snapshots
+    evidence_threshold: ami_age > 180 days
+    remediation: Deregister old AMIs and delete snapshots
+  low:
+  - id: WASTE-LOW-001
+    signal: No automated waste detection process
+    evidence_pattern: Manual waste hunting only
+    remediation: Implement automated waste scanning
+  positive:
+  - id: WASTE-POS-001
+    signal: Waste below 5% of total spend
+  - id: WASTE-POS-002
+    signal: Automated waste detection and alerting
+  - id: WASTE-POS-003
+    signal: Regular waste cleanup process with accountability
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Scan for orphaned resources
+    description: |
+      Identify resources that are detached, unassociated, or
+      otherwise orphaned from their parent resources.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find unattached EBS volumes
+      command: |
+        aws ec2 describe-volumes \
+          --filters Name=status,Values=available \
+          --query 'Volumes[*].[VolumeId,Size,CreateTime,Tags]' \
+          --output table
+    - purpose: Find unused Elastic IPs
+      command: |
+        aws ec2 describe-addresses \
+          --query 'Addresses[?AssociationId==null]' \
+          --output table
+    expected_findings:
+    - Orphaned resource inventory
+    - Cost of orphaned resources
+  - id: '2'
+    name: Identify idle resources
+    description: |
+      Find resources that are provisioned but not actively used,
+      including stopped instances and idle databases.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find stopped instances
+      command: |
+        aws ec2 describe-instances \
+          --filters Name=instance-state-name,Values=stopped \
+          --query 'Reservations[].Instances[].[InstanceId,InstanceType,LaunchTime,Tags[?Key==`Name`].Value|[0]]'
+    expected_findings:
+    - Idle resource inventory
+    - Duration in idle state
+  - id: '3'
+    name: Review legacy and deprecated resources
+    description: |
+      Identify resources using deprecated instance types, old
+      volume types, or legacy configurations.
+    duration_estimate: 30 min
+    expected_findings:
+    - Legacy resource inventory
+    - Modernization opportunities
+  - id: '4'
+    name: Quantify waste cost
+    description: |
+      Calculate the total cost of identified waste across all
+      categories.
+    duration_estimate: 30 min
+    expected_findings:
+    - Waste cost by category
+    - Total waste percentage
+    - Quick win opportunities
+  - id: '5'
+    name: Prioritize remediation
+    description: |
+      Create a prioritized list of waste elimination opportunities
+      based on cost impact and effort.
+    duration_estimate: 30 min
+    expected_findings:
+    - Prioritized cleanup list
+    - Estimated savings
+    - Implementation plan
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Waste Inventory
+    - Cost Impact Analysis
+    - Remediation Priorities
+    - Process Recommendations
+  - type: cleanup_script
+    format: executable
+    description: Safe cleanup commands for identified waste
+  confidence_guidance:
+    high: Complete resource scan with cost attribution
+    medium: Partial scan or estimated costs
+    low: Limited access to resources
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: finops-waste
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 1
+      reduced_scope: High-cost resources only
+    full:
+      included: true
+      priority: 1
+    finops:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: waste-001
+  item: All orphaned resources identified
+  level: CRITICAL
+  verification: automated
+  expected: Inventory complete
+- id: waste-002
+  item: Waste cost quantified
+  level: BLOCKING
+  verification: automated
+  expected: Cost calculated
+- id: waste-003
+  item: Cleanup plan created
+  level: WARNING
+  verification: manual
+  expected: Plan documented
+governance:
+  applicable_to:
+    archetypes:
+    - cloud-native
+    - hybrid
+    - enterprise
+  compliance_frameworks:
+  - framework: FinOps Foundation
+    controls:
+    - Usage Optimization
+    - Workload Optimization
+  - framework: AWS Well-Architected
+    controls:
+    - COST-02
+    - COST-05
+relationships:
+  commonly_combined:
+  - cost-economics.resource-efficiency.idle-resources
+  - cost-economics.resource-efficiency.utilization-analysis
+  - cost-economics.cost-optimization.storage-optimization

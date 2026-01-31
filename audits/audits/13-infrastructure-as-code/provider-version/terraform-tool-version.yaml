@@ -1,0 +1,395 @@
+# ============================================================
+# AUDIT: Terraform Tool Version
+# ============================================================
+# Evaluates how the Terraform/OpenTofu CLI version is managed
+# across environments for consistency.
+
+audit:
+  id: "infrastructure-as-code.provider-version.terraform-tool-version"
+  name: "Terraform Tool Version"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "infrastructure-as-code"
+  category_number: 13
+  subcategory: "provider-version"
+
+  tier: "expert"
+  estimated_duration: "1-2 hours"  # median: 1h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "yes"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines how the Terraform or OpenTofu CLI version is
+    specified and enforced across development and deployment environments:
+
+    - required_version constraints in Terraform configurations
+    - Version manager usage (tfenv, tenv, asdf)
+    - CI/CD pipeline version specification
+    - Local development version consistency
+    - Version upgrade strategy
+
+    The focus is on ensuring all team members and automation systems
+    use compatible Terraform versions.
+
+  why_it_matters: |
+    Terraform version mismatches cause significant issues:
+
+    - State file format changes between major versions
+    - New language features unavailable on older versions
+    - Deprecation warnings become errors on upgrades
+    - Provider compatibility varies by Terraform version
+    - Debug information becomes unreliable
+
+    Consistent tool versions prevent "works on my machine" issues
+    and ensure reproducible infrastructure operations.
+
+  when_to_run:
+    - "When setting up new Terraform projects"
+    - "Before major Terraform version upgrades"
+    - "When team members report version conflicts"
+    - "During CI/CD pipeline configuration"
+
+prerequisites:
+  required_artifacts:
+    - type: "terraform_configuration"
+      description: "Terraform configurations with version requirements"
+    - type: "cicd_configuration"
+      description: "CI/CD pipeline configurations"
+
+  access_requirements:
+    - "Read access to Terraform configuration repository"
+    - "Access to CI/CD configuration"
+
+discovery:
+  code_patterns:
+    - pattern: "required_version\\s*="
+      type: "regex"
+      scope: "source"
+      purpose: "Find Terraform version requirements"
+    - pattern: "terraform_version|TF_VERSION"
+      type: "regex"
+      scope: "config"
+      purpose: "Find version specifications in CI"
+    - pattern: "\\.terraform-version|\\.tool-versions"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find version manager files"
+    - pattern: "hashicorp/setup-terraform"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find GitHub Actions terraform setup"
+
+  file_patterns:
+    - glob: "**/versions.tf"
+      purpose: "Version requirement files"
+    - glob: "**/.terraform-version"
+      purpose: "tfenv version specification"
+    - glob: "**/.tool-versions"
+      purpose: "asdf version specification"
+    - glob: "**/.tenv"
+      purpose: "tenv version specification"
+    - glob: "**/.github/workflows/*.yml"
+      purpose: "GitHub Actions with Terraform setup"
+
+knowledge_sources:
+  specifications:
+    - id: "terraform-required-version"
+      name: "Terraform Required Version"
+      url: "https://developer.hashicorp.com/terraform/language/settings#specifying-a-required-terraform-version"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "tfenv"
+      name: "tfenv - Terraform Version Manager"
+      url: "https://github.com/tfutils/tfenv"
+      offline_cache: true
+    - id: "tenv"
+      name: "tenv - OpenTofu/Terraform Version Manager"
+      url: "https://github.com/tofuutils/tenv"
+      offline_cache: true
+    - id: "spacelift-terraform-versions"
+      name: "Managing Terraform Versions"
+      url: "https://spacelift.io/blog/terraform-version"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "tfenv"
+      purpose: "Terraform version manager"
+      command: "tfenv install && tfenv use"
+    - tool: "tenv"
+      purpose: "OpenTofu/Terraform version manager"
+      command: "tenv tf install && tenv tf use"
+    - tool: "asdf"
+      purpose: "Multi-runtime version manager"
+      command: "asdf install terraform"
+
+  scripts:
+    - id: "version-consistency-check"
+      language: "bash"
+      purpose: "Check Terraform version consistency"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Check Terraform version consistency across configs
+
+        echo "=== required_version constraints ==="
+        grep -r 'required_version' --include='*.tf' . | head -10
+
+        echo ""
+        echo "=== Version manager files ==="
+        find . -name '.terraform-version' -o -name '.tool-versions' | head -10
+
+        echo ""
+        echo "=== CI/CD Terraform versions ==="
+        grep -r 'terraform_version\|TF_VERSION\|terraform-version' .github/ --include='*.yml' 2>/dev/null | head -10
+
+        echo ""
+        echo "=== Current terraform version ==="
+        terraform version 2>/dev/null | head -1
+
+signals:
+  critical:
+    - id: "IAC-TFV-CRIT-001"
+      signal: "No required_version constraint specified"
+      evidence_pattern: "terraform {} block without required_version"
+      explanation: |
+        Without required_version, any Terraform version can be used,
+        leading to incompatibilities. State files may be upgraded
+        unexpectedly, breaking older clients.
+      remediation: |
+        Add required_version to terraform block:
+        terraform {
+          required_version = "~> 1.5"
+        }
+
+    - id: "IAC-TFV-CRIT-002"
+      signal: "CI/CD uses different Terraform version than required_version"
+      evidence_pattern: "Mismatch between required_version and CI setup"
+      explanation: |
+        If CI uses a different version than specified, deployments may
+        succeed in CI but fail locally (or vice versa), and state
+        files may be upgraded unexpectedly.
+      remediation: |
+        Align CI version with required_version:
+        - uses: hashicorp/setup-terraform@v3
+          with:
+            terraform_version: "1.5.7"  # Match required_version
+
+  high:
+    - id: "IAC-TFV-HIGH-001"
+      signal: "No version manager file for local development"
+      evidence_pattern: "Missing .terraform-version or .tool-versions"
+      explanation: |
+        Without a version manager file, developers may use any installed
+        version, leading to inconsistencies and potential issues.
+      remediation: |
+        Add version manager configuration:
+        # .terraform-version (for tfenv)
+        1.5.7
+
+        # .tool-versions (for asdf)
+        terraform 1.5.7
+
+    - id: "IAC-TFV-HIGH-002"
+      signal: "required_version too permissive across major versions"
+      evidence_pattern: "required_version = \">= 1.0\""
+      explanation: |
+        Constraints spanning major versions allow incompatible versions.
+        Major version upgrades often include breaking changes.
+      remediation: |
+        Constrain to patch/minor versions:
+        required_version = "~> 1.5.0"  # Allows 1.5.x
+        required_version = "~> 1.5"    # Allows 1.5.x through 1.x
+
+  medium:
+    - id: "IAC-TFV-MED-001"
+      signal: "Exact version pinning prevents easy updates"
+      evidence_pattern: "required_version = \"= 1.5.7\""
+      remediation: |
+        Consider pessimistic constraints:
+        required_version = "~> 1.5.7"
+
+    - id: "IAC-TFV-MED-002"
+      signal: "Multiple version manager files with different versions"
+      remediation: |
+        Consolidate to single source of truth for version
+
+  low:
+    - id: "IAC-TFV-LOW-001"
+      signal: "Version not documented in README"
+      remediation: "Document required Terraform version in README"
+
+  positive:
+    - id: "IAC-TFV-POS-001"
+      signal: "required_version, version manager, and CI all aligned"
+    - id: "IAC-TFV-POS-002"
+      signal: "Pre-commit hook validates Terraform version"
+    - id: "IAC-TFV-POS-003"
+      signal: "CI fails fast on version mismatch"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Find required_version constraints"
+      description: |
+        Locate all Terraform version requirements in configurations.
+      duration_estimate: "10 min"
+
+      commands:
+        - purpose: "Find required_version blocks"
+          command: "grep -r 'required_version' --include='*.tf' . | head -20"
+        - purpose: "Find terraform blocks"
+          command: "grep -r -A5 'terraform {' --include='*.tf' . | head -30"
+
+      expected_findings:
+        - "Required version constraints"
+        - "Constraint patterns used"
+
+    - id: "2"
+      name: "Check version manager configuration"
+      description: |
+        Verify version manager files exist and are consistent.
+      duration_estimate: "10 min"
+
+      commands:
+        - purpose: "Find version manager files"
+          command: "find . -name '.terraform-version' -o -name '.tool-versions' -o -name '.tenv' | head -10"
+        - purpose: "Read version specifications"
+          command: "cat .terraform-version .tool-versions 2>/dev/null | head -10"
+
+      expected_findings:
+        - "Version manager in use"
+        - "Specified versions"
+
+    - id: "3"
+      name: "Review CI/CD version configuration"
+      description: |
+        Check how Terraform version is specified in CI/CD pipelines.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Find setup-terraform in GitHub Actions"
+          command: "grep -r -A5 'setup-terraform' .github/ --include='*.yml' | head -30"
+        - purpose: "Find version in GitLab CI"
+          command: "grep -r 'terraform_version\\|TF_VERSION' .gitlab-ci.yml 2>/dev/null | head -10"
+
+      expected_findings:
+        - "CI version specification"
+        - "Alignment with required_version"
+
+    - id: "4"
+      name: "Verify version consistency"
+      description: |
+        Compare versions across all sources to ensure consistency.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Extract all version specifications"
+          command: |
+            echo "=== required_version ===" && grep -r 'required_version' --include='*.tf' . | head -5
+            echo "=== .terraform-version ===" && cat .terraform-version 2>/dev/null
+            echo "=== CI version ===" && grep -r 'terraform_version\\|terraform-version' .github/ --include='*.yml' 2>/dev/null | head -3
+
+      expected_findings:
+        - "Version consistency across sources"
+        - "Any mismatches"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Version Constraint Analysis"
+        - "Environment Consistency Review"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "All version sources verified and compared"
+    medium: "Configuration reviewed but not all sources checked"
+    low: "Only partial review completed"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "terraform-required-version"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: "Quick to check version constraints"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      reason: "Version consistency critical for production"
+
+closeout_checklist:
+  - id: "tf-version-001"
+    item: "required_version constraint specified"
+    level: "CRITICAL"
+    verification: "grep -r 'required_version' --include='*.tf' . | wc -l"
+    expected: ">0"
+
+  - id: "tf-version-002"
+    item: "Version manager file present"
+    level: "BLOCKING"
+    verification: "test -f .terraform-version -o -f .tool-versions && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "tf-version-003"
+    item: "CI/CD version matches required_version"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Compare CI setup version with required_version constraint"
+    expected: "Confirmed by reviewer"
+
+  - id: "tf-version-004"
+    item: "Version constraint uses pessimistic operator"
+    level: "WARNING"
+    verification: "grep -r 'required_version.*~>' --include='*.tf' . | wc -l"
+    expected: ">0"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["CC8.1"]
+
+relationships:
+  commonly_combined:
+    - "infrastructure-as-code.provider-version.provider-version-pinning"
+    - "infrastructure-as-code.cicd-integration.iac-pipeline"

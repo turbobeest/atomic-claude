@@ -1,0 +1,345 @@
+# ============================================================
+# AUDIT FILE: Release Approval Process
+# ============================================================
+# Evaluates release approval workflows and governance controls
+# for safe and compliant deployments.
+# ============================================================
+
+audit:
+  id: "devops-ci-cd.release-management.release-approval-process"
+  name: "Release Approval Process Assessment"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "release-management"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "process"
+
+  default_profiles:
+    - "full"
+    - "security"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines the release approval process including required
+    approvals, approval gates in CI/CD, segregation of duties, audit
+    trails, and emergency bypass procedures. It evaluates whether
+    releases have appropriate governance controls.
+
+  why_it_matters: |
+    Inadequate release approval processes lead to unauthorized changes,
+    compliance violations, and production incidents from insufficiently
+    reviewed releases. Proper approvals provide accountability, change
+    validation, and regulatory compliance.
+
+  when_to_run:
+    - "During compliance audits"
+    - "After unauthorized deployment incidents"
+    - "When establishing release governance"
+    - "Quarterly process reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "ci_cd_config"
+      description: "CI/CD pipeline configurations"
+    - type: "approval_policies"
+      description: "Release approval policies and procedures"
+
+  access_requirements:
+    - "Read access to CI/CD configurations"
+    - "Access to approval workflow definitions"
+    - "Permission to review deployment history"
+
+discovery:
+  file_patterns:
+    - glob: "**/.github/workflows/*.yaml"
+      purpose: "GitHub Actions workflows"
+    - glob: "**/.gitlab-ci.yml"
+      purpose: "GitLab CI configuration"
+    - glob: "**/Jenkinsfile"
+      purpose: "Jenkins pipeline"
+    - glob: "**/azure-pipelines.yml"
+      purpose: "Azure DevOps pipelines"
+    - glob: "**/.circleci/config.yml"
+      purpose: "CircleCI configuration"
+
+  code_patterns:
+    - pattern: "environment:\\s*production|approval|manual"
+      type: "regex"
+      scope: "config"
+      purpose: "Environment approval gates"
+    - pattern: "required_reviewers|approvers|CODEOWNERS"
+      type: "keyword"
+      scope: "config"
+      purpose: "Approval requirements"
+    - pattern: "needs:\\s*\\[|dependsOn|when:\\s*manual"
+      type: "regex"
+      scope: "config"
+      purpose: "Pipeline dependencies and gates"
+
+knowledge_sources:
+  guides:
+    - id: "github-environments"
+      name: "GitHub Environments"
+      url: "https://docs.github.com/en/actions/deployment/targeting-different-environments"
+      offline_cache: true
+    - id: "gitlab-approvals"
+      name: "GitLab Deployment Approvals"
+      url: "https://docs.gitlab.com/ee/ci/environments/deployment_approvals.html"
+      offline_cache: true
+
+  specifications:
+    - id: "soc2-cc"
+      name: "SOC2 Common Criteria"
+      url: "https://www.aicpa.org/soc2"
+      offline_cache: true
+      priority: "required"
+
+tooling:
+  infrastructure_tools:
+    - tool: "gh"
+      purpose: "Review GitHub environment protection rules"
+      command: "gh api repos/{owner}/{repo}/environments"
+    - tool: "glab"
+      purpose: "Review GitLab protected environments"
+      command: "glab api projects/:id/protected_environments"
+
+  scripts:
+    - id: "approval-check"
+      language: "bash"
+      purpose: "Check for approval configurations"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Check for approval patterns in CI configs
+        grep -rE 'approval|manual|production' \
+          --include='*.yaml' --include='*.yml' \
+          .github/ .gitlab-ci* 2>/dev/null | head -20
+
+signals:
+  critical:
+    - id: "RELAPP-CRIT-001"
+      signal: "Production deployments have no approval requirements"
+      evidence_indicators:
+        - "CI/CD allows direct deployment to production without approval"
+        - "No environment protection rules configured"
+      explanation: |
+        Unapproved production deployments create risk of unauthorized
+        changes, compliance violations, and incidents from unreviewed code.
+      remediation: "Implement mandatory approval gates for production deployments"
+
+    - id: "RELAPP-CRIT-002"
+      signal: "Single person can approve and deploy their own changes"
+      evidence_indicators:
+        - "No segregation of duties between author and approver"
+        - "Self-approval permitted for production releases"
+      explanation: |
+        Lack of segregation of duties violates compliance requirements
+        and removes peer review safety net.
+      remediation: "Require different individuals for code authorship and deployment approval"
+
+  high:
+    - id: "RELAPP-HIGH-001"
+      signal: "Emergency bypass procedure undocumented or uncontrolled"
+      evidence_indicators:
+        - "Admin override exists without audit trail"
+        - "Emergency procedures not documented"
+      explanation: |
+        Uncontrolled emergency bypasses can be abused and leave
+        no audit trail for compliance purposes.
+      remediation: "Document emergency procedures with mandatory logging and post-review"
+
+    - id: "RELAPP-HIGH-002"
+      signal: "Approval decisions not logged or auditable"
+      evidence_pattern: "audit|log|trail"
+      explanation: |
+        Without approval audit trails, compliance cannot be demonstrated
+        and incidents cannot be properly investigated.
+      remediation: "Implement immutable approval logging with timestamp and approver identity"
+
+  medium:
+    - id: "RELAPP-MED-001"
+      signal: "Approval requirements inconsistent across environments"
+      remediation: "Standardize approval requirements with environment-appropriate rigor"
+
+    - id: "RELAPP-MED-002"
+      signal: "No timeout for pending approvals"
+      remediation: "Implement approval expiration to prevent stale deployments"
+
+  low:
+    - id: "RELAPP-LOW-001"
+      signal: "Approval notifications not configured"
+
+  positive:
+    - id: "RELAPP-POS-001"
+      signal: "Multi-party approval required for production deployments"
+    - id: "RELAPP-POS-002"
+      signal: "Automated compliance checks integrated in approval workflow"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map approval workflow"
+      description: |
+        Identify the approval workflow for releases including
+        required approvers and approval gates.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find CI/CD configurations"
+          command: "find . -name '*.yaml' -path '*github/workflows*' -o -name '.gitlab-ci.yml' -o -name 'Jenkinsfile' 2>/dev/null | head -10"
+        - purpose: "Check for environment configurations"
+          command: "grep -r 'environment:' --include='*.yaml' --include='*.yml' . 2>/dev/null | head -20"
+      expected_findings:
+        - "Approval workflow documentation"
+        - "Approval gate identification"
+
+    - id: "2"
+      name: "Verify segregation of duties"
+      description: |
+        Confirm that appropriate segregation exists between
+        code authors, reviewers, and deployment approvers.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check CODEOWNERS configuration"
+          command: "find . -name 'CODEOWNERS' 2>/dev/null | xargs cat 2>/dev/null || echo 'No CODEOWNERS'"
+        - purpose: "Check required reviewers"
+          command: "grep -r 'required.*reviewer\\|approver' --include='*.yaml' --include='*.yml' . 2>/dev/null | head -10"
+      expected_findings:
+        - "Segregation of duties assessment"
+        - "Review requirement verification"
+
+    - id: "3"
+      name: "Audit approval history"
+      description: |
+        Review recent deployment approvals to verify process
+        is followed and properly logged.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Check recent deployment logs"
+          command: "git log --oneline --grep='deploy\\|release' -20"
+      expected_findings:
+        - "Approval compliance rate"
+        - "Audit trail completeness"
+
+    - id: "4"
+      name: "Review emergency procedures"
+      description: |
+        Examine emergency bypass procedures and verify they
+        have appropriate controls and logging.
+      duration_estimate: "30 min"
+      questions:
+        - "Is there a documented emergency deployment procedure?"
+        - "Do emergency deployments require post-hoc review?"
+        - "Are emergency bypasses logged and auditable?"
+      expected_findings:
+        - "Emergency procedure documentation"
+        - "Control effectiveness"
+
+    - id: "5"
+      name: "Test approval enforcement"
+      description: |
+        Verify that approval requirements are enforced and
+        cannot be bypassed without proper authorization.
+      duration_estimate: "45 min"
+      questions:
+        - "Can deployments proceed without required approvals?"
+        - "Are approval requirements enforced technically?"
+        - "Can approvals be forged or manipulated?"
+      expected_findings:
+        - "Enforcement verification"
+        - "Bypass vulnerability assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Approval Workflow Analysis"
+        - "Compliance Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct testing of approval enforcement with audit trail review"
+    medium: "Configuration analysis with sample verification"
+    low: "Documentation review only"
+
+offline:
+  capability: "partial"
+  cache_manifest:
+    knowledge:
+      - source_id: "soc2-cc"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive process review"
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "relapp-001"
+    item: "Production deployments require approval"
+    level: "CRITICAL"
+    verification: "grep -r 'environment.*production' --include='*.yaml' --include='*.yml' .github/ 2>/dev/null | head -5 && echo 'PASS' || echo 'FAIL'"
+    expected: "PASS"
+
+  - id: "relapp-002"
+    item: "Segregation of duties enforced"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify different individuals must approve and deploy"
+    expected: "Confirmed by reviewer"
+
+  - id: "relapp-003"
+    item: "Approval decisions are logged and auditable"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify approval audit trail exists and is complete"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC6.1", "CC8.1"]
+    - framework: "ISO27001"
+      controls: ["A.12.1.2", "A.14.2.2"]
+    - framework: "PCI-DSS"
+      controls: ["6.4.5"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.pipeline-security.pipeline-access-control"
+    - "devops-ci-cd.pipeline-security.branch-protection"

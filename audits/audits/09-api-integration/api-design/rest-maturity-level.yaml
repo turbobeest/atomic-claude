@@ -1,0 +1,339 @@
+# ============================================================
+# AUDIT: REST Maturity Level Assessment
+# ============================================================
+# Evaluates REST API implementation against Richardson Maturity Model
+# ============================================================
+
+audit:
+  id: "api-integration.api-design.rest-maturity-level"
+
+  name: "REST Maturity Level Assessment"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "api-integration"
+  category_number: 9
+  subcategory: "api-design"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates REST API implementations against the Richardson Maturity Model (RMM)
+    levels 0-3. Examines resource identification, HTTP verb usage, hypermedia
+    controls (HATEOAS), and overall RESTful design principles. Assesses whether
+    APIs leverage HTTP semantics appropriately or fall back to RPC-style patterns.
+
+  why_it_matters: |
+    Higher REST maturity levels correlate with better API evolvability, reduced
+    client coupling, and improved discoverability. Level 0-1 APIs require tight
+    client-server coordination for changes, while Level 3 APIs can evolve
+    independently. Poor REST design leads to brittle integrations, versioning
+    nightmares, and increased maintenance burden.
+
+  when_to_run:
+    - "Before major API releases"
+    - "During API design reviews"
+    - "When evaluating third-party API integrations"
+    - "Post-acquisition system assessment"
+
+prerequisites:
+  required_artifacts:
+    - type: "api-source"
+      description: "API route definitions, controllers, and handlers"
+    - type: "api-specification"
+      description: "OpenAPI/Swagger specs if available"
+
+  access_requirements:
+    - "Read access to API source code"
+    - "Access to API documentation"
+
+discovery:
+  code_patterns:
+    - pattern: "@(Get|Post|Put|Patch|Delete)Mapping|@RequestMapping"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify Spring REST endpoints"
+    - pattern: "app\\.(get|post|put|patch|delete)\\s*\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Identify Express.js routes"
+    - pattern: "@api\\.(route|resource)|@(Get|Post|Put|Delete)"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify Flask/FastAPI endpoints"
+    - pattern: "_links|_embedded|hal\\+json|hateoas"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect HATEOAS implementation"
+
+  file_patterns:
+    - glob: "**/controllers/**/*.{java,ts,js,py}"
+      purpose: "Controller implementations"
+    - glob: "**/routes/**/*.{js,ts}"
+      purpose: "Route definitions"
+    - glob: "**/*openapi*.{yaml,yml,json}"
+      purpose: "OpenAPI specifications"
+
+knowledge_sources:
+  specifications:
+    - id: "richardson-mm"
+      name: "Richardson Maturity Model"
+      url: "https://martinfowler.com/articles/richardsonMaturityModel.html"
+      offline_cache: true
+      priority: "required"
+    - id: "rfc-7231"
+      name: "RFC 7231 - HTTP/1.1 Semantics and Content"
+      url: "https://datatracker.ietf.org/doc/html/rfc7231"
+      offline_cache: true
+      priority: "required"
+    - id: "openapi-spec"
+      name: "OpenAPI Specification"
+      url: "https://spec.openapis.org/oas/latest.html"
+      offline_cache: true
+      priority: "recommended"
+    - id: "owasp-api-security"
+      name: "OWASP API Security Top 10"
+      url: "https://owasp.org/API-Security/"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "rest-api-design"
+      name: "REST API Design Rulebook"
+      url: "https://www.oreilly.com/library/view/rest-api-design/9781449317904/"
+      offline_cache: false
+
+tooling:
+  static_analysis:
+    - tool: "spectral"
+      purpose: "OpenAPI linting for REST patterns"
+      offline_capable: true
+    - tool: "swagger-cli"
+      purpose: "Validate OpenAPI specs"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "REST-CRIT-001"
+      signal: "Single endpoint handling all operations via POST (Level 0)"
+      evidence_pattern: "POST.*/(api|rpc).*action=|operation="
+      explanation: |
+        Level 0 APIs use HTTP as a tunnel, sending all requests to a single
+        endpoint with operation identifiers in the body. This eliminates
+        cacheability, prevents proper HTTP semantics, and creates tight coupling.
+      remediation: "Refactor to resource-based endpoints with appropriate HTTP methods"
+
+    - id: "REST-CRIT-002"
+      signal: "Sensitive operations using GET with side effects"
+      evidence_pattern: "GET.*(delete|remove|update|create|modify)"
+      explanation: |
+        GET requests must be safe and idempotent. Using GET for state-changing
+        operations violates HTTP semantics, enables CSRF attacks via links,
+        and causes unintended side effects from prefetching/caching.
+      remediation: "Use POST/PUT/DELETE for state-changing operations"
+
+  high:
+    - id: "REST-HIGH-001"
+      signal: "Verbs in URL paths instead of HTTP methods"
+      evidence_pattern: "/(get|create|update|delete|fetch|save|remove)[A-Z]"
+      explanation: |
+        URLs with verbs indicate Level 1 maturity - resources exist but HTTP
+        verbs aren't utilized. This leads to inconsistent APIs and missed
+        caching opportunities.
+      remediation: "Move operations to HTTP methods: getUser -> GET /users/{id}"
+
+    - id: "REST-HIGH-002"
+      signal: "No HATEOAS links in responses (stuck at Level 2)"
+      evidence_indicators:
+        - "No _links or links property in JSON responses"
+        - "No Link headers in responses"
+        - "Clients hardcoding endpoint URLs"
+      explanation: |
+        Without hypermedia controls, clients must hardcode URLs and understand
+        the entire API structure upfront, creating tight coupling and
+        preventing API evolution.
+      remediation: "Add hypermedia links to responses indicating available actions"
+
+  medium:
+    - id: "REST-MED-001"
+      signal: "Inconsistent resource naming conventions"
+      evidence_pattern: "/api/(user|Users|get_users|userList)"
+      remediation: "Standardize on plural nouns for collections: /users, /orders"
+
+    - id: "REST-MED-002"
+      signal: "Missing content negotiation support"
+      evidence_indicators:
+        - "No Accept header handling"
+        - "Hardcoded response content types"
+      remediation: "Implement content negotiation via Accept/Content-Type headers"
+
+  low:
+    - id: "REST-LOW-001"
+      signal: "No caching headers on GET responses"
+      remediation: "Add Cache-Control, ETag, Last-Modified headers"
+
+  positive:
+    - id: "REST-POS-001"
+      signal: "Full HATEOAS implementation with discoverable links"
+    - id: "REST-POS-002"
+      signal: "Proper use of HTTP methods with correct semantics"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify API Endpoints"
+      description: |
+        Discover all REST endpoints in the codebase by searching for
+        route definitions across common frameworks.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find Spring REST controllers"
+          command: "grep -rn '@\\(Get\\|Post\\|Put\\|Delete\\|Patch\\)Mapping\\|@RequestMapping' --include='*.java' ."
+        - purpose: "Find Express routes"
+          command: "grep -rn 'app\\.\\(get\\|post\\|put\\|delete\\|patch\\)\\s*(' --include='*.js' --include='*.ts' ."
+        - purpose: "Find FastAPI/Flask routes"
+          command: "grep -rn '@app\\.\\(get\\|post\\|put\\|delete\\)\\|@router\\.' --include='*.py' ."
+      expected_findings:
+        - "List of all API endpoints with their HTTP methods"
+        - "Controller/handler file locations"
+
+    - id: "2"
+      name: "Assess Maturity Level 0-1"
+      description: |
+        Check for Level 0 (tunnel) or Level 1 (resources only) patterns.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find single-endpoint RPC patterns"
+          command: "grep -rn 'action=\\|operation=\\|method=' --include='*.java' --include='*.py' --include='*.js' ."
+        - purpose: "Find verb-in-URL antipatterns"
+          command: "grep -rn '/(get|create|update|delete|fetch)[A-Z]' --include='*.java' --include='*.py' --include='*.js' ."
+      expected_findings:
+        - "Evidence of RPC-over-HTTP patterns"
+        - "Verbs embedded in URL paths"
+
+    - id: "3"
+      name: "Verify HTTP Method Semantics"
+      description: |
+        Ensure HTTP methods are used correctly per RFC 7231 semantics.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find GET with side effects"
+          command: "grep -rn -A5 '@GetMapping\\|app\\.get' --include='*.java' --include='*.js' | grep -i 'delete\\|save\\|update\\|create'"
+        - purpose: "Find POST for retrieval"
+          command: "grep -rn -B2 -A5 '@PostMapping\\|app\\.post' --include='*.java' --include='*.js' | grep -i 'find\\|get\\|search\\|list'"
+      expected_findings:
+        - "Methods violating HTTP semantics"
+        - "Safe operations using unsafe methods"
+
+    - id: "4"
+      name: "Check HATEOAS Implementation"
+      description: |
+        Look for hypermedia controls and link relations in responses.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find HATEOAS patterns"
+          command: "grep -rn '_links\\|_embedded\\|hateoas\\|hypermedia\\|hal+json' --include='*.java' --include='*.py' --include='*.js' ."
+        - purpose: "Check for Link header usage"
+          command: "grep -rn 'Link:\\|setHeader.*Link\\|headers\\.link' --include='*.java' --include='*.py' --include='*.js' ."
+      expected_findings:
+        - "HATEOAS library usage"
+        - "Link relation definitions"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Maturity Level Assessment"
+        - "Key Findings"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear code patterns demonstrating maturity level"
+    medium: "Mixed patterns or incomplete evidence"
+    low: "Inference based on limited code samples"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "richardson-mm"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires thorough endpoint analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "rest-maturity-001"
+    item: "No Level 0 single-endpoint RPC patterns found"
+    level: "CRITICAL"
+    verification: |
+      if grep -rq 'action=.*operation=\|POST.*/api.*(action\|method)=' --include='*.java' --include='*.py' --include='*.js' . 2>/dev/null; then echo "FAIL"; else echo "PASS"; fi
+    expected: "PASS"
+
+  - id: "rest-maturity-002"
+    item: "GET endpoints do not perform state changes"
+    level: "CRITICAL"
+    verification: |
+      if grep -rn '@GetMapping\|app\.get' --include='*.java' --include='*.js' . 2>/dev/null | grep -qi 'delete\|save\|update\|create\|remove'; then echo "FAIL"; else echo "PASS"; fi
+    expected: "PASS"
+
+  - id: "rest-maturity-003"
+    item: "No verbs in URL paths"
+    level: "BLOCKING"
+    verification: |
+      if grep -rEq '\"/(get|create|update|delete|fetch)[A-Z]' --include='*.java' --include='*.py' --include='*.js' . 2>/dev/null; then echo "FAIL"; else echo "PASS"; fi
+    expected: "PASS"
+
+  - id: "rest-maturity-004"
+    item: "HATEOAS support evaluated"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms whether API provides hypermedia controls"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["api-service", "microservice", "backend"]
+
+  compliance_frameworks:
+    - framework: "API Design Standards"
+      controls: ["REST-001", "REST-002"]
+
+relationships:
+  commonly_combined:
+    - "api-integration.api-design.http-method-usage"
+    - "api-integration.api-design.url-design"
+    - "api-integration.api-contracts.openapi-swagger-completeness"

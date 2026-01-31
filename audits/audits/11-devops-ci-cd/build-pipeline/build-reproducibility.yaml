@@ -1,0 +1,348 @@
+# ============================================================
+# AUDIT: Build Reproducibility
+# ============================================================
+# Ensures builds produce identical outputs given the same inputs
+
+audit:
+  id: "devops-ci-cd.build-pipeline.build-reproducibility"
+  name: "Build Reproducibility"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "build-pipeline"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "deployment"
+
+  default_profiles:
+    - "full"
+    - "security"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Examines whether builds are reproducible - that is, whether building
+    the same source code with the same dependencies and configuration
+    produces bit-for-bit identical outputs. This includes checking for
+    sources of non-determinism such as timestamps, random values,
+    unordered data structures, and floating dependencies.
+
+  why_it_matters: |
+    Reproducible builds are critical for security, debugging, and compliance.
+    Without reproducibility, you cannot verify that a binary was built from
+    claimed source code, making it impossible to audit for backdoors or
+    verify security patches. Non-reproducible builds also complicate
+    debugging (different binaries between environments) and break caching
+    strategies, wasting CI resources.
+
+  when_to_run:
+    - "Initial CI/CD audit"
+    - "After major build system changes"
+    - "Security compliance reviews"
+    - "Before implementing build caching"
+
+prerequisites:
+  required_artifacts:
+    - type: "build_system"
+      description: "Access to build configuration files and CI definitions"
+    - type: "source_code"
+      description: "Full source repository including build scripts"
+
+  access_requirements:
+    - "CI/CD system access for triggering builds"
+    - "Artifact storage access for comparing outputs"
+
+discovery:
+  code_patterns:
+    - pattern: "datetime\\.now|Date\\.now|time\\.time|System\\.currentTimeMillis"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect runtime timestamps that may be embedded in builds"
+
+    - pattern: "random\\.|Math\\.random|rand\\(|uuid"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect random values that break reproducibility"
+
+    - pattern: "__DATE__|__TIME__|__TIMESTAMP__"
+      type: "regex"
+      scope: "source"
+      purpose: "C/C++ build timestamp macros"
+
+  file_patterns:
+    - glob: "**/Dockerfile*"
+      purpose: "Check for pinned base images and reproducible layers"
+
+    - glob: "**/package-lock.json"
+      purpose: "Verify lockfiles exist for npm dependencies"
+
+    - glob: "**/Pipfile.lock"
+      purpose: "Verify lockfiles exist for Python dependencies"
+
+    - glob: "**/go.sum"
+      purpose: "Verify lockfiles exist for Go dependencies"
+
+    - glob: "**/Cargo.lock"
+      purpose: "Verify lockfiles exist for Rust dependencies"
+
+knowledge_sources:
+  specifications:
+    - id: "reproducible-builds"
+      name: "Reproducible Builds Project"
+      url: "https://reproducible-builds.org/"
+      offline_cache: true
+      priority: "required"
+    - id: "nsa-cicd-security"
+      name: "NSA/CISA: Defending CI/CD Environments"
+      url: "https://media.defense.gov/2023/Jun/28/2003249466/-1/-1/0/CSI_DEFENDING_CI_CD_ENVIRONMENTS.PDF"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "nist-ssdf"
+      name: "NIST Secure Software Development Framework"
+      url: "https://csrc.nist.gov/publications/detail/sp/800-218/final"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "diffoscope"
+      purpose: "Deep comparison of build artifacts"
+      offline_capable: true
+
+    - tool: "reprotest"
+      purpose: "Test build reproducibility under varying conditions"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "sha256sum"
+      purpose: "Generate checksums for artifact comparison"
+      command: "sha256sum build/output/*"
+
+  scripts:
+    - id: "check-lockfiles"
+      language: "bash"
+      purpose: "Verify dependency lockfiles exist"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        missing=0
+        for pkg in package.json; do
+          if [[ -f "$pkg" ]] && [[ ! -f "package-lock.json" ]] && [[ ! -f "yarn.lock" ]]; then
+            echo "FAIL: Missing lockfile for $pkg"
+            missing=1
+          fi
+        done
+        [[ $missing -eq 0 ]] && echo "PASS: All lockfiles present"
+
+signals:
+  critical:
+    - id: "CICD-REPRO-CRIT-001"
+      signal: "No dependency lockfiles present"
+      evidence_pattern: "Missing package-lock.json, yarn.lock, Pipfile.lock, or equivalent"
+      explanation: |
+        Without lockfiles, dependencies resolve to different versions on each
+        build, making reproducibility impossible and introducing security risks
+        from unexpected dependency changes.
+      remediation: "Generate and commit lockfiles for all dependency managers"
+
+    - id: "CICD-REPRO-CRIT-002"
+      signal: "Docker images use floating tags like :latest"
+      evidence_pattern: "FROM.*:latest|FROM [^:]+$"
+      explanation: |
+        Using floating tags means builds will use different base images over
+        time, breaking reproducibility and potentially introducing vulnerabilities.
+      remediation: "Pin Docker images to specific SHA256 digests"
+
+  high:
+    - id: "CICD-REPRO-HIGH-001"
+      signal: "Build embeds timestamps in outputs"
+      evidence_pattern: "__DATE__|__TIME__|datetime.now.*embedded"
+      explanation: |
+        Embedded timestamps guarantee different outputs for each build,
+        breaking caching and making security verification impossible.
+      remediation: "Use SOURCE_DATE_EPOCH or remove timestamp embedding"
+
+    - id: "CICD-REPRO-HIGH-002"
+      signal: "Non-deterministic file ordering in archives"
+      evidence_pattern: "tar.*--sort|zip ordering inconsistent"
+      explanation: |
+        File order in archives depends on filesystem traversal order,
+        which varies between systems and runs.
+      remediation: "Use --sort=name for tar, or normalize file order before archiving"
+
+  medium:
+    - id: "CICD-REPRO-MED-001"
+      signal: "Build depends on system-installed tools without version pinning"
+      evidence_pattern: "apt-get install [^=]|yum install [^-]"
+      remediation: "Pin all system package versions explicitly"
+
+    - id: "CICD-REPRO-MED-002"
+      signal: "Parallel build order may affect output"
+      remediation: "Ensure build produces same output regardless of parallelization"
+
+  low:
+    - id: "CICD-REPRO-LOW-001"
+      signal: "Build metadata includes hostname or builder identity"
+
+  positive:
+    - id: "CICD-REPRO-POS-001"
+      signal: "SOURCE_DATE_EPOCH used for reproducible timestamps"
+
+    - id: "CICD-REPRO-POS-002"
+      signal: "All dependencies pinned with lockfiles and verified hashes"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Check dependency lockfiles"
+      description: |
+        Verify that lockfiles exist for all package managers in use.
+        Check that lockfiles are committed and not gitignored.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Find package managers without lockfiles"
+          command: |
+            for f in package.json; do
+              [[ -f "$f" ]] && ls package-lock.json yarn.lock pnpm-lock.yaml 2>/dev/null || echo "Missing lockfile"
+            done
+
+      expected_findings:
+        - "All dependency managers have corresponding lockfiles"
+
+    - id: "2"
+      name: "Audit Docker reproducibility"
+      description: |
+        Check Dockerfiles for floating tags, unordered operations,
+        and non-reproducible instructions.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find floating Docker tags"
+          command: "grep -r 'FROM' **/Dockerfile* | grep -v '@sha256:'"
+
+      expected_findings:
+        - "List of images not pinned to digests"
+
+    - id: "3"
+      name: "Test build reproducibility"
+      description: |
+        Run two builds from the same commit and compare outputs.
+        Use diffoscope for deep comparison of any differences.
+      duration_estimate: "60 min"
+
+      commands:
+        - purpose: "Compare two builds"
+          command: "diffoscope build1/output build2/output"
+
+      expected_findings:
+        - "Differences between builds or confirmation of identical outputs"
+
+    - id: "4"
+      name: "Check for embedded timestamps"
+      description: |
+        Search for timestamp embedding in source and build configuration.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Find C/C++ timestamp macros"
+          command: "grep -r '__DATE__\\|__TIME__\\|__TIMESTAMP__' --include='*.c' --include='*.cpp' --include='*.h'"
+
+      expected_findings:
+        - "List of files embedding build timestamps"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Key Findings"
+        - "Reproducibility Score"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Multiple identical builds verified with diffoscope"
+    medium: "Lockfiles present but full build comparison not performed"
+    low: "Assessment based on configuration review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "reproducible-builds"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires build execution for full verification"
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "build-reproducibility-001"
+    item: "Dependency lockfiles present for all package managers"
+    level: "CRITICAL"
+    verification: |
+      find . -name 'package.json' -exec dirname {} \; | while read d; do
+        [[ -f "$d/package-lock.json" ]] || [[ -f "$d/yarn.lock" ]] && echo "PASS" || echo "FAIL"
+      done | grep -q "FAIL" && echo "FAIL" || echo "PASS"
+    expected: "PASS"
+
+  - id: "build-reproducibility-002"
+    item: "Docker images pinned to digests"
+    level: "CRITICAL"
+    verification: |
+      grep -r '^FROM' **/Dockerfile* 2>/dev/null | grep -v '@sha256:' | grep -v '#' && echo "FAIL" || echo "PASS"
+    expected: "PASS"
+
+  - id: "build-reproducibility-003"
+    item: "No floating version tags in CI configuration"
+    level: "BLOCKING"
+    verification: |
+      grep -r ':latest' .github/workflows/ .gitlab-ci.yml Jenkinsfile 2>/dev/null && echo "FAIL" || echo "PASS"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SLSA"
+      controls: ["Build L2", "Build L3"]
+    - framework: "SSDF"
+      controls: ["PW.4.1"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.build-pipeline.build-caching"
+    - "devops-ci-cd.build-pipeline.dependency-management"

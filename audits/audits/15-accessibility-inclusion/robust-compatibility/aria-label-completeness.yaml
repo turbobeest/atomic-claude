@@ -1,0 +1,407 @@
+audit:
+  id: accessibility-inclusion.robust-compatibility.aria-label-completeness
+  name: ARIA Label Completeness
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: accessibility-inclusion
+  category_number: 15
+  subcategory: robust-compatibility
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - quick
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines all interactive elements to ensure they have
+    meaningful accessible names that describe their purpose. Per WCAG
+    Success Criterion 4.1.2 (Name, Role, Value), all user interface
+    components must have an accessible name.
+
+    The audit checks:
+    - Buttons with only icons have aria-label or visually hidden text
+    - Form inputs have associated labels (via label element or aria-label)
+    - Links have descriptive text or aria-label
+    - Custom controls have appropriate accessible names
+    - Images used as controls have alt text
+    - Landmarks have distinguishing labels when multiple exist
+
+    Accessible names come from multiple sources in priority order:
+    1. aria-labelledby (references other elements)
+    2. aria-label (direct string)
+    3. Native labeling (label element, alt attribute, content)
+    4. title attribute (fallback, not preferred)
+  why_it_matters: |
+    Without accessible names, screen reader users cannot:
+    - Identify the purpose of buttons and controls
+    - Understand what a link will do
+    - Complete forms because they don't know what each field is for
+    - Navigate between landmarks efficiently
+
+    Missing accessible names are one of the most common accessibility
+    barriers and render interfaces unusable for screen reader users.
+    Even partial coverage leaves significant gaps in accessibility.
+  when_to_run:
+  - During component development
+  - After adding new interactive elements
+  - During accessibility audits
+  - Before production releases
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Frontend source with interactive elements
+  - type: running_application
+    description: Application for accessibility tree inspection
+  access_requirements:
+  - Source code access
+  - Browser accessibility inspector
+  - Screen reader for verification
+discovery:
+  code_patterns:
+  - pattern: <button[^>]*>\s*<[^>]+>\s*</button>
+    type: regex
+    scope: source
+    purpose: Find buttons containing only non-text elements (icons)
+  - pattern: <(input|select|textarea)[^>]*(?!.*aria-label|.*id="[^"]*")[^>]*>
+    type: regex
+    scope: source
+    purpose: Find form controls that may lack labels
+  - pattern: <a[^>]*>\s*<img[^>]*>\s*</a>
+    type: regex
+    scope: source
+    purpose: Find links containing only images
+  - pattern: aria-label=['"]['"]|aria-label=['"]\s*['"]
+    type: regex
+    scope: source
+    purpose: Find empty aria-label attributes
+  file_patterns:
+  - glob: '**/*.{js,jsx,ts,tsx}'
+    purpose: JavaScript/TypeScript components
+  - glob: '**/*.vue'
+    purpose: Vue components
+  - glob: '**/*.html'
+    purpose: HTML files
+  - glob: '**/components/**'
+    purpose: Component library
+knowledge_sources:
+  specifications:
+  - id: wcag-4.1.2
+    name: 'WCAG 2.2 Success Criterion 4.1.2: Name, Role, Value'
+    url: https://www.w3.org/WAI/WCAG22/Understanding/name-role-value.html
+    offline_cache: true
+    priority: required
+  - id: acc-name-spec
+    name: Accessible Name and Description Computation
+    url: https://www.w3.org/TR/accname-1.2/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: w3c-labels
+    name: 'W3C WAI: Labels and Instructions'
+    url: https://www.w3.org/WAI/WCAG22/Understanding/labels-or-instructions.html
+    offline_cache: true
+  - id: deque-names
+    name: 'Deque: Accessible Names'
+    url: https://www.deque.com/blog/accessible-name-calculation/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: axe-core
+    purpose: Check for missing accessible names
+    offline_capable: true
+  - tool: eslint-plugin-jsx-a11y
+    purpose: Lint for missing labels in React
+    offline_capable: true
+  scripts:
+  - id: unlabeled-finder
+    language: bash
+    purpose: Find potentially unlabeled interactive elements
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Icon-Only Buttons (potentially unlabeled) ==="
+      grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+        '<button[^>]*>.*<.*Icon' . | grep -v aria-label | head -20
+
+      echo ""
+      echo "=== Empty aria-labels ==="
+      grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+        --include="*.html" 'aria-label=""' .
+
+      echo ""
+      echo "=== Inputs potentially without labels ==="
+      grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+        '<input' . | grep -v -E "(aria-label|id=.*label|placeholder.*aria)" | head -20
+signals:
+  critical:
+  - id: A11Y-LABEL-CRIT-001
+    signal: Button has no accessible name
+    evidence_pattern: <button[^>]*>\s*<(svg|img|i|span[^>]*icon)
+    explanation: |
+      A button contains only an icon or image with no accessible name.
+      Screen readers will announce just "button" with no indication of
+      function, making the interface unusable for blind users.
+    remediation: |
+      Add accessible name using one of:
+      - aria-label="Description of action"
+      - aria-labelledby pointing to visible text
+      - Visually hidden text inside button: <span class="visually-hidden">Action</span>
+  - id: A11Y-LABEL-CRIT-002
+    signal: Form input has no associated label
+    evidence_pattern: <input[^>]*(?!aria-label|aria-labelledby)
+    explanation: |
+      A form input has no label, leaving screen reader users unable to
+      understand what information the field requires.
+    remediation: |
+      Add a label using one of:
+      - <label for="input-id">Label text</label>
+      - aria-label="Label text"
+      - aria-labelledby="id-of-label-element"
+      Avoid using placeholder as sole label.
+  - id: A11Y-LABEL-CRIT-003
+    signal: Link has no accessible name
+    evidence_pattern: <a[^>]*>\s*<img[^>]*alt=['"]['"]|<a[^>]*href[^>]*>\s*</a>
+    explanation: |
+      A link contains no text and any images have empty alt text, or the
+      link is completely empty. Screen readers cannot convey where the
+      link goes.
+    remediation: |
+      Add accessible name:
+      - Add descriptive alt text to images inside links
+      - Add aria-label to the link
+      - Add visible or visually-hidden text
+  high:
+  - id: A11Y-LABEL-HIGH-001
+    signal: aria-label value is empty or whitespace only
+    evidence_pattern: aria-label=['"]\s*['"]
+    explanation: |
+      An aria-label attribute exists but contains no meaningful text.
+      This provides no accessible name and may indicate incomplete
+      implementation.
+    remediation: |
+      Add meaningful descriptive text to the aria-label, or remove it
+      and use a different labeling method.
+  - id: A11Y-LABEL-HIGH-002
+    signal: Placeholder used as only label for input
+    evidence_pattern: <input[^>]*placeholder=[^>]*(?!aria-label|id=)
+    explanation: |
+      Placeholder text is used as the sole identifier for a form field.
+      Placeholder disappears when users type, and some assistive
+      technologies don't reliably announce it.
+    remediation: |
+      Add a proper label in addition to placeholder. Placeholder should
+      provide format hints or examples, not serve as the field label.
+  - id: A11Y-LABEL-HIGH-003
+    signal: Multiple landmarks without distinguishing labels
+    evidence_pattern: <nav[^>]*>.*<nav[^>]*>
+    explanation: |
+      Multiple landmarks of the same type exist without aria-label to
+      distinguish them. Screen reader users navigating by landmarks
+      cannot tell which is which.
+    remediation: |
+      Add aria-label to each landmark describing its purpose:
+      - <nav aria-label="Main navigation">
+      - <nav aria-label="Footer navigation">
+  medium:
+  - id: A11Y-LABEL-MED-001
+    signal: Non-descriptive aria-label
+    evidence_pattern: aria-label=['"]click['"]|aria-label=['"]button['"]
+    explanation: |
+      aria-label contains generic text that doesn't describe the specific
+      function. Labels like "button" or "click" don't help users.
+    remediation: |
+      Use specific, action-oriented labels: "Submit form", "Open menu",
+      "Close dialog", "Delete item".
+  - id: A11Y-LABEL-MED-002
+    signal: Label doesn't match visible text
+    evidence_indicators:
+    - aria-label differs significantly from visible button text
+    - Accessible name doesn't include visible label text
+    explanation: |
+      The accessible name differs from visible text, which may confuse
+      voice control users who try to activate the control by speaking
+      the visible text.
+    remediation: |
+      Ensure accessible name includes the visible text. If additional
+      context is needed, use aria-describedby rather than replacing
+      the visible text in aria-label.
+  low:
+  - id: A11Y-LABEL-LOW-001
+    signal: Title attribute used as primary label
+    evidence_pattern: title=['"][^'"]+['"].*(?!aria-label)
+    explanation: |
+      Title attribute is used as the labeling mechanism. While it
+      contributes to accessible name computation, it's not reliably
+      announced by all assistive technologies.
+    remediation: |
+      Use aria-label or proper label elements. Reserve title for
+      supplementary tooltip information.
+  positive:
+  - id: A11Y-LABEL-POS-001
+    signal: All interactive elements have accessible names
+    evidence_indicators:
+    - axe-core reports no missing label violations
+    - All buttons have text or aria-label
+  - id: A11Y-LABEL-POS-002
+    signal: Labels are descriptive and action-oriented
+    evidence_indicators:
+    - Button labels describe actions
+    - Link labels describe destinations
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Run automated label detection
+    description: |
+      Use automated tools to identify elements missing accessible names.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Run axe-core label checks
+      command: |
+        npx axe-cli --rules "button-name,image-alt,input-button-name,label,link-name" . 2>/dev/null || \
+          echo "Run axe manually in browser"
+    expected_findings:
+    - List of elements missing accessible names
+    - Specific violations per element
+  - id: '2'
+    name: Find icon-only interactive elements
+    description: |
+      Search for buttons and links containing only icons that may lack
+      labels.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find icon-only buttons
+      command: |
+        grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+          '<button[^>]*>[^<]*<.*Icon' . | grep -v aria-label
+    - purpose: Find image-only links
+      command: |
+        grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+          '<a[^>]*>[^<]*<img' . | grep -v aria-label
+    expected_findings:
+    - Icon-only elements needing labels
+    - Elements already properly labeled
+  - id: '3'
+    name: Check form input labels
+    description: |
+      Verify all form inputs have associated labels.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find inputs potentially missing labels
+      command: |
+        grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+          '<input' . | grep -v -E "(aria-label|aria-labelledby|hidden|type=\"hidden\")" | head -30
+    expected_findings:
+    - Form inputs requiring label verification
+  - id: '4'
+    name: Manual screen reader verification
+    description: |
+      Navigate with screen reader to verify accessible names are
+      announced correctly.
+    duration_estimate: 30 min
+    questions:
+    - Are all buttons announced with meaningful names?
+    - Are form fields announced with their labels?
+    - Can landmarks be distinguished by their labels?
+    - Are link purposes clear from announcements?
+    expected_findings:
+    - Screen reader announcement assessment
+    - Any gaps in accessible naming
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Missing Labels Inventory
+    - Quality Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Automated testing plus complete screen reader verification
+    medium: Automated testing with spot-check verification
+    low: Code review without runtime testing
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: wcag-4.1.2
+      priority: required
+    - source_id: acc-name-spec
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 1
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: aria-label-001
+  item: All buttons have accessible names
+  level: CRITICAL
+  verification: manual
+  verification_notes: Run axe-core and verify zero button-name violations
+  expected: Confirmed by reviewer
+- id: aria-label-002
+  item: All form inputs have labels
+  level: CRITICAL
+  verification: manual
+  verification_notes: Run axe-core and verify zero label violations
+  expected: Confirmed by reviewer
+- id: aria-label-003
+  item: All links have accessible names
+  level: CRITICAL
+  verification: manual
+  verification_notes: Run axe-core and verify zero link-name violations
+  expected: Confirmed by reviewer
+- id: aria-label-004
+  item: No empty aria-label attributes
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.jsx" --include="*.tsx" --include="*.vue" \
+      'aria-label=""' . | wc -l | \
+      xargs -I {} sh -c '[ {} -eq 0 ] && echo "PASS" || echo "FAIL"'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - web-application
+    - spa
+    - website
+    - forms-heavy
+  compliance_frameworks:
+  - framework: WCAG 2.2
+    controls:
+    - 4.1.2
+    - 1.3.1
+    - 2.4.6
+  - framework: Section 508
+    controls:
+    - 1194.22(n)
+  - framework: EN 301 549
+    controls:
+    - 9.4.1.2
+relationships:
+  commonly_combined:
+  - accessibility-inclusion.robust-compatibility.aria-usage
+  - accessibility-inclusion.robust-compatibility.role-attribute
+  - accessibility-inclusion.understandable-predictable.component-consistency

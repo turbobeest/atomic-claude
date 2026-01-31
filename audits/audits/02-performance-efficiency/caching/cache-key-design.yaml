@@ -1,0 +1,311 @@
+# ============================================================
+# CACHE KEY DESIGN AUDIT
+# ============================================================
+# Evaluates cache key naming conventions, structure, and design
+# for maintainability, performance, and collision avoidance.
+
+audit:
+  id: "performance-efficiency.caching.cache-key-design"
+  name: "Cache Key Design Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "caching"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes cache key naming patterns, structure, and generation logic
+    for consistency, collision safety, versioning support, and operational
+    debuggability. Reviews key length, character usage, and namespacing.
+
+  why_it_matters: |
+    Poor cache key design leads to key collisions (data corruption),
+    difficulty debugging cache issues, inefficient memory usage from
+    overly long keys, and inability to invalidate related keys. Keys
+    are the primary interface for cache operations - they must be well-designed.
+
+  when_to_run:
+    - "Cache layer implementation"
+    - "After cache-related bugs"
+    - "Code review for caching changes"
+    - "Multi-tenant architecture review"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application code with cache key generation"
+
+  access_requirements:
+    - "Source code repository access"
+    - "Cache infrastructure for key inspection"
+
+discovery:
+  code_patterns:
+    - pattern: "cache[_-]?key|CACHE[_-]?KEY"
+      type: "regex"
+      scope: "source"
+      purpose: "Find cache key definitions"
+
+    - pattern: "f['\"].*\\{.*\\}.*['\"]|`.*\\$\\{.*\\}.*`|\\.format\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find string interpolation in keys"
+
+    - pattern: "md5|sha1|sha256|hashlib|hash\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find hashed cache keys"
+
+    - pattern: "cache\\.get\\(['\"]|cache\\.set\\(['\"]"
+      type: "regex"
+      scope: "source"
+      purpose: "Find inline cache key strings"
+
+  file_patterns:
+    - glob: "**/cache*.{py,rb,js,ts,java,go}"
+      purpose: "Cache utility files"
+    - glob: "**/constants*.{py,rb,js,ts,java}"
+      purpose: "Key constant definitions"
+
+knowledge_sources:
+  guides:
+    - id: "redis-key-patterns"
+      name: "Redis Key Naming Conventions"
+      url: "https://redis.io/docs/manual/keyspace/"
+      offline_cache: true
+
+    - id: "memcached-keys"
+      name: "Memcached Key Design"
+      url: "https://github.com/memcached/memcached/wiki/Programming"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "grep/ripgrep"
+      purpose: "Find cache key patterns"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "redis-cli"
+      purpose: "Analyze existing key patterns"
+      command: "redis-cli SCAN 0 MATCH '*' COUNT 100"
+
+    - tool: "redis-cli"
+      purpose: "Key length analysis"
+      command: "redis-cli DEBUG OBJECT <key>"
+
+signals:
+  critical:
+    - id: "CACHE-KEY-CRIT-001"
+      signal: "Cache keys without namespace/prefix separation"
+      evidence_pattern: "cache\\.set\\(['\"][a-z]+['\"]"
+      explanation: |
+        Unnamespaced keys risk collisions between different features,
+        services, or tenants. A key like "user:123" from two different
+        services will overwrite each other.
+      remediation: "Add service/feature prefix: 'myapp:users:123'"
+
+    - id: "CACHE-KEY-CRIT-002"
+      signal: "User input directly in cache keys without sanitization"
+      evidence_pattern: "cache\\.set\\(.*user_input|cache\\.set\\(.*request\\."
+      explanation: |
+        Unsanitized user input in cache keys enables cache poisoning attacks
+        and can cause unexpected behavior with special characters.
+      remediation: "Sanitize and validate all user input before including in keys"
+
+  high:
+    - id: "CACHE-KEY-HIGH-001"
+      signal: "No version identifier in cache keys"
+      evidence_pattern: "cache\\.set(?!.*version|v\\d)"
+      explanation: |
+        Without version identifiers, schema changes require manual cache
+        flushes. Versioned keys enable safe deployments with incompatible
+        cached data structures.
+      remediation: "Include version in key: 'myapp:v2:users:123'"
+
+    - id: "CACHE-KEY-HIGH-002"
+      signal: "Inconsistent key naming patterns across codebase"
+      evidence_pattern: "Mixed delimiters (: vs _ vs -) in keys"
+      explanation: |
+        Inconsistent naming makes debugging difficult and prevents effective
+        pattern-based operations like bulk invalidation.
+      remediation: "Standardize on single delimiter (colon recommended for Redis)"
+
+  medium:
+    - id: "CACHE-KEY-MED-001"
+      signal: "Excessively long cache keys"
+      evidence_threshold: "Key length > 200 characters"
+      remediation: "Use hash of long components or restructure key hierarchy"
+
+    - id: "CACHE-KEY-MED-002"
+      signal: "Hardcoded cache keys scattered in codebase"
+      evidence_pattern: "cache\\.get\\(['\"][^'\"]+['\"]\\)"
+      remediation: "Centralize key generation in dedicated utility"
+
+  low:
+    - id: "CACHE-KEY-LOW-001"
+      signal: "Cache keys not documented"
+      remediation: "Document key format, components, and lifecycle"
+
+  positive:
+    - id: "CACHE-KEY-POS-001"
+      signal: "Centralized key generation with consistent patterns"
+
+    - id: "CACHE-KEY-POS-002"
+      signal: "Keys include environment/tenant isolation"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify key generation patterns"
+      description: |
+        Find all locations where cache keys are generated and catalog
+        the patterns used.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Find cache key generation"
+          command: "rg -n 'cache[_.]key|CACHE_KEY|cache\\.get|cache\\.set' --type py --type js --type java"
+        - purpose: "Find key interpolation"
+          command: "rg -n 'f[\"\\x27].*cache.*\\{|cache.*\\$\\{' --type py --type js"
+
+      expected_findings:
+        - "Key generation patterns identified"
+        - "Key component sources mapped"
+
+    - id: "2"
+      name: "Analyze key structure"
+      description: |
+        Evaluate key structure for namespace separation, versioning,
+        and consistency across the codebase.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Sample actual keys from cache"
+          command: "redis-cli SCAN 0 MATCH '*' COUNT 50 | tail -n +2 | head -20"
+
+      expected_findings:
+        - "Namespace analysis"
+        - "Delimiter consistency"
+        - "Version inclusion"
+
+    - id: "3"
+      name: "Check for collision risks"
+      description: |
+        Identify potential key collision scenarios, especially in
+        multi-tenant or multi-service environments.
+      duration_estimate: "30 min"
+
+      expected_findings:
+        - "Collision risk assessment"
+        - "Tenant isolation verification"
+
+    - id: "4"
+      name: "Review key length and complexity"
+      description: |
+        Analyze key lengths and identify opportunities to reduce
+        memory overhead from key storage.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Analyze key lengths"
+          command: "redis-cli SCAN 0 MATCH '*' COUNT 100 | tail -n +2 | awk '{print length, $0}' | sort -rn | head -10"
+
+      expected_findings:
+        - "Key length distribution"
+        - "Optimization opportunities"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Key Pattern Analysis"
+        - "Collision Risk Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct code analysis with runtime key inspection"
+    medium: "Code analysis without runtime verification"
+    low: "Pattern matching without full context"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "redis-key-patterns"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "cache-key-001"
+    item: "All cache keys use consistent namespacing"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Reviewer confirms all keys follow namespace:entity:id pattern"
+    expected: "Confirmed by reviewer"
+
+  - id: "cache-key-002"
+    item: "No user input directly in keys without sanitization"
+    level: "CRITICAL"
+    verification: "rg -l 'cache\\.(get|set).*request\\.|cache\\.(get|set).*user_input' && echo FAIL || echo PASS"
+    expected: "PASS"
+
+  - id: "cache-key-003"
+    item: "Key generation is centralized"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Key generation uses shared utility functions"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Code Quality"
+      controls: ["Naming Conventions"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.caching.cache-invalidation"
+    - "performance-efficiency.caching.cache-size"
+    - "security.injection.cache-poisoning"

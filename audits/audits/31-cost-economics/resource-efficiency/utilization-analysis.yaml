@@ -1,0 +1,329 @@
+audit:
+  id: cost-economics.resource-efficiency.utilization-analysis
+  name: Utilization Analysis Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: cost-economics
+  category_number: 31
+  subcategory: resource-efficiency
+  tier: expert
+  estimated_duration: 4-6 hours  # median: 5h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - finops
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines resource utilization across compute, memory,
+    storage, and network dimensions. It identifies patterns of under-
+    utilization that indicate waste and over-utilization that may
+    indicate performance risk or capacity constraints.
+  why_it_matters: |
+    Resource utilization is the foundation of efficiency. Low utilization
+    indicates over-provisioning and wasted spend. The typical cloud
+    environment runs at 30-40% average utilization, meaning significant
+    optimization opportunity exists. Understanding utilization patterns
+    enables rightsizing, consolidation, and scheduling optimization.
+  when_to_run:
+  - Monthly efficiency review
+  - Before capacity planning decisions
+  - When investigating high costs
+  - After workload migrations
+prerequisites:
+  required_artifacts:
+  - type: metrics-data
+    description: At least 14 days of resource metrics
+  - type: resource-inventory
+    description: Complete inventory of compute resources
+  - type: utilization-thresholds
+    description: Defined utilization targets
+  access_requirements:
+  - Access to CloudWatch, Azure Monitor, or Stackdriver
+  - Access to container orchestration metrics
+  - Access to resource configuration data
+discovery:
+  metrics_to_analyze:
+  - resource: Compute
+    metrics:
+    - CPU utilization (avg, max, p95)
+    - Memory utilization
+    - Network throughput
+  - resource: Storage
+    metrics:
+    - Volume utilization
+    - IOPS utilization
+    - Throughput utilization
+  - resource: Database
+    metrics:
+    - CPU utilization
+    - Connection utilization
+    - Storage utilization
+  utilization_thresholds:
+  - level: Under-utilized
+    cpu: < 30% average
+    memory: < 40% average
+    action: Rightsizing candidate
+  - level: Optimal
+    cpu: 30-70% average
+    memory: 40-80% average
+    action: No action needed
+  - level: Over-utilized
+    cpu: '> 80% average'
+    memory: '> 85% average'
+    action: Scaling candidate
+  file_patterns:
+  - glob: '**/*.tf'
+    purpose: Terraform files
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: CloudFormation templates
+  - glob: '**/*cost*.yaml'
+    purpose: Cost configuration files
+  - glob: '**/*budget*.yaml'
+    purpose: Budget configuration files
+  - glob: '**/*tag*.yaml'
+    purpose: Tagging policy files
+  code_patterns:
+  - pattern: tags\s*[=:]|cost_center|billing|budget
+    type: regex
+    scope: config
+    purpose: Cost/billing references
+  - pattern: reserved_instance|spot_instance|savings_plan
+    type: regex
+    scope: config
+    purpose: Cost optimization patterns
+knowledge_sources:
+  specifications:
+  - id: finops-utilization
+    name: FinOps - Workload Optimization
+    url: https://www.finops.org/framework/capabilities/workload-optimization/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-compute-optimizer
+    name: AWS Compute Optimizer
+    url: https://docs.aws.amazon.com/compute-optimizer/latest/ug/what-is-compute-optimizer.html
+    offline_cache: true
+  - id: k8s-resource-management
+    name: Kubernetes Resource Management
+    url: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+    offline_cache: true
+tooling:
+  cloud_tools:
+  - tool: AWS Compute Optimizer
+    purpose: ML-based utilization analysis
+  - tool: CloudWatch
+    purpose: Metrics collection and analysis
+  - tool: Azure Advisor
+    purpose: Utilization recommendations
+  kubernetes_tools:
+  - tool: Metrics Server
+    purpose: Real-time resource metrics
+  - tool: Kubecost
+    purpose: Cost-aware utilization analysis
+  - tool: VPA
+    purpose: Vertical Pod Autoscaler recommendations
+signals:
+  critical:
+  - id: UTIL-CRIT-001
+    signal: Average CPU utilization below 10% across fleet
+    evidence_threshold: fleet_avg_cpu < 10%
+    explanation: |
+      Extremely low fleet-wide utilization indicates massive
+      over-provisioning. Even accounting for headroom, this
+      level suggests 5-10x potential consolidation.
+    remediation: Implement aggressive rightsizing program
+  - id: UTIL-CRIT-002
+    signal: Significant resources at 0% utilization
+    evidence_threshold: zero_util_resources > 10%
+    explanation: |
+      Resources with no utilization are either idle or orphaned.
+      These represent complete waste and should be investigated.
+    remediation: Identify and terminate unused resources
+  high:
+  - id: UTIL-HIGH-001
+    signal: Memory utilization consistently below 30%
+    evidence_threshold: avg_memory_util < 30%
+    explanation: |
+      Low memory utilization often indicates instances were sized
+      for memory but are not using it. Smaller instance families
+      or types may be appropriate.
+    remediation: Evaluate memory-optimized vs general purpose instances
+  - id: UTIL-HIGH-002
+    signal: Utilization patterns not informing scaling policies
+    evidence_pattern: Static scaling despite variable utilization
+    explanation: |
+      When utilization varies significantly but scaling remains
+      static, the organization misses opportunities to reduce
+      costs during low-demand periods.
+    remediation: Implement utilization-based auto-scaling
+  medium:
+  - id: UTIL-MED-001
+    signal: Weekend/night utilization same as business hours
+    evidence_pattern: No demand variation in non-production
+    remediation: Implement scheduled scaling for predictable patterns
+  - id: UTIL-MED-002
+    signal: Kubernetes pods consistently using < 50% of requests
+    evidence_threshold: actual_usage < 50% of requests
+    remediation: Adjust resource requests to match actual usage
+  low:
+  - id: UTIL-LOW-001
+    signal: No utilization tracking or dashboards
+    evidence_pattern: Utilization not monitored
+    remediation: Implement utilization monitoring and alerting
+  positive:
+  - id: UTIL-POS-001
+    signal: Fleet utilization in optimal 40-70% range
+  - id: UTIL-POS-002
+    signal: Auto-scaling aligned with utilization patterns
+  - id: UTIL-POS-003
+    signal: Regular utilization review process in place
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Collect utilization metrics
+    description: |
+      Gather CPU, memory, storage, and network utilization metrics
+      for all resources over at least 14 days.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Get EC2 CPU utilization
+      command: |
+        aws cloudwatch get-metric-statistics \
+          --namespace AWS/EC2 \
+          --metric-name CPUUtilization \
+          --dimensions Name=InstanceId,Value=i-xxx \
+          --start-time $(date -u -d '14 days ago' +%Y-%m-%dT%H:%M:%SZ) \
+          --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
+          --period 3600 --statistics Average Maximum
+    - purpose: Get Kubernetes pod utilization
+      command: kubectl top pods --all-namespaces
+    expected_findings:
+    - Utilization by resource
+    - Statistical distribution
+  - id: '2'
+    name: Categorize by utilization tier
+    description: |
+      Classify resources into under-utilized, optimal, and
+      over-utilized categories based on defined thresholds.
+    duration_estimate: 45 min
+    expected_findings:
+    - Resource distribution by tier
+    - Under-utilized resources
+    - Over-utilized resources
+  - id: '3'
+    name: Analyze utilization patterns
+    description: |
+      Identify temporal patterns (daily, weekly, monthly) and
+      correlations between utilization and business events.
+    duration_estimate: 60 min
+    expected_findings:
+    - Temporal patterns
+    - Peak vs off-peak analysis
+    - Scaling opportunities
+  - id: '4'
+    name: Assess scaling configuration
+    description: |
+      Review auto-scaling configurations and their alignment
+      with observed utilization patterns.
+    duration_estimate: 30 min
+    expected_findings:
+    - Scaling policy review
+    - Alignment with patterns
+  - id: '5'
+    name: Calculate optimization potential
+    description: |
+      Quantify potential savings from addressing under-utilized
+      resources and optimizing scaling.
+    duration_estimate: 30 min
+    expected_findings:
+    - Rightsizing savings potential
+    - Scheduling optimization potential
+    - Priority recommendations
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Utilization Overview
+    - Pattern Analysis
+    - Optimization Opportunities
+    - Recommendations
+  - type: metrics_dashboard
+    metrics:
+    - Average utilization by resource type
+    - Resources by utilization tier
+    - Utilization trends over time
+    - Optimization savings potential
+  confidence_guidance:
+    high: 14+ days of comprehensive metrics data
+    medium: 7-14 days of data
+    low: Less than 7 days or incomplete data
+offline:
+  capability: minimal
+  cache_manifest:
+    knowledge:
+    - source_id: finops-utilization
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 1
+      reduced_scope: Sample of top resources by cost
+    full:
+      included: true
+      priority: 1
+    finops:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: util-001
+  item: Under-utilized resources identified
+  level: CRITICAL
+  verification: automated
+  expected: List generated
+- id: util-002
+  item: Optimization potential quantified
+  level: BLOCKING
+  verification: automated
+  expected: Savings estimate documented
+- id: util-003
+  item: Scaling alignment reviewed
+  level: WARNING
+  verification: manual
+  expected: Review completed
+governance:
+  applicable_to:
+    archetypes:
+    - cloud-native
+    - hybrid
+    - enterprise
+  compliance_frameworks:
+  - framework: FinOps Foundation
+    controls:
+    - Workload Optimization
+    - Usage Optimization
+  - framework: AWS Well-Architected
+    controls:
+    - COST-05
+    - COST-06
+relationships:
+  commonly_combined:
+  - cost-economics.cost-optimization.rightsizing
+  - cost-economics.resource-efficiency.idle-resources
+  - cost-economics.resource-efficiency.waste-identification

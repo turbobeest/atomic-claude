@@ -1,0 +1,356 @@
+# ============================================================
+# ADAPTIVE FILTER AUDIT
+# ============================================================
+# Evaluates adaptive filter design, convergence behavior,
+# and stability for applications like noise cancellation.
+# ============================================================
+
+audit:
+  id: "signal-processing-data-acquisition.filtering.adaptive-filter"
+  name: "Adaptive Filter Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-22"
+  status: "active"
+
+  category: "signal-processing-data-acquisition"
+  category_number: 40
+  subcategory: "filtering"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "software"
+
+  default_profiles:
+    - "full"
+    - "signal-processing"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates adaptive filter implementations for proper
+    convergence, stability, and performance. It examines:
+    - Adaptive algorithm selection (LMS, NLMS, RLS, etc.)
+    - Step size/learning rate selection and bounds
+    - Convergence behavior and speed
+    - Steady-state error and misadjustment
+    - Stability and tracking capability
+    - Computational complexity and efficiency
+
+  why_it_matters: |
+    Adaptive filters self-tune to minimize error:
+    - Step size too large causes instability
+    - Step size too small causes slow convergence
+    - Algorithm choice affects tracking vs. noise trade-off
+    - LMS is simple but slow; RLS is fast but computationally expensive
+    - Proper design enables applications like ANC, echo cancellation
+
+    Poorly designed adaptive filters may diverge, converge too slowly,
+    or have excessive misadjustment that defeats their purpose.
+
+  when_to_run:
+    - "Adaptive filter design review"
+    - "Noise cancellation system design"
+    - "System identification applications"
+    - "Echo cancellation systems"
+    - "Performance troubleshooting"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Adaptive filter implementation"
+    - type: "algorithm_specification"
+      description: "Algorithm and parameter specifications"
+    - type: "application_requirements"
+      description: "Convergence and performance requirements"
+
+  access_requirements:
+    - "Access to adaptive filter code"
+    - "Application requirements"
+    - "Test data for convergence analysis"
+
+discovery:
+  code_patterns:
+    - pattern: "(lms|nlms|rls|adaptive)_(filter|update)"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect adaptive filter algorithm"
+
+    - pattern: "(step_size|mu|learning_rate|lambda)"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect adaptation parameters"
+
+    - pattern: "(convergence|misadjust|steady_state)"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect convergence handling"
+
+    - pattern: "(weight|coefficient)_(update|adapt)"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect weight update code"
+
+  file_patterns:
+    - glob: "**/adaptive*.{c,h,cpp,py}"
+      purpose: "Adaptive filter files"
+    - glob: "**/lms*.{c,h,cpp,py}"
+      purpose: "LMS implementation files"
+    - glob: "**/echo*.{c,h,cpp,py}"
+      purpose: "Echo cancellation files"
+
+knowledge_sources:
+  specifications:
+    - id: "haykin-adaptive"
+      name: "Adaptive Filter Theory - Haykin"
+      url: "https://www.pearson.com/store/p/adaptive-filter-theory/P100002023116"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "ti-adaptive-filters"
+      name: "Texas Instruments Adaptive Filter Guide"
+      url: "https://www.ti.com/lit/an/spra704/spra704.pdf"
+      offline_cache: true
+
+    - id: "mathworks-adaptive"
+      name: "MathWorks Adaptive Filter Documentation"
+      url: "https://www.mathworks.com/help/dsp/adaptive-filters.html"
+      offline_cache: true
+
+signals:
+  critical:
+    - id: "ADAP-CRIT-001"
+      signal: "Adaptive filter diverges or is unstable"
+      evidence_indicators:
+        - "Filter weights grow unbounded"
+        - "Output error increases over time"
+        - "Step size exceeds stability bound"
+      explanation: |
+        Adaptive filter instability causes weights to grow without
+        bound, corrupting output and potentially causing overflow.
+        LMS stability requires mu < 2/(N*Pmax) where Pmax is maximum
+        input power.
+      remediation: |
+        - Reduce step size to stable range
+        - Use NLMS for automatic normalization
+        - Implement weight leakage for stability
+        - Add bounds checking on weight magnitude
+      cwe: "CWE-682"
+
+    - id: "ADAP-CRIT-002"
+      signal: "Step size selection causes non-convergence"
+      evidence_indicators:
+        - "Filter never reaches steady state"
+        - "Error does not decrease over time"
+        - "Step size too small for tracking"
+      explanation: |
+        Incorrect step size prevents proper convergence. Too small
+        causes impractically slow convergence; too large causes
+        oscillation or divergence around the optimum.
+      remediation: |
+        - Calculate appropriate step size range
+        - Use variable step size algorithm (NLMS, VSLMS)
+        - Balance convergence speed vs. misadjustment
+        - Verify convergence with typical signals
+
+  high:
+    - id: "ADAP-HIGH-001"
+      signal: "Excessive misadjustment in steady state"
+      evidence_indicators:
+        - "Steady-state error exceeds requirement"
+        - "Noise floor elevated by misadjustment"
+        - "Step size not reduced after convergence"
+      explanation: |
+        Misadjustment is the excess MSE in steady state due to weight
+        noise from adaptation. For LMS, misadjustment ~ mu*N*sigma^2.
+        Large step size causes high misadjustment.
+      remediation: |
+        - Reduce step size for lower misadjustment
+        - Use gear-shifting (large then small step size)
+        - Consider RLS for lower misadjustment
+        - Trade convergence speed for accuracy
+
+    - id: "ADAP-HIGH-002"
+      signal: "Filter cannot track time-varying system"
+      evidence_indicators:
+        - "Error increases when system changes"
+        - "Filter lags behind variations"
+        - "Step size too small for tracking"
+      explanation: |
+        Time-varying systems require adequate step size for tracking.
+        Too small step size causes tracking lag. The optimal step
+        size trades off tracking vs. misadjustment.
+      remediation: |
+        - Increase step size for faster tracking
+        - Use variable step size algorithm
+        - Consider RLS for better tracking
+        - Match algorithm to system dynamics
+
+  medium:
+    - id: "ADAP-MED-001"
+      signal: "Algorithm not matched to application"
+      evidence_indicators:
+        - "LMS used where RLS would be better"
+        - "RLS used where LMS sufficient"
+        - "Computational cost not considered"
+      explanation: |
+        Different adaptive algorithms have different trade-offs.
+        LMS is simple but slow; RLS is fast but O(N^2). The choice
+        should match application requirements and constraints.
+      remediation: |
+        - Analyze convergence vs. computation trade-off
+        - Use LMS for low-cost applications
+        - Use RLS when fast convergence is critical
+        - Document algorithm selection rationale
+
+    - id: "ADAP-MED-002"
+      signal: "Filter length not appropriate for application"
+      evidence_indicators:
+        - "Too few taps for system identification"
+        - "Too many taps slowing convergence"
+        - "Length not matched to impulse response"
+      explanation: |
+        Filter length must be adequate to model the system but
+        not excessive. Too few taps causes modeling error; too
+        many causes slow convergence and high computation.
+      remediation: |
+        - Estimate required length from system response
+        - Add margin for robustness
+        - Balance length vs. convergence speed
+        - Consider sparse adaptation for long filters
+
+  low:
+    - id: "ADAP-LOW-001"
+      signal: "Adaptive parameters not documented"
+      evidence_indicators:
+        - "Step size selection not explained"
+        - "No convergence analysis"
+        - "Algorithm choice not justified"
+      explanation: |
+        Undocumented adaptive filter design makes troubleshooting
+        and maintenance difficult. Parameter choices should be
+        justified based on analysis.
+      remediation: |
+        - Document algorithm selection rationale
+        - Record step size calculation
+        - Include convergence analysis
+        - Add parameter tuning guidance
+
+  positive:
+    - id: "ADAP-POS-001"
+      signal: "Well-designed adaptive filter with analysis"
+      evidence_indicators:
+        - "Algorithm matched to application"
+        - "Step size properly bounded"
+        - "Convergence verified"
+
+procedure:
+  context:
+    cognitive_mode: "analytical"
+    ensemble_role: "dsp-engineer"
+
+  steps:
+    - id: "1"
+      name: "Algorithm Review"
+      description: |
+        Review adaptive algorithm and parameter selection.
+      duration_estimate: "45 min"
+
+      commands:
+        - purpose: "Find adaptive filter implementation"
+          command: |
+            grep -rniE "(adaptive|lms|nlms|rls)" \
+              --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -30
+
+        - purpose: "Find step size configuration"
+          command: |
+            grep -rniE "(step_size|mu|learning)" \
+              --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -20
+
+      expected_findings:
+        - "Algorithm identification"
+        - "Step size value"
+        - "Filter length"
+
+    - id: "2"
+      name: "Convergence Analysis"
+      description: |
+        Verify convergence behavior and stability.
+      duration_estimate: "45 min"
+      manual_verification: true
+
+      expected_findings:
+        - "Stability bounds"
+        - "Convergence rate"
+        - "Misadjustment level"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Algorithm Analysis"
+        - "Convergence Assessment"
+        - "Recommendations"
+
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 3
+    signal-processing:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "adap-001"
+    item: "Adaptive filter stable"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify step size within stability bounds"
+    expected: "Confirmed by reviewer"
+
+  - id: "adap-002"
+    item: "Convergence achieved within requirements"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify convergence time meets specification"
+    expected: "Confirmed by reviewer"
+
+  - id: "adap-003"
+    item: "Steady-state error acceptable"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify misadjustment meets requirements"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["signal-processing", "audio-systems", "communications", "control-systems"]
+
+relationships:
+  commonly_combined:
+    - "signal-processing.filtering.filter-design"
+    - "signal-processing.filtering.filter-stability"
+    - "signal-processing.signal-conditioning.noise-reduction"
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

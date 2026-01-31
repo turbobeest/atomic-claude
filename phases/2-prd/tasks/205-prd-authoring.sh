@@ -140,7 +140,9 @@ task_205_prd_authoring() {
     # ═══════════════════════════════════════════════════════════════════════════
 
     local agents_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/selected-agents.json"
+    # Check embedded repo first (monorepo deployment)
     local agent_repo="$ATOMIC_ROOT/repos/agents"
+    [[ -d "$ATOMIC_ROOT/agents" ]] && agent_repo="$ATOMIC_ROOT/agents"
     local req_engineer_prompt=""
     local prd_writer_prompt=""
 

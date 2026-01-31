@@ -1,0 +1,339 @@
+audit:
+  id: observability-instrumentation.visualization-dashboards.dashboard-coverage
+  name: Dashboard Coverage Audit
+  version: 1.0.0
+  last_updated: '2025-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: visualization-dashboards
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Assesses the completeness of dashboard coverage across the
+    organization's services and infrastructure. Identifies gaps
+    where services, environments, or operational dimensions lack
+    adequate visualization and monitoring dashboards. Evaluates
+    whether dashboards cover all critical metrics, alerts, and
+    business KPIs.
+  why_it_matters: |
+    Incomplete dashboard coverage leads to:
+    - Blind spots where issues go undetected
+    - Delayed incident response due to missing visibility
+    - Inconsistent monitoring practices across teams
+    - Inability to correlate issues across services
+    - Missed business impact metrics during outages
+    - Difficulty onboarding new team members to operational state
+  when_to_run:
+  - Quarterly observability health checks
+  - After adding new services or environments
+  - During incident retrospectives revealing gaps
+  - Before major releases or migrations
+prerequisites:
+  required_artifacts:
+  - type: service_catalog
+    description: List of all services in the organization
+  - type: dashboard_inventory
+    description: Access to dashboard platform (Grafana, Datadog, etc.)
+  optional_artifacts:
+  - type: slo_definitions
+    description: Documented SLOs for each service
+  - type: runbook_repository
+    description: Operational runbooks referencing dashboards
+  access_requirements:
+  - Read access to dashboard platform APIs
+  - Service catalog or CMDB access
+  - Alert configuration access
+discovery:
+  metrics_queries:
+  - system: Grafana API
+    query: GET /api/search?type=dash-db
+    purpose: Enumerate all existing dashboards
+  - system: Prometheus
+    query: count by (job) (up)
+    purpose: Identify all monitored services
+    threshold: All services should have corresponding dashboards
+  - system: Grafana API
+    query: GET /api/dashboards/uid/{uid}
+    purpose: Analyze dashboard panel coverage
+  documents_to_review:
+  - type: Service catalog
+    purpose: Identify all services requiring dashboards
+  - type: Dashboard standards
+    purpose: Understand required dashboard components
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: grafana-best-practices
+    name: Grafana Dashboard Best Practices
+    url: https://grafana.com/docs/grafana/latest/dashboards/build-dashboards/best-practices/
+    offline_cache: true
+    priority: recommended
+  - id: google-sre-monitoring
+    name: Google SRE Book - Monitoring Distributed Systems
+    url: https://sre.google/sre-book/monitoring-distributed-systems/
+    offline_cache: true
+    priority: required
+  learning_resources:
+  - id: effective-dashboards
+    title: The Art of Monitoring
+    type: book
+    reference: James Turnbull, ISBN 978-0988820722
+tooling:
+  infrastructure_tools:
+  - tool: grafana-cli
+    purpose: Query dashboard inventory via API
+    command: 'curl -H ''Authorization: Bearer $TOKEN'' $GRAFANA_URL/api/search'
+  - tool: kubectl
+    purpose: Enumerate services in Kubernetes
+    command: kubectl get services --all-namespaces -o json
+  monitoring_queries:
+  - system: Prometheus
+    query: count by (job) (up)
+    purpose: List all monitored targets
+  - system: Grafana API
+    query: GET /api/search?query=&type=dash-db
+    purpose: List all dashboards
+  scripts:
+  - id: dashboard-coverage-check
+    language: bash
+    purpose: Compare services to dashboard inventory
+    source: inline
+    code: |
+      #!/bin/bash
+      # Compare services to dashboards
+
+      echo "=== Services without dashboards ==="
+      # Get list of services
+      services=$(kubectl get services --all-namespaces -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | sort -u)
+
+      # Get list of dashboards
+      dashboards=$(curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
+        "$GRAFANA_URL/api/search?type=dash-db" | jq -r '.[].title' | tr '[:upper:]' '[:lower:]' | sort -u)
+
+      # Find services without matching dashboards
+      for service in $services; do
+        if ! echo "$dashboards" | grep -qi "$service"; then
+          echo "Missing dashboard: $service"
+        fi
+      done
+signals:
+  critical:
+  - id: DASHCOV-CRIT-001
+    signal: Production services without any dashboard
+    evidence_indicators:
+    - Service exists in production but no dashboard found
+    - Service metrics are collected but not visualized
+    explanation: |
+      Services without dashboards create operational blind spots.
+      During incidents, teams cannot quickly assess service health
+      or identify root causes without proper visualization.
+    remediation: |
+      Create a service dashboard following organizational standards.
+      At minimum include: request rate, error rate, latency percentiles,
+      resource utilization, and dependency health.
+  - id: DASHCOV-CRIT-002
+    signal: SLO metrics not represented on dashboards
+    evidence_indicators:
+    - SLO defined but no corresponding dashboard panel
+    - Error budget not visible anywhere
+    explanation: |
+      SLOs without dashboard visibility cannot be effectively monitored.
+      Teams may violate SLOs without awareness.
+    remediation: |
+      Add dedicated SLO panels showing current state, burn rate,
+      and error budget remaining.
+  high:
+  - id: DASHCOV-HIGH-001
+    signal: No infrastructure dashboards for critical components
+    explanation: |
+      Database, cache, and queue infrastructure lacking dashboards
+      prevents early detection of resource exhaustion.
+    remediation: |
+      Create infrastructure dashboards covering CPU, memory, disk,
+      connections, and service-specific metrics.
+  - id: DASHCOV-HIGH-002
+    signal: Missing environment coverage
+    explanation: |
+      Dashboards only exist for production, leaving staging and
+      development environments unmonitored.
+    remediation: |
+      Extend dashboard templates to cover all environments or
+      create environment-specific variants.
+  medium:
+  - id: DASHCOV-MED-001
+    signal: Inconsistent dashboard standards across teams
+    remediation: |
+      Establish and enforce dashboard templates and naming conventions.
+  - id: DASHCOV-MED-002
+    signal: Dashboards lack drill-down capabilities
+    remediation: |
+      Add links between overview and detail dashboards for
+      effective investigation workflows.
+  positive:
+  - id: DASHCOV-POS-001
+    signal: 100% service coverage with standardized dashboards
+  - id: DASHCOV-POS-002
+    signal: Dashboard templates automatically provisioned for new services
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory All Services
+    description: |
+      Create a comprehensive list of all services in the organization
+      across all environments.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List Kubernetes services
+      command: kubectl get services --all-namespaces -o json | jq '.items[].metadata.name'
+    - purpose: List from service catalog
+      command: curl -s $SERVICE_CATALOG_URL/api/services | jq '.[]'
+    expected_findings:
+    - Complete service inventory
+    - Environment distribution
+  - id: '2'
+    name: Inventory Existing Dashboards
+    description: |
+      Enumerate all existing dashboards in the monitoring platform.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List Grafana dashboards
+      command: 'curl -s -H ''Authorization: Bearer $TOKEN'' $GRAFANA_URL/api/search?type=dash-db | jq
+        ''.[].title'''
+    expected_findings:
+    - Dashboard inventory by folder/team
+    - Dashboard naming patterns
+  - id: '3'
+    name: Map Services to Dashboards
+    description: |
+      Create a mapping between services and their dashboards.
+      Identify services without dashboard coverage.
+    duration_estimate: 45 min
+    expected_findings:
+    - Services with dashboards
+    - Services missing dashboards
+    - Orphaned dashboards (no matching service)
+  - id: '4'
+    name: Assess Dashboard Content Quality
+    description: |
+      For existing dashboards, verify they contain required panels
+      per organizational standards.
+    duration_estimate: 45 min
+    questions:
+    - Does each dashboard have RED/USE metrics?
+    - Are SLO panels present where applicable?
+    - Do dashboards include relevant alerts?
+    expected_findings:
+    - Dashboards meeting standards
+    - Dashboards requiring enhancement
+output:
+  deliverables:
+  - type: coverage_matrix
+    format: table
+    description: Service-to-dashboard mapping with gap analysis
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Coverage Statistics
+    - Gap Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Direct comparison of service catalog to dashboard inventory
+    medium: Service discovery from runtime metrics
+    low: Inferred from naming conventions
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: google-sre-monitoring
+      priority: required
+    - source_id: grafana-best-practices
+      priority: recommended
+  degradation:
+  - feature: Live dashboard enumeration
+    impact: Cannot discover current dashboards
+    mitigation: Export dashboard list before going offline
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive comparison
+    full:
+      included: true
+      priority: 10
+    production:
+      included: true
+      priority: 8
+closeout_checklist:
+- id: dashcov-001
+  item: All production services have dashboards
+  level: CRITICAL
+  verification: manual
+  verification_notes: Compare service catalog to dashboard inventory
+  expected: Confirmed by reviewer
+- id: dashcov-002
+  item: SLO dashboards exist for services with defined SLOs
+  level: CRITICAL
+  verification: manual
+  verification_notes: Cross-reference SLO definitions with dashboard panels
+  expected: Confirmed by reviewer
+- id: dashcov-003
+  item: Infrastructure components have dedicated dashboards
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify dashboards for databases, caches, queues, etc.
+  expected: Confirmed by reviewer
+- id: dashcov-004
+  item: Dashboard standards documentation exists
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm documented dashboard requirements
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - microservices
+    - monolith
+    - serverless
+    platforms:
+    - kubernetes
+    - cloud
+    - hybrid
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC7.1
+    - CC7.2
+  - framework: ISO27001
+    controls:
+    - A.12.4.1
+relationships:
+  commonly_combined:
+  - observability-instrumentation.metrics.metrics-coverage
+  - observability-instrumentation.alerting.alert-coverage
+  - observability-instrumentation.visualization-dashboards.service-health-dashboard

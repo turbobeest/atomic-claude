@@ -1,0 +1,386 @@
+# ============================================================
+# AUDIT: Stamp Coupling Detection
+# ============================================================
+# Identifies components passing entire data structures when only
+# a portion of the data is needed, creating unnecessary dependencies.
+# ============================================================
+
+audit:
+  id: "architecture-design.coupling.stamp-coupling"
+  name: "Stamp Coupling Detection"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "architecture-design"
+  category_number: 7
+  subcategory: "coupling"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit detects stamp coupling - a condition where modules exchange
+    more data than necessary by passing entire composite data structures
+    when only a few fields are used. It identifies methods that receive
+    large DTOs, entities, or complex objects but only access a subset
+    of their fields.
+
+  why_it_matters: |
+    Stamp coupling creates:
+    - Unnecessary dependencies on data structure internals
+    - Tight coupling to specific object shapes
+    - Testing difficulty due to complex setup requirements
+    - API inflexibility when data structures change
+    - Performance overhead passing unneeded data
+    - Privacy/security concerns when sensitive data is exposed
+
+  when_to_run:
+    - "During API design reviews"
+    - "When refactoring service boundaries"
+    - "Before creating microservices from monoliths"
+    - "When optimizing data transfer between systems"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Complete source code"
+    - type: "api_definitions"
+      description: "API contracts and DTOs"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Understanding of domain model"
+
+discovery:
+  code_patterns:
+    - pattern: "\\(.*DTO\\s+\\w+\\)|\\(.*Entity\\s+\\w+\\)|\\(.*Model\\s+\\w+\\)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find methods accepting entire DTOs/Entities"
+
+    - pattern: "\\w+\\.get[A-Z]\\w+\\(\\)"
+      type: "regex"
+      scope: "source"
+      purpose: "Track getter usage to measure field access"
+
+    - pattern: "function.*:\\s*\\{[^}]+\\}"
+      type: "regex"
+      scope: "source"
+      purpose: "TypeScript object type parameters"
+
+    - pattern: "def\\s+\\w+\\(.*:\\s*(User|Order|Product|Account)"
+      type: "regex"
+      scope: "source"
+      purpose: "Python methods accepting domain objects"
+
+  file_patterns:
+    - glob: "**/*Service*.{java,ts,py}"
+      purpose: "Service layer often exhibits stamp coupling"
+    - glob: "**/*Controller*.{java,ts,py}"
+      purpose: "Controllers passing DTOs to services"
+    - glob: "**/*Handler*.{java,ts,py}"
+      purpose: "Event handlers with data objects"
+
+knowledge_sources:
+  specifications:
+    - id: "coupling-cohesion"
+      name: "Software Engineering Coupling and Cohesion"
+      url: "https://en.wikipedia.org/wiki/Coupling_(computer_programming)"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "structured-design"
+      name: "Structured Design - Yourdon & Constantine"
+      url: "https://www.win.tue.nl/~wstomv/quotes/structured-design.html"
+      offline_cache: true
+
+    - id: "ddd-evans"
+      name: "Domain-Driven Design Reference"
+      url: "https://www.domainlanguage.com/ddd/reference/"
+      offline_cache: true
+
+    - id: "clean-architecture"
+      name: "Clean Architecture"
+      url: "https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html"
+      offline_cache: true
+
+    - id: "pragmatic-programmer"
+      name: "Pragmatic Programmer Tips"
+      url: "https://pragprog.com/tips/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "data-oriented-design"
+      title: "Data-Oriented Design"
+      type: "book"
+      reference: "Richard Fabian - ISBN 978-1916478701"
+
+    - id: "api-design"
+      title: "API Design Patterns"
+      type: "book"
+      reference: "JJ Geewax - ISBN 978-1617295850"
+
+tooling:
+  static_analysis:
+    - tool: "IntelliJ IDEA"
+      purpose: "Analyze parameter usage within methods"
+      offline_capable: true
+
+    - tool: "SonarQube"
+      purpose: "Detect unused parameters and over-coupling"
+      offline_capable: false
+
+    - tool: "NDepend"
+      purpose: "Track type dependencies in .NET"
+      offline_capable: true
+
+  scripts:
+    - id: "stamp-coupling-analyzer"
+      language: "bash"
+      purpose: "Find methods with large object parameters"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Methods with DTO/Entity parameters ==="
+        grep -rn "void.*\(.*DTO\|void.*\(.*Entity\|void.*\(.*Model" --include="*.java" | head -30
+
+        echo "=== Getter usage in methods ==="
+        grep -rn "\.get[A-Z]" --include="*.java" | cut -d: -f1 | sort | uniq -c | sort -rn | head -20
+
+signals:
+  critical:
+    - id: "STAMP-CRIT-001"
+      signal: "Method receives entire entity but only uses ID"
+      evidence_pattern: "Method takes User/Order/etc but only calls getId()"
+      explanation: |
+        Passing an entire domain object when only the ID is needed creates
+        severe stamp coupling. The receiving code appears to need the full
+        object graph when it doesn't.
+      remediation: "Change parameter to just the ID type; load entity only where needed"
+
+    - id: "STAMP-CRIT-002"
+      signal: "API endpoint accepts entire object for single field update"
+      evidence_pattern: "PUT/PATCH handler deserializes full DTO, updates one field"
+      explanation: |
+        Forces clients to provide complete objects even for simple updates,
+        creating coupling and potential for unintended changes.
+      remediation: "Create specific DTOs for specific operations; use PATCH semantics"
+
+  high:
+    - id: "STAMP-HIGH-001"
+      signal: "Service method receives DTO, accesses less than 20% of fields"
+      evidence_pattern: "Method with DTO parameter but few getter calls"
+      explanation: |
+        Indicates the method's actual dependencies are much smaller than
+        the apparent contract suggests, creating false coupling.
+      remediation: "Create focused parameter object with only required fields"
+
+    - id: "STAMP-HIGH-002"
+      signal: "Cross-boundary data transfer includes unneeded sensitive fields"
+      evidence_pattern: "User object with password hash passed to presentation layer"
+      explanation: |
+        Stamp coupling can create security vulnerabilities when sensitive
+        data is exposed to layers that don't need it.
+      remediation: "Create projection/view DTOs without sensitive fields"
+
+  medium:
+    - id: "STAMP-MED-001"
+      signal: "Method accepts complex object for simple calculation"
+      evidence_pattern: "calculateTotal(Order order) only uses order.items and order.discount"
+      remediation: "Extract required fields as separate parameters"
+
+    - id: "STAMP-MED-002"
+      signal: "Event handlers receive entire domain events with partial usage"
+      evidence_pattern: "Handler processes OrderCreatedEvent but ignores most fields"
+      remediation: "Create specific events or use event field projection"
+
+  low:
+    - id: "STAMP-LOW-001"
+      signal: "Test setup creates full objects when partial would suffice"
+      remediation: "Use test builders with minimal required fields"
+
+  positive:
+    - id: "STAMP-POS-001"
+      signal: "Purpose-specific DTOs for each use case"
+    - id: "STAMP-POS-002"
+      signal: "Clean separation between command and query DTOs"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify DTO/Entity parameters"
+      description: |
+        Find all methods that accept complex domain objects,
+        DTOs, or entities as parameters.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find methods with DTO parameters"
+          command: "grep -rn 'public.*\\(.*DTO\\s' --include='*.java' | head -30"
+        - purpose: "Find methods with Entity parameters"
+          command: "grep -rn 'public.*\\(.*Entity\\s\\|public.*\\(.*Model\\s' --include='*.java' | head -30"
+        - purpose: "TypeScript interface parameters"
+          command: "grep -rn 'function.*:.*{' --include='*.ts' | head -20"
+      expected_findings:
+        - "List of methods with complex parameters"
+        - "Frequency of each DTO type as parameter"
+
+    - id: "2"
+      name: "Analyze field access patterns"
+      description: |
+        For each identified method, analyze which fields of the
+        passed object are actually accessed.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Count getter calls per file"
+          command: "grep -rn '\\.get[A-Z]\\w*()' --include='*.java' | cut -d: -f1 | sort | uniq -c | sort -rn | head -20"
+        - purpose: "Find property access patterns"
+          command: "grep -rn '\\w+\\.\\w+' --include='*.ts' | grep -v 'this\\.' | head -30"
+      expected_findings:
+        - "Field access frequency per method"
+        - "Unused parameter fields"
+
+    - id: "3"
+      name: "Calculate coupling ratio"
+      description: |
+        Determine the ratio of fields used vs fields available
+        for methods with composite parameters.
+      duration_estimate: "30 min"
+      questions:
+        - "What percentage of DTO fields are accessed in each method?"
+        - "Are there patterns in which fields are commonly used together?"
+      expected_findings:
+        - "Coupling ratio per method"
+        - "Natural field groupings"
+
+    - id: "4"
+      name: "Assess cross-boundary transfers"
+      description: |
+        Identify data objects that cross architectural boundaries
+        (service, controller, repository) and evaluate field necessity.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find DTO usage across layers"
+          command: "for layer in Controller Service Repository; do echo \"=== $layer ===\"; grep -rn 'DTO' --include=\"*$layer.java\" | head -10; done"
+      expected_findings:
+        - "DTOs crossing multiple boundaries"
+        - "Layer-specific vs shared DTOs"
+
+    - id: "5"
+      name: "Review sensitive data exposure"
+      description: |
+        Check if stamp coupling exposes sensitive fields to
+        components that don't need them.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find sensitive field patterns"
+          command: "grep -rn 'password\\|secret\\|token\\|apiKey' --include='*DTO.java' --include='*Entity.java' | head -20"
+      expected_findings:
+        - "Sensitive fields in shared DTOs"
+        - "Potential security concerns"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Stamp Coupling Instances"
+        - "Field Usage Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Field access analysis shows clear underutilization"
+    medium: "Pattern suggests stamp coupling, needs verification"
+    low: "Potential stamp coupling in dynamic code"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "coupling-cohesion"
+        priority: "required"
+      - source_id: "structured-design"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed field usage analysis"
+    full:
+      included: true
+      priority: 2
+    architecture:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "stamp-coupling-001"
+    item: "Methods with under-utilized DTO parameters identified"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Methods using <20% of DTO fields are documented"
+    expected: "Confirmed by reviewer"
+
+  - id: "stamp-coupling-002"
+    item: "Sensitive data exposure via stamp coupling assessed"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "No sensitive fields unnecessarily exposed across boundaries"
+    expected: "Confirmed by reviewer"
+
+  - id: "stamp-coupling-003"
+    item: "Recommendations for focused DTOs provided"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Clear refactoring suggestions for worst offenders"
+    expected: "Confirmed by reviewer"
+
+  - id: "stamp-coupling-004"
+    item: "Cross-boundary data transfers optimized"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Layer-specific DTOs recommended where appropriate"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Security"]
+    - framework: "OWASP"
+      controls: ["Data Exposure"]
+
+relationships:
+  commonly_combined:
+    - "architecture-design.coupling.tight-coupling-detection"
+    - "architecture-design.design-principles.interface-segregation"
+    - "architecture-design.system-decomposition.data-ownership-clarity"

@@ -1,0 +1,373 @@
+# ============================================================
+# AUDIT FILE: Container Health Checks
+# ============================================================
+
+audit:
+  id: "cloud-infrastructure.containers.container-health-checks"
+  name: "Container Health Checks"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "cloud-infrastructure"
+  category_number: 12
+  subcategory: "containers"
+
+  tier: "expert"
+  estimated_duration: "1-2 hours"  # median: 1h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates container health check configurations including liveness probes,
+    readiness probes, and startup probes. Examines probe types (HTTP, TCP,
+    command), timing configurations (initialDelaySeconds, periodSeconds,
+    timeoutSeconds), failure thresholds, and endpoint implementations to
+    ensure containers are properly monitored for health.
+
+  why_it_matters: |
+    Health checks are critical for container orchestration to detect and
+    recover from failures. Missing or misconfigured probes can cause traffic
+    to be sent to unhealthy containers, delay failure detection, or cause
+    premature container restarts. Proper health checks enable self-healing
+    and maintain application availability.
+
+  when_to_run:
+    - "Before deploying new services to production"
+    - "After observing container restart loops or availability issues"
+    - "When implementing rolling deployments"
+    - "During reliability engineering reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "kubernetes-manifests"
+      description: "Deployment configurations with probe definitions"
+    - type: "application-endpoints"
+      description: "Health check endpoint implementations"
+
+  access_requirements:
+    - "kubectl access to inspect pod configurations"
+    - "Access to application source code for endpoint review"
+    - "Access to container logs for probe analysis"
+
+discovery:
+  file_patterns:
+    - glob: "**/deployment*.yaml"
+      purpose: "Find deployment manifests"
+    - glob: "**/pod*.yaml"
+      purpose: "Find pod specifications"
+    - glob: "**/statefulset*.yaml"
+      purpose: "Find StatefulSet configurations"
+
+  code_patterns:
+    - pattern: "livenessProbe:"
+      type: "keyword"
+      scope: "config"
+      purpose: "Identify liveness probe configurations"
+    - pattern: "readinessProbe:"
+      type: "keyword"
+      scope: "config"
+      purpose: "Identify readiness probe configurations"
+    - pattern: "startupProbe:"
+      type: "keyword"
+      scope: "config"
+      purpose: "Identify startup probe configurations"
+    - pattern: "/health|/ready|/live|/healthz"
+      type: "regex"
+      scope: "source"
+      purpose: "Find health check endpoint implementations"
+
+knowledge_sources:
+  specifications:
+    - id: "k8s-probes"
+      name: "Kubernetes Pod Lifecycle - Probes"
+      url: "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"
+      offline_cache: true
+      priority: "required"
+    - id: "cis-kubernetes"
+      name: "CIS Kubernetes Benchmark"
+      url: "https://www.cisecurity.org/benchmark/kubernetes"
+      offline_cache: true
+      priority: "required"
+    - id: "nsa-kubernetes"
+      name: "NSA Kubernetes Hardening Guide"
+      url: "https://media.defense.gov/2022/Aug/29/2003066362/-1/-1/0/CTR_KUBERNETES_HARDENING_GUIDANCE_1.2_20220829.PDF"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "health-check-patterns"
+      name: "Container Health Check Patterns"
+      url: "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/"
+      offline_cache: true
+    - id: "graceful-shutdown"
+      name: "Graceful Shutdown Best Practices"
+      url: "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Inspect probe configurations"
+      command: "kubectl get pods -o yaml"
+    - tool: "kubectl-describe"
+      purpose: "View probe events"
+      command: "kubectl describe pod <pod-name>"
+
+  scripts:
+    - id: "probe-audit"
+      language: "bash"
+      purpose: "Audit probe configurations"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Pods without liveness probes ==="
+        kubectl get pods -A -o json | jq -r '.items[] | select(.spec.containers[].livenessProbe == null) | "\(.metadata.namespace)/\(.metadata.name)"'
+        echo "=== Pods without readiness probes ==="
+        kubectl get pods -A -o json | jq -r '.items[] | select(.spec.containers[].readinessProbe == null) | "\(.metadata.namespace)/\(.metadata.name)"'
+        echo "=== Probe configurations ==="
+        kubectl get pods -A -o json | jq '.items[] | {name: .metadata.name, containers: [.spec.containers[] | {name: .name, liveness: .livenessProbe, readiness: .readinessProbe, startup: .startupProbe}]}'
+
+signals:
+  critical:
+    - id: "CONTAINER-HEALTH-CRIT-001"
+      signal: "Production pods without any health probes"
+      evidence_pattern: "livenessProbe and readinessProbe both null"
+      explanation: |
+        Containers without health probes cannot be monitored by the
+        orchestrator. Failed containers will continue receiving traffic
+        and won't be automatically restarted.
+      remediation: "Add appropriate liveness and readiness probes"
+    - id: "CONTAINER-HEALTH-CRIT-002"
+      signal: "Health probe endpoints not implemented"
+      evidence_pattern: "Probes configured but endpoints return errors"
+      explanation: |
+        Probes that always fail will cause continuous container restarts
+        or prevent traffic from reaching the service.
+      remediation: "Implement proper health check endpoints in application"
+
+  high:
+    - id: "CONTAINER-HEALTH-HIGH-001"
+      signal: "Missing readiness probes on services"
+      evidence_pattern: "readinessProbe null for pods behind services"
+      explanation: |
+        Without readiness probes, traffic may be sent to containers that
+        are still starting up or temporarily unavailable.
+      remediation: "Add readiness probes that verify application is ready to serve"
+    - id: "CONTAINER-HEALTH-HIGH-002"
+      signal: "Liveness probe too aggressive"
+      evidence_pattern: "failureThreshold < 3 or timeoutSeconds < 5"
+      explanation: |
+        Aggressive probes can cause unnecessary restarts during
+        temporary slowdowns or garbage collection pauses.
+      remediation: "Increase failure thresholds and timeouts appropriately"
+    - id: "CONTAINER-HEALTH-HIGH-003"
+      signal: "Missing startup probe for slow-starting applications"
+      evidence_pattern: "No startupProbe with high initialDelaySeconds on liveness"
+      explanation: |
+        Applications with long startup times need startup probes to
+        prevent liveness probes from killing them before ready.
+      remediation: "Add startup probe for applications with >30s startup time"
+
+  medium:
+    - id: "CONTAINER-HEALTH-MED-001"
+      signal: "Liveness and readiness probes identical"
+      evidence_pattern: "Same endpoint and parameters for both probes"
+      remediation: "Differentiate probes - liveness for alive, readiness for traffic"
+    - id: "CONTAINER-HEALTH-MED-002"
+      signal: "Health probe initialDelaySeconds too low"
+      evidence_pattern: "initialDelaySeconds < expected startup time"
+      remediation: "Set initialDelaySeconds based on actual startup time"
+    - id: "CONTAINER-HEALTH-MED-003"
+      signal: "Health endpoint performs expensive operations"
+      evidence_pattern: "Health check includes database queries or external calls"
+      remediation: "Keep health checks lightweight and fast"
+
+  low:
+    - id: "CONTAINER-HEALTH-LOW-001"
+      signal: "Using TCP probe when HTTP available"
+      remediation: "Use HTTP probes for more accurate health assessment"
+    - id: "CONTAINER-HEALTH-LOW-002"
+      signal: "Probe timeoutSeconds equals periodSeconds"
+      remediation: "Ensure timeout is less than period for consistent behavior"
+
+  positive:
+    - id: "CONTAINER-HEALTH-POS-001"
+      signal: "All production pods have liveness and readiness probes"
+    - id: "CONTAINER-HEALTH-POS-002"
+      signal: "Startup probes configured for slow-starting applications"
+    - id: "CONTAINER-HEALTH-POS-003"
+      signal: "Probe timings appropriate for application characteristics"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory probe configurations"
+      description: |
+        Collect all health probe configurations across the cluster and
+        identify pods missing probes.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Get all probe configs"
+          command: "kubectl get pods -A -o json | jq '.items[] | {namespace: .metadata.namespace, name: .metadata.name, containers: [.spec.containers[] | {name: .name, liveness: .livenessProbe, readiness: .readinessProbe, startup: .startupProbe}]}'"
+        - purpose: "Find pods without liveness"
+          command: "kubectl get pods -A -o json | jq -r '.items[] | select(.spec.containers[].livenessProbe == null) | \"\\(.metadata.namespace)/\\(.metadata.name)\"'"
+      expected_findings:
+        - "Complete inventory of probe configurations"
+        - "List of pods missing health probes"
+
+    - id: "2"
+      name: "Analyze probe timing parameters"
+      description: |
+        Review probe timing settings for appropriateness given
+        application characteristics.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Extract probe timings"
+          command: "kubectl get pods -A -o json | jq '.items[] | {name: .metadata.name, containers: [.spec.containers[] | {name: .name, liveness: {initial: .livenessProbe.initialDelaySeconds, period: .livenessProbe.periodSeconds, timeout: .livenessProbe.timeoutSeconds, failure: .livenessProbe.failureThreshold}}]}'"
+      expected_findings:
+        - "Timing analysis for all probes"
+        - "Potentially aggressive or lenient configurations"
+
+    - id: "3"
+      name: "Review probe types and endpoints"
+      description: |
+        Examine probe types (HTTP, TCP, exec) and verify endpoint
+        implementations are appropriate.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Get HTTP probe endpoints"
+          command: "kubectl get pods -A -o json | jq '.items[] | {name: .metadata.name, containers: [.spec.containers[] | {name: .name, httpGet: .livenessProbe.httpGet, readinessHttpGet: .readinessProbe.httpGet}]}'"
+      expected_findings:
+        - "Probe type distribution"
+        - "Health check endpoint patterns"
+
+    - id: "4"
+      name: "Check probe failure history"
+      description: |
+        Review events and logs for probe failures indicating
+        misconfigurations.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find probe failure events"
+          command: "kubectl get events -A --field-selector reason=Unhealthy"
+        - purpose: "Check restart counts"
+          command: "kubectl get pods -A -o json | jq '.items[] | select(.status.containerStatuses[]?.restartCount > 5) | {namespace: .metadata.namespace, name: .metadata.name, restarts: .status.containerStatuses[].restartCount}'"
+      expected_findings:
+        - "Historical probe failures"
+        - "Containers with high restart counts"
+
+    - id: "5"
+      name: "Validate health endpoint implementations"
+      description: |
+        Review application code to verify health check endpoints
+        are properly implemented.
+      duration_estimate: "35 min"
+      commands:
+        - purpose: "Test health endpoint"
+          command: "kubectl exec <pod> -- curl -s localhost:<port>/health"
+      expected_findings:
+        - "Health endpoint response patterns"
+        - "Endpoint implementation quality"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Probe Coverage Analysis"
+        - "Configuration Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct kubectl query results, probe failure events"
+    medium: "Inferred from timing analysis and patterns"
+    low: "Based on endpoint code review"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "k8s-probes"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires live cluster inspection"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "container-health-checks-001"
+    item: "All production pods have liveness probes"
+    level: "CRITICAL"
+    verification: "kubectl get pods -n production -o json | jq '[.items[] | select(.spec.containers[].livenessProbe == null)] | length' | awk '{print ($1==0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "container-health-checks-002"
+    item: "All production pods have readiness probes"
+    level: "CRITICAL"
+    verification: "kubectl get pods -n production -o json | jq '[.items[] | select(.spec.containers[].readinessProbe == null)] | length' | awk '{print ($1==0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "container-health-checks-003"
+    item: "No pods in crash loop due to probe failures"
+    level: "BLOCKING"
+    verification: "kubectl get pods -A | grep -c CrashLoopBackOff | awk '{print ($1==0)?\"PASS\":\"FAIL\"}'"
+    expected: "PASS"
+  - id: "container-health-checks-004"
+    item: "Probe timings appropriate for workloads"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Review probe timing parameters against application startup times"
+    expected: "Confirmed by reviewer"
+  - id: "container-health-checks-005"
+    item: "Health endpoints return appropriate status"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Test health endpoints return 200 for healthy state"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["A1.2", "CC7.2"]
+    - framework: "ISO27001"
+      controls: ["A.12.1.3", "A.17.2.1"]
+
+relationships:
+  commonly_combined:
+    - "cloud-infrastructure.containers.container-orchestration"
+    - "cloud-infrastructure.containers.container-resource-limits"
+    - "cloud-infrastructure.service-mesh.observability-integration"

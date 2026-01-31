@@ -1,0 +1,340 @@
+audit:
+  id: observability-instrumentation.debug-troubleshooting.feature-flag-debug
+  name: Feature Flag Debug Audit
+  version: 1.0.0
+  last_updated: '2025-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: debug-troubleshooting
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Assesses debugging capabilities around feature flags including
+    the ability to see current flag states, understand flag
+    evaluation context, debug flag-related issues, and safely
+    override flags for testing. Evaluates tooling for analyzing
+    flag impact on application behavior.
+  why_it_matters: |
+    Poor feature flag debugging causes:
+    - Difficulty diagnosing flag-related issues
+    - Extended troubleshooting when flags affect behavior
+    - Risk of incorrect flag states causing outages
+    - Inability to verify flag behavior in specific contexts
+    - Lost time correlating issues to flag changes
+    - Challenges in reproducing flag-dependent bugs
+  when_to_run:
+  - When feature flag usage increases
+  - After flag-related incidents
+  - During feature flag system evaluation
+  - When onboarding teams to feature flags
+prerequisites:
+  required_artifacts:
+  - type: feature_flag_system
+    description: Access to feature flag management system
+  - type: application_access
+    description: Access to applications using feature flags
+  optional_artifacts:
+  - type: flag_documentation
+    description: Documentation of feature flags
+  - type: flag_audit_logs
+    description: History of flag changes
+  access_requirements:
+  - Feature flag dashboard access
+  - Application log access
+  - Flag evaluation endpoint access
+discovery:
+  code_patterns:
+  - pattern: (featureFlag|feature_flag|isEnabled|isFeatureEnabled)
+    type: regex
+    scope: source
+    purpose: Find feature flag usage
+  - pattern: (LaunchDarkly|Split|Unleash|flagsmith)
+    type: regex
+    scope: config
+    purpose: Identify feature flag provider
+  file_patterns:
+  - glob: '**/features/**'
+    purpose: Feature flag configuration
+  - glob: '**/*flag*.{yaml,yml,json}'
+    purpose: Flag configuration files
+knowledge_sources:
+  guides:
+  - id: feature-flag-best-practices
+    name: Feature Flag Best Practices
+    url: https://launchdarkly.com/blog/feature-flag-best-practices/
+    offline_cache: true
+    priority: required
+  - id: debugging-feature-flags
+    name: Debugging Feature Flags
+    url: https://docs.launchdarkly.com/home/flags/debugger
+    offline_cache: true
+    priority: recommended
+  learning_resources:
+  - id: feature-management
+    title: Feature Management with LaunchDarkly
+    type: article
+    reference: https://launchdarkly.com/feature-management/
+tooling:
+  infrastructure_tools:
+  - tool: LaunchDarkly Debugger
+    purpose: Debug flag evaluation in real-time
+  - tool: Feature flag dashboard
+    purpose: View and manage flag states
+  scripts:
+  - id: feature-flag-debug-check
+    language: bash
+    purpose: Check feature flag debugging capabilities
+    source: inline
+    code: |
+      #!/bin/bash
+      # Check feature flag debugging capabilities
+
+      echo "=== Feature Flag Debug Capability Check ==="
+
+      # Check for flag evaluation endpoint
+      echo ""
+      echo "Checking flag evaluation endpoints:"
+      curl -s "$APP_URL/api/flags/evaluate" 2>/dev/null && echo "  [OK] Evaluation endpoint available" || echo "  [MISSING] No evaluation endpoint"
+
+      # Check for flag state endpoint
+      echo ""
+      echo "Checking flag state visibility:"
+      curl -s "$APP_URL/api/flags/state" 2>/dev/null && echo "  [OK] State endpoint available" || echo "  [MISSING] No state endpoint"
+
+      # Check for flag override capability
+      echo ""
+      echo "Checking flag override mechanism:"
+      if curl -s "$APP_URL/api/flags/override" -X OPTIONS 2>/dev/null | grep -q "POST"; then
+        echo "  [OK] Override endpoint available"
+      else
+        echo "  [MISSING] No override capability"
+      fi
+
+      # Check logs for flag evaluation
+      echo ""
+      echo "Checking flag evaluation in logs:"
+      kubectl logs -l app=$APP_NAME --tail=100 | grep -i "flag\|feature" | head -5
+signals:
+  critical:
+  - id: FLAGDEBUG-CRIT-001
+    signal: No visibility into current flag states
+    evidence_indicators:
+    - No flag dashboard access
+    - No API endpoint for flag states
+    - Cannot determine which flags are enabled
+    explanation: |
+      Without visibility into flag states, diagnosing flag-related
+      issues requires guessing or code inspection. This significantly
+      delays troubleshooting and may lead to incorrect conclusions.
+    remediation: |
+      Implement flag state visibility:
+      - Dashboard showing all flag states
+      - API endpoint returning current evaluations
+      - Admin UI for flag inspection
+  - id: FLAGDEBUG-CRIT-002
+    signal: Cannot determine flag evaluation context
+    evidence_indicators:
+    - No logging of flag evaluation inputs
+    - Cannot see why a flag evaluated a certain way
+    explanation: |
+      Feature flags often depend on user attributes or context.
+      Without seeing the evaluation context, understanding why
+      a specific user sees specific behavior is impossible.
+    remediation: |
+      Log flag evaluation context:
+      - User/tenant attributes used
+      - Targeting rules matched
+      - Percentage group assignment
+  high:
+  - id: FLAGDEBUG-HIGH-001
+    signal: No flag change audit trail
+    explanation: |
+      Without audit logs, correlating issues to flag changes
+      requires manual investigation of who changed what when.
+    remediation: |
+      Enable audit logging for all flag changes.
+      Include timestamp, user, old value, new value.
+  - id: FLAGDEBUG-HIGH-002
+    signal: Cannot override flags for testing
+    explanation: |
+      Testing flag-dependent behavior requires the ability to
+      force specific flag states for specific users or sessions.
+    remediation: |
+      Implement safe flag override mechanism:
+      - Per-user overrides
+      - Test account targeting
+      - Header-based override for development
+  medium:
+  - id: FLAGDEBUG-MED-001
+    signal: Flag evaluation not logged
+    remediation: |
+      Add structured logging for flag evaluations including
+      flag name, result, and context summary.
+  - id: FLAGDEBUG-MED-002
+    signal: No correlation between flags and metrics
+    remediation: |
+      Include flag states in metrics labels or traces
+      to correlate performance with flag variations.
+  - id: FLAGDEBUG-MED-003
+    signal: Flag documentation missing or outdated
+    remediation: |
+      Document each flag's purpose, targeting rules,
+      and expected behavior.
+  low:
+  - id: FLAGDEBUG-LOW-001
+    signal: No flag impact analysis tooling
+    remediation: |
+      Implement tooling to analyze the impact of flag changes
+      on application metrics.
+  positive:
+  - id: FLAGDEBUG-POS-001
+    signal: Real-time flag debugger available
+  - id: FLAGDEBUG-POS-002
+    signal: Complete flag audit trail maintained
+  - id: FLAGDEBUG-POS-003
+    signal: Flag evaluations included in traces
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Flag Visibility Assessment
+    description: |
+      Evaluate ability to see current flag states and configurations.
+    duration_estimate: 20 min
+    questions:
+    - Is there a dashboard showing all flag states?
+    - Can flag states be queried via API?
+    - Are targeting rules visible?
+    expected_findings:
+    - Flag visibility status
+    - Dashboard capabilities
+  - id: '2'
+    name: Evaluation Context Review
+    description: |
+      Assess ability to understand flag evaluation decisions.
+    duration_estimate: 20 min
+    questions:
+    - Is flag evaluation logged?
+    - Can evaluation context be inspected?
+    - Are targeting decisions explainable?
+    expected_findings:
+    - Context visibility
+    - Logging completeness
+  - id: '3'
+    name: Override Mechanism Assessment
+    description: |
+      Verify safe flag override capability for testing.
+    duration_estimate: 15 min
+    questions:
+    - Can flags be overridden for specific users?
+    - Are override mechanisms safe for production?
+    - Is override activity audited?
+    expected_findings:
+    - Override capabilities
+    - Safety controls
+  - id: '4'
+    name: Audit Trail Review
+    description: |
+      Evaluate flag change audit capabilities.
+    duration_estimate: 15 min
+    questions:
+    - Are flag changes logged?
+    - Can changes be correlated to incidents?
+    - Is audit data accessible?
+    expected_findings:
+    - Audit completeness
+    - Correlation capability
+output:
+  deliverables:
+  - type: flag_debug_assessment
+    format: structured
+    description: Analysis of feature flag debugging capabilities
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Visibility Assessment
+    - Debug Capabilities
+    - Recommendations
+  confidence_guidance:
+    high: Direct capability testing
+    medium: Configuration and documentation review
+    low: Feature flag provider documentation
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: feature-flag-best-practices
+      priority: required
+  degradation:
+  - feature: Live flag state inspection
+    impact: Cannot verify current flag states
+    mitigation: Review configuration and audit logs
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires feature flag system access
+    full:
+      included: true
+      priority: 16
+closeout_checklist:
+- id: flagdebug-001
+  item: Flag states visible via dashboard or API
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify ability to see all flag states
+  expected: Confirmed by reviewer
+- id: flagdebug-002
+  item: Flag evaluation context logged
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify logs include evaluation context
+  expected: Confirmed by reviewer
+- id: flagdebug-003
+  item: Flag change audit trail maintained
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify audit log captures flag changes
+  expected: Confirmed by reviewer
+- id: flagdebug-004
+  item: Safe flag override mechanism available
+  level: WARNING
+  verification: manual
+  verification_notes: Verify ability to override flags for testing
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - microservices
+    - monolith
+    - serverless
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC8.1
+  - framework: Internal Standards
+    controls:
+    - Feature Flag Management
+relationships:
+  commonly_combined:
+  - observability-instrumentation.debug-troubleshooting.debug-logging
+  - release-engineering.feature-management.feature-flags
+  - observability-instrumentation.distributed-tracing.trace-attributes

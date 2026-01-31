@@ -1,0 +1,282 @@
+audit:
+  id: devops-ci-cd.release-management.version-numbering
+  name: Version Numbering Assessment
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: devops-ci-cd
+  category_number: 11
+  subcategory: release-management
+  tier: expert
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: process
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines version numbering practices including adherence
+    to semantic versioning, version automation in CI/CD, consistency
+    across artifacts, and version communication to consumers. It
+    evaluates whether version numbers accurately convey change impact.
+  why_it_matters: |
+    Inconsistent or unclear versioning confuses consumers, breaks
+    dependency management, and makes change impact assessment difficult.
+    Proper semantic versioning enables safe automated upgrades and
+    clear communication of breaking changes.
+  when_to_run:
+  - When establishing versioning standards
+  - Before publishing to package registries
+  - After versioning-related incidents
+  - During API lifecycle reviews
+prerequisites:
+  required_artifacts:
+  - type: version_files
+    description: Package.json, setup.py, version files
+  - type: release_history
+    description: Git tags and release records
+  access_requirements:
+  - Read access to source repositories
+  - Access to release history
+discovery:
+  file_patterns:
+  - glob: '**/package.json'
+    purpose: Node.js version configuration
+  - glob: '**/setup.py'
+    purpose: Python package version
+  - glob: '**/Cargo.toml'
+    purpose: Rust package version
+  - glob: '**/pom.xml'
+    purpose: Maven project version
+  - glob: '**/VERSION*'
+    purpose: Version files
+  - glob: '**/*.csproj'
+    purpose: .NET project version
+  code_patterns:
+  - pattern: version.*[0-9]+\.[0-9]+\.[0-9]+
+    type: regex
+    scope: config
+    purpose: Semantic version patterns
+  - pattern: __version__|VERSION|version
+    type: keyword
+    scope: source
+    purpose: Version declarations
+knowledge_sources:
+  specifications:
+  - id: semver
+    name: Semantic Versioning 2.0.0
+    url: https://semver.org/
+    offline_cache: true
+    priority: required
+  - id: calver
+    name: Calendar Versioning
+    url: https://calver.org/
+    offline_cache: true
+    priority: optional
+  guides:
+  - id: npm-semver
+    name: npm Semantic Versioning
+    url: https://docs.npmjs.com/about-semantic-versioning
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semver
+    purpose: Validate semantic version compliance
+    offline_capable: true
+  - tool: standard-version
+    purpose: Automated version bumping
+    offline_capable: true
+  scripts:
+  - id: version-check
+    language: bash
+    purpose: Extract and validate versions
+    source: inline
+    code: |
+      #!/bin/bash
+      # Check version consistency
+      echo "=== Package Versions ==="
+      if [ -f package.json ]; then
+        grep '"version"' package.json
+      fi
+      echo "=== Git Tags ==="
+      git tag -l 'v*' | tail -10
+signals:
+  critical:
+  - id: VERNUM-CRIT-001
+    signal: Breaking changes released without major version bump
+    evidence_indicators:
+    - API breaking changes in minor or patch release
+    - Consumer reports breakage after minor upgrade
+    explanation: |
+      Releasing breaking changes without major version bump causes
+      unexpected failures for consumers using automatic updates
+      and violates semantic versioning contract.
+    remediation: Implement breaking change detection; enforce major bump for breaking changes
+  - id: VERNUM-CRIT-002
+    signal: Version numbers reused or overwritten
+    evidence_indicators:
+    - Same version number points to different artifacts
+    - Version tags moved to different commits
+    explanation: |
+      Reusing versions breaks reproducibility, caching, and audit
+      trails. Consumers cannot trust that a version represents
+      consistent content.
+    remediation: Implement immutable versioning; never reuse or overwrite versions
+  high:
+  - id: VERNUM-HIGH-001
+    signal: No consistent versioning scheme across projects
+    evidence_pattern: version.*[a-z]|version.*SNAPSHOT
+    explanation: |
+      Inconsistent versioning across projects creates confusion
+      and makes dependency management unreliable.
+    remediation: Establish and enforce organization-wide versioning standards
+  - id: VERNUM-HIGH-002
+    signal: Manual version bumping without automation
+    evidence_indicators:
+    - Version changes made by hand in commits
+    - No automated version bump tooling
+    explanation: |
+      Manual versioning is error-prone and often forgotten,
+      leading to version drift and release mistakes.
+    remediation: Implement automated version bumping in CI/CD pipeline
+  medium:
+  - id: VERNUM-MED-001
+    signal: Pre-release versions used in production
+    evidence_pattern: -alpha|-beta|-rc|SNAPSHOT
+    remediation: Reserve pre-release versions for non-production use
+  - id: VERNUM-MED-002
+    signal: Version not synchronized across multiple package files
+    remediation: Implement single source of truth for version with distribution to all files
+  low:
+  - id: VERNUM-LOW-001
+    signal: Build metadata not included in version string
+  positive:
+  - id: VERNUM-POS-001
+    signal: Automated semantic versioning based on commit conventions
+  - id: VERNUM-POS-002
+    signal: Breaking change detection integrated in CI/CD
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify versioning scheme
+    description: |
+      Determine the versioning scheme used across projects and
+      verify adherence to semantic versioning principles.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find version declarations
+      command: grep -rh 'version' --include='package.json' --include='setup.py' --include='*.toml' . 2>/dev/null
+        | head -20
+    - purpose: List recent tags
+      command: git tag -l --sort=-version:refname | head -20
+    expected_findings:
+    - Versioning scheme identification
+    - Consistency assessment
+  - id: '2'
+    name: Audit version history
+    description: |
+      Review version history for proper bumping practices,
+      looking for breaking changes in minor releases.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check version bump commits
+      command: git log --oneline --all --grep='version\|bump\|release' | head -20
+    expected_findings:
+    - Version bump patterns
+    - Breaking change handling
+  - id: '3'
+    name: Verify version automation
+    description: |
+      Check if version bumping is automated in CI/CD and
+      follows commit conventions.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find version automation
+      command: grep -r 'version\|bump\|release' --include='*.yml' --include='*.yaml' .github/ .gitlab-ci*
+        2>/dev/null | head -20
+    expected_findings:
+    - Automation coverage
+    - Commit convention usage
+  - id: '4'
+    name: Check version synchronization
+    description: |
+      Verify that version numbers are consistent across all
+      package manifests and artifacts.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Extract versions from different files
+      command: grep -rh '"version"\|version\s*=' --include='package.json' --include='*.toml' --include='setup.py'
+        . 2>/dev/null | head -15
+    expected_findings:
+    - Version synchronization status
+    - Discrepancy identification
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Versioning Scheme Assessment
+    - Automation Review
+    - Recommendations
+  confidence_guidance:
+    high: Direct analysis of version history with breaking change verification
+    medium: Configuration analysis with inferred practices
+    low: Documentation review only
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: semver
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 3
+    full:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: vernum-001
+  item: Semantic versioning followed consistently
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify version history shows proper semantic versioning
+  expected: Confirmed by reviewer
+- id: vernum-002
+  item: Version bumping automated in CI/CD
+  level: BLOCKING
+  verification: grep -r 'version\|bump' --include='*.yml' .github/workflows/ 2>/dev/null && echo 'PASS'
+    || echo 'FAIL'
+  expected: PASS
+- id: vernum-003
+  item: Versions synchronized across all package files
+  level: WARNING
+  verification: manual
+  verification_notes: Verify version is consistent across all manifest files
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC8.1
+relationships:
+  commonly_combined:
+  - devops-ci-cd.release-management.release-notes-generation
+  - devops-ci-cd.artifact-management.artifact-versioning

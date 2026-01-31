@@ -1,0 +1,387 @@
+# ============================================================
+# AUDIT: Concurrency Limits Audit
+# ============================================================
+# Category 4: Scalability & Capacity
+# Subcategory 4.7: Serverless & Edge Scaling
+# ============================================================
+
+# ============================================================
+# SECTION 1: IDENTITY & METADATA
+# ============================================================
+
+audit:
+  id: "scalability-capacity.serverless-edge-scaling.concurrency-limits"
+
+  name: "Concurrency Limits Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "serverless-edge-scaling"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+# ============================================================
+# SECTION 2: EXECUTION CLASSIFICATION
+# ============================================================
+
+execution:
+  automatable: "partial"
+
+  severity: "high"
+
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+# ============================================================
+# SECTION 3: DESCRIPTION & RATIONALE
+# ============================================================
+
+description:
+  what: |
+    Evaluates concurrency limit configurations for serverless functions,
+    analyzing account-level limits, per-function reserved concurrency,
+    and the relationship between concurrency settings and downstream
+    resource capacity. Examines throttling behavior and burst handling
+    to ensure limits align with business requirements.
+
+  why_it_matters: |
+    Concurrency limits determine maximum parallel execution capacity.
+    Limits set too low cause throttling during traffic spikes, resulting
+    in request failures. Limits set too high may overwhelm downstream
+    resources or exceed account quotas, impacting other functions.
+    Proper concurrency management balances scalability with protection.
+
+  when_to_run:
+    - "During capacity planning for serverless architectures"
+    - "When experiencing throttling errors"
+    - "After adding new functions to an account"
+    - "Before high-traffic events"
+
+# ============================================================
+# SECTION 4: PREREQUISITES
+# ============================================================
+
+prerequisites:
+  required_artifacts:
+    - type: "function_configurations"
+      description: "Serverless function concurrency settings"
+    - type: "account_limits"
+      description: "Account-level concurrency quotas"
+    - type: "metrics_system"
+      description: "Throttling and concurrent execution metrics"
+
+  access_requirements:
+    - "Access to serverless function configurations"
+    - "Access to account service quotas"
+    - "Access to throttling metrics"
+
+# ============================================================
+# SECTION 5: DISCOVERY SPECIFICATION
+# ============================================================
+
+discovery:
+  code_patterns:
+    - pattern: "ReservedConcurrentExecutions|reserved_concurrent_executions"
+      type: "regex"
+      scope: "config"
+      purpose: "Find reserved concurrency configurations"
+    - pattern: "ProvisionedConcurrencyConfig"
+      type: "regex"
+      scope: "config"
+      purpose: "Find provisioned concurrency settings"
+
+  file_patterns:
+    - glob: "**/serverless.{yml,yaml}"
+      purpose: "Serverless framework configurations"
+    - glob: "**/template.{yml,yaml}"
+      purpose: "SAM template configurations"
+    - glob: "**/lambda*.tf"
+      purpose: "Terraform Lambda configurations"
+
+  metrics_queries:
+    - system: "CloudWatch"
+      query: "ConcurrentExecutions"
+      purpose: "Current concurrent executions"
+      threshold: "Should have headroom below account limit"
+    - system: "CloudWatch"
+      query: "Throttles"
+      purpose: "Throttling events indicating limit reached"
+      threshold: "Should be zero under normal operation"
+
+# ============================================================
+# SECTION 6: EXTERNAL KNOWLEDGE SOURCES
+# ============================================================
+
+knowledge_sources:
+  guides:
+    - id: "lambda-concurrency"
+      name: "AWS Lambda Concurrency"
+      url: "https://docs.aws.amazon.com/lambda/latest/dg/configuration-concurrency.html"
+      offline_cache: true
+    - id: "lambda-scaling"
+      name: "Lambda Function Scaling"
+      url: "https://docs.aws.amazon.com/lambda/latest/dg/invocation-scaling.html"
+      offline_cache: true
+
+# ============================================================
+# SECTION 7: TOOLING & AUTOMATION
+# ============================================================
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws service-quotas"
+      purpose: "Check account concurrency limits"
+      command: "aws service-quotas get-service-quota --service-code lambda --quota-code L-B99A9384"
+    - tool: "aws lambda get-function-concurrency"
+      purpose: "Check function reserved concurrency"
+      command: "aws lambda get-function-concurrency --function-name <name>"
+
+  monitoring_queries:
+    - system: "CloudWatch"
+      query: "SEARCH('{AWS/Lambda,FunctionName} Throttles', 'Sum', 300)"
+      purpose: "Throttling across all functions"
+    - system: "CloudWatch"
+      query: "ConcurrentExecutions / AccountLimit * 100"
+      purpose: "Concurrency utilization percentage"
+
+  scripts:
+    - id: "concurrency-auditor"
+      language: "bash"
+      purpose: "List all function concurrency settings"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "Checking function concurrency configurations..."
+        aws lambda list-functions --query 'Functions[*].[FunctionName]' --output text | \
+        while read fn; do
+          echo "Function: $fn"
+          aws lambda get-function-concurrency --function-name "$fn" 2>/dev/null || echo "No reserved concurrency"
+        done
+
+# ============================================================
+# SECTION 8: SIGNALS & FINDINGS TAXONOMY
+# ============================================================
+
+signals:
+  critical:
+    - id: "CONCURRENCY-CRIT-001"
+      signal: "Account concurrency limit frequently exceeded"
+      evidence_threshold: "Throttles > 0 for extended periods"
+      explanation: |
+        When account limits are hit, all functions may be throttled,
+        causing widespread failures across the application. This
+        indicates insufficient capacity for actual demand.
+      remediation: "Request account limit increase or optimize function duration"
+    - id: "CONCURRENCY-CRIT-002"
+      signal: "Critical function shares unreserved concurrency pool"
+      evidence_pattern: "No reserved concurrency for business-critical function"
+      explanation: |
+        Without reserved concurrency, critical functions compete with
+        all other functions and may be throttled during bursts.
+      remediation: "Configure reserved concurrency for critical functions"
+
+  high:
+    - id: "CONCURRENCY-HIGH-001"
+      signal: "Reserved concurrency exceeds downstream capacity"
+      explanation: "Database or API may be overwhelmed at max concurrency"
+      remediation: "Align reserved concurrency with downstream limits"
+    - id: "CONCURRENCY-HIGH-002"
+      signal: "Total reserved concurrency exceeds account limit"
+      explanation: "Leaves no unreserved capacity for other functions"
+      remediation: "Review and reduce reserved concurrency allocations"
+
+  medium:
+    - id: "CONCURRENCY-MED-001"
+      signal: "Throttling metrics not monitored"
+      remediation: "Add CloudWatch alarms for Throttles metric"
+    - id: "CONCURRENCY-MED-002"
+      signal: "Concurrency limits not documented"
+      remediation: "Document concurrency strategy and rationale"
+
+  low:
+    - id: "CONCURRENCY-LOW-001"
+      signal: "Burst concurrency not considered in capacity planning"
+
+  positive:
+    - id: "CONCURRENCY-POS-001"
+      signal: "Reserved concurrency configured for critical functions"
+    - id: "CONCURRENCY-POS-002"
+      signal: "Concurrency headroom maintained below account limit"
+
+# ============================================================
+# SECTION 9: EXECUTION PROCEDURE
+# ============================================================
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Document Account Limits"
+      description: |
+        Retrieve account-level concurrency limits and current
+        utilization across all functions.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Get account concurrency limit"
+          command: "aws service-quotas get-service-quota --service-code lambda --quota-code L-B99A9384"
+      expected_findings:
+        - "Account concurrency limit"
+        - "Current utilization"
+
+    - id: "2"
+      name: "Inventory Function Concurrency Settings"
+      description: |
+        List all functions with their reserved and provisioned
+        concurrency configurations.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Reserved concurrency per function"
+        - "Total reserved vs account limit"
+
+    - id: "3"
+      name: "Analyze Throttling History"
+      description: |
+        Review throttling metrics to identify functions
+        hitting limits and frequency of throttling.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Functions with throttling"
+        - "Throttling patterns and triggers"
+
+    - id: "4"
+      name: "Assess Downstream Alignment"
+      description: |
+        Verify that concurrency limits align with downstream
+        resource capacity (databases, APIs, etc.).
+      duration_estimate: "30 min"
+      questions:
+        - "Can downstream handle max concurrency?"
+        - "Are connection pools sized appropriately?"
+      expected_findings:
+        - "Downstream capacity constraints"
+        - "Potential bottlenecks"
+
+    - id: "5"
+      name: "Verify Critical Function Protection"
+      description: |
+        Ensure business-critical functions have reserved
+        concurrency to prevent throttling.
+      duration_estimate: "15 min"
+      expected_findings:
+        - "Critical function protection status"
+        - "Gaps in reservation strategy"
+
+# ============================================================
+# SECTION 10: OUTPUT SPECIFICATION
+# ============================================================
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Concurrency Inventory"
+        - "Throttling Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "All configurations reviewed, metrics analyzed"
+    medium: "Configuration review with limited metrics history"
+    low: "Partial configuration access"
+
+# ============================================================
+# SECTION 11: OFFLINE SUPPORT
+# ============================================================
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "lambda-concurrency"
+        priority: "required"
+
+# ============================================================
+# SECTION 12: PROFILES
+# ============================================================
+
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+# ============================================================
+# SECTION 13: DETERMINISTIC VERIFICATION
+# ============================================================
+
+closeout_checklist:
+  - id: "concurrency-001"
+    item: "Critical functions have reserved concurrency"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "All business-critical functions have ReservedConcurrentExecutions"
+    expected: "Confirmed by reviewer"
+
+  - id: "concurrency-002"
+    item: "Total reserved concurrency leaves unreserved headroom"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Sum of reserved < 80% of account limit"
+    expected: "Confirmed by reviewer"
+
+  - id: "concurrency-003"
+    item: "Throttling alerts configured"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "CloudWatch alarms exist for Throttles metric"
+    expected: "Confirmed by reviewer"
+
+# ============================================================
+# SECTION 14: GOVERNANCE
+# ============================================================
+
+governance:
+  applicable_to:
+    archetypes: ["serverless", "api-gateway", "event-driven"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.1"]
+
+# ============================================================
+# SECTION 15: RELATIONSHIPS
+# ============================================================
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.serverless-edge-scaling.cold-start-impact"
+    - "scalability-capacity.serverless-edge-scaling.provisioned-capacity"

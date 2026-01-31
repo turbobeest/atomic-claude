@@ -1,0 +1,321 @@
+# ============================================================
+# AUDIT: Temporal Data Handling
+# ============================================================
+# Evaluates how temporal data is handled including timestamps,
+# time zones, historical data tracking, and bi-temporal patterns.
+# ============================================================
+
+audit:
+  id: "data-state-management.data-lifecycle.temporal-data-handling"
+
+  name: "Temporal Data Handling"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "data-lifecycle"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates temporal data handling including timestamp storage,
+    timezone management, historical data tracking, and temporal query patterns.
+    It examines whether the system can accurately represent when events
+    occurred, track changes over time, and query historical state.
+
+  why_it_matters: |
+    Poor temporal data handling causes bugs that are notoriously difficult
+    to diagnose. Timezone confusion creates data that appears to shift in
+    time. Missing historical tracking prevents understanding how data
+    evolved. Incorrect timestamps corrupt audit trails and compliance
+    records. Proper temporal handling is essential for data integrity.
+
+  when_to_run:
+    - "When designing time-sensitive features"
+    - "After timezone-related bugs"
+    - "When implementing audit trails"
+    - "Before expanding to new timezones"
+
+prerequisites:
+  required_artifacts:
+    - type: "database-schema"
+      description: "Schema with timestamp columns"
+    - type: "application-code"
+      description: "Code handling temporal data"
+
+  access_requirements:
+    - "Read access to database schemas"
+    - "Access to application temporal logic"
+    - "Configuration for timezone settings"
+
+discovery:
+  code_patterns:
+    - pattern: "TIMESTAMP|DATETIME|DATE|TIME"
+      type: "keyword"
+      scope: "source"
+      purpose: "Identify temporal columns"
+    - pattern: "timezone|tz|UTC|Z$"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify timezone handling"
+    - pattern: "effective_date|valid_from|valid_to|version"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify temporal versioning patterns"
+
+  file_patterns:
+    - glob: "**/models/**/*"
+      purpose: "Model definitions with timestamps"
+    - glob: "**/migrations/**/*.sql"
+      purpose: "Schema with temporal columns"
+    - glob: "**/utils/**/date*"
+      purpose: "Date/time utility functions"
+
+knowledge_sources:
+  guides:
+    - id: "temporal-database-patterns"
+      name: "Temporal Database Design Patterns"
+      url: "https://www.postgresql.org/docs/current/datatype-datetime.html"
+      offline_cache: true
+
+    - id: "bitemporal-modeling"
+      name: "Bi-Temporal Data Modeling"
+      url: "https://martinfowler.com/articles/bitemporal-history.html"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "timestamp-analyzer"
+      purpose: "Detect timezone handling issues"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "TEMP-CRIT-001"
+      signal: "Timestamps stored without timezone information"
+      evidence_pattern: "TIMESTAMP WITHOUT TIME ZONE, DATETIME without UTC conversion"
+      explanation: |
+        Timestamps without timezone information become ambiguous when the
+        system or users span multiple timezones. Data may be interpreted
+        differently depending on who queries it, causing bugs that are
+        extremely difficult to diagnose.
+      remediation: "Use TIMESTAMP WITH TIME ZONE; convert to UTC before storage; store original timezone if needed"
+
+    - id: "TEMP-CRIT-002"
+      signal: "Date/time conversion not handling DST transitions"
+      evidence_pattern: "Naive datetime arithmetic, hardcoded timezone offsets"
+      explanation: |
+        Daylight Saving Time transitions can cause time jumps, duplicated
+        hours, or skipped hours. Naive date arithmetic fails during these
+        transitions, corrupting scheduled operations and time-based queries.
+      remediation: "Use timezone-aware datetime libraries; handle DST transitions explicitly"
+
+  high:
+    - id: "TEMP-HIGH-001"
+      signal: "Inconsistent timestamp columns across tables"
+      evidence_pattern: "Mixed TIMESTAMP types, inconsistent created_at/updated_at patterns"
+      explanation: |
+        Inconsistent timestamp handling makes it difficult to correlate
+        events across tables. Some tables may use UTC, others local time.
+        Joins and queries produce incorrect results.
+      remediation: "Standardize timestamp types and timezone handling across all tables"
+
+    - id: "TEMP-HIGH-002"
+      signal: "No historical data tracking for auditable entities"
+      evidence_pattern: "Entities updated in place without version history"
+      explanation: |
+        Without historical tracking, you cannot answer "what was the value
+        at time X?" This is often required for audits, disputes, debugging,
+        and compliance. Once updated, previous state is lost.
+      remediation: "Implement history tables, temporal tables, or event sourcing for auditable entities"
+
+  medium:
+    - id: "TEMP-MED-001"
+      signal: "created_at/updated_at not populated automatically"
+      evidence_pattern: "Audit timestamps set manually in application code"
+      remediation: "Use database triggers or ORM hooks to auto-populate timestamps"
+
+    - id: "TEMP-MED-002"
+      signal: "Temporal queries not using appropriate indexes"
+      evidence_pattern: "Range queries on timestamp columns without indexes"
+      remediation: "Add indexes on timestamp columns used in range queries"
+
+  low:
+    - id: "TEMP-LOW-001"
+      signal: "Using string types for dates"
+
+  positive:
+    - id: "TEMP-POS-001"
+      signal: "Consistent UTC storage with proper timezone conversion"
+    - id: "TEMP-POS-002"
+      signal: "Bi-temporal modeling for entities requiring audit trails"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Temporal Column Discovery"
+      description: |
+        Identify all timestamp and date columns in the schema
+        and their data types.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find timestamp columns"
+          command: "grep -riE 'TIMESTAMP|DATETIME|DateTime|@Column.*Date|DATE\\s' --include='*.sql' --include='*.prisma' --include='*.ts' --include='*.java' . 2>/dev/null | head -50"
+        - purpose: "Find audit timestamp columns"
+          command: "grep -riE 'created_at|updated_at|createdAt|updatedAt|@CreatedDate|@LastModified' --include='*.sql' --include='*.prisma' --include='*.ts' --include='*.java' . 2>/dev/null | head -40"
+        - purpose: "Check for timezone in column types"
+          command: "grep -riE 'TIMESTAMP.*WITH.*TIME.*ZONE|TIMESTAMPTZ|timezone' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Timestamp column inventory"
+        - "Timezone handling in schema"
+
+    - id: "2"
+      name: "Timezone Handling Analysis"
+      description: |
+        Evaluate how timezones are handled in application code
+        and database storage.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find timezone conversions"
+          command: "grep -riE 'timezone|tz|UTC|toISOString|toUTC|fromUTC' --include='*.ts' --include='*.py' --include='*.java' . 2>/dev/null | head -40"
+        - purpose: "Find timezone configuration"
+          command: "grep -riE 'timezone|TZ=|time_zone' --include='*.yml' --include='*.yaml' --include='*.env' --include='*.json' . 2>/dev/null | head -20"
+        - purpose: "Find hardcoded timezone offsets"
+          command: "grep -riE '[+-][0-9]{2}:?[0-9]{2}|offset.*[0-9]+|[0-9]+.*offset' --include='*.ts' --include='*.py' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Timezone handling patterns"
+        - "Configuration consistency"
+
+    - id: "3"
+      name: "Historical Data Tracking Analysis"
+      description: |
+        Identify patterns for tracking historical data and
+        point-in-time queries.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find history/audit tables"
+          command: "grep -riE '_history|_audit|_version|_log|History|Audit' --include='*.sql' --include='*.prisma' --include='*.ts' . 2>/dev/null | head -40"
+        - purpose: "Find temporal validity patterns"
+          command: "grep -riE 'valid_from|valid_to|effective_date|start_date|end_date' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -30"
+        - purpose: "Find event sourcing patterns"
+          command: "grep -riE 'event.*store|eventStore|aggregate.*version|domain.*event' --include='*.ts' --include='*.py' --include='*.java' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Historical tracking mechanisms"
+        - "Point-in-time query capability"
+
+    - id: "4"
+      name: "Temporal Query Analysis"
+      description: |
+        Evaluate queries that operate on temporal data
+        for correctness and performance.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find date range queries"
+          command: "grep -riE 'BETWEEN.*AND|>=.*<|date.*>=|timestamp.*>=' --include='*.sql' --include='*.ts' --include='*.py' . 2>/dev/null | head -30"
+        - purpose: "Find temporal indexes"
+          command: "grep -riE 'INDEX.*date|INDEX.*time|INDEX.*created|INDEX.*updated' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Temporal query patterns"
+        - "Index coverage for temporal queries"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Temporal Column Analysis"
+        - "Timezone Handling"
+        - "Historical Tracking"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear evidence of timezone issues or missing historical tracking"
+    medium: "Patterns suggest issues, testing across timezones needed"
+    low: "Implementation appears correct but edge cases uncertain"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "temporal-database-patterns"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed temporal analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "temp-001"
+    item: "Timestamps stored with timezone information"
+    level: "CRITICAL"
+    verification: "grep -riE 'TIMESTAMPTZ|WITH TIME ZONE|UTC' --include='*.sql' --include='*.prisma' . 2>/dev/null | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "temp-002"
+    item: "Consistent timezone handling across application"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify timezone handling is consistent"
+    expected: "Confirmed by reviewer"
+
+  - id: "temp-003"
+    item: "Historical tracking for auditable entities"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify audit trails exist for critical entities"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Audit Requirements"
+      controls: ["AUD-001", "AUD-002"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.data-lifecycle.data-retention-policy"
+    - "data-state-management.schema-design.data-modeling-quality"

@@ -1,0 +1,241 @@
+audit:
+  id: dependency-supply-chain.dependency-inventory.registry-source-tracking
+  name: Registry Source Tracking Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: dependency-supply-chain
+  category_number: 32
+  subcategory: dependency-inventory
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: dependencies
+  default_profiles:
+  - full
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit tracks and validates the sources (registries) from which
+    dependencies are fetched. It identifies all registry configurations,
+    verifies their legitimacy, and ensures dependencies come from trusted
+    and expected sources.
+  why_it_matters: |
+    Dependency confusion attacks exploit misconfigured registries to serve
+    malicious packages. Organizations may unknowingly pull packages from
+    untrusted sources, or attackers may publish malicious packages with
+    internal package names to public registries. Proper registry management
+    is critical for supply chain security.
+  when_to_run:
+  - During security assessments
+  - When configuring new projects
+  - After registry configuration changes
+  - When investigating supply chain concerns
+prerequisites:
+  required_artifacts:
+  - type: registry_config
+    description: .npmrc, pip.conf, .yarnrc, settings.xml, etc.
+  - type: dependency_manifest
+    description: Package manifests that may specify registries
+  access_requirements:
+  - Read access to configuration files
+  - Access to environment variables
+discovery:
+  file_patterns:
+  - glob: '**/.npmrc'
+    purpose: Find npm registry configurations
+  - glob: '**/.yarnrc'
+    purpose: Find yarn v1 configurations
+  - glob: '**/.yarnrc.yml'
+    purpose: Find yarn v2+ configurations
+  - glob: '**/pip.conf'
+    purpose: Find pip configurations
+  - glob: '**/.pypirc'
+    purpose: Find PyPI configurations
+  - glob: '**/settings.xml'
+    purpose: Find Maven repository settings
+  - glob: '**/.cargo/config.toml'
+    purpose: Find Cargo registry configs
+  - glob: '**/nuget.config'
+    purpose: Find NuGet configurations
+knowledge_sources:
+  guides:
+  - id: npm-registry-config
+    name: npm Registry Configuration
+    url: https://docs.npmjs.com/cli/v9/using-npm/config#registry
+  - id: dependency-confusion
+    name: Dependency Confusion Research
+    url: https://medium.com/@alex.birsan/dependency-confusion-4a5d60fec610
+  standards:
+  - id: slsa-supply-chain
+    name: SLSA Supply Chain Security
+    relevance: Trusted source requirements
+tooling:
+  analysis_tools:
+  - tool: npm config list
+    purpose: Show npm registry configuration
+  - tool: pip config list
+    purpose: Show pip configuration
+  - tool: yarn config get registry
+    purpose: Show yarn registry
+signals:
+  critical:
+  - id: DEP-REG-CRIT-001
+    signal: Unknown or suspicious registry configured
+    evidence_indicators:
+    - Registry URL not recognized or documented
+    - Non-HTTPS registry URL
+    explanation: |
+      Unknown registries could be attacker-controlled, serving malicious
+      packages. All registry sources must be explicitly trusted and
+      documented.
+    remediation: Remove unknown registries; document all configured registries
+  - id: DEP-REG-CRIT-002
+    signal: Internal package namespace not protected from public registry
+    evidence_indicators:
+    - Scoped packages without scope registry mapping
+    - Internal naming convention without registry lock
+    remediation: Configure scope-to-registry mappings; register namespaces
+  high:
+  - id: DEP-REG-HIGH-001
+    signal: Mixed public and private registries without proper scoping
+    evidence_indicators:
+    - Private registry as fallback to public
+    - No scope separation for internal packages
+    remediation: Configure explicit scope-to-registry mappings
+  - id: DEP-REG-HIGH-002
+    signal: Registry credentials stored insecurely
+    evidence_indicators:
+    - Plaintext tokens in committed .npmrc
+    - Credentials in environment variables without encryption
+    remediation: Use secure credential storage; never commit tokens
+  medium:
+  - id: DEP-REG-MED-001
+    signal: Registry configuration differs between environments
+    evidence_indicators:
+    - Different .npmrc in dev vs CI
+    - Inconsistent pip.conf across team
+    remediation: Standardize registry configuration across environments
+  - id: DEP-REG-MED-002
+    signal: Using npm registry mirror without verification
+    evidence_indicators:
+    - Third-party npm mirror configured
+    - No integrity checking on mirror
+    remediation: Use official registries or verify mirror integrity
+  low:
+  - id: DEP-REG-LOW-001
+    signal: Registry configuration not documented
+    evidence_indicators:
+    - No documentation of registry sources
+    - Team unaware of registry configuration
+    remediation: Document all registry sources and their purposes
+  positive:
+  - id: DEP-REG-POS-001
+    signal: All registries documented and verified as trusted
+  - id: DEP-REG-POS-002
+    signal: Proper scope-to-registry mapping configured
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Discover Registry Configurations
+    description: Find all registry configuration files
+    commands:
+    - purpose: Find npm registry configs
+      command: find . -name '.npmrc' -o -name '.yarnrc*' 2>/dev/null | head -20
+    - purpose: Find pip configs
+      command: find . -name 'pip.conf' -o -name '.pypirc' 2>/dev/null | head -20
+  - id: '2'
+    name: Extract Registry URLs
+    description: Identify all configured registry URLs
+    commands:
+    - purpose: Show npm registry configuration
+      command: npm config list 2>/dev/null | grep registry || echo 'npm config not available'
+    - purpose: Check .npmrc content
+      command: cat .npmrc 2>/dev/null | grep -v '//' | grep -E '(registry|//)' || echo 'No .npmrc found'
+    - purpose: Show yarn registry
+      command: yarn config get registry 2>/dev/null || echo 'yarn config not available'
+  - id: '3'
+    name: Check for Dependency Confusion Risk
+    description: Identify potential dependency confusion vulnerabilities
+    commands:
+    - purpose: Check for scope without registry mapping
+      command: 'cat package.json 2>/dev/null | jq -r ''.dependencies + .devDependencies | keys[]'' | grep
+        ''^@'' | cut -d''/'' -f1 | sort -u | while read scope; do grep -q "$scope:registry" .npmrc 2>/dev/null
+        || echo "Missing registry for scope: $scope"; done || echo ''scope check not applicable'''
+  - id: '4'
+    name: Verify Registry Security
+    description: Check registry URLs for security issues
+    commands:
+    - purpose: Check for non-HTTPS registries
+      command: grep -rE 'registry.*http://' .npmrc .yarnrc* 2>/dev/null || echo 'No insecure HTTP registries
+        found'
+    - purpose: Check for committed credentials
+      command: 'grep -rE ''(_authToken|_password|//.*:_)'' .npmrc 2>/dev/null && echo ''WARNING: Possible
+        credentials in .npmrc'' || echo ''No obvious credentials in .npmrc'''
+  - id: '5'
+    name: Document Registry Sources
+    description: Create inventory of all registry sources
+    commands:
+    - purpose: List all unique registries
+      command: |
+        grep -rhE 'registry["=:].*http' .npmrc .yarnrc* pip.conf 2>/dev/null | grep -oE 'https?://[^"'"'"' ]+' | sort -u || echo 'No registries found'
+output:
+  deliverables:
+  - type: registry_inventory
+    format: structured
+    description: Complete list of registry sources
+  - type: finding_list
+    format: structured
+    description: Security issues with registry configuration
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Registry Inventory
+    - Security Assessment
+    - Dependency Confusion Risk
+    - Recommendations
+closeout_checklist:
+- id: dep-reg-001
+  item: All registries identified and documented
+  level: REQUIRED
+  verification: Registry inventory complete
+- id: dep-reg-002
+  item: No unknown or untrusted registries
+  level: CRITICAL
+  verification: All registries verified as legitimate
+- id: dep-reg-003
+  item: Scope-to-registry mappings configured
+  level: REQUIRED
+  verification: Internal scopes mapped to internal registry
+- id: dep-reg-004
+  item: No credentials in committed files
+  level: CRITICAL
+  verification: grep for tokens returns empty
+governance:
+  applicable_to:
+    archetypes:
+    - all-software-projects
+  compliance_mappings:
+  - framework: SOC 2
+    control: CC6.6
+    description: Restricting access by components
+  - framework: NIST CSF
+    control: PR.DS-6
+    description: Integrity checking mechanisms
+relationships:
+  commonly_combined:
+  - dependency-supply-chain.supply-chain-security.artifact-integrity
+  depends_on: []
+  feeds_into:
+  - dependency-supply-chain.supply-chain-security.provenance-verification

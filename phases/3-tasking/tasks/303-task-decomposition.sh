@@ -39,7 +39,10 @@ task_303_task_decomposition() {
     local validator_prompt=""
 
     # Get agent repo path from Phase 0 config
-    local agent_repo="${ATOMIC_AGENT_REPO:-$ATOMIC_ROOT/repos/agents}"
+    # Check embedded repo first (monorepo deployment), then env var, then default
+    local agent_repo="$ATOMIC_ROOT/repos/agents"
+    [[ -f "$ATOMIC_ROOT/agents/agent-inventory.csv" ]] && agent_repo="$ATOMIC_ROOT/agents"
+    [[ -n "$ATOMIC_AGENT_REPO" ]] && agent_repo="$ATOMIC_AGENT_REPO"
 
     if [[ -f "$agents_file" ]]; then
         # Load decomposition agent prompts from agents repository

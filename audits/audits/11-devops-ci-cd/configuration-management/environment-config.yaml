@@ -1,0 +1,331 @@
+# ============================================================
+# AUDIT: Environment Config
+# ============================================================
+# Evaluates environment-specific configuration management
+
+audit:
+  id: "devops-ci-cd.configuration-management.environment-config"
+  name: "Environment Config"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "configuration-management"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "deployment"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Assesses how configuration varies between environments (dev, staging,
+    production) and how those differences are managed. Evaluates whether
+    environment parity is maintained where appropriate, whether differences
+    are intentional and documented, and whether environment promotion
+    is reliable.
+
+  why_it_matters: |
+    Configuration differences between environments cause "works on my
+    machine" and "works in staging" problems. Uncontrolled environment
+    drift leads to production issues that cannot be reproduced. However,
+    some differences (like scaling, logging levels) are intentional.
+    Proper environment config management balances parity with purpose.
+
+  when_to_run:
+    - "Initial deployment audit"
+    - "After environment-specific incidents"
+    - "When adding new environments"
+    - "Quarterly operations review"
+
+prerequisites:
+  required_artifacts:
+    - type: "deployment_configuration"
+      description: "Configuration for all environments"
+    - type: "infrastructure_definitions"
+      description: "Environment infrastructure definitions"
+
+  access_requirements:
+    - "Access to configuration for all environments"
+    - "Environment documentation"
+
+discovery:
+  file_patterns:
+    - glob: "**/env/**"
+      purpose: "Environment-specific directories"
+
+    - glob: "**/*prod*"
+      purpose: "Production-specific files"
+
+    - glob: "**/*staging*"
+      purpose: "Staging-specific files"
+
+    - glob: "**/values-*.yaml"
+      purpose: "Helm environment values files"
+
+    - glob: "**/overlays/**"
+      purpose: "Kustomize environment overlays"
+
+knowledge_sources:
+  guides:
+    - id: "12factor-dev-prod-parity"
+      name: "12-Factor App - Dev/Prod Parity"
+      url: "https://12factor.net/dev-prod-parity"
+      offline_cache: true
+
+    - id: "kustomize"
+      name: "Kustomize Documentation"
+      url: "https://kustomize.io/"
+      offline_cache: true
+
+tooling:
+  scripts:
+    - id: "compare-environments"
+      language: "bash"
+      purpose: "Compare configuration between environments"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Environment-specific files ==="
+        find . -name '*prod*' -o -name '*staging*' -o -name '*dev*' 2>/dev/null | grep -E '\.(yaml|json|env)$' | head -20
+        echo "=== Helm values files ==="
+        find . -name 'values-*.yaml' 2>/dev/null | head -10
+
+signals:
+  critical:
+    - id: "CICD-ENVCONFIG-CRIT-001"
+      signal: "Production has configuration absent from other environments"
+      evidence_pattern: "Production-only settings not testable in staging"
+      explanation: |
+        Configuration that only exists in production cannot be tested
+        before deployment. Issues will only be discovered in production,
+        where impact is highest.
+      remediation: "Ensure all production configuration is testable in staging"
+
+    - id: "CICD-ENVCONFIG-CRIT-002"
+      signal: "Security configurations differ between staging and production"
+      evidence_pattern: "TLS disabled in staging, different auth mechanisms"
+      explanation: |
+        Different security configurations mean security issues may not
+        be caught in pre-production testing. Authentication bugs, TLS
+        issues, or permission problems will only appear in production.
+      remediation: "Match security configuration across environments"
+
+  high:
+    - id: "CICD-ENVCONFIG-HIGH-001"
+      signal: "No environment parity strategy documented"
+      evidence_pattern: "No documentation of intentional vs accidental differences"
+      explanation: |
+        Without documented strategy, it's unclear which differences are
+        intentional (scaling) vs accidental (configuration drift).
+      remediation: "Document environment configuration strategy"
+
+    - id: "CICD-ENVCONFIG-HIGH-002"
+      signal: "Environment configurations managed in separate repositories"
+      evidence_pattern: "prod-config repo separate from staging-config repo"
+      explanation: |
+        Separate repositories make it hard to compare environments and
+        ensure changes are promoted consistently.
+      remediation: "Manage all environments in single repository with overlays"
+
+  medium:
+    - id: "CICD-ENVCONFIG-MED-001"
+      signal: "Large number of environment-specific overrides"
+      evidence_pattern: ">50% of configuration varies by environment"
+      remediation: "Review and reduce unnecessary environment differences"
+
+    - id: "CICD-ENVCONFIG-MED-002"
+      signal: "No staging environment - dev deploys to production"
+      evidence_pattern: "Only dev and production environments exist"
+      remediation: "Implement staging environment matching production"
+
+  low:
+    - id: "CICD-ENVCONFIG-LOW-001"
+      signal: "Environment names inconsistent across tools"
+
+    - id: "CICD-ENVCONFIG-LOW-002"
+      signal: "No environment configuration change review process"
+
+  positive:
+    - id: "CICD-ENVCONFIG-POS-001"
+      signal: "Single source of truth with environment overlays"
+
+    - id: "CICD-ENVCONFIG-POS-002"
+      signal: "Staging mirrors production configuration"
+
+    - id: "CICD-ENVCONFIG-POS-003"
+      signal: "Environment differences documented with rationale"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory environment configurations"
+      description: |
+        Identify all environment-specific configuration sources
+        and how they are organized.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find environment directories"
+          command: |
+            find . -type d -name 'env' -o -name 'environments' -o -name 'overlays' 2>/dev/null | head -10
+
+        - purpose: "Find environment-specific files"
+          command: |
+            find . -name '*prod*' -o -name '*staging*' -o -name '*dev*' 2>/dev/null | grep -E '\.(yaml|json|env|tf)$' | head -30
+
+      expected_findings:
+        - "Environment configuration structure"
+
+    - id: "2"
+      name: "Compare environment configurations"
+      description: |
+        Compare configurations across environments to identify
+        differences and assess their appropriateness.
+      duration_estimate: "30 min"
+
+      commands:
+        - purpose: "Compare Helm values files"
+          command: |
+            diff values-staging.yaml values-prod.yaml 2>/dev/null || echo "Files not found or no diff tool"
+
+        - purpose: "Compare Kustomize overlays"
+          command: |
+            ls -la k8s/overlays/*/kustomization.yaml 2>/dev/null
+
+      expected_findings:
+        - "Configuration differences between environments"
+
+    - id: "3"
+      name: "Assess environment parity"
+      description: |
+        Evaluate whether staging effectively mirrors production
+        for configuration testing.
+      duration_estimate: "20 min"
+
+      questions:
+        - "Does staging have the same configuration options as production?"
+        - "Are security settings identical?"
+        - "Can production-bound changes be tested in staging?"
+
+      expected_findings:
+        - "Environment parity assessment"
+
+    - id: "4"
+      name: "Review environment promotion"
+      description: |
+        Examine how configuration changes are promoted
+        between environments.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Check for promotion scripts or workflows"
+          command: |
+            find . -name '*promote*' -o -name '*deploy*' 2>/dev/null | head -10
+
+      expected_findings:
+        - "Environment promotion process"
+
+    - id: "5"
+      name: "Document differences rationale"
+      description: |
+        For each significant difference, determine if it is
+        intentional and document the rationale.
+      duration_estimate: "15 min"
+
+      questions:
+        - "Which differences are intentional (scaling, logging)?"
+        - "Which differences are historical/accidental?"
+        - "Are differences documented?"
+
+      expected_findings:
+        - "Documented rationale for environment differences"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Environment Configuration Inventory"
+        - "Parity Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full comparison of all environment configurations"
+    medium: "Sample comparison of key configurations"
+    low: "Based on file structure review only"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "12factor-dev-prod-parity"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed environment comparison"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "environment-config-001"
+    item: "Staging mirrors production configuration"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify staging has same configuration options as production"
+    expected: "Confirmed by reviewer"
+
+  - id: "environment-config-002"
+    item: "Security settings consistent across environments"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify TLS, auth, and security settings match"
+    expected: "Confirmed by reviewer"
+
+  - id: "environment-config-003"
+    item: "Environment differences documented"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify documentation explains environment differences"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "12-Factor"
+      controls: ["X. Dev/prod parity"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.configuration-management.config-externalization"
+    - "devops-ci-cd.configuration-management.config-versioning"

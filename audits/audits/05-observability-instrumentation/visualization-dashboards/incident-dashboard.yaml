@@ -1,0 +1,365 @@
+audit:
+  id: observability-instrumentation.visualization-dashboards.incident-dashboard
+  name: Incident Dashboard Audit
+  version: 1.0.0
+  last_updated: '2025-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: visualization-dashboards
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: metrics
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Assesses incident response dashboards for effectiveness during
+    outages and degraded service conditions. Evaluates real-time
+    data currency, drill-down capabilities, correlation features,
+    and overall usability under incident pressure. Reviews whether
+    dashboards support rapid root cause identification and impact
+    assessment.
+  why_it_matters: |
+    Inadequate incident dashboards cause:
+    - Extended Mean Time To Recovery (MTTR)
+    - Misdiagnosis leading to incorrect remediation
+    - Difficulty understanding incident scope and impact
+    - Missed correlations between symptoms
+    - Stress on responders during high-pressure situations
+    - Post-incident difficulty in timeline reconstruction
+  when_to_run:
+  - After incident retrospectives identify gaps
+  - When response times are longer than expected
+  - During incident response readiness reviews
+  - Before on-call rotation changes
+prerequisites:
+  required_artifacts:
+  - type: incident_dashboards
+    description: Access to incident and troubleshooting dashboards
+  - type: runbook_references
+    description: Runbooks that reference incident dashboards
+  optional_artifacts:
+  - type: incident_history
+    description: Past incident reports for validation
+  - type: response_playbooks
+    description: Documented incident response procedures
+  access_requirements:
+  - Dashboard viewer access
+  - Runbook repository access
+discovery:
+  documents_to_review:
+  - type: Incident dashboards
+    purpose: Evaluate incident response effectiveness
+  - type: Runbooks
+    purpose: Verify dashboard references are current
+  - type: Past incident reports
+    purpose: Identify dashboard gaps from real incidents
+  interviews:
+  - role: On-call engineers
+    questions:
+    - What dashboards do you use during incidents?
+    - What information is hardest to find?
+    - What's missing from current dashboards?
+    purpose: Understand real-world usability
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: google-incident-response
+    name: Google SRE - Managing Incidents
+    url: https://sre.google/sre-book/managing-incidents/
+    offline_cache: true
+    priority: required
+  - id: pagerduty-incident
+    name: PagerDuty Incident Response Guide
+    url: https://response.pagerduty.com/
+    offline_cache: true
+    priority: recommended
+  learning_resources:
+  - id: incident-command
+    title: Incident Management for Operations
+    type: article
+    reference: https://www.atlassian.com/incident-management
+tooling:
+  infrastructure_tools:
+  - tool: grafana-cli
+    purpose: Analyze incident dashboard configurations
+  scripts:
+  - id: incident-dashboard-checker
+    language: bash
+    purpose: Check incident dashboard completeness
+    source: inline
+    code: |
+      #!/bin/bash
+      # Check incident dashboard for required elements
+
+      DASHBOARD_UID=$1
+
+      dashboard=$(curl -s -H "Authorization: Bearer $TOKEN" \
+        "$GRAFANA_URL/api/dashboards/uid/$DASHBOARD_UID")
+
+      echo "=== Incident Dashboard Analysis ==="
+
+      # Check refresh rate
+      refresh=$(echo "$dashboard" | jq -r '.dashboard.refresh // "not set"')
+      echo "Refresh Rate: $refresh"
+      if [[ "$refresh" == "not set" || "$refresh" == "" ]]; then
+        echo "  [WARNING] No auto-refresh configured"
+      fi
+
+      # Check for time range
+      echo ""
+      echo "Time Controls:"
+      if echo "$dashboard" | jq -e '.dashboard.timepicker' > /dev/null 2>&1; then
+        echo "  [OK] Time picker present"
+      else
+        echo "  [MISSING] Time picker"
+      fi
+
+      # Check for annotations
+      echo ""
+      echo "Annotations/Events:"
+      if echo "$dashboard" | jq -e '.dashboard.annotations.list | length > 0' > /dev/null 2>&1; then
+        echo "  [OK] Annotations configured"
+      else
+        echo "  [MISSING] No annotations configured"
+      fi
+
+      # Check for links
+      echo ""
+      echo "Drill-down Links:"
+      links=$(echo "$dashboard" | jq -r '.dashboard.links | length')
+      echo "  Dashboard links: $links"
+
+      panel_links=$(echo "$dashboard" | jq -r '[.dashboard.panels[].links // [] | length] | add')
+      echo "  Panel links: ${panel_links:-0}"
+signals:
+  critical:
+  - id: INCIDENT-CRIT-001
+    signal: Dashboard has slow or no auto-refresh
+    evidence_indicators:
+    - Refresh interval > 30 seconds or disabled
+    - Manual refresh required during incidents
+    explanation: |
+      During incidents, stale data leads to incorrect decisions.
+      Teams need real-time visibility, ideally 5-10 second refresh
+      during active incidents.
+    remediation: |
+      Configure 5-10 second auto-refresh for incident dashboards.
+      Ensure queries are optimized to support this refresh rate.
+      Add manual refresh button for immediate updates.
+  - id: INCIDENT-CRIT-002
+    signal: No drill-down from summary to detail
+    evidence_indicators:
+    - High-level dashboard without links to detailed views
+    - No way to investigate specific components
+    explanation: |
+      Incident responders need to move from symptoms to causes.
+      Without drill-down, they must manually navigate or remember
+      dashboard names under pressure.
+    remediation: |
+      Add data links from summary panels to detailed dashboards.
+      Include links to service-specific and dependency dashboards.
+  high:
+  - id: INCIDENT-HIGH-001
+    signal: Missing deployment/change correlation
+    explanation: |
+      Many incidents are caused by recent changes. Without deployment
+      annotations, responders cannot quickly correlate symptoms with
+      recent deployments.
+    remediation: |
+      Add deployment annotations from CI/CD system.
+      Include change events from configuration management.
+  - id: INCIDENT-HIGH-002
+    signal: No error message aggregation
+    explanation: |
+      During incidents, understanding specific error types and their
+      frequency is critical for diagnosis.
+    remediation: |
+      Add log-based error aggregation panels showing top errors,
+      new errors, and error frequency trends.
+  medium:
+  - id: INCIDENT-MED-001
+    signal: Missing impact metrics
+    remediation: |
+      Add user-facing impact metrics: affected users, failed requests,
+      degraded functionality scope.
+  - id: INCIDENT-MED-002
+    signal: No comparison with baseline
+    remediation: |
+      Add previous day/week comparison to quickly identify deviations
+      from normal patterns.
+  - id: INCIDENT-MED-003
+    signal: Dashboard not referenced in runbooks
+    remediation: |
+      Update runbooks to reference incident dashboards.
+      Add dashboard links directly in alert notifications.
+  low:
+  - id: INCIDENT-LOW-001
+    signal: Missing status page integration
+    remediation: |
+      Link incident dashboards to customer status page data
+      for coordinated communication.
+  positive:
+  - id: INCIDENT-POS-001
+    signal: Real-time refresh with optimized queries
+  - id: INCIDENT-POS-002
+    signal: Comprehensive drill-down paths
+  - id: INCIDENT-POS-003
+    signal: Deployment annotations automatically populated
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Real-time Data Currency Assessment
+    description: |
+      Evaluate whether dashboards provide sufficiently current data
+      for incident response.
+    duration_estimate: 20 min
+    questions:
+    - What is the auto-refresh interval?
+    - Is data latency acceptable for incidents?
+    - Do queries support rapid refresh?
+    expected_findings:
+    - Refresh configuration
+    - Data currency issues
+  - id: '2'
+    name: Navigation and Drill-down Review
+    description: |
+      Assess ability to move from overview to details during incidents.
+    duration_estimate: 30 min
+    questions:
+    - Can responders drill from summary to service details?
+    - Are related dashboards linked?
+    - Is navigation intuitive under pressure?
+    expected_findings:
+    - Navigation gaps
+    - Missing drill-down paths
+  - id: '3'
+    name: Correlation Capability Assessment
+    description: |
+      Evaluate features for correlating symptoms with causes.
+    duration_estimate: 30 min
+    questions:
+    - Are deployment events visible?
+    - Can symptoms be correlated across services?
+    - Are alerts shown on dashboards?
+    expected_findings:
+    - Correlation capabilities
+    - Missing context
+  - id: '4'
+    name: On-call Feedback Integration
+    description: |
+      Review incident dashboard against responder feedback.
+    duration_estimate: 30 min
+    questions:
+    - What do on-call engineers say about dashboard usability?
+    - What gaps were identified in past incidents?
+    - Are runbooks aligned with dashboards?
+    expected_findings:
+    - Real-world usability issues
+    - Gap alignment with past incidents
+output:
+  deliverables:
+  - type: incident_readiness_scorecard
+    format: table
+    description: Dashboard-by-dashboard incident readiness assessment
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Real-time Data Assessment
+    - Navigation and Drill-down
+    - Correlation Capabilities
+    - Recommendations
+  confidence_guidance:
+    high: Direct dashboard analysis and responder feedback
+    medium: Configuration analysis without incident testing
+    low: Based on dashboard naming and structure
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: google-incident-response
+      priority: required
+    - source_id: pagerduty-incident
+      priority: recommended
+  degradation:
+  - feature: Live dashboard testing
+    impact: Cannot verify real-time behavior
+    mitigation: Export configurations and review offline
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed analysis and feedback
+    full:
+      included: true
+      priority: 6
+    production:
+      included: true
+      priority: 4
+closeout_checklist:
+- id: incident-001
+  item: Incident dashboards have 30 second or better refresh
+  level: CRITICAL
+  verification: manual
+  verification_notes: Check refresh configuration in dashboard settings
+  expected: Confirmed by reviewer
+- id: incident-002
+  item: Drill-down paths exist from overview to details
+  level: CRITICAL
+  verification: manual
+  verification_notes: Test navigation from overview to service dashboards
+  expected: Confirmed by reviewer
+- id: incident-003
+  item: Deployment annotations visible on incident dashboards
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify deployment events appear as annotations
+  expected: Confirmed by reviewer
+- id: incident-004
+  item: Runbooks reference current incident dashboards
+  level: WARNING
+  verification: manual
+  verification_notes: Cross-reference runbook links with actual dashboards
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - microservices
+    - monolith
+    - serverless
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC7.4
+    - CC7.5
+  - framework: ISO27001
+    controls:
+    - A.16.1.5
+relationships:
+  commonly_combined:
+  - observability-instrumentation.visualization-dashboards.service-health-dashboard
+  - observability-instrumentation.alerting.alert-runbook-integration
+  - incident-management.response.incident-tooling
+  - observability-instrumentation.logging.log-aggregation

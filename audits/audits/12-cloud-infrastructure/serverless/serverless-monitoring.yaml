@@ -1,0 +1,372 @@
+audit:
+  id: cloud-infrastructure.serverless.serverless-monitoring
+  name: Serverless Monitoring
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: serverless
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates serverless monitoring and observability including CloudWatch
+    metrics, logs, X-Ray tracing, custom metrics, alarms, and dashboards.
+    Examines whether monitoring provides adequate visibility into function
+    performance, errors, and operational health.
+  why_it_matters: |
+    Serverless functions are ephemeral and distributed, making observability
+    challenging but critical. Without proper monitoring, performance issues
+    go undetected, errors are missed, and troubleshooting is difficult.
+    Proper monitoring enables proactive issue detection, faster resolution,
+    and data-driven optimization.
+  when_to_run:
+  - Operational readiness reviews
+  - After deploying new functions
+  - Incident postmortems
+  - Performance optimization projects
+prerequisites:
+  required_artifacts:
+  - type: cloud_access
+    description: Read access to Lambda and CloudWatch configurations
+  - type: monitoring_requirements
+    description: SLOs and alerting requirements
+  access_requirements:
+  - Lambda configuration access
+  - CloudWatch metrics and logs access
+  - X-Ray traces access
+  - CloudWatch alarms access
+discovery:
+  metrics_queries:
+  - system: CloudWatch
+    query: |
+      SELECT SUM(Invocations), SUM(Errors), AVG(Duration)
+      FROM Lambda
+      WHERE FunctionName = '{function}'
+    purpose: Get function invocation metrics
+    threshold: Error rate > 1% requires investigation
+  file_patterns:
+  - glob: '**/serverless.yml'
+    purpose: Find Serverless Framework configurations
+  - glob: '**/terraform/**/*cloudwatch*.tf'
+    purpose: Find Terraform CloudWatch configurations
+  - glob: '**/terraform/**/*alarm*.tf'
+    purpose: Find alarm configurations
+knowledge_sources:
+  specifications:
+  - id: aws-lambda-monitoring
+    name: AWS Lambda Monitoring
+    url: https://docs.aws.amazon.com/lambda/latest/dg/lambda-monitoring.html
+    offline_cache: true
+    priority: required
+  - id: aws-xray
+    name: AWS X-Ray
+    url: https://docs.aws.amazon.com/xray/latest/devguide/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: lambda-insights
+    name: Lambda Insights
+    url: https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Lambda-Insights.html
+    offline_cache: true
+  - id: serverless-observability
+    name: Serverless Observability
+    url: https://docs.aws.amazon.com/lambda/latest/operatorguide/observability.html
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS CLI
+    purpose: Check Lambda insights
+    command: aws lambda get-function-configuration --function-name {function} --query 'Layers[?contains(Arn,
+      `LambdaInsightsExtension`)]'
+  - tool: AWS CLI
+    purpose: List CloudWatch alarms
+    command: aws cloudwatch describe-alarms --alarm-name-prefix Lambda
+  - tool: AWS CLI
+    purpose: Check X-Ray tracing
+    command: aws lambda get-function-configuration --function-name {function} --query 'TracingConfig.Mode'
+  scripts:
+  - id: monitoring-analyzer
+    language: bash
+    purpose: Analyze serverless monitoring configuration
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Serverless Monitoring Analysis ==="
+
+      # Check X-Ray tracing configuration
+      echo "X-Ray Tracing Configuration:"
+      aws lambda list-functions \
+        --query 'Functions[].{Name:FunctionName,Tracing:TracingConfig.Mode}' \
+        --output table
+
+      # Check for Lambda Insights
+      echo ""
+      echo "Functions with Lambda Insights:"
+      for func in $(aws lambda list-functions --query 'Functions[].FunctionName' --output text | head -20); do
+        insights=$(aws lambda get-function-configuration --function-name $func --query 'Layers[?contains(Arn,`LambdaInsightsExtension`)]' --output text 2>/dev/null)
+        if [ ! -z "$insights" ]; then
+          echo "$func: Lambda Insights enabled"
+        fi
+      done
+
+      # List Lambda-related alarms
+      echo ""
+      echo "Lambda-Related CloudWatch Alarms:"
+      aws cloudwatch describe-alarms \
+        --query 'MetricAlarms[?Namespace==`AWS/Lambda`].{Name:AlarmName,Metric:MetricName,State:StateValue}' \
+        --output table
+
+      # Check log groups and retention
+      echo ""
+      echo "Lambda Log Groups and Retention:"
+      aws logs describe-log-groups \
+        --log-group-name-prefix '/aws/lambda/' \
+        --query 'logGroups[].{Name:logGroupName,Retention:retentionInDays}' \
+        --output table | head -30
+
+      # Functions without alarms (sample)
+      echo ""
+      echo "High-Traffic Functions (check alarm coverage):"
+      aws cloudwatch get-metric-data \
+        --metric-data-queries '[{"Id":"m1","MetricStat":{"Metric":{"Namespace":"AWS/Lambda","MetricName":"Invocations"},"Period":86400,"Stat":"Sum"},"ReturnData":true}]' \
+        --start-time $(date -d '1 day ago' -u +%Y-%m-%dT%H:%M:%SZ) \
+        --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
+        --query 'MetricDataResults[0].Values | sort(@) | reverse(@) | [0:5]' \
+        --output table 2>/dev/null || echo "Metrics query failed"
+signals:
+  critical:
+  - id: MONITORING-CRIT-001
+    signal: Production functions without error alarms
+    evidence_indicators:
+    - No CloudWatch alarm on Errors metric
+    - No alerting for function failures
+    explanation: |
+      Without error alarms, production failures go unnoticed until
+      users report issues. Proactive alerting is essential for
+      maintaining service reliability.
+    remediation: Create CloudWatch alarms for Errors metric on all production functions
+  - id: MONITORING-CRIT-002
+    signal: Log retention not configured (indefinite retention)
+    evidence_pattern: 'retentionInDays: null'
+    explanation: |
+      Indefinite log retention causes unbounded cost growth.
+      Old logs rarely provide value and should be expired.
+    remediation: Configure log retention policy (14-90 days typical)
+  high:
+  - id: MONITORING-HIGH-001
+    signal: X-Ray tracing not enabled for production functions
+    evidence_pattern: 'TracingConfig.Mode: PassThrough'
+    explanation: |
+      Without X-Ray, distributed tracing is not available for
+      debugging latency issues and understanding request flow.
+    remediation: Enable Active tracing for production functions
+  - id: MONITORING-HIGH-002
+    signal: No duration/throttle alarms for critical functions
+    evidence_indicators:
+    - No alarm on Duration metric
+    - No alarm on Throttles metric
+    explanation: |
+      Duration increases and throttling indicate performance
+      issues that should be alerted before affecting users.
+    remediation: Create alarms for Duration and Throttles metrics
+  - id: MONITORING-HIGH-003
+    signal: Lambda Insights not enabled for complex functions
+    evidence_pattern: No LambdaInsightsExtension layer
+    explanation: |
+      Lambda Insights provides enhanced metrics including memory,
+      CPU, and network utilization not available in standard metrics.
+    remediation: Enable Lambda Insights for functions needing deep visibility
+  medium:
+  - id: MONITORING-MED-001
+    signal: No custom metrics for business KPIs
+    remediation: Implement custom metrics for business-relevant measurements
+  - id: MONITORING-MED-002
+    signal: No centralized dashboard for serverless functions
+    remediation: Create CloudWatch dashboard for function overview
+  - id: MONITORING-MED-003
+    signal: Log format not structured (unstructured text)
+    remediation: Implement structured JSON logging for better analysis
+  low:
+  - id: MONITORING-LOW-001
+    signal: Alarm documentation incomplete
+    remediation: Document alarm thresholds and response procedures
+  positive:
+  - id: MONITORING-POS-001
+    signal: Comprehensive alarms for all production functions
+  - id: MONITORING-POS-002
+    signal: X-Ray tracing enabled with service maps
+  - id: MONITORING-POS-003
+    signal: Lambda Insights for enhanced visibility
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Monitoring Configuration Review
+    description: |
+      Review function monitoring configurations including
+      X-Ray, Lambda Insights, and log settings.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check tracing configuration
+      command: aws lambda list-functions --query 'Functions[].{Name:FunctionName,Tracing:TracingConfig.Mode}'
+        --output table
+    - purpose: Check log retention
+      command: aws logs describe-log-groups --log-group-name-prefix '/aws/lambda/' --query 'logGroups[].{Name:logGroupName,Retention:retentionInDays}'
+        --output table | head -30
+    expected_findings:
+    - X-Ray tracing status
+    - Log retention policies
+  - id: '2'
+    name: Alarm Coverage Assessment
+    description: |
+      Assess CloudWatch alarm coverage for Lambda functions
+      including errors, duration, and throttles.
+    duration_estimate: 45 min
+    commands:
+    - purpose: List Lambda alarms
+      command: aws cloudwatch describe-alarms --query 'MetricAlarms[?Namespace==`AWS/Lambda`].{Name:AlarmName,Metric:MetricName,Function:Dimensions[?Name==`FunctionName`].Value|[0],State:StateValue}'
+        --output table
+    - purpose: Get functions for coverage analysis
+      command: aws lambda list-functions --query 'Functions[].FunctionName' --output text
+    expected_findings:
+    - Alarm coverage per function
+    - Missing alarm types
+  - id: '3'
+    name: Metrics Analysis
+    description: |
+      Review available metrics and identify functions
+      needing additional monitoring.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Get error rates
+      command: for func in $(aws lambda list-functions --query 'Functions[].FunctionName' --output text
+        | head -10); do echo "=== $func ==="; aws cloudwatch get-metric-statistics --namespace AWS/Lambda
+        --metric-name Errors --dimensions Name=FunctionName,Value=$func --start-time $(date -d '7 days
+        ago' -u +%Y-%m-%dT%H:%M:%SZ) --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) --period 86400 --statistics
+        Sum --output table 2>/dev/null || echo 'No metrics'; done
+    expected_findings:
+    - Error rates
+    - Functions needing attention
+  - id: '4'
+    name: Dashboard Review
+    description: |
+      Review existing dashboards for serverless monitoring
+      and identify gaps.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List dashboards
+      command: aws cloudwatch list-dashboards --query 'DashboardEntries[].DashboardName' --output table
+    questions:
+    - Is there a centralized serverless dashboard?
+    - Are key metrics visible at a glance?
+    - Are SLO metrics tracked?
+    expected_findings:
+    - Dashboard coverage
+    - Visualization gaps
+  - id: '5'
+    name: Recommendations Development
+    description: |
+      Generate specific recommendations for improving
+      serverless monitoring and observability.
+    duration_estimate: 30 min
+    expected_findings:
+    - Alarm recommendations
+    - Tracing improvements
+    - Dashboard requirements
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Monitoring Configuration Review
+    - Alarm Coverage Assessment
+    - Observability Gaps
+    - Recommendations
+  confidence_guidance:
+    high: Full access to Lambda and CloudWatch configurations
+    medium: Partial access to monitoring data
+    low: Limited access
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-lambda-monitoring
+      priority: required
+    - source_id: lambda-insights
+      priority: required
+  limitations:
+  - Cannot access live metrics offline
+  - Alarm configurations require runtime access
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed monitoring analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: monitoring-001
+  item: Error alarms for production functions
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify error alarms exist for all production functions
+  expected: Confirmed by reviewer
+- id: monitoring-002
+  item: Log retention configured
+  level: CRITICAL
+  verification: aws logs describe-log-groups --log-group-name-prefix '/aws/lambda/' --query 'logGroups[?retentionInDays==`null`]'
+    --output text | grep -q . && echo FAIL || echo PASS
+  expected: PASS
+- id: monitoring-003
+  item: X-Ray tracing enabled
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify Active tracing for production functions
+  expected: Confirmed by reviewer
+- id: monitoring-004
+  item: Centralized dashboard exists
+  level: WARNING
+  verification: manual
+  verification_notes: Verify serverless monitoring dashboard
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.2
+    - CC7.3
+  - framework: SRE
+    controls:
+    - Monitoring
+    - Alerting
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.serverless.function-sizing
+  - cloud-infrastructure.serverless.cold-start-optimization
+  - observability.logging-standards

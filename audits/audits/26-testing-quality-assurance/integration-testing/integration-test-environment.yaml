@@ -1,0 +1,357 @@
+# ============================================================
+# AUDIT: Integration Test Environment
+# ============================================================
+# Evaluates the integration test environment setup and
+# infrastructure.
+# ============================================================
+
+audit:
+  id: "testing-quality-assurance.integration-testing.integration-test-environment"
+  name: "Integration Test Environment"
+  version: "1.0.0"
+  last_updated: "2026-01-22"
+  status: "active"
+
+  category: "testing-quality-assurance"
+  category_number: 26
+  subcategory: "integration-testing"
+
+  tier: "expert"
+  estimated_duration: "1-2 hours"  # median: 1h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the test environment infrastructure for integration testing
+    including Docker/container setup, test database provisioning, mock
+    service configuration, environment isolation, and cleanup procedures.
+    Verifies that the environment enables reliable and repeatable tests.
+
+  why_it_matters: |
+    Flaky integration tests often stem from environment issues, not code
+    bugs. Proper test environment setup enables reliable tests, parallel
+    execution, and fast feedback. Poor environments cause test instability,
+    slow CI pipelines, and developer frustration.
+
+  when_to_run:
+    - "CI/CD pipeline optimization"
+    - "Test reliability investigation"
+    - "New service setup"
+    - "Infrastructure changes"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Source code with test infrastructure"
+    - type: "ci_configuration"
+      description: "CI/CD pipeline configuration"
+
+  access_requirements:
+    - "Source code repository access"
+    - "CI/CD system access"
+    - "Container registry access"
+
+discovery:
+  file_patterns:
+    - glob: "**/docker-compose*.yml"
+      purpose: "Docker Compose configurations"
+    - glob: "**/testcontainers*"
+      purpose: "Testcontainers setup"
+    - glob: "**/.env.test*"
+      purpose: "Test environment variables"
+
+  code_patterns:
+    - pattern: "docker-compose|testcontainers|localstack"
+      type: "regex"
+      scope: "config"
+      purpose: "Container-based test infrastructure"
+    - pattern: "beforeAll.*start|afterAll.*stop"
+      type: "regex"
+      scope: "test"
+      purpose: "Environment lifecycle management"
+
+knowledge_sources:
+  guides:
+    - id: "testcontainers"
+      name: "Testcontainers Documentation"
+      url: "https://www.testcontainers.org/"
+      offline_cache: true
+    - id: "docker-testing"
+      name: "Docker for Testing"
+      url: "https://docs.docker.com/develop/develop-images/dockerfile_best-practices/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "container-testing"
+      title: "Container-Based Testing Strategies"
+      type: "article"
+      reference: "https://www.baeldung.com/docker-test-containers"
+
+tooling:
+  infrastructure_tools:
+    - tool: "Testcontainers"
+      purpose: "Programmatic container management"
+      offline_capable: false
+    - tool: "Docker Compose"
+      purpose: "Multi-container test environments"
+      offline_capable: false
+    - tool: "LocalStack"
+      purpose: "AWS service emulation"
+      offline_capable: true
+    - tool: "Kind"
+      purpose: "Kubernetes in Docker"
+      offline_capable: false
+
+  scripts:
+    - id: "env-analysis"
+      language: "bash"
+      purpose: "Analyze test environment setup"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Integration Test Environment Analysis ==="
+
+        echo "Docker Compose files:"
+        find . -name 'docker-compose*.yml' 2>/dev/null
+
+        echo ""
+        echo "Testcontainers usage:"
+        grep -r -c 'testcontainers\\|GenericContainer' --include='*.{js,ts,java,py}' . 2>/dev/null | awk -F: '{sum+=$2} END {print sum}'
+
+        echo ""
+        echo "Test environment variables:"
+        find . -name '.env.test*' -o -name '.env.ci*' 2>/dev/null
+
+        echo ""
+        echo "Setup/teardown in tests:"
+        grep -r -c 'beforeAll\\|afterAll\\|setUp\\|tearDown' --include='*.test.*' . 2>/dev/null | awk -F: '{sum+=$2} END {print sum}'
+
+signals:
+  critical:
+    - id: "TESTENV-CRIT-001"
+      signal: "Integration tests use shared persistent state"
+      evidence_pattern: "Tests share databases without cleanup"
+      explanation: |
+        Shared state between tests causes non-deterministic failures.
+        Tests pass individually but fail when run together. Order
+        dependency makes debugging extremely difficult.
+      remediation: |
+        Isolate test state:
+        - Use fresh containers per test/suite
+        - Implement database cleanup between tests
+        - Use unique schemas/databases per test run
+        - Ensure parallel tests don't share resources
+
+    - id: "TESTENV-CRIT-002"
+      signal: "No containerized test dependencies"
+      evidence_pattern: "Tests require manually installed services"
+      explanation: |
+        Manual dependency management causes "works on my machine"
+        issues. New developers struggle to set up environments.
+        CI environments differ from local, causing mysterious failures.
+      remediation: |
+        Containerize all dependencies:
+        - Use Docker Compose or Testcontainers
+        - Document any required local setup
+        - Provide one-command environment startup
+        - Ensure CI uses identical containers
+
+  high:
+    - id: "TESTENV-HIGH-001"
+      signal: "Test environment differs from production"
+      evidence_pattern: "Using SQLite tests when production uses PostgreSQL"
+      explanation: |
+        Environment differences hide bugs that only manifest in
+        production. SQL dialects, constraint behavior, and performance
+        characteristics vary significantly between database engines.
+      remediation: |
+        Match production environment:
+        - Use same database engine (Testcontainers)
+        - Match significant configuration
+        - Use production-like data volumes for key tests
+
+    - id: "TESTENV-HIGH-002"
+      signal: "Environment startup time excessive"
+      evidence_threshold: "Test environment takes >60 seconds to start"
+      explanation: |
+        Slow environment startup discourages running integration
+        tests locally. Developers skip tests or commit without
+        running them, reducing their value.
+      remediation: |
+        Optimize startup time:
+        - Use container images with pre-warmed state
+        - Cache container layers
+        - Parallelize independent container startup
+        - Consider reusing containers across test suites
+
+  medium:
+    - id: "TESTENV-MED-001"
+      signal: "Environment cleanup not automated"
+      evidence_pattern: "Manual steps required to reset environment"
+      remediation: "Automate cleanup in afterAll/teardown hooks"
+
+    - id: "TESTENV-MED-002"
+      signal: "Test configuration hardcoded"
+      evidence_pattern: "Hostnames and ports hardcoded in tests"
+      remediation: "Use environment variables for configuration"
+
+  low:
+    - id: "TESTENV-LOW-001"
+      signal: "Test environment documentation missing"
+      evidence_pattern: "No README for test setup"
+
+  positive:
+    - id: "TESTENV-POS-001"
+      signal: "Fully containerized test environment"
+      evidence_pattern: "All dependencies in Docker/Testcontainers"
+
+    - id: "TESTENV-POS-002"
+      signal: "One-command environment startup"
+      evidence_pattern: "docker-compose up or similar"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify test dependencies"
+      description: |
+        Map all external dependencies needed for integration tests.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find Docker Compose services"
+          command: "cat docker-compose*.yml 2>/dev/null | grep -E '^\\s+[a-z]+:$' | head -20"
+        - purpose: "Find Testcontainers usage"
+          command: "grep -r 'GenericContainer\\|PostgreSQLContainer' --include='*.{js,ts,java}' . 2>/dev/null | head -10"
+      expected_findings:
+        - "Dependency inventory"
+        - "Containerization status"
+
+    - id: "2"
+      name: "Analyze environment lifecycle"
+      description: |
+        Review how test environment is started and stopped.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find setup/teardown"
+          command: "grep -r -A5 'beforeAll\\|setUp' --include='*.test.*' . 2>/dev/null | head -40"
+      expected_findings:
+        - "Lifecycle management"
+        - "Cleanup procedures"
+
+    - id: "3"
+      name: "Verify isolation"
+      description: |
+        Check that tests are properly isolated.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find cleanup code"
+          command: "grep -r 'truncate\\|deleteAll\\|cleanup\\|reset' --include='*.test.*' . 2>/dev/null | head -20"
+      expected_findings:
+        - "Isolation mechanisms"
+        - "Shared state risks"
+
+    - id: "4"
+      name: "Assess production parity"
+      description: |
+        Compare test environment to production.
+      duration_estimate: "15 min"
+      questions:
+        - "Does test DB match production DB engine?"
+        - "Are service versions aligned?"
+        - "Is configuration similar?"
+      expected_findings:
+        - "Parity assessment"
+        - "Significant differences"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "environment_report"
+      format: "table"
+      sections:
+        - "Dependencies"
+        - "Containerization Status"
+        - "Isolation Assessment"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Environment Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full analysis with test execution"
+    medium: "Static analysis of configuration"
+    low: "Documentation review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "testcontainers"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires infrastructure analysis"
+    full:
+      included: true
+      priority: 9
+
+closeout_checklist:
+  - id: "testenv-001"
+    item: "Dependencies inventoried"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "List all test infrastructure dependencies"
+    expected: "Confirmed by reviewer"
+
+  - id: "testenv-002"
+    item: "Containerization assessed"
+    level: "BLOCKING"
+    verification: "find . -name 'docker-compose*.yml' 2>/dev/null | wc -l"
+    expected: "Count documented"
+
+  - id: "testenv-003"
+    item: "Isolation verified"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Confirm tests don't share mutable state"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Testability"]
+
+relationships:
+  commonly_combined:
+    - "testing-quality-assurance.integration-testing.integration-test-coverage"
+    - "testing-quality-assurance.test-environment.environment-parity"
+    - "testing-quality-assurance.test-effectiveness.test-flakiness"

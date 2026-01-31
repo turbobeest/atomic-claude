@@ -1,0 +1,324 @@
+# ============================================================
+# AUDIT: Zero Downtime Migration
+# ============================================================
+# Evaluates whether database migrations can be executed without
+# service interruption or performance degradation.
+# ============================================================
+
+audit:
+  id: "data-state-management.schema-evolution.zero-downtime-migration"
+
+  name: "Zero Downtime Migration"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "schema-evolution"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates whether database migrations can be executed
+    without causing service downtime or significant performance degradation.
+    It examines lock acquisition patterns, query blocking, concurrent
+    operation support, and migration execution time. The audit identifies
+    migrations that would require maintenance windows.
+
+  why_it_matters: |
+    Modern applications require high availability. Database migrations
+    that lock tables, block queries, or run for extended periods cause
+    service disruptions that impact users and business operations. Zero
+    downtime migrations enable continuous deployment without maintenance
+    windows, improving deployment frequency and reducing risk.
+
+  when_to_run:
+    - "Before deploying migrations to production"
+    - "When planning schema changes"
+    - "After migration-related outages"
+    - "When evaluating migration strategies"
+
+prerequisites:
+  required_artifacts:
+    - type: "migration-files"
+      description: "Database migrations to be evaluated"
+    - type: "table-statistics"
+      description: "Information about table sizes and access patterns"
+
+  access_requirements:
+    - "Read access to migration files"
+    - "Database statistics access"
+    - "Query execution plan access"
+
+discovery:
+  code_patterns:
+    - pattern: "CREATE INDEX(?!.*CONCURRENTLY)"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify blocking index creation"
+    - pattern: "ALTER TABLE.*ADD CONSTRAINT"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify potentially blocking constraint additions"
+    - pattern: "LOCK TABLE|EXCLUSIVE|ACCESS EXCLUSIVE"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify explicit lock acquisition"
+
+  file_patterns:
+    - glob: "**/migrations/**/*.sql"
+      purpose: "SQL migration files"
+    - glob: "**/migrations/**/*.ts"
+      purpose: "TypeScript migration files"
+
+knowledge_sources:
+  guides:
+    - id: "postgres-concurrency"
+      name: "PostgreSQL Concurrency Control"
+      url: "https://www.postgresql.org/docs/current/mvcc.html"
+      offline_cache: true
+
+    - id: "zero-downtime-postgres"
+      name: "Zero Downtime Migrations in PostgreSQL"
+      url: "https://www.citusdata.com/blog/2018/02/22/seven-tips-for-zero-downtime-migrations/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "squawk"
+      purpose: "Lint PostgreSQL migrations for zero-downtime issues"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "pg_stat_activity"
+      purpose: "Monitor active queries during migration"
+      command: "psql -c \"SELECT * FROM pg_stat_activity WHERE state = 'active';\""
+    - tool: "pg_locks"
+      purpose: "Monitor lock acquisition"
+      command: "psql -c \"SELECT * FROM pg_locks WHERE granted = false;\""
+
+signals:
+  critical:
+    - id: "ZDMIG-CRIT-001"
+      signal: "CREATE INDEX without CONCURRENTLY on large tables"
+      evidence_pattern: "CREATE INDEX|CREATE UNIQUE INDEX without CONCURRENTLY"
+      explanation: |
+        Creating indexes without CONCURRENTLY acquires an ACCESS EXCLUSIVE
+        lock that blocks all reads and writes on the table. On large tables,
+        this can cause minutes or hours of downtime.
+      remediation: "Use CREATE INDEX CONCURRENTLY for all index creation on production tables"
+
+    - id: "ZDMIG-CRIT-002"
+      signal: "ALTER TABLE operations on high-traffic tables"
+      evidence_pattern: "ALTER TABLE on tables with >1M rows or high write rate"
+      explanation: |
+        Many ALTER TABLE operations acquire locks that block writes or
+        require full table rewrites. On high-traffic tables, this causes
+        query timeouts, connection pool exhaustion, and cascading failures.
+      remediation: "Use online schema change tools (pt-osc, gh-ost) or split into multiple safe operations"
+
+  high:
+    - id: "ZDMIG-HIGH-001"
+      signal: "Adding NOT NULL constraint without default on populated table"
+      evidence_pattern: "ALTER TABLE ADD COLUMN.*NOT NULL on existing table"
+      explanation: |
+        Adding a NOT NULL column without default requires PostgreSQL to
+        rewrite the entire table to add the column with a value. This
+        locks the table and causes downtime proportional to table size.
+      remediation: "Add nullable column first, backfill data, then add NOT NULL constraint"
+
+    - id: "ZDMIG-HIGH-002"
+      signal: "DROP INDEX without CONCURRENTLY"
+      evidence_pattern: "DROP INDEX without CONCURRENTLY"
+      explanation: |
+        Dropping indexes without CONCURRENTLY can block queries that
+        depend on the index being dropped. While faster than creation,
+        it still acquires locks that can cause brief disruptions.
+      remediation: "Use DROP INDEX CONCURRENTLY for zero-downtime index removal"
+
+  medium:
+    - id: "ZDMIG-MED-001"
+      signal: "Long-running data migrations without batching"
+      evidence_pattern: "UPDATE or INSERT affecting all rows without LIMIT"
+      remediation: "Batch data migrations into smaller chunks with commits between batches"
+
+    - id: "ZDMIG-MED-002"
+      signal: "Adding foreign key constraints on populated tables"
+      evidence_pattern: "ADD CONSTRAINT FOREIGN KEY on tables with data"
+      remediation: "Add constraint with NOT VALID first, then VALIDATE separately"
+
+  low:
+    - id: "ZDMIG-LOW-001"
+      signal: "Multiple schema changes in single transaction"
+
+  positive:
+    - id: "ZDMIG-POS-001"
+      signal: "CONCURRENTLY used for all index operations"
+    - id: "ZDMIG-POS-002"
+      signal: "Batched data migrations with appropriate chunk sizes"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Lock Analysis"
+      description: |
+        Identify operations that acquire heavy locks that
+        would block application queries.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find index operations"
+          command: "grep -riE 'CREATE (UNIQUE )?INDEX|DROP INDEX' --include='*.sql' -path '*/migrations/*' . 2>/dev/null | head -30"
+        - purpose: "Check for CONCURRENTLY usage"
+          command: "grep -riE 'CONCURRENTLY' --include='*.sql' -path '*/migrations/*' . 2>/dev/null | head -30"
+        - purpose: "Find ALTER TABLE operations"
+          command: "grep -riE 'ALTER TABLE' --include='*.sql' -path '*/migrations/*' . 2>/dev/null | head -40"
+
+      expected_findings:
+        - "Lock-acquiring operations"
+        - "CONCURRENTLY usage patterns"
+
+    - id: "2"
+      name: "Table Rewrite Analysis"
+      description: |
+        Identify operations that cause full table rewrites,
+        which block access for extended periods.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find type changes"
+          command: "grep -riE 'ALTER.*TYPE|USING|ALTER COLUMN.*SET DATA TYPE' --include='*.sql' -path '*/migrations/*' . 2>/dev/null | head -20"
+        - purpose: "Find NOT NULL additions"
+          command: "grep -riE 'SET NOT NULL|ADD.*NOT NULL(?!.*DEFAULT)' --include='*.sql' -path '*/migrations/*' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Table-rewriting operations"
+        - "Potential downtime duration"
+
+    - id: "3"
+      name: "Constraint Analysis"
+      description: |
+        Evaluate constraint additions for blocking behavior
+        and validation strategies.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find constraint additions"
+          command: "grep -riE 'ADD CONSTRAINT|ADD FOREIGN KEY|ADD CHECK' --include='*.sql' -path '*/migrations/*' . 2>/dev/null | head -30"
+        - purpose: "Check for NOT VALID pattern"
+          command: "grep -riE 'NOT VALID|VALIDATE CONSTRAINT' --include='*.sql' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Constraint addition patterns"
+        - "Validation strategy usage"
+
+    - id: "4"
+      name: "Data Migration Analysis"
+      description: |
+        Evaluate data migrations for batching and execution
+        time management.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find bulk data operations"
+          command: "grep -riE 'UPDATE.*SET|INSERT INTO.*SELECT|DELETE FROM' --include='*.sql' -path '*/migrations/*' . 2>/dev/null | head -40"
+        - purpose: "Check for batching patterns"
+          command: "grep -riE 'LIMIT|OFFSET|batch|chunk' --include='*.sql' --include='*.ts' --include='*.py' -path '*/migrations/*' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Data migration volume"
+        - "Batching strategy usage"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Lock Analysis"
+        - "Downtime Risk Assessment"
+        - "Migration Timing Estimates"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear blocking operations without mitigation"
+    medium: "Potentially blocking depending on table size"
+    low: "Unlikely to cause downtime but should be verified"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "postgres-concurrency"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed lock and timing analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "zdmig-001"
+    item: "All index operations use CONCURRENTLY"
+    level: "CRITICAL"
+    verification: "grep -riE 'CREATE INDEX|DROP INDEX' --include='*.sql' -path '*/migrations/*' . 2>/dev/null | grep -v CONCURRENTLY | wc -l | xargs -I{} test {} -eq 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "zdmig-002"
+    item: "Table-rewriting operations identified and planned"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify table rewrites have downtime plan"
+    expected: "Confirmed by reviewer"
+
+  - id: "zdmig-003"
+    item: "Data migrations use batching for large tables"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify large data migrations are batched"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Availability SLA"
+      controls: ["AVAIL-001", "AVAIL-002"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.schema-evolution.migration-safety"
+    - "data-state-management.schema-evolution.backward-compatible-schema-change"

@@ -1,0 +1,526 @@
+audit:
+  id: security-trust.data-protection.data-masking
+  name: Data Masking Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: data-protection
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the implementation of data masking, tokenization, and
+    pseudonymization techniques used to protect sensitive data. It evaluates:
+    - Masking techniques for non-production environments (dev, test, staging)
+    - Tokenization implementations for payment and PII data
+    - Pseudonymization methods per GDPR Article 4(5) requirements
+    - Format-preserving encryption (FPE) implementations
+    - Data subsetting and synthetic data generation
+    - Consistency of masking across related datasets
+  why_it_matters: |
+    Data masking is essential for:
+    - Protecting sensitive data in non-production environments where security
+      controls are typically weaker
+    - Enabling development and testing with realistic data without exposing
+      actual customer information
+    - Achieving GDPR compliance through pseudonymization (Article 25, 32)
+    - Meeting PCI-DSS requirements for protecting cardholder data
+    - Reducing breach impact by limiting real data exposure
+
+    According to NIST SP 1800-28B, data confidentiality techniques including
+    masking and tokenization are critical for protecting data at rest.
+    Organizations that fail to mask production data before use in non-production
+    environments create significant breach risk.
+  when_to_run:
+  - Before deploying to non-production environments
+  - During data pipeline security reviews
+  - When implementing new data masking solutions
+  - During PCI-DSS or GDPR compliance audits
+  - After database refresh to non-production
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Source code including ETL pipelines and data transformation logic
+  - type: database_configs
+    description: Database configurations for all environments
+  - type: masking_policies
+    description: Data masking policy documentation
+  access_requirements:
+  - Read access to all source code repositories
+  - Access to ETL/data pipeline configurations
+  - Access to masking tool configurations
+  - Access to non-production database samples
+discovery:
+  code_patterns:
+  - pattern: (mask|obfuscate|redact|anonymize|pseudonymize)\s*\(
+    type: regex
+    scope: source
+    purpose: Detect masking function calls
+  - pattern: (tokenize|detokenize|token_?vault)\s*\(
+    type: regex
+    scope: source
+    purpose: Detect tokenization implementations
+  - pattern: (fpe|format_?preserving|ff1|ff3)
+    type: regex
+    scope: source
+    purpose: Detect format-preserving encryption
+  - pattern: (transform|sanitize|scrub).*?(pii|ssn|email|credit)
+    type: regex
+    scope: source
+    purpose: Detect PII transformation in pipelines
+  - pattern: (faker|synthetic|generate).*?(data|record|user)
+    type: regex
+    scope: source
+    purpose: Detect synthetic data generation
+  - pattern: (dev|test|staging|uat).*SELECT.*FROM.*(user|customer|patient)
+    type: regex
+    scope: config
+    purpose: Detect potential unmasked queries in non-prod configs
+  - pattern: (pg_dump|mysqldump|mongodump).*--host.*(prod|production)
+    type: regex
+    scope: config
+    purpose: Detect direct production database dumps
+  file_patterns:
+  - glob: '**/masking/**/*.{py,js,sql,yaml}'
+    purpose: Masking implementation files
+  - glob: '**/etl/**/*.{py,sql,yaml}'
+    purpose: ETL pipeline configurations
+  - glob: '**/data-pipeline/**/*'
+    purpose: Data pipeline code and configs
+  - glob: '**/*anonymiz*.{py,js,ts,yaml}'
+    purpose: Anonymization scripts
+  - glob: '**/fixtures/**/*.{json,yaml,sql}'
+    purpose: Test data fixtures that may contain sensitive data
+knowledge_sources:
+  specifications:
+  - id: gdpr-article-4-5
+    name: 'GDPR Article 4(5): Pseudonymization Definition'
+    url: https://gdpr-info.eu/art-4-gdpr/
+    offline_cache: true
+    priority: required
+  - id: nist-sp-1800-28
+    name: 'NIST SP 1800-28: Data Confidentiality'
+    url: https://www.nccoe.nist.gov/projects/data-confidentiality
+    offline_cache: true
+    priority: required
+  - id: pci-dss-req-3
+    name: 'PCI-DSS Requirement 3: Protect Stored Cardholder Data'
+    url: https://www.pcisecuritystandards.org
+    offline_cache: true
+    priority: required
+  - id: nist-fips-140-3
+    name: 'NIST FIPS 140-3: Cryptographic Module Validation'
+    url: https://csrc.nist.gov/publications/detail/fips/140/3/final
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: owasp-testing-data
+    name: 'OWASP Testing Guide: Test Data Protection'
+    url: https://owasp.org/www-project-web-security-testing-guide/
+    offline_cache: true
+  - id: nist-de-identification
+    name: NIST De-Identification of Personal Information
+    url: https://nvlpubs.nist.gov/nistpubs/ir/2015/NIST.IR.8053.pdf
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect unmasked PII in code and configs
+    offline_capable: true
+  - tool: custom-masking-validator
+    purpose: Validate masking rule coverage
+    offline_capable: true
+  infrastructure_tools:
+  - tool: delphix
+    purpose: Data masking and virtualization
+    command: delphix masking job status
+  - tool: informatica-data-masking
+    purpose: Enterprise data masking solution
+    command: infacmd mas listMaskingJobs
+  - tool: aws-dms
+    purpose: Data migration with transformation
+    command: aws dms describe-replication-tasks
+  scripts:
+  - id: masking-coverage-scanner
+    language: bash
+    purpose: Scan for masking implementations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Data Masking Coverage Scan ==="
+      echo "Masking implementations found:"
+      grep -rniE "(mask|tokenize|pseudonymize|anonymize)" \
+        --include="*.py" --include="*.js" --include="*.sql" . 2>/dev/null | head -50
+signals:
+  critical:
+  - id: DMASK-CRIT-001
+    signal: Production data copied directly to non-production without masking
+    evidence_pattern: (pg_dump|mysqldump|mongodump).*(prod|production).*>(dev|test|staging)
+    explanation: |
+      Direct copying of production databases to non-production environments
+      without masking exposes all sensitive data to environments with weaker
+      security controls. Non-production environments typically have broader
+      access, weaker authentication, and less monitoring.
+    remediation: |
+      - Implement mandatory masking pipeline for all production data transfers
+      - Use data virtualization with just-in-time masking
+      - Create dedicated masked snapshots for non-production refresh
+      - Block direct database dumps from production to non-production
+    cwe: CWE-312
+  - id: DMASK-CRIT-002
+    signal: Reversible pseudonymization keys stored with masked data
+    evidence_pattern: (token_?key|mask_?key|pseudo_?key).*(same|alongside|with).*data
+    explanation: |
+      GDPR Article 4(5) requires that pseudonymization keys be kept separately
+      from the pseudonymized data. Storing reversal keys alongside masked data
+      defeats the purpose of pseudonymization - if the database is breached,
+      attackers can reverse the masking.
+    remediation: |
+      - Store pseudonymization keys in separate, secured key management systems
+      - Implement strict access controls on key stores
+      - Use different key storage for different environments
+      - Consider irreversible masking where reversal is not needed
+    cwe: CWE-522
+  - id: DMASK-CRIT-003
+    signal: Payment card data not tokenized per PCI-DSS
+    evidence_pattern: (credit_?card|card_?number|pan)(?!.*(token|mask|encrypt))
+    explanation: |
+      PCI-DSS requires that stored cardholder data be protected. Tokenization
+      is the preferred method as it removes actual card numbers from systems.
+      Untokenized card data creates PCI scope expansion and breach liability.
+    remediation: |
+      - Implement tokenization through payment processor or token vault
+      - Replace stored card numbers with tokens
+      - Ensure tokens are not reversible without secure vault access
+      - Reduce PCI scope by eliminating card number storage
+    cwe: CWE-311
+  high:
+  - id: DMASK-HIGH-001
+    signal: Masking rules inconsistent across related tables
+    evidence_indicators:
+    - Foreign key relationships not preserved after masking
+    - Same value masked differently in different tables
+    - Join keys broken by inconsistent masking
+    explanation: |
+      When masking related data (e.g., user_id in users and orders tables),
+      the same original value must map to the same masked value. Inconsistent
+      masking breaks referential integrity and renders test data unusable
+      for realistic testing.
+    remediation: |
+      - Use deterministic masking for foreign keys and join columns
+      - Implement masking reference tables for consistency
+      - Test masked data for referential integrity
+      - Document which fields require consistent masking
+    cwe: CWE-922
+  - id: DMASK-HIGH-002
+    signal: Weak masking algorithm used for sensitive data
+    evidence_pattern: (shuffle|random_?replace|simple_?mask).*?(ssn|credit|password)
+    explanation: |
+      Simple masking techniques like character shuffling or random replacement
+      may be reversible through statistical analysis, especially for patterned
+      data like SSNs or credit cards. Strong cryptographic masking should be
+      used for highly sensitive data.
+    remediation: |
+      - Use NIST-approved format-preserving encryption (FF1, FF3-1)
+      - Implement proper tokenization with secure vaults
+      - Avoid reversible transformations for production data
+      - Use irreversible hashing where original values aren't needed
+    cwe: CWE-327
+  - id: DMASK-HIGH-003
+    signal: No masking applied to backup data
+    evidence_indicators:
+    - Backups contain unmasked production data
+    - Backup restoration to non-prod without masking step
+    - Archive data not included in masking scope
+    explanation: |
+      Backup data often receives less protection than live databases but
+      contains the same sensitive information. Restoring unmasked backups
+      to non-production environments creates the same exposure as copying
+      live production data.
+    remediation: |
+      - Include backup data in masking policies
+      - Mask data before archival where possible
+      - Implement masking step in restore procedures for non-prod
+      - Maintain separate masked backup sets for non-production
+  medium:
+  - id: DMASK-MED-001
+    signal: Test data fixtures contain realistic PII patterns
+    evidence_pattern: (test|fixture|seed).*\.(json|yaml|sql).*(@gmail|@yahoo|555-|123-45)
+    explanation: |
+      Test fixtures with realistic-looking PII (even if fake) can create
+      confusion about data sensitivity and may accidentally contain real
+      data if not carefully managed. Use obviously synthetic data.
+    remediation: |
+      - Use obviously fake data (test@example.com, 000-00-0000)
+      - Implement data generators with clearly synthetic outputs
+      - Review fixtures regularly for accidental real data
+      - Document that fixture data is synthetic
+    cwe: CWE-200
+  - id: DMASK-MED-002
+    signal: Masking not applied to all PII fields
+    evidence_indicators:
+    - Name masked but email not masked
+    - Primary identifiers masked but secondary not
+    - Gaps in masking coverage across schemas
+    explanation: |
+      Partial masking leaves re-identification risk. If names are masked
+      but emails are not, records can still be linked to individuals.
+      GDPR pseudonymization requires that all identifying fields be
+      protected consistently.
+    remediation: |
+      - Inventory all PII fields across all tables
+      - Ensure masking rules cover all identifying fields
+      - Include quasi-identifiers in masking scope
+      - Validate masking coverage before refresh
+  - id: DMASK-MED-003
+    signal: No validation of masking effectiveness
+    evidence_indicators:
+    - No automated tests for masking rules
+    - No masking verification in pipeline
+    - Manual masking without validation step
+    explanation: |
+      Masking rules can fail silently or become outdated as schemas change.
+      Without validation, organizations may believe data is masked when
+      it is not, creating false confidence.
+    remediation: |
+      - Implement automated masking validation tests
+      - Add data quality checks after masking operations
+      - Create alerting for masking job failures
+      - Periodically audit non-production data for unmasked values
+  low:
+  - id: DMASK-LOW-001
+    signal: Masking reduces data utility unnecessarily
+    evidence_indicators:
+    - Over-aggressive masking breaking valid test scenarios
+    - Format-destroying masking where format-preserving would work
+    - Masking applied where synthetic data would suffice
+    explanation: |
+      Overly aggressive masking can make test data unusable for realistic
+      testing. The goal is to balance protection with data utility.
+    remediation: |
+      - Use format-preserving masking where format matters for testing
+      - Consider synthetic data generation for some use cases
+      - Document masking rationale and utility trade-offs
+  positive:
+  - id: DMASK-POS-001
+    signal: Comprehensive masking pipeline implemented
+    evidence_indicators:
+    - Automated masking in data refresh pipeline
+    - Masking rules for all identified PII
+    - Validation steps after masking operations
+  - id: DMASK-POS-002
+    signal: Tokenization properly implemented for payment data
+    evidence_indicators:
+    - Token vault integration with proper key management
+    - Original card numbers not stored in application databases
+    - Secure token-to-PAN mapping process
+  - id: DMASK-POS-003
+    signal: Synthetic data used for development
+    evidence_indicators:
+    - Data generators produce realistic but fake data
+    - No production data in development environments
+    - Synthetic data documented as artificial
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Masking Implementation Discovery
+    description: |
+      Identify all masking, tokenization, and pseudonymization
+      implementations in the codebase and infrastructure.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find masking functions and utilities
+      command: |
+        grep -rniE "(mask|tokenize|pseudonymize|anonymize|obfuscate)" \
+          --include="*.py" --include="*.js" --include="*.sql" \
+          --include="*.yaml" . 2>/dev/null | head -50
+    - purpose: Find data pipeline configurations
+      command: |
+        find . -type f \( -name "*etl*" -o -name "*pipeline*" \
+          -o -name "*transform*" \) 2>/dev/null | head -20
+    expected_findings:
+    - Masking utility implementations
+    - Data pipeline configurations
+    - Tokenization integrations
+  - id: '2'
+    name: Masking Coverage Assessment
+    description: |
+      Verify that masking rules cover all sensitive data types
+      and maintain referential integrity.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find PII fields that may need masking
+      command: |
+        grep -rniE "(email|ssn|phone|credit|birth|address|salary)" \
+          --include="*.sql" --include="*.prisma" . 2>/dev/null | head -50
+    - purpose: Check for masking rule definitions
+      command: |
+        find . -type f \( -name "*mask*" -o -name "*anonymiz*" \) \
+          -exec grep -l -iE "rule|policy|config" {} \; 2>/dev/null
+    expected_findings:
+    - PII fields requiring masking
+    - Masking rule configurations
+    - Coverage gaps
+  - id: '3'
+    name: Non-Production Environment Check
+    description: |
+      Verify that non-production environments receive only
+      masked data and that masking is enforced.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find environment-specific configurations
+      command: |
+        find . -type f \( -name "*.env*" -o -name "*config*" \) \
+          -exec grep -l -iE "dev|test|staging|uat" {} \; 2>/dev/null | head -20
+    - purpose: Check for database refresh scripts
+      command: |
+        grep -rniE "(pg_dump|mysqldump|restore|refresh)" \
+          --include="*.sh" --include="*.yaml" . 2>/dev/null | head -30
+    expected_findings:
+    - Environment configurations
+    - Database refresh procedures
+    - Masking enforcement in pipelines
+  - id: '4'
+    name: Key Management Assessment
+    description: |
+      Verify that tokenization and pseudonymization keys are
+      properly managed and stored separately from data.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find key management configurations
+      command: |
+        grep -rniE "(kms|vault|key_?store|secret)" \
+          --include="*.yaml" --include="*.json" --include="*.tf" . 2>/dev/null | head -30
+    - purpose: Check for key references in masking code
+      command: |
+        grep -rniE "(token_?key|encryption_?key|mask_?key)" \
+          --include="*.py" --include="*.js" . 2>/dev/null | head -20
+    expected_findings:
+    - Key management system integrations
+    - Key storage locations
+    - Key rotation configurations
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Masking Implementation Assessment
+    - Coverage Analysis
+    - Non-Production Data Flows
+    - Recommendations
+  - type: masking_coverage_matrix
+    format: table
+    description: Mapping of sensitive fields to masking rules
+  confidence_guidance:
+    high: Masking implementation directly observed and verified
+    medium: Masking configuration found but effectiveness not verified
+    low: Masking status unclear, requires manual verification
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: gdpr-article-4-5
+      priority: required
+    - source_id: nist-sp-1800-28
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Masking audit requires thorough analysis
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: dmask-001
+  item: No unmasked production data in non-production environments
+  level: CRITICAL
+  verification: |
+    grep -rniE "(pg_dump|mysqldump).*(prod|production).*>.*dev|test|staging" \
+      --include="*.sh" --include="*.yaml" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -eq 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: dmask-002
+  item: Masking rules defined for all PII fields
+  level: CRITICAL
+  verification: |
+    find . -type f \( -name "*mask*" -o -name "*anonymiz*" \) \
+      -exec grep -l -iE "email|ssn|credit|phone" {} \; 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: dmask-003
+  item: Tokenization implemented for payment card data
+  level: CRITICAL
+  verification: |
+    grep -rniE "(token|tokenize).*card|credit" \
+      --include="*.py" --include="*.js" --include="*.yaml" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: dmask-004
+  item: Masking keys stored separately from masked data
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify that token/pseudonymization keys are in separate key management system
+  expected: Confirmed by reviewer
+- id: dmask-005
+  item: Masking validation tests exist
+  level: WARNING
+  verification: |
+    find . -type f -name "*test*" -exec grep -l -iE "mask|anonymize" {} \; 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: GDPR
+    controls:
+    - Article 4(5)
+    - Article 25
+    - Article 32
+  - framework: PCI-DSS
+    controls:
+    - '3.4'
+    - '3.5'
+    - '3.6'
+  - framework: HIPAA
+    controls:
+    - '164.514'
+  - framework: NIST 800-53
+    controls:
+    - SC-28
+    - MP-6
+  - framework: ISO 27001
+    controls:
+    - A.8.2.3
+    - A.8.3.1
+relationships:
+  commonly_combined:
+  - security-trust.data-protection.pii-handling
+  - security-trust.data-protection.data-classification
+  - security-trust.cryptography.encryption-at-rest
+  - security-trust.secrets-management.key-management

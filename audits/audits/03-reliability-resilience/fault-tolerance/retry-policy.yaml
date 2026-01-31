@@ -1,0 +1,369 @@
+audit:
+  id: reliability-resilience.fault-tolerance.retry-policy
+  name: Retry Policy Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: fault-tolerance
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: configuration
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates retry policies across the system for handling
+    transient failures. It examines retry counts, backoff strategies
+    (exponential, jitter), retry conditions, timeout interactions, and
+    idempotency requirements. The audit verifies retries are configured
+    appropriately to recover from transient failures without causing
+    retry storms or amplifying problems.
+  why_it_matters: |
+    Retries enable recovery from transient failures (network blips, temporary
+    overload) but can cause catastrophic failure if misconfigured. Aggressive
+    retries during outages create retry storms that multiply load and prevent
+    recovery. Missing retries cause unnecessary failures for recoverable errors.
+    Proper backoff with jitter prevents thundering herd. Retry policy is a
+    critical balance between resilience and system stability.
+  when_to_run:
+  - During architecture design reviews
+  - When adding external dependencies
+  - After retry-related incidents
+  - Quarterly reliability assessments
+prerequisites:
+  required_artifacts:
+  - type: source-code
+    description: Application source code for retry analysis
+  - type: configuration
+    description: Retry policy configurations
+  access_requirements:
+  - Read access to application source code
+  - Access to HTTP client configurations
+  - Access to messaging system configurations
+  - Access to service mesh configurations
+discovery:
+  code_patterns:
+  - pattern: '@Retry|RetryConfig|retry|Retry'
+    type: regex
+    scope: source
+    purpose: Retry annotations and configurations
+  - pattern: maxRetries|max_retries|retryAttempts|retry_attempts
+    type: regex
+    scope: config
+    purpose: Retry count configurations
+  - pattern: backoff|Backoff|exponential|jitter
+    type: regex
+    scope: config
+    purpose: Backoff strategy configurations
+  - pattern: retryOn|retry_on|retryableExceptions|retriable
+    type: regex
+    scope: source
+    purpose: Retryable condition definitions
+  - pattern: RetryTemplate|Retryer|retry.*policy
+    type: regex
+    scope: source
+    purpose: Retry implementation patterns
+  file_patterns:
+  - glob: '**/src/**/*.{java,go,py,ts,js}'
+    purpose: Application source code
+  - glob: '**/config/**/*.{yaml,json,properties}'
+    purpose: Retry configurations
+  - glob: '**/istio/**/*.yaml'
+    purpose: Service mesh retry policies
+  metrics_queries:
+  - system: Prometheus
+    query: http_client_requests_total{status='retry'}
+    purpose: Retry frequency
+  - system: Prometheus
+    query: retry_attempts_total
+    purpose: Total retry attempts by service
+knowledge_sources:
+  specifications:
+  - id: resilience4j-retry
+    name: Resilience4j Retry Guide
+    url: https://resilience4j.readme.io/docs/retry
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-retry
+    name: AWS SDK Retry Behavior
+    url: https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html
+    offline_cache: true
+  - id: gcp-retry
+    name: Google Cloud Retry Strategy
+    url: https://cloud.google.com/storage/docs/retry-strategy
+    offline_cache: true
+  - id: istio-retry
+    name: Istio Retry Policy
+    url: https://istio.io/latest/docs/concepts/traffic-management/#retries
+    offline_cache: true
+  - id: release-it
+    name: Michael Nygard - Release It!
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+    offline_cache: true
+  - id: sre-book
+    name: Site Reliability Engineering
+    url: https://sre.google/sre-book/table-of-contents/
+    offline_cache: true
+  learning_resources:
+  - id: release-it
+    title: Release It! Second Edition
+    type: book
+    reference: 'ISBN 978-1680502398 - Chapter 5: Retries'
+tooling:
+  static_analysis:
+  - tool: code-analysis
+    purpose: Find retry patterns in code
+    offline_capable: true
+  infrastructure_tools:
+  - tool: kubectl
+    purpose: Check Istio retry policies
+    command: 'kubectl get virtualservices -A -o json | jq ''.items[] | {name: .metadata.name, retries:
+      .spec.http[].retries}'''
+  monitoring_queries:
+  - system: Prometheus
+    query: |
+      rate(http_client_requests_total{status="retry"}[5m])
+    purpose: Retry rate by service
+  - system: Prometheus
+    query: |
+      histogram_quantile(0.95, rate(retry_duration_seconds_bucket[5m]))
+    purpose: Retry duration distribution
+signals:
+  critical:
+  - id: RTRY-CRIT-001
+    signal: Retries without backoff cause retry storm
+    evidence_pattern: retry.*immediate|backoff.*0|no.*delay
+    explanation: |
+      Immediate retries without backoff cause all clients to retry
+      simultaneously when a service fails. This multiplies load and
+      prevents recovery. Every retry must include backoff delay,
+      preferably exponential with jitter.
+    remediation: Implement exponential backoff with jitter for all retry policies
+  - id: RTRY-CRIT-002
+    signal: Non-idempotent operation retried
+    evidence_pattern: POST.*retry|create.*retry|payment.*retry
+    explanation: |
+      Retrying non-idempotent operations causes duplicate side effects:
+      double payments, duplicate orders, multiple notifications. Only
+      idempotent operations (GET, idempotent PUT with idempotency key)
+      should be retried.
+    remediation: Ensure operations are idempotent before enabling retries, or use idempotency keys
+  high:
+  - id: RTRY-HIGH-001
+    signal: Excessive retry count amplifies failures
+    evidence_pattern: maxRetries.*10|retry.*attempts.*unlimited
+    explanation: |
+      High retry counts amplify load during outages. If 10 clients each
+      retry 10 times, load increases 100x. Typical configurations use
+      3-5 retries maximum. Infinite retries should never be used.
+    remediation: Configure maximum 3-5 retries with circuit breaker integration
+  - id: RTRY-HIGH-002
+    signal: No jitter in backoff causes thundering herd
+    evidence_pattern: backoff.*exponential.*no.*jitter|fixedDelay
+    explanation: |
+      Exponential backoff without jitter synchronizes retry timing.
+      All clients retry at exactly 1s, 2s, 4s creating load spikes.
+      Adding random jitter (typically 0-100% of delay) spreads retries.
+    remediation: Add jitter to all backoff configurations (typically full or decorrelated jitter)
+  - id: RTRY-HIGH-003
+    signal: Retrying on non-transient errors
+    evidence_pattern: retry.*all.*exceptions|retryOn.*400|retryOn.*404
+    explanation: |
+      Retrying on 4xx client errors (400, 401, 404) is pointless and
+      wastes resources. Only transient errors (503, 429, timeout, network
+      errors) should trigger retries. 500 errors may or may not be transient.
+    remediation: Configure retry conditions to only include transient errors (5xx, timeout, network)
+  medium:
+  - id: RTRY-MED-001
+    signal: Retry timeout exceeds overall request timeout
+    explanation: |
+      If sum of retry delays exceeds the caller's timeout, retries are
+      wasted. Retry policy should complete within the overall timeout
+      budget.
+    remediation: Ensure retry timing fits within overall request timeout budget
+  - id: RTRY-MED-002
+    signal: No retry budget limiting total retry attempts
+    explanation: |
+      Retry budgets limit the percentage of requests that are retries
+      (typically 20%). This prevents retry amplification during
+      widespread failures while allowing retries for isolated issues.
+    remediation: Implement retry budgets (e.g., max 20% of requests can be retries)
+  - id: RTRY-MED-003
+    signal: Retry metrics not tracked
+    explanation: |
+      Tracking retry rates helps identify degraded dependencies and
+      tune configurations. High retry rates indicate issues needing
+      investigation.
+    remediation: Implement metrics for retry attempts and success rates
+  low:
+  - id: RTRY-LOW-001
+    signal: Retry configurations not documented
+    explanation: |
+      Documenting retry rationale aids troubleshooting and prevents
+      inappropriate changes.
+  positive:
+  - id: RTRY-POS-001
+    signal: Exponential backoff with jitter configured
+  - id: RTRY-POS-002
+    signal: Retry limited to idempotent operations
+  - id: RTRY-POS-003
+    signal: Retry budget implemented
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory retry configurations
+    description: |
+      Catalog all retry policies across the system including counts,
+      backoff strategies, and conditions.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find retry configurations
+      command: |
+        grep -r "retry\|Retry\|maxRetries\|retryAttempts" --include="*.java" --include="*.yaml" --include="*.properties" src/ config/
+    - purpose: Find backoff configurations
+      command: |
+        grep -r "backoff\|Backoff\|exponential\|jitter" --include="*.yaml" --include="*.properties" config/
+    expected_findings:
+    - Retry configuration inventory
+    - Missing retry configurations
+  - id: '2'
+    name: Verify backoff strategies
+    description: |
+      Check that all retries use appropriate backoff with jitter.
+    duration_estimate: 20 min
+    questions:
+    - What backoff strategy is used?
+    - Is jitter included?
+    - What are the delay values?
+    expected_findings:
+    - Backoff strategy assessment
+    - Missing jitter issues
+  - id: '3'
+    name: Assess retry conditions
+    description: |
+      Review which errors trigger retries and verify only transient
+      errors are retried.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find retry conditions
+      command: |
+        grep -r "retryOn\|retryableExceptions\|retriable" --include="*.java" --include="*.yaml" src/ config/
+    questions:
+    - Which exceptions/errors trigger retries?
+    - Are 4xx errors excluded?
+    - Are non-transient errors retried?
+    expected_findings:
+    - Retry condition appropriateness
+    - Non-transient retry issues
+  - id: '4'
+    name: Verify idempotency requirements
+    description: |
+      Confirm that operations being retried are idempotent or
+      protected by idempotency keys.
+    duration_estimate: 25 min
+    questions:
+    - Which operations are retried?
+    - Are these operations idempotent?
+    - Are idempotency keys used for non-idempotent operations?
+    expected_findings:
+    - Idempotency assessment
+    - Unsafe retry patterns
+  - id: '5'
+    name: Review retry metrics and limits
+    description: |
+      Check that retry metrics are tracked and retry budgets
+      are implemented.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Check retry metrics
+      command: |
+        curl -s 'http://prometheus:9090/api/v1/label/__name__/values' | jq '.data[] | select(contains("retry"))'
+    expected_findings:
+    - Retry metrics availability
+    - Retry budget status
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Retry Configuration Inventory
+    - Backoff Strategy Analysis
+    - Idempotency Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Configuration review with retry metrics analysis
+    medium: Configuration review only
+    low: Partial configuration review
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: resilience4j-retry
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: rtry-001
+  item: All retries use exponential backoff with jitter
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify backoff and jitter configuration for all retry policies
+  expected: Confirmed by reviewer
+- id: rtry-002
+  item: Only idempotent operations are retried
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify POST/create operations have idempotency protection
+  expected: Confirmed by reviewer
+- id: rtry-003
+  item: Retry conditions exclude non-transient errors
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify 4xx errors are not retried
+  expected: Confirmed by reviewer
+- id: rtry-004
+  item: Maximum retry count is 5 or less
+  level: WARNING
+  verification: manual
+  verification_notes: Verify maxRetries <= 5 for all policies
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC7.1
+relationships:
+  commonly_combined:
+  - reliability-resilience.fault-tolerance.idempotency
+  - reliability-resilience.fault-tolerance.circuit-breaker
+  - reliability-resilience.fault-tolerance.timeout-configuration

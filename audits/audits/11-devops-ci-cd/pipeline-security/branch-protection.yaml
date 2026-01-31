@@ -1,0 +1,358 @@
+# ============================================================
+# AUDIT FILE: Branch Protection
+# ============================================================
+# Evaluates branch protection rules and policies for securing
+# code changes and preventing unauthorized modifications.
+# ============================================================
+
+audit:
+  id: "devops-ci-cd.pipeline-security.branch-protection"
+  name: "Branch Protection Assessment"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "pipeline-security"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "security"
+
+  default_profiles:
+    - "full"
+    - "security"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines branch protection rules for critical branches
+    including required reviews, status checks, force push prevention,
+    and linear history requirements. It evaluates whether code changes
+    are properly controlled before reaching production.
+
+  why_it_matters: |
+    Unprotected branches allow direct commits that bypass code review,
+    enable force pushes that rewrite history, and permit merges without
+    passing required checks. Branch protection is fundamental to secure
+    software development.
+
+  when_to_run:
+    - "When establishing repository security"
+    - "After unauthorized code changes"
+    - "During security audits"
+    - "Quarterly access reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "repository_config"
+      description: "Repository settings and protection rules"
+
+  access_requirements:
+    - "Read access to repository settings"
+    - "Access to branch protection configurations"
+
+discovery:
+  file_patterns:
+    - glob: "**/CODEOWNERS"
+      purpose: "Code ownership definitions"
+    - glob: "**/.github/branch-protection*"
+      purpose: "Branch protection configurations"
+    - glob: "**/ruleset*"
+      purpose: "Repository ruleset files"
+
+  code_patterns:
+    - pattern: "required.*review|approval|protect"
+      type: "keyword"
+      scope: "config"
+      purpose: "Protection-related patterns"
+
+  documents_to_review:
+    - type: "repository_settings"
+      purpose: "Branch protection rules configuration"
+
+knowledge_sources:
+  guides:
+    - id: "github-branch-protection"
+      name: "GitHub Branch Protection"
+      url: "https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches"
+      offline_cache: true
+    - id: "gitlab-protected-branches"
+      name: "GitLab Protected Branches"
+      url: "https://docs.gitlab.com/ee/user/project/protected_branches.html"
+      offline_cache: true
+
+  specifications:
+    - id: "soc2-cc"
+      name: "SOC2 Change Management"
+      url: "https://www.aicpa.org/soc2"
+      offline_cache: true
+      priority: "required"
+    - id: "nsa-cicd-security"
+      name: "NSA/CISA: Defending CI/CD Environments"
+      url: "https://media.defense.gov/2023/Jun/28/2003249466/-1/-1/0/CSI_DEFENDING_CI_CD_ENVIRONMENTS.PDF"
+      offline_cache: true
+      priority: "required"
+    - id: "nsa-supply-chain"
+      name: "NSA: Securing the Software Supply Chain"
+      url: "https://media.defense.gov/2022/Sep/01/2003068942/-1/-1/0/ESF_SECURING_THE_SOFTWARE_SUPPLY_CHAIN_DEVELOPERS.PDF"
+      offline_cache: true
+      priority: "required"
+    - id: "nist-800-218"
+      name: "NIST SP 800-218: SSDF"
+      url: "https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-218.pdf"
+      offline_cache: true
+      priority: "required"
+
+tooling:
+  infrastructure_tools:
+    - tool: "gh"
+      purpose: "Review GitHub branch protection"
+      command: "gh api repos/{owner}/{repo}/branches/main/protection"
+    - tool: "glab"
+      purpose: "Review GitLab protected branches"
+      command: "glab api projects/:id/protected_branches"
+
+  scripts:
+    - id: "protection-check"
+      language: "bash"
+      purpose: "Check for branch protection indicators"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Check for CODEOWNERS
+        echo "=== CODEOWNERS ==="
+        cat CODEOWNERS 2>/dev/null || echo "No CODEOWNERS file"
+        echo "=== Protected Branches (check via gh cli) ==="
+        echo "Run: gh api repos/{owner}/{repo}/branches/main/protection"
+
+signals:
+  critical:
+    - id: "BRPROT-CRIT-001"
+      signal: "Production branch has no protection rules"
+      evidence_indicators:
+        - "Direct pushes allowed to main/master"
+        - "No branch protection configured"
+      explanation: |
+        Unprotected production branches allow anyone with write access
+        to push code directly, bypassing all review and testing gates.
+      remediation: "Enable branch protection with required reviews and status checks"
+
+    - id: "BRPROT-CRIT-002"
+      signal: "Force push allowed on protected branches"
+      evidence_indicators:
+        - "Force push not blocked on main/master"
+        - "History can be rewritten"
+      explanation: |
+        Force pushes enable history rewriting, removing audit trail
+        of changes and potentially hiding malicious commits.
+      remediation: "Block force pushes on all protected branches"
+
+  high:
+    - id: "BRPROT-HIGH-001"
+      signal: "No required reviewers or approvals"
+      evidence_indicators:
+        - "PRs can be merged without approval"
+        - "No minimum review requirement"
+      explanation: |
+        Without required reviews, code changes bypass peer review
+        quality and security checks.
+      remediation: "Require at least one approval from CODEOWNERS for protected branches"
+
+    - id: "BRPROT-HIGH-002"
+      signal: "Status checks not required before merge"
+      evidence_indicators:
+        - "Merges allowed with failing CI"
+        - "No required status checks configured"
+      explanation: |
+        Bypassing status checks allows broken or vulnerable code
+        to reach protected branches.
+      remediation: "Require all critical status checks to pass before merge"
+
+  medium:
+    - id: "BRPROT-MED-001"
+      signal: "Admin users can bypass protection rules"
+      remediation: "Enable 'Do not allow bypassing' or require admin approval"
+
+    - id: "BRPROT-MED-002"
+      signal: "No signed commits required"
+      remediation: "Require signed commits to verify author identity"
+
+  low:
+    - id: "BRPROT-LOW-001"
+      signal: "Linear history not required"
+
+  positive:
+    - id: "BRPROT-POS-001"
+      signal: "Comprehensive branch protection with CODEOWNERS enforcement"
+    - id: "BRPROT-POS-002"
+      signal: "Signed commits and verified author required"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify critical branches"
+      description: |
+        Identify branches that should be protected including
+        main/master, release, and deployment branches.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "List branches"
+          command: "git branch -a 2>/dev/null | head -20"
+        - purpose: "Check for release branches"
+          command: "git branch -a 2>/dev/null | grep -E 'main|master|release|deploy' | head -10"
+      expected_findings:
+        - "Critical branch identification"
+        - "Protection scope"
+
+    - id: "2"
+      name: "Review protection rules"
+      description: |
+        Examine branch protection rules configured for each
+        critical branch.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check CODEOWNERS"
+          command: "cat CODEOWNERS 2>/dev/null || echo 'No CODEOWNERS'"
+      expected_findings:
+        - "Protection rule inventory"
+        - "Configuration details"
+
+    - id: "3"
+      name: "Evaluate review requirements"
+      description: |
+        Assess required reviewer configurations and CODEOWNERS
+        enforcement.
+      duration_estimate: "20 min"
+      questions:
+        - "How many approvals are required?"
+        - "Is CODEOWNERS approval required?"
+        - "Can stale reviews be dismissed?"
+      expected_findings:
+        - "Review requirement assessment"
+        - "CODEOWNERS enforcement"
+
+    - id: "4"
+      name: "Check status check requirements"
+      description: |
+        Verify that required status checks are configured and
+        enforced before merge.
+      duration_estimate: "20 min"
+      questions:
+        - "What status checks are required?"
+        - "Are security scans required?"
+        - "Can checks be bypassed?"
+      expected_findings:
+        - "Status check requirements"
+        - "Enforcement assessment"
+
+    - id: "5"
+      name: "Test bypass capabilities"
+      description: |
+        Verify that protection rules cannot be bypassed by
+        admins or automated systems.
+      duration_estimate: "20 min"
+      questions:
+        - "Can admins bypass protection rules?"
+        - "Can bots merge without approval?"
+        - "Are there any documented exceptions?"
+      expected_findings:
+        - "Bypass vulnerability assessment"
+        - "Exception inventory"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Branch Protection Analysis"
+        - "Compliance Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct API verification of protection rules"
+    medium: "Configuration review with documented rules"
+    low: "Interview-based assessment"
+
+offline:
+  capability: "partial"
+  cache_manifest:
+    knowledge:
+      - source_id: "github-branch-protection"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "brprot-001"
+    item: "Production branch has protection rules enabled"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify via repository settings or gh api"
+    expected: "Confirmed by reviewer"
+
+  - id: "brprot-002"
+    item: "Force push blocked on protected branches"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify force push is disabled in protection settings"
+    expected: "Confirmed by reviewer"
+
+  - id: "brprot-003"
+    item: "Required reviews configured"
+    level: "CRITICAL"
+    verification: "test -f CODEOWNERS && echo 'PASS' || echo 'FAIL'"
+    expected: "PASS"
+
+  - id: "brprot-004"
+    item: "Required status checks configured"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify CI/security checks required before merge"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC6.1", "CC8.1"]
+    - framework: "ISO27001"
+      controls: ["A.12.1.2", "A.14.2.2"]
+    - framework: "PCI-DSS"
+      controls: ["6.4.2"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.pipeline-security.pipeline-access-control"
+    - "devops-ci-cd.release-management.release-approval-process"

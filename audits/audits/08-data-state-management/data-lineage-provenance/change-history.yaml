@@ -1,0 +1,398 @@
+# ============================================================
+# AUDIT: Change History
+# ============================================================
+
+audit:
+  id: "data-state-management.data-lineage-provenance.change-history"
+  name: "Change History Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "data-lineage-provenance"
+
+  tier: "expert"
+  estimated_duration: "90 minutes"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "compliance"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates the implementation of entity change history tracking, including
+    versioning, temporal tables, soft deletes, and the ability to reconstruct
+    entity state at any point in time. Analyzes whether users can see what
+    changed, when, and by whom.
+
+  why_it_matters: |
+    Change history enables debugging, compliance, dispute resolution, and
+    user trust. Users need to see what changed in their data; support needs
+    to investigate issues; compliance requires demonstrating data integrity
+    over time. Without change history, you cannot answer "what was this
+    record before it changed?"
+
+  when_to_run:
+    - "Data model design reviews"
+    - "Compliance assessments"
+    - "After data integrity issues"
+    - "Feature planning for audit features"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application code with entity definitions"
+    - type: "database_schema"
+      description: "Database schema including history tables"
+
+  access_requirements:
+    - "Read access to application source code"
+    - "Access to database schema"
+
+discovery:
+  code_patterns:
+    - pattern: "history|History|version|Version|revision"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect history tracking"
+
+    - pattern: "temporal|valid_from|valid_to|effective_date"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect temporal patterns"
+
+    - pattern: "deleted_at|soft.*delete|is_deleted|archived"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect soft delete patterns"
+
+    - pattern: "@Version|@Audited|Envers|hibernate.*audit"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect audit frameworks"
+
+  file_patterns:
+    - glob: "**/history/**"
+      purpose: "History modules"
+    - glob: "**/*_history.sql"
+      purpose: "History table migrations"
+    - glob: "**/versions/**"
+      purpose: "Version tracking"
+
+knowledge_sources:
+  guides:
+    - id: "temporal-tables"
+      name: "SQL Server Temporal Tables"
+      url: "https://docs.microsoft.com/en-us/sql/relational-databases/tables/temporal-tables"
+      offline_cache: true
+
+    - id: "hibernate-envers"
+      name: "Hibernate Envers"
+      url: "https://hibernate.org/orm/envers/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "temporal-data"
+      title: "Temporal Data and the Relational Model"
+      type: "book"
+      reference: "C.J. Date, ISBN: 978-1558608559"
+
+tooling:
+  static_analysis:
+    - tool: "schema-history-analyzer"
+      purpose: "Detect history table patterns"
+      offline_capable: true
+
+  scripts:
+    - id: "change-history-scan"
+      language: "bash"
+      purpose: "Analyze change history implementation"
+      source: "inline"
+      code: |
+        echo "=== Change History Analysis ==="
+        echo "--- History tables/entities ---"
+        grep -rn "History\|_history\|_audit\|_version" \
+          --include="*.ts" --include="*.java" --include="*.sql" . 2>/dev/null | \
+          grep -v node_modules | head -30
+
+        echo "--- Temporal columns ---"
+        grep -rn "valid_from\|valid_to\|effective\|created_at\|updated_at" \
+          --include="*.ts" --include="*.java" --include="*.sql" . 2>/dev/null | \
+          grep -v node_modules | head -30
+
+        echo "--- Soft delete patterns ---"
+        grep -rn "deleted_at\|soft.*delete\|is_deleted\|archived" \
+          --include="*.ts" --include="*.java" --include="*.sql" . 2>/dev/null | \
+          grep -v node_modules | head -20
+
+signals:
+  critical:
+    - id: "CH-CRIT-001"
+      signal: "Hard deletes with no history for regulated data"
+      evidence_pattern: "DELETE operations on compliance-sensitive tables"
+      explanation: |
+        Hard deletes permanently destroy data. For regulated data, this
+        may violate retention requirements and makes investigation
+        impossible. Compliance often requires demonstrating what existed.
+      remediation: "Implement soft delete or archive deleted records"
+
+    - id: "CH-CRIT-002"
+      signal: "No change history for financial/legal data"
+      evidence_pattern: "Contracts, transactions updated without versioning"
+      explanation: |
+        Financial and legal records often require complete history for
+        audit purposes. Being unable to show what a contract said
+        at signing time is a compliance failure.
+      remediation: "Implement versioning for all legal/financial entities"
+
+  high:
+    - id: "CH-HIGH-001"
+      signal: "Updates overwrite data without preserving history"
+      evidence_pattern: "UPDATE without trigger or history table"
+      explanation: |
+        When updates simply overwrite data, the previous state is lost
+        forever. This prevents debugging, rollback, and answering
+        "what was it before?"
+      remediation: "Create history table or use temporal tables"
+
+    - id: "CH-HIGH-002"
+      signal: "No versioning on user-facing editable content"
+      evidence_pattern: "Documents/content edited without version history"
+      explanation: |
+        Users expect to see edit history and revert changes. Without
+        versioning, accidental deletions cannot be recovered and
+        collaborative editing conflicts cannot be resolved.
+      remediation: "Implement version history for user content"
+
+    - id: "CH-HIGH-003"
+      signal: "Soft deletes without timestamp"
+      evidence_pattern: "is_deleted boolean without deleted_at timestamp"
+      explanation: |
+        Knowing that something was deleted is insufficient - you need to
+        know when. Without deletion timestamp, timeline reconstruction
+        and compliance reporting are impossible.
+      remediation: "Include deleted_at timestamp with soft delete flag"
+
+  medium:
+    - id: "CH-MED-001"
+      signal: "History only tracks current and previous state"
+      evidence_pattern: "Only one previous version stored"
+      remediation: "Store complete version history, not just current+previous"
+
+    - id: "CH-MED-002"
+      signal: "No efficient point-in-time queries"
+      evidence_pattern: "Must scan all versions to find state at date"
+      remediation: "Use temporal tables or indexed effective dates"
+
+    - id: "CH-MED-003"
+      signal: "Change history not exposed to users"
+      evidence_pattern: "History exists but no UI to view it"
+      remediation: "Provide user-facing change history views"
+
+  low:
+    - id: "CH-LOW-001"
+      signal: "History table grows unbounded"
+      evidence_pattern: "No archival strategy for old versions"
+      remediation: "Implement history archival or summarization"
+
+    - id: "CH-LOW-002"
+      signal: "Change reason/comment not captured"
+      evidence_pattern: "History shows what changed but not why"
+      remediation: "Allow users to provide change reasons"
+
+  positive:
+    - id: "CH-POS-001"
+      signal: "Comprehensive version history"
+      evidence_pattern: "All entity changes tracked with full history"
+
+    - id: "CH-POS-002"
+      signal: "Temporal tables or equivalent"
+      evidence_pattern: "Efficient point-in-time state reconstruction"
+
+    - id: "CH-POS-003"
+      signal: "User-accessible change history"
+      evidence_pattern: "Users can view and compare versions"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Entities Requiring History"
+      description: |
+        Catalog entities that need change tracking.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find main entities"
+          command: |
+            grep -rn "@Entity\|class.*Model\|CREATE TABLE" \
+              --include="*.ts" --include="*.java" --include="*.sql" . 2>/dev/null | \
+              grep -v node_modules | grep -v test | head -40
+        - purpose: "Find regulated data"
+          command: |
+            grep -rn "contract\|payment\|order\|invoice\|agreement\|financial" \
+              --include="*.ts" --include="*.java" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Entity inventory"
+        - "Regulated data identification"
+
+    - id: "2"
+      name: "Review History Implementation"
+      description: |
+        Examine how change history is tracked.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find history patterns"
+          command: |
+            grep -rn "History\|_history\|version\|revision" \
+              --include="*.ts" --include="*.java" --include="*.sql" . 2>/dev/null | \
+              grep -v node_modules | head -40
+        - purpose: "Find audit framework usage"
+          command: |
+            grep -rn "@Audited\|Envers\|temporal\|versioned" \
+              --include="*.ts" --include="*.java" . 2>/dev/null | \
+              grep -v node_modules | head -20
+
+      expected_findings:
+        - "History implementation pattern"
+        - "Framework usage"
+
+    - id: "3"
+      name: "Check Soft Delete Implementation"
+      description: |
+        Review how deletions are handled.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find delete operations"
+          command: |
+            grep -rn "DELETE\|\.delete(\|\.remove(" \
+              --include="*.ts" --include="*.java" --include="*.sql" . 2>/dev/null | \
+              grep -v node_modules | grep -v test | head -30
+        - purpose: "Find soft delete patterns"
+          command: |
+            grep -rn "deleted_at\|soft.*delete\|is_deleted" \
+              --include="*.ts" --include="*.java" --include="*.sql" . 2>/dev/null | head -20
+
+      expected_findings:
+        - "Delete pattern analysis"
+        - "Soft delete coverage"
+
+    - id: "4"
+      name: "Assess Point-in-Time Capability"
+      description: |
+        Check ability to reconstruct historical state.
+      duration_estimate: "25 min"
+      questions:
+        - "Can you query entity state at a specific past date?"
+        - "Is history indexed for efficient queries?"
+        - "Can full entity graphs be reconstructed historically?"
+      expected_findings:
+        - "Point-in-time capability"
+        - "Query efficiency"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "entity_inventory"
+        - "history_coverage"
+        - "deletion_handling"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Entity Analysis"
+        - "History Coverage"
+        - "Deletion Handling"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear absence of history for regulated data"
+    medium: "History exists but may have gaps"
+    low: "Requires data review to confirm coverage"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "temporal-tables"
+        priority: "required"
+      - source_id: "hibernate-envers"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires schema and entity analysis"
+    full:
+      included: true
+      priority: 1
+    compliance:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "ch-001"
+    item: "Change history implemented for critical entities"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "History\|_history\|@Audited\|version" \
+        --include="*.ts" --include="*.java" --include="*.sql" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "ch-002"
+    item: "Soft delete or archive for regulated data"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "deleted_at\|soft.*delete\|archived" \
+        --include="*.ts" --include="*.java" --include="*.sql" . 2>/dev/null | \
+        wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "ch-003"
+    item: "Point-in-time state reconstruction possible"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify ability to query entity state at past date"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["enterprise", "regulated", "financial"]
+
+  compliance_frameworks:
+    - framework: "SOX"
+      controls: ["Data Retention"]
+    - framework: "GDPR"
+      controls: ["Right to Erasure Exceptions"]
+    - framework: "FINRA"
+      controls: ["Record Retention"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.data-lineage-provenance.audit-trail"
+    - "data-state-management.data-validation.constraint-validation"
+    - "reliability-resilience.backup-recovery.point-in-time-recovery"

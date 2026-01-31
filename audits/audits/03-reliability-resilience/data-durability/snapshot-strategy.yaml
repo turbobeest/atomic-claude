@@ -1,0 +1,280 @@
+# ============================================================
+# AUDIT: Snapshot Strategy Audit
+# ============================================================
+
+audit:
+  id: "reliability-resilience.data-durability.snapshot-strategy"
+  name: "Snapshot Strategy Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "data-durability"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates snapshot and backup strategies for databases, storage
+    volumes, and virtual machines. Examines snapshot frequency, retention
+    policies, consistency guarantees (crash-consistent vs application-consistent),
+    cross-region copies, and restoration procedures.
+
+  why_it_matters: |
+    Snapshots provide point-in-time recovery capability essential for
+    disaster recovery and data protection. Inadequate snapshot strategies
+    result in excessive data loss (high RPO) or failed recoveries.
+    Application-inconsistent snapshots can leave databases in corrupted
+    states after restore.
+
+  when_to_run:
+    - "During backup strategy review"
+    - "After defining RPO requirements"
+    - "When experiencing backup or restore failures"
+    - "During compliance audits"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure"
+      description: "Snapshot configuration and policies"
+    - type: "documentation"
+      description: "RPO requirements and data classification"
+
+  access_requirements:
+    - "Cloud console or backup system access"
+    - "Infrastructure as code access"
+
+discovery:
+  file_patterns:
+    - glob: "**/terraform/**/*.tf"
+      purpose: "Infrastructure as code"
+    - glob: "**/backup/**/*.yaml"
+      purpose: "Backup configuration"
+
+  code_patterns:
+    - pattern: "snapshot|backup.*policy|retention|lifecycle"
+      type: "regex"
+      scope: "config"
+      purpose: "Find snapshot configuration"
+
+knowledge_sources:
+  specifications:
+    - id: "aws-dlm"
+      name: "AWS Data Lifecycle Manager"
+      url: "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/snapshot-lifecycle.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "rds-snapshots"
+      name: "Amazon RDS Backup and Restore"
+      url: "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_WorkingWithAutomatedBackups.html"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws cli"
+      purpose: "List snapshots"
+      command: "aws ec2 describe-snapshots --owner-ids self --query 'Snapshots[*].[SnapshotId,StartTime,VolumeSize]'"
+    - tool: "aws cli"
+      purpose: "Check RDS backup configuration"
+      command: "aws rds describe-db-instances --query 'DBInstances[*].[DBInstanceIdentifier,BackupRetentionPeriod,PreferredBackupWindow]'"
+
+signals:
+  critical:
+    - id: "DD-SS-CRIT-001"
+      signal: "No automated snapshots for critical databases"
+      evidence_indicators:
+        - "RDS backup retention set to 0"
+        - "No snapshot policy for EBS volumes"
+      explanation: |
+        Without automated snapshots, point-in-time recovery is impossible.
+        Any data corruption or accidental deletion has no recovery path.
+      remediation: "Enable automated snapshots with retention aligned to RPO"
+
+    - id: "DD-SS-CRIT-002"
+      signal: "Snapshot retention too short for recovery needs"
+      evidence_indicators:
+        - "Retention period shorter than incident detection time"
+        - "Only 1-2 days of snapshots retained"
+      explanation: |
+        If corruption or attack goes undetected longer than retention
+        period, all snapshots will be corrupted, preventing recovery.
+      remediation: "Set retention to exceed expected detection time (typically 30+ days)"
+
+  high:
+    - id: "DD-SS-HIGH-001"
+      signal: "Snapshots not application-consistent for databases"
+      explanation: "Crash-consistent snapshots may require database recovery after restore"
+      remediation: "Use application-consistent snapshots (VSS, database quiesce)"
+
+    - id: "DD-SS-HIGH-002"
+      signal: "No cross-region snapshot copies"
+      explanation: "Regional disaster destroys both data and all snapshots"
+      remediation: "Enable cross-region snapshot replication"
+
+  medium:
+    - id: "DD-SS-MED-001"
+      signal: "Snapshot restoration never tested"
+      remediation: "Conduct regular restoration tests to verify recoverability"
+
+    - id: "DD-SS-MED-002"
+      signal: "No alerting on snapshot failures"
+      remediation: "Configure alerts for snapshot creation failures"
+
+  low:
+    - id: "DD-SS-LOW-001"
+      signal: "Snapshot costs not optimized"
+
+  positive:
+    - id: "DD-SS-POS-001"
+      signal: "Application-consistent snapshots with verified restoration"
+    - id: "DD-SS-POS-002"
+      signal: "Cross-region replication with appropriate retention"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Snapshot Policies"
+      description: |
+        Document all snapshot policies and their target resources.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "List DLM policies"
+          command: "aws dlm get-lifecycle-policies"
+        - purpose: "Check RDS backup config"
+          command: "aws rds describe-db-instances --query 'DBInstances[*].[DBInstanceIdentifier,BackupRetentionPeriod]'"
+      expected_findings:
+        - "Snapshot policies inventory"
+        - "Coverage gaps"
+
+    - id: "2"
+      name: "Review Retention Configuration"
+      description: |
+        Verify retention periods meet RPO requirements.
+      duration_estimate: "30 min"
+      questions:
+        - "How long are snapshots retained?"
+        - "Does retention exceed expected incident detection time?"
+      expected_findings:
+        - "Retention periods per resource type"
+        - "RPO alignment assessment"
+
+    - id: "3"
+      name: "Verify Consistency Guarantees"
+      description: |
+        Confirm snapshots are application-consistent for databases.
+      duration_estimate: "30 min"
+      questions:
+        - "Are database snapshots taken during quiescent state?"
+        - "Is VSS or equivalent used for consistent snapshots?"
+      expected_findings:
+        - "Consistency mechanism used"
+        - "Database recovery requirements after restore"
+
+    - id: "4"
+      name: "Review Cross-Region Replication"
+      description: |
+        Check if snapshots are replicated to other regions.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check snapshot copy configuration"
+          command: "aws dlm get-lifecycle-policy --policy-id policy-id"
+      expected_findings:
+        - "Cross-region replication status"
+        - "Remote region snapshot retention"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Snapshot Policy Inventory"
+        - "Retention Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full policy review with restoration testing"
+    medium: "Policy review without restoration testing"
+    low: "Documentation review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-dlm"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires infrastructure access"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "snapshot-strategy-001"
+    item: "Automated snapshots enabled for all critical resources"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify snapshot policies exist for all critical databases and volumes"
+    expected: "Confirmed by reviewer"
+
+  - id: "snapshot-strategy-002"
+    item: "Retention period meets or exceeds RPO requirements"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Compare retention settings to documented RPO"
+    expected: "Confirmed by reviewer"
+
+  - id: "snapshot-strategy-003"
+    item: "Restoration tested within last quarter"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review restoration test records"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["A1.2"]
+    - framework: "ISO 27001"
+      controls: ["A.12.3.1"]
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.data-durability.point-in-time-recovery"
+    - "reliability-resilience.disaster-recovery.backup-restoration-testing"

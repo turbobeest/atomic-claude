@@ -1,0 +1,245 @@
+audit:
+  id: observability-instrumentation.logging.structured-logging
+  name: Structured Logging Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: logging
+  tier: expert
+  estimated_duration: 1 hour
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates whether the application uses structured logging (JSON or other
+    machine-parseable formats) instead of unstructured text logs. Reviews log
+    statement implementations to ensure consistent field usage, proper context
+    enrichment, and compatibility with log aggregation systems.
+  why_it_matters: |
+    Structured logging enables efficient log searching, filtering, and analysis
+    in aggregation platforms. Unstructured text logs require complex regex parsing,
+    are error-prone to query, and make correlation across services extremely
+    difficult. Modern observability depends on structured, queryable log data.
+  when_to_run:
+  - Greenfield project setup
+  - Log aggregation system implementation
+  - Observability platform migration
+  - When log search/analysis becomes inefficient
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code with logging implementations
+  - type: configuration_files
+    description: Logging framework configuration
+  access_requirements:
+  - Read access to application codebase
+  - Access to logging framework documentation
+discovery:
+knowledge_sources:
+  specifications:
+  - id: ecs-logging
+    name: Elastic Common Schema
+    url: https://www.elastic.co/guide/en/ecs/current/index.html
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: structured-logging-guide
+    name: Structured Logging Best Practices
+    url: https://www.honeycomb.io/blog/how-to-structure-your-logs
+    offline_cache: true
+  learning_resources:
+  - id: observability-engineering
+    title: Observability Engineering
+    type: book
+    reference: O'Reilly Media - Chapter on Logging
+tooling:
+  static_analysis:
+  - tool: grep/ripgrep
+    purpose: Identify logging patterns
+    offline_capable: true
+  - tool: ast-grep
+    purpose: Parse log statements structurally
+    offline_capable: true
+  scripts:
+  - id: analyze-log-structure
+    language: bash
+    purpose: Identify structured vs unstructured log usage
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Counting structured logging library imports ==="
+      rg -c "(structlog|bunyan|pino|winston|zap|zerolog)" --type-add 'code:*.{js,ts,py,go,java,rb}' -t code
+      echo "=== Finding string-interpolated log statements ==="
+      rg "logger\.(info|warn|error)\(f?[\"']" --type py -c 2>/dev/null || echo "No Python f-string logs found"
+signals:
+  critical:
+  - id: STRUCT-LOG-CRIT-001
+    signal: No structured logging implementation found
+    evidence_pattern: Absence of JSON formatters or structured logging libraries
+    explanation: |
+      Without structured logging, log analysis requires complex regex parsing,
+      cross-service correlation is nearly impossible, and log aggregation
+      systems cannot efficiently index or query log data.
+    remediation: Implement structured logging using a library like structlog, pino, or zap
+  high:
+  - id: STRUCT-LOG-HIGH-001
+    signal: Mixed structured and unstructured logging
+    explanation: Inconsistent log formats break aggregation queries and complicate analysis
+    remediation: Standardize all log statements to use structured format
+  - id: STRUCT-LOG-HIGH-002
+    signal: String concatenation in log messages
+    explanation: Dynamic string building prevents proper field extraction and indexing
+    remediation: Use structured fields instead of string interpolation
+  medium:
+  - id: STRUCT-LOG-MED-001
+    signal: Inconsistent field naming across services
+    remediation: Adopt a common schema like ECS for field names
+  - id: STRUCT-LOG-MED-002
+    signal: Missing context enrichment in logs
+    remediation: Add request_id, user_id, and service metadata to all logs
+  low:
+  - id: STRUCT-LOG-LOW-001
+    signal: Verbose field names increasing log size
+  positive:
+  - id: STRUCT-LOG-POS-001
+    signal: Consistent JSON structured logging across all services
+  - id: STRUCT-LOG-POS-002
+    signal: Common schema adopted for log field names
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify logging libraries and configuration
+    description: |
+      Discover which logging libraries are in use and how they are configured
+      for output formatting.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find logging library imports
+      command: rg -i 'import.*(logging|logger|log4j|logback|winston|pino|bunyan|zap|zerolog|structlog)'
+    - purpose: Find JSON formatter configuration
+      command: rg -i 'json.?format|JSONFormatter|json.?encoder' .
+    expected_findings:
+    - Logging libraries in use
+    - Output format configuration
+  - id: '2'
+    name: Analyze log statement patterns
+    description: |
+      Sample log statements across the codebase to determine whether
+      structured or unstructured patterns predominate.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find structured log calls with context objects
+      command: rg 'log\.(info|warn|error).*\{.*:' --type-add 'code:*.{js,ts}' -t code | head -20
+    - purpose: Find unstructured string logs
+      command: rg 'log\.(info|warn|error)\(["\x27][^{}]*["\x27]\)' --type-add 'code:*.{js,ts}' -t code
+        | head -20
+    expected_findings:
+    - Ratio of structured to unstructured logs
+    - Common logging patterns
+  - id: '3'
+    name: Evaluate field consistency
+    description: |
+      Check whether structured logs use consistent field names for
+      common concepts like user IDs, request IDs, and timestamps.
+    duration_estimate: 15 min
+    questions:
+    - Are field names consistent across log statements?
+    - Is there a documented schema for log fields?
+    - Do logs include standard context fields?
+    expected_findings:
+    - Field naming conventions
+    - Context enrichment patterns
+  - id: '4'
+    name: Review log output compatibility
+    description: |
+      Verify that log output format is compatible with the log aggregation
+      system in use (ELK, Datadog, Splunk, etc.).
+    duration_estimate: 10 min
+    questions:
+    - What log aggregation system is in use?
+    - Does the log format match the expected input format?
+    - Are there parsing errors in the aggregation system?
+    expected_findings:
+    - Aggregation system compatibility
+    - Parsing configuration requirements
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Logging Library Analysis
+    - Structure Assessment
+    - Field Consistency Report
+    - Recommendations
+  confidence_guidance:
+    high: Log output format directly verified through code analysis
+    medium: Logging patterns inferred from library configuration
+    low: Format assumed based on library defaults
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: ecs-logging
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed code analysis
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: struct-log-001
+  item: Structured logging library is configured
+  level: CRITICAL
+  verification: rg -l '(JSONFormatter|json.?format|pino|bunyan|structlog|zap\.NewProduction)' . && echo
+    'PASS' || echo 'FAIL'
+  expected: PASS
+- id: struct-log-002
+  item: Log statements use structured patterns
+  level: BLOCKING
+  verification: manual
+  verification_notes: Review sample of log statements for object/context usage vs string interpolation
+  expected: Confirmed by reviewer
+- id: struct-log-003
+  item: Common fields are consistently named
+  level: WARNING
+  verification: manual
+  verification_notes: Check that request_id, user_id, etc. use consistent naming
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC7.2
+    - CC7.3
+relationships:
+  commonly_combined:
+  - observability-instrumentation.logging.log-aggregation
+  - observability-instrumentation.logging.correlation-id
+  - observability-instrumentation.logging.log-format-consistency

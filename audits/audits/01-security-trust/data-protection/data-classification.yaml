@@ -1,0 +1,502 @@
+audit:
+  id: security-trust.data-protection.data-classification
+  name: Data Classification Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: data-protection
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the implementation and enforcement of data classification
+    schemes across the organization's systems. It evaluates:
+    - Classification taxonomy definition and documentation
+    - Data labeling mechanisms and metadata tagging
+    - Handling procedures defined for each classification level
+    - Access controls aligned with classification levels
+    - Classification review and update processes
+    - Integration with DLP (Data Loss Prevention) systems
+  why_it_matters: |
+    Proper data classification is foundational to information security:
+    - ISO 27001 Annex A.5.12 requires organizations to classify information
+      based on value, sensitivity, and legal requirements
+    - Without classification, organizations cannot apply appropriate protection
+      measures proportional to data sensitivity
+    - Regulatory compliance (GDPR, HIPAA, PCI-DSS) requires different handling
+      for different data types
+    - Classification enables automated DLP policies and access controls
+    - Breach impact assessment requires understanding what data was exposed
+
+    The European Commission notes that GDPR requires organizations to understand
+    what personal data they hold to fulfill data subject rights.
+  when_to_run:
+  - Initial security assessment
+  - After organizational data policy changes
+  - During ISO 27001 certification audits
+  - When implementing new data handling systems
+  - Following merger or acquisition activities
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Source code with data models and schemas
+  - type: policy_documents
+    description: Data classification policy documentation
+  - type: data_inventory
+    description: Inventory of data assets and systems
+  access_requirements:
+  - Read access to all source code repositories
+  - Access to data governance documentation
+  - Access to DLP tool configurations
+  - Access to metadata management systems
+discovery:
+  code_patterns:
+  - pattern: '@(classification|data_class|sensitivity|confidentiality)'
+    type: regex
+    scope: source
+    purpose: Detect classification decorators/annotations
+  - pattern: (classification|sensitivity|data_level)\s*[=:]\s*['"]?(public|internal|confidential|restricted|secret)
+    type: regex
+    scope: source
+    purpose: Detect classification level assignments
+  - pattern: class\s+\w+.*:\s*#\s*(confidential|restricted|internal|public)
+    type: regex
+    scope: source
+    purpose: Detect classification comments on classes
+  - pattern: COMMENT\s+ON\s+(TABLE|COLUMN).*classification
+    type: regex
+    scope: config
+    purpose: Detect SQL schema classification metadata
+  - pattern: (label|tag|classification)\s*:\s*['"]?(sensitive|pii|phi|pci|confidential)
+    type: regex
+    scope: config
+    purpose: Detect YAML/JSON classification tags
+  - pattern: (dlp|data_loss_prevention|sensitivity_label)
+    type: regex
+    scope: source
+    purpose: Detect DLP integration code
+  - pattern: CREATE\s+TABLE\s+\w+\s*\(
+    type: regex
+    scope: config
+    purpose: Detect table creation without classification
+  file_patterns:
+  - glob: '**/classification*.{yaml,yml,json,md}'
+    purpose: Classification policy files
+  - glob: '**/data-governance/**'
+    purpose: Data governance documentation
+  - glob: '**/models/**/*.{py,rb,java,ts}'
+    purpose: Data model definitions
+  - glob: '**/schemas/**/*.{sql,prisma,graphql}'
+    purpose: Database schema definitions
+  - glob: '**/.labels*'
+    purpose: Label configuration files
+knowledge_sources:
+  specifications:
+  - id: iso-27001-a512
+    name: ISO 27001:2022 Annex A.5.12 - Classification of Information
+    url: https://www.iso.org/standard/27001
+    offline_cache: true
+    priority: required
+  - id: nist-800-60
+    name: 'NIST SP 800-60: Guide for Mapping Types of Information and Systems'
+    url: https://csrc.nist.gov/pubs/sp/800/60/v1/r1/final
+    offline_cache: true
+    priority: required
+  - id: gdpr-article-30
+    name: 'GDPR Article 30: Records of Processing Activities'
+    url: https://gdpr-info.eu/art-30-gdpr/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: data-classification-advisera
+    name: Information Classification According to ISO 27001
+    url: https://advisera.com/27001academy/blog/2014/05/12/information-classification-according-to-iso-27001/
+    offline_cache: true
+  - id: nist-data-classification
+    name: NIST Data Classification Guidelines
+    url: https://www.nist.gov/cyberframework
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect unclassified data structures
+    offline_capable: true
+  - tool: custom-schema-scanner
+    purpose: Scan database schemas for classification metadata
+    offline_capable: true
+  infrastructure_tools:
+  - tool: microsoft-purview
+    purpose: Data catalog and classification scanning
+    command: purview scan --workspace $WORKSPACE
+  - tool: aws-macie
+    purpose: Automated data discovery and classification
+    command: aws macie2 get-findings --finding-ids
+  scripts:
+  - id: classification-scanner
+    language: bash
+    purpose: Scan for classification metadata in codebase
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Data Classification Scan ==="
+      echo "Looking for classification metadata..."
+      grep -rniE "(classification|sensitivity|data_class|confidential|restricted)" \
+        --include="*.py" --include="*.js" --include="*.yaml" \
+        --include="*.sql" --include="*.json" . 2>/dev/null | head -50
+signals:
+  critical:
+  - id: DCLASS-CRIT-001
+    signal: No data classification scheme defined
+    evidence_indicators:
+    - No classification policy documentation found
+    - No classification levels defined in code or config
+    - No data labeling mechanisms implemented
+    explanation: |
+      Without a defined classification scheme, organizations cannot systematically
+      protect sensitive data. ISO 27001 A.5.12 requires information to be
+      classified based on legal requirements, value, and sensitivity. Absence
+      of classification makes it impossible to apply appropriate controls.
+    remediation: |
+      - Define classification taxonomy (e.g., Public, Internal, Confidential, Restricted)
+      - Document handling requirements for each level
+      - Implement labeling mechanisms in code and systems
+      - Train personnel on classification procedures
+    cwe: CWE-693
+  - id: DCLASS-CRIT-002
+    signal: Highly sensitive data stored without classification
+    evidence_pattern: (ssn|credit_card|health_record|medical|diagnosis)(?!.*classification)
+    explanation: |
+      Sensitive data types (PII, PHI, PCI) that lack classification labels
+      cannot be properly protected by automated DLP systems and may not
+      receive appropriate access controls. This violates the principle of
+      classifying data before handling (ISO 27001).
+    remediation: |
+      - Immediately classify identified sensitive data
+      - Add classification metadata to schemas and models
+      - Implement automated classification scanning
+      - Review and update DLP policies to match classifications
+    cwe: CWE-693
+  high:
+  - id: DCLASS-HIGH-001
+    signal: Classification labels not enforced at data boundaries
+    evidence_pattern: export|api|endpoint|response(?!.*classification|sensitivity)
+    explanation: |
+      Data crossing system boundaries (APIs, exports, integrations) without
+      classification checks may expose sensitive information inappropriately.
+      Classification should be verified before data leaves protected domains.
+    remediation: |
+      - Implement classification checks at API boundaries
+      - Add sensitivity headers to API responses
+      - Configure DLP policies for outbound data
+      - Log classification violations at boundaries
+    cwe: CWE-200
+  - id: DCLASS-HIGH-002
+    signal: Inconsistent classification across related data
+    evidence_indicators:
+    - Same data classified differently in different systems
+    - Derived data has lower classification than source
+    - No classification inheritance rules defined
+    explanation: |
+      Inconsistent classification undermines protection efforts. If the same
+      PII is classified as Confidential in one system and Internal in another,
+      the lower-classified copy creates a security gap.
+    remediation: |
+      - Establish classification inheritance rules
+      - Implement master data management for classification
+      - Audit for classification inconsistencies
+      - Define rules for derived/aggregated data classification
+    cwe: CWE-285
+  - id: DCLASS-HIGH-003
+    signal: No classification owner assigned
+    evidence_indicators:
+    - Data assets without designated owners
+    - No ownership metadata in data catalogs
+    - Classification decisions made ad-hoc
+    explanation: |
+      ISO 27001 requires every classified asset to have an assigned owner
+      responsible for determining and maintaining its classification.
+      Without ownership, classification becomes inconsistent and outdated.
+    remediation: |
+      - Assign owners to all data assets
+      - Document ownership in data catalogs
+      - Establish ownership transfer procedures
+      - Include ownership in classification metadata
+  medium:
+  - id: DCLASS-MED-001
+    signal: Classification labels not human-readable
+    evidence_pattern: (class|sensitivity)\s*[=:]\s*[0-9]+
+    explanation: |
+      Numeric or coded classification labels without clear meaning make
+      it difficult for personnel to apply correct handling procedures.
+      ISO 27001 A.5.13 requires information to be labeled in a way that
+      reflects classification.
+    remediation: |
+      - Use descriptive labels (Confidential, Internal, Public)
+      - Provide label legends in documentation
+      - Implement visual labeling in user interfaces
+      - Map internal codes to standard classification terms
+    cwe: CWE-1059
+  - id: DCLASS-MED-002
+    signal: No classification review schedule defined
+    evidence_indicators:
+    - No review dates in classification metadata
+    - No classification audit procedures documented
+    - Stale classifications (>1 year without review)
+    explanation: |
+      ISO 27001 A.5.12 notes that classification value may change over time.
+      Without periodic review, classifications become outdated, potentially
+      leading to over-protection (inefficiency) or under-protection (risk).
+    remediation: |
+      - Define review periods for each classification level
+      - Implement automated review reminders
+      - Document classification change procedures
+      - Track classification history for auditing
+  - id: DCLASS-MED-003
+    signal: Missing handling procedures for classification levels
+    evidence_indicators:
+    - Classification levels defined without handling rules
+    - No documented access control per level
+    - No encryption requirements per level
+    explanation: |
+      Classification labels are only useful if accompanied by clear handling
+      procedures. Each level should define requirements for access, storage,
+      transmission, and disposal.
+    remediation: |
+      - Document handling procedures per classification level
+      - Define encryption requirements per level
+      - Specify access control requirements
+      - Document disposal/deletion procedures per level
+  low:
+  - id: DCLASS-LOW-001
+    signal: Classification metadata not searchable
+    evidence_indicators:
+    - Labels embedded in comments only
+    - No structured metadata fields
+    - Classification not indexed in data catalogs
+    explanation: |
+      Classification metadata should be queryable for compliance reporting,
+      DLP policy application, and access management. Non-searchable labels
+      provide limited operational value.
+    remediation: |
+      - Use structured metadata fields for classification
+      - Index classification in data catalogs
+      - Enable classification-based search and filtering
+  positive:
+  - id: DCLASS-POS-001
+    signal: Comprehensive classification taxonomy implemented
+    evidence_indicators:
+    - Clear classification levels defined and documented
+    - Handling procedures documented per level
+    - Classification metadata integrated in systems
+  - id: DCLASS-POS-002
+    signal: Automated classification scanning enabled
+    evidence_indicators:
+    - DLP tools configured for classification detection
+    - Automated classification suggestions
+    - Classification compliance reporting active
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Classification Scheme Assessment
+    description: |
+      Verify that a data classification scheme is defined, documented,
+      and appropriate for the organization's data types and regulatory requirements.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find classification policy documents
+      command: |
+        find . -type f \( -name "*classification*" -o -name "*data-governance*" \
+          -o -name "*sensitivity*" \) 2>/dev/null | head -20
+    - purpose: Search for classification level definitions
+      command: |
+        grep -rniE "(public|internal|confidential|restricted|secret).*level" \
+          --include="*.md" --include="*.yaml" --include="*.json" . 2>/dev/null | head -30
+    expected_findings:
+    - Classification policy documentation
+    - Defined classification levels
+    - Handling procedures per level
+  - id: '2'
+    name: Classification Implementation Audit
+    description: |
+      Examine how classification is implemented in code, schemas,
+      and configurations across the codebase.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find classification metadata in code
+      command: |
+        grep -rniE "@classification|sensitivity_level|data_class" \
+          --include="*.py" --include="*.js" --include="*.ts" \
+          --include="*.java" --include="*.rb" . 2>/dev/null | head -50
+    - purpose: Find classification in database schemas
+      command: |
+        grep -rniE "COMMENT.*classification|--.*confidential|--.*sensitive" \
+          --include="*.sql" --include="*.prisma" . 2>/dev/null | head -30
+    expected_findings:
+    - Classification annotations/decorators in code
+    - Schema classification metadata
+    - Configuration-based classification rules
+  - id: '3'
+    name: Unclassified Data Detection
+    description: |
+      Identify potentially sensitive data structures that lack
+      classification metadata.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find data models without classification
+      command: |
+        grep -rniE "class\\s+\\w*(User|Customer|Patient|Employee|Account)" \
+          --include="*.py" --include="*.js" --include="*.java" . 2>/dev/null | \
+          grep -v classification | head -30
+    - purpose: Find tables with sensitive columns but no classification
+      command: |
+        grep -rniE "CREATE\\s+TABLE.*(user|customer|patient|employee)" \
+          --include="*.sql" . 2>/dev/null | head -20
+    expected_findings:
+    - Unclassified data models
+    - Database tables needing classification
+    - API endpoints handling unclassified data
+  - id: '4'
+    name: Classification Controls Verification
+    description: |
+      Verify that access controls and handling procedures align
+      with classification levels.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check for classification-based access controls
+      command: |
+        grep -rniE "(require|check|verify).*classification|classification.*access" \
+          --include="*.py" --include="*.js" --include="*.ts" . 2>/dev/null | head -30
+    - purpose: Find DLP or data protection configurations
+      command: |
+        find . -type f \( -name "*dlp*" -o -name "*data-protection*" \
+          -o -name "*sensitivity*" \) 2>/dev/null | head -20
+    expected_findings:
+    - Classification-based access control implementation
+    - DLP policy configurations
+    - Encryption rules per classification level
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Classification Scheme Assessment
+    - Implementation Status
+    - Unclassified Data Inventory
+    - Recommendations
+  - type: classification_matrix
+    format: table
+    description: Mapping of data types to classification levels
+  confidence_guidance:
+    high: Classification metadata directly observed in code/config
+    medium: Classification inferred from naming or handling patterns
+    low: Classification status unclear, requires manual review
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: iso-27001-a512
+      priority: required
+    - source_id: nist-800-60
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Classification audit requires thorough analysis
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: dclass-001
+  item: Classification scheme is documented
+  level: CRITICAL
+  verification: |
+    find . -type f \( -name "*classification*" -o -name "*data-governance*" \) \
+      -exec grep -l -iE "public|internal|confidential|restricted" {} \; 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: dclass-002
+  item: Sensitive data types have classification metadata
+  level: CRITICAL
+  verification: |
+    grep -rniE "(customer|user|patient|employee|account).*(classification|sensitivity)" \
+      --include="*.py" --include="*.js" --include="*.sql" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: dclass-003
+  item: Handling procedures defined per classification level
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify handling procedures exist for each defined classification level
+  expected: Confirmed by reviewer
+- id: dclass-004
+  item: Classification-based access controls implemented
+  level: BLOCKING
+  verification: |
+    grep -rniE "(classification|sensitivity).*(access|permission|role)" \
+      --include="*.py" --include="*.js" --include="*.yaml" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: dclass-005
+  item: Classification review process documented
+  level: WARNING
+  verification: manual
+  verification_notes: Verify periodic review schedule exists for classifications
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 27001
+    controls:
+    - A.5.9
+    - A.5.10
+    - A.5.12
+    - A.5.13
+  - framework: GDPR
+    controls:
+    - Article 5
+    - Article 30
+    - Article 32
+  - framework: NIST 800-53
+    controls:
+    - RA-2
+    - SC-16
+  - framework: NIST 800-60
+    controls:
+    - Section 2
+    - Appendix C
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.7
+relationships:
+  commonly_combined:
+  - security-trust.data-protection.pii-handling
+  - security-trust.data-protection.data-masking
+  - security-trust.data-protection.data-retention
+  - security-trust.authorization.access-control

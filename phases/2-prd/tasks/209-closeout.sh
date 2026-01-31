@@ -48,6 +48,7 @@ task_209_closeout() {
         echo -e "  ${RED}[CRIT]${NC} ${RED}✗${NC} PRD document missing"
         checklist+=("PRD authored:FAIL")
         all_passed=false
+    fi
 
     # Check PRD approval
     local approval_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/prd-approved.json"
@@ -65,6 +66,7 @@ task_209_closeout() {
         echo -e "  ${RED}[CRIT]${NC} ${RED}✗${NC} PRD not approved"
         checklist+=("PRD approved:FAIL")
         all_passed=false
+    fi
 
     # Check audit - look in .outputs/audits/ (current path) or .claude/audit/ (legacy)
     local audit_file="$ATOMIC_ROOT/.outputs/audits/phase-2-report.json"
@@ -97,6 +99,7 @@ task_209_closeout() {
     else
         echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Audit not completed"
         checklist+=("Audit:SKIP")
+    fi
 
     # Check validation
     local validation_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/prd-validation.json"
@@ -107,6 +110,7 @@ task_209_closeout() {
     else
         echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Validation not completed"
         checklist+=("Validation:SKIP")
+    fi
 
     echo -e "  ${GREEN}[PASS]${NC} ${GREEN}✓${NC} Ready for Tasking"
     echo ""
@@ -121,6 +125,8 @@ task_209_closeout() {
     if [[ "$all_passed" == false ]]; then
         echo -e "  ${YELLOW}Some critical items need attention before closeout.${NC}"
         echo ""
+
+    fi
 
     echo -e "  ${CYAN}Closeout options:${NC}"
     echo ""

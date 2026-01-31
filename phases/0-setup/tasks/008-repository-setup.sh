@@ -360,6 +360,14 @@ _008_setup_repository() {
     # NOTE: This function is called via $() — all display output must go to
     # stderr (>&2) so only the return path/status goes to stdout.
 
+    # Check for EMBEDDED repository first (monorepo deployment)
+    local embedded_path="$ATOMIC_ROOT/$repo_name"
+    if [[ -f "$embedded_path/$manifest_file" ]]; then
+        echo -e "  ${GREEN}✓${NC} Using embedded repository: $embedded_path" >&2
+        echo "$embedded_path"
+        return 0
+    fi
+
     # Check if already exists at target path
     if [[ -f "$target_path/$manifest_file" ]]; then
         echo -e "  ${GREEN}✓${NC} Found existing repository: $target_path" >&2

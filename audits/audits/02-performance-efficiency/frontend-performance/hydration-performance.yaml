@@ -1,0 +1,344 @@
+# ============================================================
+# HYDRATION PERFORMANCE AUDIT
+# ============================================================
+# Evaluates the efficiency of JavaScript hydration in server-side
+# rendered (SSR) and static site generation (SSG) applications.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.frontend-performance.hydration-performance"
+  name: "Hydration Performance Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "frontend-performance"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Analyzes hydration performance in SSR/SSG applications where pre-rendered
+    HTML is "hydrated" with JavaScript interactivity. Examines hydration timing,
+    component-level hydration strategies, and patterns that cause hydration
+    mismatches or delayed interactivity.
+
+  why_it_matters: |
+    Hydration is often the largest single task on the main thread after SSR.
+    Full-page hydration blocks interactivity until complete, negating SSR
+    benefits. Users see content but cannot interact, creating frustration.
+    Inefficient hydration directly impacts INP and Time to Interactive.
+
+  when_to_run:
+    - "When implementing SSR/SSG"
+    - "When Time to Interactive is high despite fast FCP"
+    - "After adding client-side interactivity"
+    - "When experiencing hydration mismatches"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "SSR/SSG application source code"
+    - type: "deployed_application"
+      description: "Running application for testing"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Chrome DevTools for profiling"
+
+discovery:
+  code_patterns:
+    - pattern: "hydrateRoot|hydrate\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find React hydration"
+
+    - pattern: "createSSRApp|createApp\\(.*\\)\\.mount"
+      type: "regex"
+      scope: "source"
+      purpose: "Find Vue hydration"
+
+    - pattern: "useEffect|useLayoutEffect"
+      type: "regex"
+      scope: "source"
+      purpose: "Find effects that run during hydration"
+
+    - pattern: "client:.*|client:load|client:visible"
+      type: "regex"
+      scope: "source"
+      purpose: "Find Astro partial hydration directives"
+
+  file_patterns:
+    - glob: "**/*.tsx"
+      purpose: "React components"
+    - glob: "**/*.vue"
+      purpose: "Vue components"
+    - glob: "**/*.astro"
+      purpose: "Astro components"
+    - glob: "**/pages/**"
+      purpose: "Page components"
+
+knowledge_sources:
+  guides:
+    - id: "react-hydration"
+      name: "React Hydration"
+      url: "https://react.dev/reference/react-dom/client/hydrateRoot"
+      offline_cache: true
+
+    - id: "partial-hydration"
+      name: "Islands Architecture"
+      url: "https://jasonformat.com/islands-architecture/"
+      offline_cache: true
+
+    - id: "progressive-hydration"
+      name: "Progressive Hydration"
+      url: "https://www.patterns.dev/posts/progressive-hydration"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "Chrome DevTools Performance"
+      purpose: "Profile hydration timing"
+      offline_capable: false
+
+    - tool: "React DevTools Profiler"
+      purpose: "Component-level hydration analysis"
+      offline_capable: false
+
+  scripts:
+    - id: "find-hydration-patterns"
+      language: "bash"
+      purpose: "Find hydration-related code"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find React hydration
+        grep -rn 'hydrateRoot\|hydrate(' --include='*.tsx' --include='*.jsx' --include='*.ts' .
+        # Find client-side only code
+        grep -rn 'typeof window\|useEffect\[' --include='*.tsx' --include='*.jsx' .
+
+signals:
+  critical:
+    - id: "HYDRA-CRIT-001"
+      signal: "Full page hydration blocking interactivity >1 second"
+      evidence_threshold: "Hydration task > 1000ms"
+      explanation: |
+        Full page hydration executes as a single long task. During this time,
+        the page appears interactive but does not respond to user input.
+        This creates a frustrating experience where buttons don't work.
+      remediation: "Implement progressive/partial hydration, lazy hydrate non-critical components"
+
+    - id: "HYDRA-CRIT-002"
+      signal: "Hydration mismatch causing full re-render"
+      evidence_pattern: "Warning.*mismatch|Hydration failed"
+      explanation: |
+        When server and client HTML don't match, React/Vue discards server
+        HTML and re-renders everything client-side, negating SSR benefits
+        and causing a visible flash.
+      remediation: "Fix mismatches: avoid Date.now(), random(), window checks in render"
+
+  high:
+    - id: "HYDRA-HIGH-001"
+      signal: "Large component tree hydrating synchronously"
+      evidence_pattern: "hydrateRoot.*<App"
+      explanation: |
+        Hydrating the entire app at once means all components must process
+        before any become interactive. Large apps have significant hydration cost.
+      remediation: "Use React.lazy with Suspense, or framework-specific lazy hydration"
+
+    - id: "HYDRA-HIGH-002"
+      signal: "useLayoutEffect causing hydration delay"
+      evidence_pattern: "useLayoutEffect"
+      explanation: |
+        useLayoutEffect runs synchronously during hydration, blocking rendering.
+        Complex operations in useLayoutEffect extend the hydration task.
+      remediation: "Move to useEffect where possible, or defer expensive operations"
+
+    - id: "HYDRA-HIGH-003"
+      signal: "No partial hydration for interactive islands"
+      evidence_pattern: "(?!.*client:visible|client:idle|lazy)"
+      explanation: |
+        In frameworks supporting partial hydration (Astro, Qwik, Fresh),
+        not using it means all JavaScript ships and executes regardless
+        of whether components need interactivity.
+      remediation: "Use client:visible/idle directives for non-critical interactive components"
+
+  medium:
+    - id: "HYDRA-MED-001"
+      signal: "Heavy computation during hydration"
+      evidence_pattern: "useMemo.*\\[\\]|useState.*complex"
+      remediation: "Defer expensive computations to after hydration with useEffect"
+
+    - id: "HYDRA-MED-002"
+      signal: "Data fetching during hydration"
+      evidence_pattern: "useQuery.*suspense|fetch.*useEffect\\[\\]"
+      remediation: "Pass data from server, avoid fetching during hydration"
+
+  low:
+    - id: "HYDRA-LOW-001"
+      signal: "Non-interactive components hydrated"
+      evidence_pattern: "static.*content.*hydrate"
+      remediation: "Use static rendering for non-interactive content"
+
+  positive:
+    - id: "HYDRA-POS-001"
+      signal: "Progressive hydration implemented"
+      evidence_pattern: "client:visible|client:idle|lazy.*load"
+
+    - id: "HYDRA-POS-002"
+      signal: "Server components used for static content"
+      evidence_pattern: "'use server'|server\\.tsx"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify hydration approach"
+      description: |
+        Determine what hydration strategy is used.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find hydration entry point"
+          command: "grep -rn 'hydrateRoot\\|hydrate(' --include='*.tsx' --include='*.jsx' --include='*.ts' ."
+        - purpose: "Find partial hydration"
+          command: "grep -rn 'client:\\|lazy' --include='*.astro' --include='*.tsx' ."
+      expected_findings:
+        - "Hydration strategy"
+        - "Partial hydration usage"
+
+    - id: "2"
+      name: "Measure hydration timing"
+      description: |
+        Profile hydration to measure its duration.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Profile with DevTools"
+          command: "DevTools > Performance > Record page load"
+      expected_findings:
+        - "Hydration task duration"
+        - "Main thread blocking time"
+
+    - id: "3"
+      name: "Check for hydration mismatches"
+      description: |
+        Look for console warnings about mismatches.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find mismatch-prone code"
+          command: "grep -rn 'Date.now()\\|Math.random()\\|typeof window' --include='*.tsx' --include='*.jsx' ."
+      expected_findings:
+        - "Mismatch sources"
+        - "Console warnings"
+
+    - id: "4"
+      name: "Analyze component hydration"
+      description: |
+        Identify which components are hydrated and their cost.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find components at hydration boundary"
+          command: "grep -rn 'hydrateRoot\\|hydrate(' --include='*.tsx' -A5 ."
+      expected_findings:
+        - "Components being hydrated"
+        - "Candidates for lazy hydration"
+
+    - id: "5"
+      name: "Evaluate optimization opportunities"
+      description: |
+        Identify components that could benefit from partial/progressive hydration.
+      duration_estimate: "20 min"
+      questions:
+        - "Which components need immediate interactivity?"
+        - "Which can be hydrated on visibility/idle?"
+        - "Which are purely static?"
+      expected_findings:
+        - "Optimization candidates"
+        - "Potential strategy changes"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Hydration Analysis"
+        - "Performance Impact"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Profiling clearly shows hydration timing and mismatches"
+    medium: "Code patterns suggest issues"
+    low: "Requires profiling to confirm"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "react-hydration"
+        priority: "required"
+      - source_id: "partial-hydration"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires profiling"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "hydration-001"
+    item: "Hydration task under 500ms"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "DevTools Performance shows hydration < 500ms"
+    expected: "< 500ms"
+
+  - id: "hydration-002"
+    item: "No hydration mismatches"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "No hydration warnings in console"
+    expected: "0 warnings"
+
+  - id: "hydration-003"
+    item: "Non-critical components use progressive hydration"
+    level: "BLOCKING"
+    verification: "grep -rn 'client:visible\\|client:idle\\|lazy' --include='*.tsx' --include='*.astro' . | wc -l"
+    expected: "> 0 where applicable"
+
+governance:
+  applicable_to:
+    archetypes: ["webapp", "ssr-app", "ssg-site"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.frontend-performance.core-web-vitals"
+    - "performance-efficiency.frontend-performance.javascript-bundle-size"

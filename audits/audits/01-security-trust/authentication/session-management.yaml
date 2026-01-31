@@ -1,0 +1,569 @@
+audit:
+  id: security-trust.authentication.session-management
+  name: Session Management Security Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: authentication
+  tier: phd
+  estimated_duration: 2-4 hours  # median: 3h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: security
+  default_profiles:
+  - full
+  - security
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    Examines session management implementation for security vulnerabilities
+    including session ID generation, cookie security attributes, session
+    lifecycle management, timeout handling, and session fixation prevention.
+    Reviews code patterns, configuration files, and security headers.
+  why_it_matters: |
+    Weak session management enables:
+    - Session hijacking via predictable tokens or network interception
+    - Session fixation attacks allowing attacker-controlled sessions
+    - Persistent unauthorized access through insufficient expiration
+    - Cross-site attacks exploiting missing cookie security attributes
+    - Account takeover through session theft or replay attacks
+
+    NIST states: "Strength of session management procedures is as important
+    as authentication, since the ability to hijack a session is as damaging
+    as an authentication failure."
+  when_to_run:
+  - Before production deployment
+  - After authentication system changes
+  - During security audits or penetration testing prep
+  - After framework or library upgrades
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code with authentication/session handling
+  - type: configuration
+    description: Session and cookie configuration files
+  access_requirements:
+  - Read access to authentication and session management code
+  - Read access to web server and framework configuration
+  - Access to security headers configuration
+discovery:
+  code_patterns:
+  - pattern: session[_-]?(id|token|key)
+    type: regex
+    scope: source
+    purpose: Identify session token handling code
+  - pattern: (set[Cc]ookie|cookie\.set|res\.cookie)
+    type: regex
+    scope: source
+    purpose: Find cookie setting operations
+  - pattern: (HttpOnly|Secure|SameSite)
+    type: keyword
+    scope: config
+    purpose: Verify cookie security attributes
+  - pattern: (session[_-]?timeout|idle[_-]?timeout|max[_-]?age)
+    type: regex
+    scope: config
+    purpose: Locate timeout configurations
+  - pattern: (regenerate|rotate|renew)[_-]?(session|token|id)
+    type: regex
+    scope: source
+    purpose: Find session regeneration logic
+  - pattern: (Math\.random|rand\(|random\.|uuid\.v1)
+    type: regex
+    scope: source
+    purpose: Detect weak random number generation for tokens
+  file_patterns:
+  - glob: '**/session*.{js,ts,py,rb,java,go,php}'
+    purpose: Session management modules
+  - glob: '**/auth*.{js,ts,py,rb,java,go,php}'
+    purpose: Authentication handlers
+  - glob: '**/{nginx,apache,httpd}.conf'
+    purpose: Web server configuration
+  - glob: '**/application.{yml,yaml,properties}'
+    purpose: Framework session configuration
+knowledge_sources:
+  specifications:
+  - id: owasp-session-cheatsheet
+    name: OWASP Session Management Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
+    offline_cache: true
+    priority: required
+  - id: nist-800-63b
+    name: NIST SP 800-63B Digital Identity Guidelines
+    url: https://pages.nist.gov/800-63-3/sp800-63b.html
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs-v3
+    name: OWASP ASVS V3 Session Management Requirements
+    url: https://github.com/OWASP/ASVS/blob/master/4.0/en/0x12-V3-Session-management.md
+    offline_cache: true
+    priority: required
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: NIST SP 800-207 Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-wstg-session
+    name: OWASP Web Security Testing Guide - Session Management
+    url: https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/06-Session_Management_Testing/
+    offline_cache: true
+  - id: nist-800-53-ac12
+    name: NIST SP 800-53 AC-12 Session Termination
+    url: https://csf.tools/reference/nist-sp-800-53/r5/ac/ac-12/
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Pattern-based detection of insecure session handling
+    offline_capable: true
+  - tool: grep/ripgrep
+    purpose: Search for session-related code patterns
+    offline_capable: true
+  scripts:
+  - id: session-cookie-checker
+    language: bash
+    purpose: Check for missing cookie security attributes
+    source: inline
+    code: |
+      #!/bin/bash
+      # Find cookie setters without security attributes
+      echo "=== Cookies without HttpOnly ==="
+      grep -rn --include="*.{js,ts,py,rb,java,go,php}" -E "(set[Cc]ookie|cookie\.set|res\.cookie)" . | \
+        grep -vi "httponly"
+
+      echo ""
+      echo "=== Cookies without Secure flag ==="
+      grep -rn --include="*.{js,ts,py,rb,java,go,php}" -E "(set[Cc]ookie|cookie\.set|res\.cookie)" . | \
+        grep -vi "secure"
+
+      echo ""
+      echo "=== Cookies without SameSite ==="
+      grep -rn --include="*.{js,ts,py,rb,java,go,php}" -E "(set[Cc]ookie|cookie\.set|res\.cookie)" . | \
+        grep -vi "samesite"
+    offline_capable: true
+  - id: weak-random-detector
+    language: bash
+    purpose: Detect weak random number generators for session IDs
+    source: inline
+    code: |
+      #!/bin/bash
+      # Find potentially weak session ID generation
+      echo "=== Weak Random Number Generation ==="
+      grep -rn --include="*.{js,ts}" "Math\.random" . | grep -i "session\|token\|id"
+      grep -rn --include="*.py" "random\." . | grep -v "secrets\." | grep -i "session\|token"
+      grep -rn --include="*.{java,go}" -E "(rand\(|Random\(\))" . | grep -i "session\|token"
+    offline_capable: true
+signals:
+  critical:
+  - id: SESS-CRIT-001
+    signal: Session IDs generated with weak entropy
+    cwe: CWE-331
+    owasp_asvs: V3.2.2, V3.2.4
+    evidence_pattern: (Math\.random|rand\(|Random\(\)|uuid\.v1).*(session|token)
+    explanation: |
+      Session IDs must be generated using cryptographically secure random
+      number generators with at least 64 bits of entropy. Using Math.random(),
+      standard rand(), or predictable UUID versions allows attackers to
+      guess or brute-force valid session tokens.
+
+      OWASP states: "Session IDs must be long enough to encode sufficient
+      entropy, preventing brute force attacks."
+    remediation: |
+      Use cryptographically secure random generators:
+      - Node.js: crypto.randomBytes() or crypto.randomUUID()
+      - Python: secrets.token_hex() or secrets.token_urlsafe()
+      - Java: SecureRandom
+      - Go: crypto/rand
+
+      Ensure minimum 128 bits of entropy (32 hex characters or 22 base64 characters).
+  - id: SESS-CRIT-002
+    signal: Session token transmitted over unencrypted connection
+    cwe: CWE-319
+    owasp_asvs: V3.4.1
+    evidence_pattern: cookie.*[^s]ecure.*false|secure\s*[:=]\s*false
+    explanation: |
+      Session cookies without the Secure attribute can be transmitted over
+      HTTP, allowing network attackers to intercept tokens via man-in-the-middle
+      attacks. This completely undermines session security regardless of
+      token strength.
+
+      NIST 800-63B requires session secrets to be sent "over an authenticated
+      protected channel."
+    remediation: |
+      Set the Secure attribute on all session cookies:
+      - Express.js: res.cookie('session', token, { secure: true })
+      - Django: SESSION_COOKIE_SECURE = True
+      - Rails: config.session_store :cookie_store, secure: true
+      - Spring: server.servlet.session.cookie.secure=true
+
+      Enforce HTTPS site-wide with HSTS headers.
+  high:
+  - id: SESS-HIGH-001
+    signal: Session not regenerated after authentication
+    cwe: CWE-384
+    owasp_asvs: V3.2.1
+    evidence_pattern: login|authenticate.*\{[^}]*\}
+    evidence_indicators:
+    - Login handler without session regeneration call
+    - Authentication successful without new session token
+    - Pre-authentication session ID persists post-login
+    explanation: |
+      Session fixation attacks occur when an attacker can set or predict
+      a victim's session ID before authentication. If the session ID is
+      not changed upon login, the attacker gains access to the authenticated
+      session.
+
+      OWASP ASVS V3.2.1: "Verify the application generates a new session
+      token on user authentication."
+    remediation: |
+      Regenerate session ID immediately after successful authentication:
+      - Express.js: req.session.regenerate()
+      - Django: request.session.cycle_key()
+      - Rails: reset_session
+      - PHP: session_regenerate_id(true)
+      - Java: request.getSession().invalidate(); request.getSession(true);
+  - id: SESS-HIGH-002
+    signal: Session cookies accessible via JavaScript (missing HttpOnly)
+    cwe: CWE-1004
+    owasp_asvs: V3.4.2
+    evidence_pattern: httponly\s*[:=]\s*false|HttpOnly.*false
+    explanation: |
+      Without the HttpOnly attribute, session cookies can be read by
+      JavaScript, making them vulnerable to theft via XSS attacks.
+      A single XSS vulnerability could compromise all user sessions.
+
+      OWASP ASVS V3.4.2: "Verify that cookie-based session tokens have
+      the 'HttpOnly' attribute set."
+    remediation: |
+      Set HttpOnly on all session cookies:
+      - Express.js: res.cookie('session', token, { httpOnly: true })
+      - Django: SESSION_COOKIE_HTTPONLY = True (default)
+      - Rails: httponly: true in cookie settings
+      - Spring: server.servlet.session.cookie.http-only=true
+  medium:
+  - id: SESS-MED-001
+    signal: Insufficient session timeout configuration
+    cwe: CWE-613
+    owasp_asvs: V3.3.2
+    evidence_pattern: (session.*timeout|idle.*timeout|maxAge)\s*[:=]\s*\d+
+    evidence_threshold: Idle timeout > 30 minutes for high-risk apps, or no timeout configured
+    explanation: |
+      Sessions without appropriate timeouts remain valid indefinitely,
+      increasing the window for session theft attacks. OWASP recommends
+      2-5 minutes idle timeout for high-risk applications and 15-30
+      minutes for low-risk applications.
+
+      NIST 800-63B specifies reauthentication requirements based on
+      Authenticator Assurance Level (AAL).
+    remediation: |
+      Configure appropriate timeouts based on risk:
+      - High-risk (financial, healthcare): 2-5 min idle, 4 hour absolute
+      - Standard: 15-30 min idle, 8 hour absolute
+
+      Example (Express.js):
+      app.use(session({
+        cookie: { maxAge: 30 * 60 * 1000 },  // 30 min idle
+        rolling: true
+      }));
+  - id: SESS-MED-002
+    signal: Missing SameSite cookie attribute
+    cwe: CWE-1275
+    owasp_asvs: V3.4.3
+    evidence_pattern: cookie|session
+    evidence_indicators:
+    - Cookie setter without SameSite attribute
+    - SameSite set to None without Secure flag
+    explanation: |
+      Without SameSite attribute (or with SameSite=None), cookies are
+      sent with cross-site requests, enabling CSRF attacks. Modern
+      browsers default to Lax, but explicit configuration is required
+      for consistent protection across all browsers.
+
+      OWASP ASVS V3.4.3: "Verify that cookie-based session tokens utilize
+      the 'SameSite' attribute to limit exposure to cross-site request
+      forgery attacks."
+    remediation: |
+      Set SameSite=Strict or SameSite=Lax on session cookies:
+      - Express.js: res.cookie('session', token, { sameSite: 'strict' })
+      - Django: SESSION_COOKIE_SAMESITE = 'Strict'
+      - Rails: same_site: :strict
+
+      Use Strict for maximum protection. Use Lax if cross-site navigation
+      with session is required.
+  low:
+  - id: SESS-LOW-001
+    signal: Session token exposed in URL parameters
+    cwe: CWE-598
+    owasp_asvs: V3.1.1
+    evidence_pattern: (\?|&)(session|token|sid)=
+    explanation: |
+      Session IDs in URLs are logged in server logs, browser history,
+      and referrer headers, increasing exposure risk.
+    remediation: |
+      Transmit session tokens only via cookies or Authorization headers.
+      Never include session identifiers in URL query parameters.
+  - id: SESS-LOW-002
+    signal: Default or revealing session cookie names
+    cwe: CWE-200
+    evidence_pattern: (PHPSESSID|JSESSIONID|ASP\.NET_SessionId|connect\.sid)
+    explanation: |
+      Framework-default cookie names reveal technology stack information
+      to attackers, aiding in targeting framework-specific vulnerabilities.
+    remediation: |
+      Use generic session cookie names like 'id' or 'session':
+      - Express.js: app.use(session({ name: 'id' }))
+      - Django: SESSION_COOKIE_NAME = 'id'
+      - Spring: server.servlet.session.cookie.name=id
+  positive:
+  - id: SESS-POS-001
+    signal: Cryptographically secure session ID generation
+    evidence_pattern: (crypto\.randomBytes|secrets\.token|SecureRandom|crypto/rand)
+  - id: SESS-POS-002
+    signal: All session cookie security attributes configured
+    evidence_indicators:
+    - 'Secure: true'
+    - 'HttpOnly: true'
+    - 'SameSite: Strict or Lax'
+  - id: SESS-POS-003
+    signal: Session regeneration on authentication state changes
+    evidence_pattern: (regenerate|rotate|cycle_key|reset_session).*(login|logout|auth)
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Locate Session Management Code
+    description: |
+      Identify all files and modules handling session creation,
+      storage, validation, and termination.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find session-related files
+      command: |
+        find . -type f \( -name "*.js" -o -name "*.ts" -o -name "*.py" -o -name "*.java" -o -name "*.go" -o -name "*.rb" -o -name "*.php" \) | xargs grep -l -i "session" 2>/dev/null | head -50
+    - purpose: Find authentication handlers
+      command: |
+        find . -type f \( -name "*.js" -o -name "*.ts" -o -name "*.py" \) | xargs grep -l -E "(login|authenticate|signin)" 2>/dev/null | head -30
+    expected_findings:
+    - List of session management files
+    - Authentication handler locations
+  - id: '2'
+    name: Analyze Session ID Generation
+    description: |
+      Verify session tokens use cryptographically secure random
+      generation with sufficient entropy (minimum 64 bits, recommended 128 bits).
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check for weak random usage
+      command: |
+        grep -rn --include="*.{js,ts}" "Math\.random" . 2>/dev/null | grep -i "session\|token\|id" || echo "No Math.random in session context found"
+    - purpose: Check for secure random usage
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go}" -E "(crypto\.randomBytes|secrets\.|SecureRandom|crypto/rand)" . 2>/dev/null | head -20
+    expected_findings:
+    - Session ID generation mechanism identified
+    - Entropy assessment
+  - id: '3'
+    name: Verify Cookie Security Attributes
+    description: |
+      Check that session cookies have Secure, HttpOnly, and
+      SameSite attributes properly configured.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find cookie configuration
+      command: |
+        grep -rn --include="*.{js,ts,py,java,rb,yml,yaml,json}" -E "(cookie|session).*\{" . 2>/dev/null | grep -iE "(secure|httponly|samesite)" | head -30
+    - purpose: Check for explicit false settings
+      command: |
+        grep -rn --include="*.{js,ts,py,java,yml}" -iE "(httponly|secure|samesite)\s*[:=]\s*false" . 2>/dev/null || echo "No explicitly disabled security attributes found"
+    expected_findings:
+    - Cookie security attribute configuration
+    - Any disabled security attributes
+  - id: '4'
+    name: Check Session Fixation Prevention
+    description: |
+      Verify session IDs are regenerated after authentication
+      and privilege changes.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find session regeneration calls
+      command: |
+        grep -rn --include="*.{js,ts,py,rb,java,php}" -E "(regenerate|rotate|cycle_key|reset_session|invalidate.*getSession)" . 2>/dev/null | head -20
+    - purpose: Check login handlers for regeneration
+      command: |
+        grep -rn --include="*.{js,ts,py}" -A10 -B2 "login\|authenticate" . 2>/dev/null | grep -iE "(session|regenerate)" | head -20
+    expected_findings:
+    - Session regeneration implementation
+    - Authentication handler analysis
+  - id: '5'
+    name: Verify Session Timeout Configuration
+    description: |
+      Check that appropriate idle and absolute timeouts are configured.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find timeout configurations
+      command: |
+        grep -rn --include="*.{js,ts,py,yml,yaml,json,properties}" -iE "(session.*timeout|idle.*timeout|maxage|max_age|cookie.*age)" . 2>/dev/null | head -20
+    - purpose: Check framework session config
+      command: |
+        find . -name "*.yml" -o -name "*.yaml" -o -name "*.properties" | xargs grep -l -i "session" 2>/dev/null | head -10
+    expected_findings:
+    - Timeout values configured
+    - Risk-appropriate timeout assessment
+  - id: '6'
+    name: Check Session Termination
+    description: |
+      Verify logout properly invalidates sessions server-side
+      and clears all session data.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find logout implementations
+      command: |
+        grep -rn --include="*.{js,ts,py,rb,java,php}" -A5 "logout\|signout\|sign_out" . 2>/dev/null | grep -iE "(session|destroy|invalidate|delete|clear)" | head -20
+    - purpose: Check for client-only logout
+      command: |
+        grep -rn --include="*.{js,ts}" -B2 -A5 "logout" . 2>/dev/null | grep -E "(localStorage|sessionStorage)\.remove" | head -10
+    expected_findings:
+    - Server-side session destruction
+    - Client-side vs server-side termination
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Critical Findings
+    - Session ID Security Analysis
+    - Cookie Configuration Review
+    - Lifecycle Management Assessment
+    - Remediation Priorities
+  confidence_guidance:
+    high: Code pattern directly observed, security attribute explicitly configured
+    medium: Pattern inferred from framework usage, configuration partially verified
+    low: Based on framework defaults or incomplete code visibility
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-session-cheatsheet
+      priority: required
+    - source_id: owasp-asvs-v3
+      priority: required
+    - source_id: nist-800-63b
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed code analysis
+    security:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 5
+closeout_checklist:
+- id: sess-001
+  item: Session IDs use cryptographically secure random generation
+  level: CRITICAL
+  verification: |
+    ! grep -rn --include="*.{js,ts}" "Math\.random" . 2>/dev/null | grep -qi "session\|token" && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: sess-002
+  item: Session cookies have Secure attribute
+  level: CRITICAL
+  verification: |
+    ! grep -rn --include="*.{js,ts,py,yml}" -iE "secure\s*[:=]\s*false" . 2>/dev/null | grep -qi "cookie\|session" && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: sess-003
+  item: Session cookies have HttpOnly attribute
+  level: CRITICAL
+  verification: |
+    ! grep -rn --include="*.{js,ts,py,yml}" -iE "httponly\s*[:=]\s*false" . 2>/dev/null | grep -qi "cookie\|session" && echo 'PASS' || echo 'FAIL'
+  expected: PASS
+- id: sess-004
+  item: Session regeneration implemented on authentication
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify login handlers call session regeneration before setting authenticated state
+  expected: Confirmed by reviewer
+- id: sess-005
+  item: Session timeout configured
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.{js,ts,py,yml,yaml,json}" -iE "(timeout|maxage|max_age)" . 2>/dev/null | grep -qi "session" && echo 'PASS' || echo 'FAIL: No session timeout found'
+  expected: PASS
+- id: sess-006
+  item: SameSite cookie attribute configured
+  level: WARNING
+  verification: |
+    grep -rn --include="*.{js,ts,py,yml}" -iE "samesite" . 2>/dev/null | grep -qi "session\|cookie" && echo 'PASS' || echo 'WARNING: SameSite not explicitly set'
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - web-application
+    - api-service
+    - microservices
+  compliance_frameworks:
+  - framework: OWASP ASVS
+    controls:
+    - V3.1.1
+    - V3.2.1
+    - V3.2.2
+    - V3.2.4
+    - V3.3.1
+    - V3.3.2
+    - V3.4.1
+    - V3.4.2
+    - V3.4.3
+    - V3.7.1
+  - framework: NIST SP 800-53
+    controls:
+    - AC-12
+    - SC-23
+  - framework: NIST SP 800-63B
+    controls:
+    - '7.1'
+    - 7.1.1
+    - '7.2'
+  - framework: CWE/SANS Top 25
+    controls:
+    - CWE-331
+    - CWE-384
+    - CWE-613
+    - CWE-614
+    - CWE-1004
+relationships:
+  commonly_combined:
+  - security-trust.authentication.credential-management
+  - security-trust.authentication.multi-factor-auth
+  - security-trust.authorization.access-control
+  - security-trust.cryptography.secure-random
+  - security-trust.application-security.xss-prevention

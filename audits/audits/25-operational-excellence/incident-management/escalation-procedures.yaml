@@ -1,0 +1,432 @@
+audit:
+  id: operational-excellence.incident-management.escalation-procedures
+  name: Escalation Procedures Audit
+  version: 1.0.0
+  last_updated: '2025-01-22'
+  status: active
+  category: operational-excellence
+  category_number: 25
+  subcategory: incident-management
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: process
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines escalation procedures including:
+    - Escalation path definitions (functional, hierarchical, executive)
+    - Escalation triggers and timing criteria
+    - Contact information accuracy and accessibility
+    - Automated vs manual escalation mechanisms
+    - Cross-team escalation procedures
+    - Vendor and third-party escalation paths
+    - Escalation documentation and runbooks
+    - Escalation testing and validation
+  why_it_matters: |
+    Effective escalation ensures incidents reach the right responders quickly:
+    - Delays in engaging Subject Matter Experts extend outages
+    - Missing escalation paths leave responders without support
+    - Incorrect escalation wastes time and causes confusion
+    - Untested escalation paths may fail during actual incidents
+
+    According to the Google SRE book, clear escalation paths are essential
+    for managing incidents effectively. PagerDuty research shows that
+    organizations with well-defined escalation procedures achieve
+    significantly faster resolution times.
+  when_to_run:
+  - Quarterly operational reviews
+  - After incidents with escalation failures
+  - When team structures change
+  - After on-call rotation changes
+  - During vendor relationship reviews
+prerequisites:
+  required_artifacts:
+  - type: escalation_documentation
+    description: Escalation path definitions and contact lists
+  - type: oncall_schedules
+    description: On-call rotation configurations
+  - type: incident_tool_configs
+    description: PagerDuty, Opsgenie escalation policies
+  access_requirements:
+  - Read access to escalation documentation
+  - Access to on-call scheduling tools
+  - Contact list access
+  - Vendor escalation documentation
+discovery:
+  code_patterns:
+  - pattern: (escalat|page|notify).*(policy|path|level|chain)
+    type: regex
+    scope: config
+    purpose: Detect escalation policy definitions
+  - pattern: (timeout|delay|after).*minutes.*escalat
+    type: regex
+    scope: config
+    purpose: Detect escalation timing rules
+  - pattern: (on-?call|primary|secondary|backup).*(schedule|rotation)
+    type: regex
+    scope: config
+    purpose: Detect on-call escalation tiers
+  file_patterns:
+  - glob: '**/escalation*.{yaml,yml,md,json}'
+    purpose: Escalation configuration files
+  - glob: '**/oncall*.{yaml,yml,json}'
+    purpose: On-call configuration files
+  - glob: '**/contacts*.{yaml,yml,json}'
+    purpose: Contact list files
+knowledge_sources:
+  specifications:
+  - id: google-sre-escalation
+    name: Google SRE - Incident Management Escalation
+    url: https://sre.google/sre-book/managing-incidents/
+    offline_cache: true
+    priority: required
+  - id: pagerduty-escalation
+    name: PagerDuty Escalation Policy Best Practices
+    url: https://support.pagerduty.com/docs/escalation-policies
+    offline_cache: true
+    priority: required
+  guides:
+  - id: itil-escalation
+    name: ITIL Escalation Management
+    url: https://www.axelos.com/certifications/itil-service-management
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: pagerduty
+    purpose: Escalation policy management
+    command: pd escalation-policy list
+  - tool: opsgenie
+    purpose: Escalation configuration
+    command: opsgenie escalation list
+  scripts:
+  - id: escalation-path-scanner
+    language: bash
+    purpose: Identify escalation documentation
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Escalation Path Documentation Scan ==="
+      find . -type f \( -name "*escalat*" -o -name "*oncall*" -o -name "*contact*" \) \
+        2>/dev/null | head -30
+signals:
+  critical:
+  - id: EP-CRIT-001
+    signal: No escalation paths defined
+    evidence_indicators:
+    - No escalation documentation exists
+    - On-call has no backup or escalation
+    - No escalation policies in incident tools
+    explanation: |
+      Without defined escalation paths, on-call responders have no support when
+      facing unfamiliar issues. This leads to extended outages, responder burnout,
+      and inconsistent incident handling. Google SRE principles require clear
+      escalation mechanisms for all services.
+    remediation: |
+      - Define primary, secondary, and tertiary escalation tiers
+      - Document Subject Matter Expert escalation paths
+      - Configure escalation policies in incident tools
+      - Establish management escalation criteria
+      - Test escalation paths monthly
+  - id: EP-CRIT-002
+    signal: Escalation contact information is outdated
+    evidence_indicators:
+    - Contact lists not updated in >3 months
+    - Departed employees still on escalation paths
+    - Phone numbers and emails invalid
+    explanation: |
+      Outdated contact information causes escalation failures during critical
+      incidents. Responders unable to reach escalation contacts experience
+      delayed resolution and increased stress.
+    remediation: |
+      - Implement automated contact validation
+      - Require monthly contact information review
+      - Integrate with HR for automatic updates
+      - Test contact reachability regularly
+      - Document contact update procedures
+  high:
+  - id: EP-HIGH-001
+    signal: No automatic escalation configured
+    evidence_indicators:
+    - All escalation requires manual action
+    - No timeout-based escalation
+    - Unacknowledged alerts don't escalate
+    explanation: |
+      Manual-only escalation fails when primary responders are unavailable or
+      overwhelmed. Automatic escalation ensures incidents reach responders
+      even if initial contacts cannot respond.
+    remediation: |
+      - Configure automatic escalation after acknowledgment timeout
+      - Set escalation delays appropriate to severity
+      - Implement escalation for unresolved incidents
+      - Test automatic escalation regularly
+      - Monitor escalation policy execution
+  - id: EP-HIGH-002
+    signal: No executive or management escalation path
+    evidence_indicators:
+    - Technical escalation only
+    - No business impact escalation
+    - Executives not notified of major incidents
+    explanation: |
+      Major incidents often require business decisions, customer communication,
+      and resource authorization that require management involvement. Without
+      management escalation paths, these decisions are delayed.
+    remediation: |
+      - Define management escalation criteria
+      - Document executive notification thresholds
+      - Create management on-call rotation
+      - Establish communication protocols for executives
+      - Test management escalation quarterly
+  - id: EP-HIGH-003
+    signal: Cross-team escalation procedures missing
+    evidence_indicators:
+    - No inter-team escalation documentation
+    - Unknown contacts for dependent services
+    - Escalation stops at team boundaries
+    explanation: |
+      Modern systems involve multiple teams. When incidents span teams,
+      unclear cross-team escalation causes delays and confusion. Each
+      team should know how to escalate to dependent service teams.
+    remediation: |
+      - Map service dependencies to team ownership
+      - Document cross-team escalation contacts
+      - Establish inter-team communication protocols
+      - Create shared incident channels
+      - Practice cross-team incident response
+  medium:
+  - id: EP-MED-001
+    signal: Vendor escalation paths not documented
+    evidence_indicators:
+    - No third-party support contacts documented
+    - Vendor escalation procedures unknown
+    - Support contract details inaccessible
+    explanation: |
+      Incidents involving third-party services require vendor escalation.
+      Without documented vendor contacts and support procedures, responders
+      waste time finding the right escalation path during outages.
+    remediation: |
+      - Document all vendor support contacts
+      - Record support contract details (SLA, tier)
+      - Create vendor escalation runbooks
+      - Maintain vendor escalation history
+      - Review vendor contacts quarterly
+  - id: EP-MED-002
+    signal: Escalation timing not optimized
+    evidence_indicators:
+    - Same escalation delay for all severities
+    - Escalation too slow for critical incidents
+    - Escalation too aggressive for minor issues
+    explanation: |
+      Escalation timing should match incident severity. Critical incidents
+      need rapid escalation (5-15 minutes) while lower severity incidents
+      can wait longer before escalating.
+    remediation: |
+      - Define escalation timing per severity level
+      - Configure severity-based escalation policies
+      - Monitor escalation timing effectiveness
+      - Adjust based on MTTR data
+      - Document timing rationale
+  low:
+  - id: EP-LOW-001
+    signal: Escalation metrics not tracked
+    evidence_indicators:
+    - Escalation frequency unknown
+    - Escalation effectiveness not measured
+    - No escalation failure tracking
+    explanation: |
+      Without metrics, organizations cannot optimize escalation policies.
+      Tracking escalation frequency, timing, and outcomes enables
+      continuous improvement.
+    remediation: |
+      - Implement escalation frequency tracking
+      - Measure time-to-escalation by severity
+      - Track escalation success/failure rate
+      - Analyze escalation patterns monthly
+      - Report escalation metrics to leadership
+  positive:
+  - id: EP-POS-001
+    signal: Comprehensive escalation paths with automatic triggers
+    evidence_indicators:
+    - Multi-tier escalation policies configured
+    - Automatic escalation based on severity and timing
+    - Regular escalation path testing
+  - id: EP-POS-002
+    signal: Cross-functional escalation procedures documented
+    evidence_indicators:
+    - Technical, management, and vendor escalation paths
+    - Cross-team escalation procedures
+    - Contact information validated regularly
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Escalation Policy Review
+    description: |
+      Examine escalation policy definitions and configurations.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find escalation documentation
+      command: |
+        find . -type f \( -name "*escalat*" -o -name "*oncall*" \) \
+          \( -name "*.md" -o -name "*.yaml" -o -name "*.json" \) 2>/dev/null | head -20
+    - purpose: Search for escalation policy definitions
+      command: |
+        grep -rniE "escalat.*(policy|path|level|tier)" \
+          --include="*.md" --include="*.yaml" . 2>/dev/null | head -30
+    expected_findings:
+    - Escalation policy configurations
+    - Escalation tier definitions
+    - Timing and trigger rules
+  - id: '2'
+    name: Contact Information Validation
+    description: |
+      Verify escalation contact information is current and accessible.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find contact lists
+      command: |
+        find . -type f \( -name "*contact*" -o -name "*directory*" -o -name "*oncall*" \) \
+          2>/dev/null | head -20
+    - purpose: Search for phone/email patterns
+      command: |
+        grep -rniE "(@|phone|mobile|slack|teams)" \
+          --include="*.yaml" --include="*.json" --include="*.md" . 2>/dev/null | head -30
+    expected_findings:
+    - Contact lists
+    - Communication channel definitions
+    - Last update timestamps
+  - id: '3'
+    name: Automatic Escalation Configuration
+    description: |
+      Review automatic escalation settings in incident tools.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find PagerDuty/Opsgenie configurations
+      command: |
+        find . -type f \( -name "*pagerduty*" -o -name "*opsgenie*" \) \
+          \( -name "*.yaml" -o -name "*.tf" -o -name "*.json" \) 2>/dev/null | head -20
+    - purpose: Search for escalation timeout settings
+      command: |
+        grep -rniE "(timeout|delay|escalation_delay_in_minutes)" \
+          --include="*.yaml" --include="*.tf" --include="*.json" . 2>/dev/null | head -20
+    expected_findings:
+    - Automatic escalation rules
+    - Timeout configurations
+    - Escalation policy assignments
+  - id: '4'
+    name: Cross-Team and Vendor Escalation Review
+    description: |
+      Assess escalation procedures for dependent teams and vendors.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find vendor support documentation
+      command: |
+        find . -type f \( -name "*vendor*" -o -name "*support*" -o -name "*third-party*" \) \
+          \( -name "*.md" -o -name "*.yaml" \) 2>/dev/null | head -20
+    - purpose: Search for team ownership documentation
+      command: |
+        grep -rniE "(owner|team|responsible).*(service|component)" \
+          --include="*.md" --include="*.yaml" . 2>/dev/null | head -20
+    expected_findings:
+    - Vendor support contacts
+    - Team ownership documentation
+    - Cross-team escalation procedures
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Escalation Path Assessment
+    - Contact Information Audit
+    - Automation Review
+    - Recommendations
+  - type: escalation_matrix
+    format: table
+    description: Escalation paths by severity and team
+  confidence_guidance:
+    high: Escalation policies fully documented and configured
+    medium: Partial documentation, tool configurations exist
+    low: Escalation procedures unclear, requires interviews
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: google-sre-escalation
+      priority: required
+    - source_id: pagerduty-escalation
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Escalation audit requires thorough review
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: ep-001
+  item: Escalation paths are defined for all services
+  level: CRITICAL
+  verification: |
+    find . -type f -name "*escalat*.yaml" 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: ep-002
+  item: Contact information is validated and current
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify contact lists were updated within last 30 days
+  expected: Confirmed by reviewer
+- id: ep-003
+  item: Automatic escalation is configured
+  level: BLOCKING
+  verification: |
+    grep -rniE "escalation_delay|timeout.*escalat" \
+      --include="*.yaml" --include="*.json" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: ep-004
+  item: Management escalation path exists
+  level: WARNING
+  verification: manual
+  verification_notes: Verify executive/management escalation is documented
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ITIL 4
+    controls:
+    - Incident Management
+    - Escalation Management
+  - framework: SOC 2
+    controls:
+    - CC7.4
+    - CC7.5
+  - framework: ISO 27001
+    controls:
+    - A.16.1.1
+    - A.16.1.2
+relationships:
+  commonly_combined:
+  - operational-excellence.incident-management.incident-response-process
+  - operational-excellence.on-call-operations.on-call-rotation
+  - operational-excellence.on-call-operations.escalation-paths

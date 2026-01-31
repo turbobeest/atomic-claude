@@ -1,0 +1,380 @@
+# ============================================================
+# AUDIT: Change Impact Analysis
+# ============================================================
+# Evaluates how well the architecture isolates changes and
+# predicts the impact of modifications across the system.
+# ============================================================
+
+audit:
+  id: "architecture-design.extensibility-evolution.change-impact-analysis"
+  name: "Change Impact Analysis"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "architecture-design"
+  category_number: 7
+  subcategory: "extensibility-evolution"
+
+  tier: "expert"
+  estimated_duration: "2-4 hours"  # median: 3h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates how well the architecture supports change impact
+    analysis - the ability to predict which components will be affected
+    by a given modification. It assesses dependency clarity, change
+    propagation patterns, and the isolation of volatile components from
+    stable ones.
+
+  why_it_matters: |
+    Poor change isolation causes:
+    - Unpredictable cascading changes from simple modifications
+    - High risk of regression when making updates
+    - Difficulty estimating development effort
+    - Testing scope explosion for any change
+    - Reluctance to refactor due to unknown impact
+    Good isolation enables confident, low-risk evolution.
+
+  when_to_run:
+    - "Before major changes or refactoring"
+    - "When changes consistently have unexpected impact"
+    - "During architecture risk assessment"
+    - "When estimating effort for new features"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Complete source code"
+    - type: "version_control"
+      description: "Git history for change pattern analysis"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Read access to git history"
+
+discovery:
+  code_patterns:
+    - pattern: "^import\\s+|^from\\s+.*import"
+      type: "regex"
+      scope: "source"
+      purpose: "Track dependency relationships"
+
+    - pattern: "interface\\s+|protocol\\s+|trait\\s+"
+      type: "regex"
+      scope: "source"
+      purpose: "Find abstraction boundaries"
+
+  file_patterns:
+    - glob: "**/interfaces/**"
+      purpose: "Interface definitions"
+    - glob: "**/contracts/**"
+      purpose: "Contract definitions"
+
+knowledge_sources:
+  specifications:
+    - id: "change-management"
+      name: "Software Change Impact Analysis"
+      url: "https://en.wikipedia.org/wiki/Change_impact_analysis"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "dependency-management"
+      name: "Managing Dependencies"
+      url: "https://martinfowler.com/articles/dipInTheWild.html"
+      offline_cache: true
+
+    - id: "refactoring-fowler"
+      name: "Refactoring Catalog"
+      url: "https://refactoring.com/catalog/"
+      offline_cache: true
+
+    - id: "clean-architecture"
+      name: "Clean Architecture"
+      url: "https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html"
+      offline_cache: true
+
+  learning_resources:
+    - id: "legacy-code"
+      title: "Working Effectively with Legacy Code"
+      type: "book"
+      reference: "Michael Feathers"
+
+    - id: "refactoring"
+      title: "Refactoring"
+      type: "book"
+      reference: "Martin Fowler"
+
+tooling:
+  static_analysis:
+    - tool: "Structure101"
+      purpose: "Visualize dependency impact"
+      offline_capable: true
+
+    - tool: "NDepend"
+      purpose: "Calculate impact metrics for .NET"
+      offline_capable: true
+
+    - tool: "dependency-cruiser"
+      purpose: "Analyze JavaScript/TypeScript impact"
+      offline_capable: true
+
+  scripts:
+    - id: "impact-analyzer"
+      language: "bash"
+      purpose: "Analyze change impact patterns"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Files with Most Dependents ==="
+        for f in $(find . -name "*.java" | head -50); do
+          name=$(basename $f .java)
+          deps=$(grep -rln "$name" --include="*.java" | wc -l)
+          [ $deps -gt 3 ] && echo "$f: $deps dependents"
+        done | sort -t: -k2 -rn | head -15
+
+        echo "=== High Change Frequency Files ==="
+        git log --oneline --name-only -n 200 | grep -E '\.(java|ts)$' | sort | uniq -c | sort -rn | head -15
+
+signals:
+  critical:
+    - id: "IMPACT-CRIT-001"
+      signal: "Central class with many dependents and frequent changes"
+      evidence_pattern: "Class modified in 50% of commits, imported by 30+ files"
+      explanation: |
+        A frequently changing class with many dependents is a change
+        amplifier. Every modification risks widespread impact and
+        requires extensive testing.
+      remediation: "Stabilize interface; extract volatile parts; apply Stable Dependencies"
+
+    - id: "IMPACT-CRIT-002"
+      signal: "No abstraction layer between stable and volatile code"
+      evidence_pattern: "Stable core directly depends on frequently changing modules"
+      explanation: |
+        When stable code depends on volatile code, stable components
+        must change when volatile ones do, negating their stability.
+      remediation: "Introduce interface owned by stable code; volatile implements"
+
+  high:
+    - id: "IMPACT-HIGH-001"
+      signal: "Circular dependencies preventing isolated change"
+      evidence_pattern: "Module A imports B, B imports A"
+      explanation: |
+        Circular dependencies mean changes to either module affect both.
+        Impact analysis becomes impossible as changes ripple both ways.
+      remediation: "Break cycle with dependency inversion or merge"
+
+    - id: "IMPACT-HIGH-002"
+      signal: "Changes consistently touch many unrelated files"
+      evidence_pattern: "Single feature changes require 20+ file modifications"
+      explanation: |
+        High change scattering indicates poor cohesion and coupling.
+        Simple changes have complex, unpredictable impact.
+      remediation: "Refactor to localize related functionality"
+
+  medium:
+    - id: "IMPACT-MED-001"
+      signal: "Shared utility with broad impact"
+      evidence_pattern: "Utility class used throughout codebase"
+      remediation: "Make utility stable; version if changes needed"
+
+    - id: "IMPACT-MED-002"
+      signal: "Config changes require code changes"
+      evidence_pattern: "Adding config value requires code modification"
+      remediation: "Make config data-driven where possible"
+
+  low:
+    - id: "IMPACT-LOW-001"
+      signal: "Test changes required for non-behavioral changes"
+      remediation: "Improve test isolation and abstraction"
+
+  positive:
+    - id: "IMPACT-POS-001"
+      signal: "Clear dependency flow from volatile to stable"
+    - id: "IMPACT-POS-002"
+      signal: "Changes typically localized to single module"
+    - id: "IMPACT-POS-003"
+      signal: "Interface boundaries isolate implementations"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map dependency graph"
+      description: |
+        Create a dependency graph to understand how changes
+        propagate through the system.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Generate dependency visualization"
+          command: "npx dependency-cruiser --output-type dot src 2>/dev/null | head -100 || echo 'dependency-cruiser not available'"
+        - purpose: "Count imports per file"
+          command: "for f in $(find . -name '*.java' | head -50); do echo \"$f: $(grep -c '^import' $f 2>/dev/null)\"; done | sort -t: -k2 -rn | head -20"
+      expected_findings:
+        - "Dependency structure"
+        - "High-dependency nodes"
+
+    - id: "2"
+      name: "Analyze change frequency vs impact"
+      description: |
+        Correlate change frequency with number of dependents
+        to find high-risk components.
+      duration_estimate: "35 min"
+      commands:
+        - purpose: "Find frequently changed files"
+          command: "git log --oneline --name-only -n 200 | grep -E '\\.(java|ts)$' | sort | uniq -c | sort -rn | head -20"
+        - purpose: "Find files with many dependents"
+          command: "for f in $(find . -name '*.java' | head -30); do name=$(basename $f .java); deps=$(grep -rl \"$name\" --include='*.java' 2>/dev/null | wc -l); echo \"$f: $deps\"; done | sort -t: -k2 -rn | head -15"
+      expected_findings:
+        - "Change frequency ranking"
+        - "Dependent count ranking"
+
+    - id: "3"
+      name: "Check abstraction boundaries"
+      description: |
+        Verify that volatile components are isolated behind
+        stable interfaces.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find interface definitions"
+          command: "grep -rn 'interface [A-Z]\\|protocol [A-Z]' --include='*.java' --include='*.swift' | head -30"
+        - purpose: "Check implementation locations"
+          command: "grep -rn 'implements [A-Z]' --include='*.java' | head -30"
+      expected_findings:
+        - "Interface coverage"
+        - "Implementation isolation"
+
+    - id: "4"
+      name: "Identify change amplifiers"
+      description: |
+        Find components that amplify change impact when modified.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find most imported files"
+          command: "grep -rh '^import' --include='*.java' | sed 's/import //' | cut -d. -f-3 | sort | uniq -c | sort -rn | head -15"
+      expected_findings:
+        - "Change amplifiers"
+        - "High-impact components"
+
+    - id: "5"
+      name: "Develop isolation recommendations"
+      description: |
+        For high-risk components, recommend strategies to
+        reduce change impact.
+      duration_estimate: "30 min"
+      questions:
+        - "Can we introduce an interface to isolate this component?"
+        - "Should this component be split?"
+        - "Can we reduce its dependents?"
+      expected_findings:
+        - "Isolation recommendations"
+        - "Priority for refactoring"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "impact_matrix"
+      format: "tabular"
+      sections:
+        - "Component"
+        - "Change Frequency"
+        - "Dependent Count"
+        - "Risk Score"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Impact Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Metrics clearly show high-impact pattern"
+    medium: "Pattern suggests impact concern"
+    low: "Potential issue requiring verification"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "change-management"
+        priority: "required"
+      - source_id: "dependency-management"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive analysis"
+    full:
+      included: true
+      priority: 2
+    architecture:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "impact-001"
+    item: "No circular dependencies"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Dependency graph has no cycles"
+    expected: "Confirmed by reviewer"
+
+  - id: "impact-002"
+    item: "High-impact components identified and isolated"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Components with many dependents have stable interfaces"
+    expected: "Confirmed by reviewer"
+
+  - id: "impact-003"
+    item: "Volatile components behind stable interfaces"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Frequently changing code isolated from dependents"
+    expected: "Confirmed by reviewer"
+
+  - id: "impact-004"
+    item: "Change impact predictable"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Typical changes affect expected modules only"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Modifiability"]
+
+relationships:
+  commonly_combined:
+    - "architecture-design.coupling.afferent-efferent-coupling"
+    - "architecture-design.design-principles.dependency-inversion"
+    - "architecture-design.cohesion.shotgun-surgery-risk"

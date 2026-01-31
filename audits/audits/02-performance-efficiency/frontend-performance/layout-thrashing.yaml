@@ -1,0 +1,340 @@
+# ============================================================
+# LAYOUT THRASHING AUDIT
+# ============================================================
+# Identifies forced synchronous layout patterns that cause
+# performance degradation during DOM manipulation.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.frontend-performance.layout-thrashing"
+  name: "Layout Thrashing Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "frontend-performance"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Identifies layout thrashing (forced synchronous layouts) where JavaScript
+    reads layout properties after making DOM changes, forcing the browser to
+    recalculate layout synchronously. Examines patterns of interleaved reads
+    and writes that cause expensive reflows.
+
+  why_it_matters: |
+    Layout thrashing is one of the most common causes of janky animations
+    and sluggish interactions. Each forced layout can take 10-100ms, and
+    when done repeatedly in a loop, can make the page unresponsive. This
+    directly impacts INP and perceived performance.
+
+  when_to_run:
+    - "When animations or interactions feel janky"
+    - "When DevTools shows long tasks"
+    - "During scroll performance optimization"
+    - "After implementing drag-and-drop or resizing features"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "JavaScript/TypeScript source files"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Chrome DevTools for profiling"
+
+discovery:
+  code_patterns:
+    - pattern: "offsetWidth|offsetHeight|offsetTop|offsetLeft"
+      type: "regex"
+      scope: "source"
+      purpose: "Find layout property reads"
+
+    - pattern: "getBoundingClientRect|getComputedStyle"
+      type: "regex"
+      scope: "source"
+      purpose: "Find methods that force layout"
+
+    - pattern: "clientWidth|clientHeight|scrollWidth|scrollHeight"
+      type: "regex"
+      scope: "source"
+      purpose: "Find client dimension reads"
+
+    - pattern: "\\.style\\.\\w+\\s*="
+      type: "regex"
+      scope: "source"
+      purpose: "Find style modifications"
+
+  file_patterns:
+    - glob: "**/*.js"
+      purpose: "JavaScript files"
+    - glob: "**/*.ts"
+      purpose: "TypeScript files"
+    - glob: "**/*.tsx"
+      purpose: "React components"
+
+knowledge_sources:
+  guides:
+    - id: "avoid-layout-thrashing"
+      name: "Avoid Large, Complex Layouts and Layout Thrashing"
+      url: "https://developers.google.com/web/fundamentals/performance/rendering/avoid-large-complex-layouts-and-layout-thrashing"
+      offline_cache: true
+
+    - id: "what-forces-layout"
+      name: "What Forces Layout / Reflow"
+      url: "https://gist.github.com/paulirish/5d52fb081b3570c81e3a"
+      offline_cache: true
+
+  learning_resources:
+    - id: "rendering-performance"
+      title: "Rendering Performance"
+      type: "article"
+      reference: "https://developers.google.com/web/fundamentals/performance/rendering"
+
+tooling:
+  static_analysis:
+    - tool: "ESLint (custom rules)"
+      purpose: "Detect layout thrashing patterns"
+      offline_capable: true
+
+    - tool: "Chrome DevTools Performance"
+      purpose: "Profile forced synchronous layouts"
+      offline_capable: false
+
+  scripts:
+    - id: "find-layout-reads"
+      language: "bash"
+      purpose: "Find layout property access"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find layout-forcing reads
+        grep -rn 'offsetWidth\|offsetHeight\|getBoundingClientRect\|getComputedStyle\|clientWidth\|clientHeight\|scrollTop\|scrollLeft' \
+          --include='*.js' --include='*.ts' --include='*.tsx' .
+
+signals:
+  critical:
+    - id: "LAYOUT-CRIT-001"
+      signal: "Read-write-read pattern in loop"
+      evidence_pattern: "for.*\\{[^}]*(offset|client|scroll).*style.*\\1|while.*\\{[^}]*(offset|client|scroll).*style.*\\1"
+      explanation: |
+        Reading layout properties, modifying styles, then reading again in a
+        loop forces layout calculation on every iteration. This can cause
+        thousands of layouts and completely freeze the page.
+      remediation: "Batch reads before writes, use requestAnimationFrame for batching"
+
+    - id: "LAYOUT-CRIT-002"
+      signal: "getBoundingClientRect in animation loop"
+      evidence_pattern: "requestAnimationFrame.*getBoundingClientRect|setInterval.*getBoundingClientRect"
+      explanation: |
+        Calling getBoundingClientRect in every animation frame forces
+        synchronous layout, causing dropped frames and janky animations.
+      remediation: "Cache dimensions, recalculate only on resize"
+
+  high:
+    - id: "LAYOUT-HIGH-001"
+      signal: "Interleaved style reads and writes"
+      evidence_pattern: "(offset|client|scroll)\\w+[^;]*;[^;]*\\.style\\."
+      explanation: |
+        Reading a layout property then immediately setting styles forces
+        the browser to calculate layout synchronously to return the value.
+      remediation: "Separate reads and writes into distinct phases"
+
+    - id: "LAYOUT-HIGH-002"
+      signal: "Multiple element position reads in sequence"
+      evidence_pattern: "getBoundingClientRect\\(\\)[^;]*;[^;]*getBoundingClientRect\\(\\)"
+      explanation: |
+        Reading positions of multiple elements after style changes forces
+        layout for each read if styles were modified between reads.
+      remediation: "Batch all reads together before any writes"
+
+    - id: "LAYOUT-HIGH-003"
+      signal: "Layout read in scroll/resize handler without throttling"
+      evidence_pattern: "onscroll.*offset|onresize.*getBoundingClientRect"
+      explanation: |
+        Scroll and resize events fire rapidly. Layout calculations in each
+        event cause excessive reflows.
+      remediation: "Throttle handlers, use requestAnimationFrame, or IntersectionObserver"
+
+  medium:
+    - id: "LAYOUT-MED-001"
+      signal: "getComputedStyle followed by style change"
+      evidence_pattern: "getComputedStyle.*\\.style\\."
+      remediation: "Avoid reading computed styles when planning to modify them"
+
+    - id: "LAYOUT-MED-002"
+      signal: "offsetWidth/Height for dimension caching"
+      evidence_pattern: "offset(Width|Height).*cache|cache.*offset(Width|Height)"
+      remediation: "Use ResizeObserver for dimension tracking instead"
+
+  low:
+    - id: "LAYOUT-LOW-001"
+      signal: "Layout reads in useEffect without deps"
+      evidence_pattern: "useEffect\\(.*offset|useEffect\\(.*getBoundingClientRect"
+      remediation: "Ensure layout reads are necessary and add proper dependencies"
+
+  positive:
+    - id: "LAYOUT-POS-001"
+      signal: "Using requestAnimationFrame for batching"
+      evidence_pattern: "requestAnimationFrame.*style|requestAnimationFrame.*classList"
+
+    - id: "LAYOUT-POS-002"
+      signal: "Using ResizeObserver instead of polling"
+      evidence_pattern: "ResizeObserver"
+
+    - id: "LAYOUT-POS-003"
+      signal: "Using CSS transforms instead of position/dimensions"
+      evidence_pattern: "transform.*translate"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Find layout property reads"
+      description: |
+        Locate all code that reads layout-forcing properties.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find layout reads"
+          command: "grep -rn 'offsetWidth\\|offsetHeight\\|getBoundingClientRect\\|getComputedStyle' --include='*.js' --include='*.ts' --include='*.tsx' ."
+      expected_findings:
+        - "All layout property access points"
+        - "Initial pattern assessment"
+
+    - id: "2"
+      name: "Find style modifications"
+      description: |
+        Locate code that modifies element styles.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find style writes"
+          command: "grep -rn '\\.style\\.\\|classList\\.' --include='*.js' --include='*.ts' --include='*.tsx' . | head -30"
+      expected_findings:
+        - "Style modification points"
+        - "Potential interleaving"
+
+    - id: "3"
+      name: "Identify interleaved patterns"
+      description: |
+        Find code where reads and writes are interleaved.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find potential thrashing in context"
+          command: "grep -rn -A5 -B5 'offsetWidth\\|getBoundingClientRect' --include='*.js' --include='*.ts' . | grep -B5 -A5 'style'"
+      expected_findings:
+        - "Read-write-read patterns"
+        - "Loop-based thrashing"
+
+    - id: "4"
+      name: "Profile with DevTools"
+      description: |
+        Use Chrome DevTools Performance panel to identify forced layouts.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Record performance profile"
+          command: "DevTools > Performance > Record while interacting"
+      expected_findings:
+        - "Forced synchronous layouts"
+        - "Long tasks"
+        - "Recalculate Style events"
+
+    - id: "5"
+      name: "Check event handlers"
+      description: |
+        Verify scroll and resize handlers are optimized.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find scroll handlers"
+          command: "grep -rn 'onscroll\\|addEventListener.*scroll' --include='*.js' --include='*.ts' --include='*.tsx' ."
+      expected_findings:
+        - "Scroll/resize handlers"
+        - "Throttling usage"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Layout Thrashing Patterns"
+        - "Event Handler Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "DevTools shows forced synchronous layouts"
+    medium: "Code patterns indicate likely thrashing"
+    low: "Potential issue requiring profiling"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "avoid-layout-thrashing"
+        priority: "required"
+      - source_id: "what-forces-layout"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed profiling"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "layout-001"
+    item: "No read-write-read patterns in loops"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Code review confirms no interleaved reads/writes in loops"
+    expected: "Confirmed by reviewer"
+
+  - id: "layout-002"
+    item: "Scroll/resize handlers throttled"
+    level: "BLOCKING"
+    verification: "grep -rn 'onscroll\\|onresize' --include='*.js' --include='*.ts' . | wc -l"
+    expected: "0 direct handlers (use throttled versions)"
+
+  - id: "layout-003"
+    item: "DevTools shows no forced synchronous layouts"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Performance recording shows no 'Forced reflow' warnings"
+    expected: "No forced layouts"
+
+governance:
+  applicable_to:
+    archetypes: ["webapp", "spa"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.frontend-performance.core-web-vitals"
+    - "performance-efficiency.frontend-performance.dom-size"

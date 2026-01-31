@@ -21,7 +21,10 @@ task_207_prd_approval() {
     local validation_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/prd-validation.json"
     local approval_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/prd-approved.json"
     local prompts_dir="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/prompts"
-    local agent_repo="${AGENT_REPO:-$ATOMIC_ROOT/repos/agents}"
+    # Check embedded repo first (monorepo deployment), then env var, then default
+    local agent_repo="$ATOMIC_ROOT/repos/agents"
+    [[ -d "$ATOMIC_ROOT/agents" ]] && agent_repo="$ATOMIC_ROOT/agents"
+    [[ -n "$AGENT_REPO" ]] && agent_repo="$AGENT_REPO"
 
     atomic_step "PRD Review, Refinement & Approval"
     mkdir -p "$prompts_dir"

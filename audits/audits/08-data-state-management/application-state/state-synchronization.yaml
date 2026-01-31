@@ -1,0 +1,318 @@
+# ============================================================
+# AUDIT: State Synchronization
+# ============================================================
+# Evaluates how state is synchronized between client and server,
+# handling conflicts, offline support, and eventual consistency.
+# ============================================================
+
+audit:
+  id: "data-state-management.application-state.state-synchronization"
+
+  name: "State Synchronization"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "application-state"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates state synchronization between client and server
+    including sync strategies, conflict resolution, offline support,
+    and consistency guarantees. It examines how the application handles
+    network partitions, concurrent modifications, and state divergence.
+
+  why_it_matters: |
+    Poor state synchronization causes data loss, conflicts, and user
+    frustration. Offline edits may be lost when reconnecting. Concurrent
+    modifications can overwrite each other. Inconsistent state between
+    client and server causes confusing behavior. Proper synchronization
+    ensures data integrity across all conditions.
+
+  when_to_run:
+    - "When implementing offline support"
+    - "When designing real-time features"
+    - "After sync-related data loss"
+    - "When scaling concurrent users"
+
+prerequisites:
+  required_artifacts:
+    - type: "application-code"
+      description: "Client and server synchronization code"
+    - type: "api-definitions"
+      description: "API contracts for sync endpoints"
+
+  access_requirements:
+    - "Read access to client and server code"
+    - "Access to sync protocol documentation"
+
+discovery:
+  code_patterns:
+    - pattern: "sync|Sync|synchronize|replication"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify sync-related code"
+    - pattern: "offline|Offline|serviceWorker|workbox"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify offline support"
+    - pattern: "conflict|merge|lastWrite|version|etag|optimistic"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify conflict handling"
+
+  file_patterns:
+    - glob: "**/sync/**/*"
+      purpose: "Sync-related code"
+    - glob: "**/offline/**/*"
+      purpose: "Offline support code"
+    - glob: "**/service-worker*"
+      purpose: "Service worker for offline"
+
+knowledge_sources:
+  guides:
+    - id: "offline-first"
+      name: "Offline First Design Patterns"
+      url: "https://developer.chrome.com/docs/workbox/"
+      offline_cache: true
+
+    - id: "crdt-patterns"
+      name: "CRDTs and Conflict-Free Replication"
+      url: "https://crdt.tech/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "sync-analyzer"
+      purpose: "Detect sync pattern issues"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "SYNC-CRIT-001"
+      signal: "Offline edits lost on reconnection"
+      evidence_pattern: "No offline queue, server state overwrites local changes"
+      explanation: |
+        When offline edits are not queued and synchronized, users lose
+        work when connectivity is restored. The server state simply
+        replaces local changes, causing data loss and user frustration.
+      remediation: "Implement offline queue with sync on reconnection; use service worker for persistence"
+
+    - id: "SYNC-CRIT-002"
+      signal: "Last-write-wins without conflict detection"
+      evidence_pattern: "PUT/POST without version check or ETag"
+      explanation: |
+        Pure last-write-wins silently loses concurrent edits. User A and
+        User B both edit the same document. Whoever saves last wins,
+        and the other's changes are silently discarded.
+      remediation: "Implement optimistic locking with version/ETag; detect and surface conflicts"
+
+  high:
+    - id: "SYNC-HIGH-001"
+      signal: "No conflict resolution strategy defined"
+      evidence_pattern: "Sync without handling 409 Conflict responses"
+      explanation: |
+        Without conflict resolution, applications fail unpredictably when
+        conflicts occur. Users see error messages without ability to
+        resolve the conflict or recover their changes.
+      remediation: "Define and implement conflict resolution strategy (merge, user choice, or CRDT)"
+
+    - id: "SYNC-HIGH-002"
+      signal: "Real-time sync without idempotency"
+      evidence_pattern: "WebSocket messages processed without deduplication"
+      explanation: |
+        Network issues cause message redelivery. Without idempotency,
+        the same operation may be applied multiple times, corrupting
+        state (double increments, duplicate inserts).
+      remediation: "Make sync operations idempotent; deduplicate by message ID or sequence number"
+
+  medium:
+    - id: "SYNC-MED-001"
+      signal: "No indication of sync status to user"
+      evidence_pattern: "Missing sync pending/failed indicators"
+      remediation: "Show sync status indicator; notify user of pending or failed syncs"
+
+    - id: "SYNC-MED-002"
+      signal: "Full state sync instead of delta sync"
+      evidence_pattern: "Fetching entire state on every sync instead of changes"
+      remediation: "Implement delta sync with timestamps or sequence numbers"
+
+  low:
+    - id: "SYNC-LOW-001"
+      signal: "Sync frequency not optimized for use case"
+
+  positive:
+    - id: "SYNC-POS-001"
+      signal: "Robust offline support with conflict resolution"
+    - id: "SYNC-POS-002"
+      signal: "Real-time sync with proper idempotency"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Sync Strategy Discovery"
+      description: |
+        Identify synchronization strategies used for client-server
+        state coordination.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find sync-related code"
+          command: "grep -riE 'sync|synchronize|replicate' --include='*.ts' --include='*.js' --include='*.py' . 2>/dev/null | head -50"
+        - purpose: "Find API calls for data sync"
+          command: "grep -riE 'fetch|axios|http\\.get|http\\.post' --include='*.ts' --include='*.js' . 2>/dev/null | head -50"
+        - purpose: "Find WebSocket/real-time patterns"
+          command: "grep -riE 'websocket|socket\\.io|pusher|firebase|ably' --include='*.ts' --include='*.js' --include='*.json' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Sync approach identification"
+        - "Real-time capabilities"
+
+    - id: "2"
+      name: "Offline Support Analysis"
+      description: |
+        Evaluate offline support including queuing, persistence,
+        and reconnection handling.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find service worker"
+          command: "find . -name '*service*worker*' -o -name 'sw.js' -o -name 'sw.ts' 2>/dev/null | head -20"
+        - purpose: "Find offline queue patterns"
+          command: "grep -riE 'offline|queue|pending|retry' --include='*.ts' --include='*.js' . 2>/dev/null | head -40"
+        - purpose: "Find Workbox usage"
+          command: "grep -riE 'workbox|Workbox|sw-precache|sw-toolbox' --include='*.ts' --include='*.js' --include='*.json' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Offline support mechanisms"
+        - "Queue and retry patterns"
+
+    - id: "3"
+      name: "Conflict Resolution Analysis"
+      description: |
+        Evaluate how conflicts are detected and resolved
+        during synchronization.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find conflict handling"
+          command: "grep -riE 'conflict|409|Conflict|merge|resolution' --include='*.ts' --include='*.js' --include='*.py' . 2>/dev/null | head -40"
+        - purpose: "Find version/ETag handling"
+          command: "grep -riE 'etag|ETag|version|If-Match|If-None-Match|updatedAt' --include='*.ts' --include='*.js' --include='*.py' . 2>/dev/null | head -40"
+        - purpose: "Find optimistic locking"
+          command: "grep -riE 'optimistic|lock|concurrent|@Version' --include='*.ts' --include='*.js' --include='*.java' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Conflict detection mechanisms"
+        - "Resolution strategies"
+
+    - id: "4"
+      name: "Idempotency Analysis"
+      description: |
+        Verify sync operations are idempotent to handle
+        retries and redelivery.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find idempotency keys"
+          command: "grep -riE 'idempotency|idempotent|requestId|messageId|dedup' --include='*.ts' --include='*.js' --include='*.py' . 2>/dev/null | head -30"
+        - purpose: "Find sequence/ordering patterns"
+          command: "grep -riE 'sequence|seqNum|ordering|lastSequence' --include='*.ts' --include='*.js' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Idempotency implementation"
+        - "Message ordering handling"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Sync Strategy"
+        - "Offline Support"
+        - "Conflict Resolution"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear evidence of data loss scenarios or missing conflict handling"
+    medium: "Patterns suggest issues, edge case testing needed"
+    low: "Implementation appears robust but network failure testing needed"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "offline-first"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive sync analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "sync-001"
+    item: "Sync strategy identified and documented"
+    level: "CRITICAL"
+    verification: "grep -riE 'sync|Sync' --include='*.ts' --include='*.js' . 2>/dev/null | wc -l | xargs -I{} echo PASS"
+    expected: "PASS"
+
+  - id: "sync-002"
+    item: "Conflict handling implemented"
+    level: "BLOCKING"
+    verification: "grep -riE 'conflict|409|merge|version|etag' --include='*.ts' --include='*.js' . 2>/dev/null | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "sync-003"
+    item: "Offline edits preserved and synced"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify offline edits are not lost"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["web-application", "mobile-application"]
+
+  compliance_frameworks:
+    - framework: "Data Integrity"
+      controls: ["DI-007", "DI-008"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.application-state.optimistic-update-handling"
+    - "data-state-management.application-state.client-side-state-management"

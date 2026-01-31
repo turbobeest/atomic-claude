@@ -1,0 +1,399 @@
+audit:
+  id: cloud-infrastructure.networking.private-connectivity
+  name: Private Connectivity
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: networking
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates private connectivity configurations including VPC peering,
+    Transit Gateway, PrivateLink endpoints, VPN connections, and Direct
+    Connect. Examines whether private connectivity is properly configured
+    for security, performance, and cost efficiency.
+  why_it_matters: |
+    Private connectivity keeps traffic off the public internet, improving
+    security and reducing attack surface. Misconfigured private connections
+    can create security vulnerabilities or routing issues. Missing private
+    connectivity forces traffic through NAT gateways, increasing costs and
+    latency. Proper private connectivity enables secure, high-performance
+    network architecture.
+  when_to_run:
+  - Network architecture reviews
+  - Security assessments
+  - Cost optimization reviews
+  - Multi-account/multi-VPC deployments
+prerequisites:
+  required_artifacts:
+  - type: cloud_access
+    description: Read access to networking configurations
+  - type: connectivity_requirements
+    description: Cross-VPC and hybrid connectivity requirements
+  access_requirements:
+  - VPC peering configuration access
+  - Transit Gateway access
+  - VPC Endpoint access
+  - VPN and Direct Connect access
+discovery:
+  file_patterns:
+  - glob: '**/terraform/**/*peering*.tf'
+    purpose: Find Terraform VPC peering configurations
+  - glob: '**/terraform/**/*transit*.tf'
+    purpose: Find Transit Gateway configurations
+  - glob: '**/terraform/**/*endpoint*.tf'
+    purpose: Find VPC endpoint configurations
+  - glob: '**/terraform/**/*vpn*.tf'
+    purpose: Find VPN configurations
+knowledge_sources:
+  specifications:
+  - id: aws-vpc-peering
+    name: AWS VPC Peering
+    url: https://docs.aws.amazon.com/vpc/latest/peering/
+    offline_cache: true
+    priority: required
+  - id: aws-transit-gateway
+    name: AWS Transit Gateway
+    url: https://docs.aws.amazon.com/vpc/latest/tgw/
+    offline_cache: true
+    priority: required
+  - id: aws-privatelink
+    name: AWS PrivateLink
+    url: https://docs.aws.amazon.com/vpc/latest/privatelink/
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: 'NIST SP 800-207: Zero Trust Architecture'
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-connectivity-options
+    name: AWS VPC Connectivity Options
+    url: https://docs.aws.amazon.com/whitepapers/latest/aws-vpc-connectivity-options/
+    offline_cache: true
+  - id: aws-hybrid-connectivity
+    name: AWS Hybrid Connectivity
+    url: https://docs.aws.amazon.com/whitepapers/latest/hybrid-connectivity/
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS CLI
+    purpose: List VPC peering connections
+    command: aws ec2 describe-vpc-peering-connections
+  - tool: AWS CLI
+    purpose: List Transit Gateway attachments
+    command: aws ec2 describe-transit-gateway-attachments
+  - tool: AWS CLI
+    purpose: List VPC endpoints
+    command: aws ec2 describe-vpc-endpoints
+  - tool: AWS CLI
+    purpose: List VPN connections
+    command: aws ec2 describe-vpn-connections
+  scripts:
+  - id: connectivity-analyzer
+    language: bash
+    purpose: Analyze private connectivity configurations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Private Connectivity Analysis ==="
+
+      # VPC Peering
+      echo "VPC Peering Connections:"
+      aws ec2 describe-vpc-peering-connections \
+        --query 'VpcPeeringConnections[].{ID:VpcPeeringConnectionId,Requester:RequesterVpcInfo.VpcId,Accepter:AccepterVpcInfo.VpcId,Status:Status.Code}' \
+        --output table
+
+      # Transit Gateway
+      echo ""
+      echo "Transit Gateways:"
+      aws ec2 describe-transit-gateways \
+        --query 'TransitGateways[].{ID:TransitGatewayId,State:State,DefaultRouteTable:Options.DefaultRouteTableAssociation}' \
+        --output table 2>/dev/null || echo "No Transit Gateways"
+
+      # Transit Gateway Attachments
+      echo ""
+      echo "Transit Gateway Attachments:"
+      aws ec2 describe-transit-gateway-attachments \
+        --query 'TransitGatewayAttachments[].{ID:TransitGatewayAttachmentId,TGW:TransitGatewayId,Type:ResourceType,State:State}' \
+        --output table 2>/dev/null || echo "No TGW Attachments"
+
+      # VPC Endpoints
+      echo ""
+      echo "VPC Endpoints:"
+      aws ec2 describe-vpc-endpoints \
+        --query 'VpcEndpoints[].{ID:VpcEndpointId,Service:ServiceName,Type:VpcEndpointType,State:State}' \
+        --output table
+
+      # VPN Connections
+      echo ""
+      echo "VPN Connections:"
+      aws ec2 describe-vpn-connections \
+        --query 'VpnConnections[].{ID:VpnConnectionId,State:State,Type:Type,CustomerGW:CustomerGatewayId}' \
+        --output table 2>/dev/null || echo "No VPN Connections"
+
+      # Direct Connect
+      echo ""
+      echo "Direct Connect Connections:"
+      aws directconnect describe-connections \
+        --query 'connections[].{ID:connectionId,Name:connectionName,State:connectionState,Location:location}' \
+        --output table 2>/dev/null || echo "No Direct Connect"
+signals:
+  critical:
+  - id: PRIVATE-CRIT-001
+    signal: AWS service traffic going through NAT Gateway instead of VPC Endpoints
+    evidence_indicators:
+    - No S3 or DynamoDB gateway endpoints
+    - High NAT Gateway data transfer costs for S3/DynamoDB
+    explanation: |
+      NAT Gateway traffic to AWS services incurs data processing
+      charges and adds latency. VPC endpoints provide free (gateway)
+      or lower-cost (interface) private connectivity.
+    remediation: Create gateway endpoints for S3 and DynamoDB
+  - id: PRIVATE-CRIT-002
+    signal: VPC peering without proper route table configuration
+    evidence_indicators:
+    - Peering connection active but no routes
+    - Asymmetric routing between peered VPCs
+    explanation: |
+      Peering connections without proper routing cause connectivity
+      failures and debugging difficulties.
+    remediation: Configure route tables in both VPCs for peering
+  - id: PRIVATE-CRIT-003
+    signal: Sensitive data traversing public internet to third parties
+    evidence_indicators:
+    - No PrivateLink for SaaS integrations
+    - API calls to partners over internet
+    explanation: |
+      Sensitive data should stay on private networks when possible.
+      PrivateLink enables private connectivity to supported services.
+    remediation: Implement PrivateLink for supported SaaS providers
+  high:
+  - id: PRIVATE-HIGH-001
+    signal: VPN connection without redundancy
+    evidence_pattern: Single VPN tunnel without backup
+    explanation: |
+      Single VPN connections are single points of failure. AWS
+      provides two tunnels per VPN for redundancy.
+    remediation: Ensure both VPN tunnels are active
+  - id: PRIVATE-HIGH-002
+    signal: Transit Gateway without route table management
+    evidence_pattern: All attachments using default route table
+    explanation: |
+      Default route table for all attachments can create unintended
+      connectivity between VPCs that should be isolated.
+    remediation: Implement route table segmentation for TGW
+  - id: PRIVATE-HIGH-003
+    signal: No interface endpoints for frequently used AWS services
+    evidence_indicators:
+    - No endpoints for Secrets Manager, KMS, SSM
+    - High interface endpoint traffic through NAT
+    explanation: |
+      Interface endpoints for frequently used services improve
+      security and reduce NAT costs.
+    remediation: Create interface endpoints for Secrets Manager, KMS, SSM, etc.
+  medium:
+  - id: PRIVATE-MED-001
+    signal: VPC peering used instead of Transit Gateway for many VPCs
+    remediation: Consider Transit Gateway for simplified hub-spoke architecture
+  - id: PRIVATE-MED-002
+    signal: Direct Connect without backup connection
+    remediation: Implement VPN backup for Direct Connect
+  - id: PRIVATE-MED-003
+    signal: Interface endpoint policies overly permissive
+    remediation: Restrict endpoint policies to required principals
+  low:
+  - id: PRIVATE-LOW-001
+    signal: Private connectivity architecture not documented
+    remediation: Document connectivity architecture and data flows
+  positive:
+  - id: PRIVATE-POS-001
+    signal: VPC endpoints for major AWS services
+  - id: PRIVATE-POS-002
+    signal: Transit Gateway with proper route table segmentation
+  - id: PRIVATE-POS-003
+    signal: Redundant VPN/Direct Connect with failover
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Connectivity Inventory
+    description: |
+      Collect inventory of all private connectivity components
+      including peering, TGW, endpoints, and hybrid connections.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List VPC peering
+      command: aws ec2 describe-vpc-peering-connections --query 'VpcPeeringConnections[].{ID:VpcPeeringConnectionId,Status:Status.Code,RequesterVPC:RequesterVpcInfo.VpcId,AccepterVPC:AccepterVpcInfo.VpcId}'
+        --output table
+    - purpose: List VPC endpoints
+      command: aws ec2 describe-vpc-endpoints --query 'VpcEndpoints[].{ID:VpcEndpointId,VPC:VpcId,Service:ServiceName,Type:VpcEndpointType,State:State}'
+        --output table
+    - purpose: List Transit Gateway
+      command: aws ec2 describe-transit-gateway-attachments --query 'TransitGatewayAttachments[].{ID:TransitGatewayAttachmentId,TGW:TransitGatewayId,ResourceType:ResourceType,State:State}'
+        --output table 2>/dev/null || echo 'No TGW'
+    expected_findings:
+    - Complete connectivity inventory
+    - Connection states
+  - id: '2'
+    name: VPC Endpoint Analysis
+    description: |
+      Analyze VPC endpoint coverage for AWS services and
+      identify missing endpoints.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List endpoints by service
+      command: aws ec2 describe-vpc-endpoints --query 'VpcEndpoints[].ServiceName' --output text | tr
+        '\t' '\n' | sort | uniq -c
+    - purpose: Check for S3 gateway endpoint
+      command: aws ec2 describe-vpc-endpoints --filters 'Name=service-name,Values=com.amazonaws.*.s3'
+        --query 'VpcEndpoints[].{VPC:VpcId,Type:VpcEndpointType}' --output table
+    expected_findings:
+    - Current endpoint coverage
+    - Missing recommended endpoints
+  - id: '3'
+    name: Hybrid Connectivity Review
+    description: |
+      Review VPN and Direct Connect configurations for
+      redundancy and security.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check VPN status
+      command: aws ec2 describe-vpn-connections --query 'VpnConnections[].{ID:VpnConnectionId,State:State,Tunnels:VgwTelemetry[].Status}'
+        --output yaml 2>/dev/null || echo 'No VPN'
+    - purpose: Check Direct Connect
+      command: aws directconnect describe-connections --query 'connections[].{ID:connectionId,State:connectionState,Bandwidth:bandwidth}'
+        --output table 2>/dev/null || echo 'No DX'
+    expected_findings:
+    - Hybrid connectivity status
+    - Redundancy configuration
+  - id: '4'
+    name: Routing Analysis
+    description: |
+      Analyze routing configurations for peering, TGW,
+      and endpoint traffic paths.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Check TGW route tables
+      command: for tgw in $(aws ec2 describe-transit-gateways --query 'TransitGateways[].TransitGatewayId'
+        --output text 2>/dev/null); do echo "=== $tgw ==="; aws ec2 describe-transit-gateway-route-tables
+        --filters "Name=transit-gateway-id,Values=$tgw" --query 'TransitGatewayRouteTables[].{ID:TransitGatewayRouteTableId,Default:DefaultAssociationRouteTable}'
+        --output table; done
+    expected_findings:
+    - Route table configurations
+    - Traffic flow patterns
+  - id: '5'
+    name: Cost and Security Analysis
+    description: |
+      Analyze cost implications and security posture of
+      current connectivity architecture.
+    duration_estimate: 30 min
+    questions:
+    - What is the NAT Gateway data processing cost?
+    - Could VPC endpoints reduce costs?
+    - Are endpoint policies properly restricted?
+    expected_findings:
+    - Cost optimization opportunities
+    - Security improvements
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Connectivity Inventory
+    - VPC Endpoint Analysis
+    - Hybrid Connectivity Review
+    - Recommendations
+  - type: diagram
+    format: text
+    contents: Connectivity architecture diagram
+  confidence_guidance:
+    high: Full access to all connectivity configurations
+    medium: Access to most configurations
+    low: Limited access
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-vpc-peering
+      priority: required
+    - source_id: aws-privatelink
+      priority: required
+  limitations:
+  - Cannot access live configurations offline
+  - Connection status requires runtime
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed connectivity analysis
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: private-001
+  item: VPC endpoints for S3 and DynamoDB verified
+  level: CRITICAL
+  verification: aws ec2 describe-vpc-endpoints --filters 'Name=service-name,Values=com.amazonaws.*.s3'
+    --query 'length(VpcEndpoints)' | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: private-002
+  item: VPC peering routes verified
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify routes exist for all active peering connections
+  expected: Confirmed by reviewer
+- id: private-003
+  item: VPN redundancy verified
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify both tunnels active for VPN connections
+  expected: Confirmed by reviewer
+- id: private-004
+  item: Connectivity architecture documented
+  level: WARNING
+  verification: manual
+  verification_notes: Document private connectivity architecture
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.6
+  - framework: ISO 27001
+    controls:
+    - A.13.1.1
+    - A.13.2.1
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.networking.vpc-design
+  - cloud-infrastructure.networking.network-segmentation
+  - cloud-infrastructure.storage.storage-cost-optimization

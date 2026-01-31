@@ -1,0 +1,389 @@
+# ============================================================
+# AUDIT: Test Data Management
+# ============================================================
+
+audit:
+  id: "code-quality.test-code-quality.test-data-management"
+  name: "Test Data Management Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "code-quality"
+  category_number: 6
+  subcategory: "test-code-quality"
+
+  tier: "expert"
+  estimated_duration: "60 minutes"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "testing"
+
+  default_profiles:
+    - "full"
+    - "quality"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates how test data is created, managed, and cleaned up across the
+    test suite. This includes examining fixture patterns, factory usage,
+    hardcoded data, data isolation between tests, and handling of sensitive
+    data in test environments.
+
+  why_it_matters: |
+    Poor test data management leads to brittle tests, slow test execution,
+    data leakage between tests, and potential security issues from production
+    data in tests. Well-managed test data enables reliable, fast, and secure
+    testing while making tests easier to understand and maintain.
+
+  when_to_run:
+    - "Test suite maintenance"
+    - "Before adding new test infrastructure"
+    - "Security reviews"
+    - "Performance optimization"
+
+prerequisites:
+  required_artifacts:
+    - type: "test_code"
+      description: "Test files"
+    - type: "fixtures"
+      description: "Test fixtures and factories"
+
+  access_requirements:
+    - "Read access to test directories"
+    - "Access to fixture/factory definitions"
+
+discovery:
+  code_patterns:
+    - pattern: "factory\\.create|Factory\\.build|create_factory"
+      type: "regex"
+      scope: "testing"
+      purpose: "Detect factory usage"
+
+    - pattern: "@pytest\\.fixture|beforeEach.*=|setUp"
+      type: "regex"
+      scope: "testing"
+      purpose: "Detect fixture definitions"
+
+    - pattern: "password.*=.*['\"]\\w+|secret.*=.*['\"]\\w+"
+      type: "regex"
+      scope: "testing"
+      purpose: "Detect hardcoded secrets in tests"
+
+  file_patterns:
+    - glob: "**/fixtures/**"
+      purpose: "Fixture directories"
+    - glob: "**/factories/**"
+      purpose: "Factory directories"
+    - glob: "**/seeds/**"
+      purpose: "Seed data"
+    - glob: "**/*.test.{js,ts,jsx,tsx}"
+      purpose: "Test files"
+    - glob: "**/test_*.py"
+      purpose: "Python test files"
+    - glob: "**/conftest.py"
+      purpose: "pytest fixtures"
+
+knowledge_sources:
+  guides:
+    - id: "factory-bot"
+      name: "Factory Bot Documentation"
+      url: "https://github.com/thoughtbot/factory_bot"
+      offline_cache: true
+
+    - id: "pytest-fixtures"
+      name: "pytest Fixtures Documentation"
+      url: "https://docs.pytest.org/en/stable/how-to/fixtures.html"
+      offline_cache: true
+
+    - id: "xunit-patterns"
+      name: "xUnit Test Patterns: Refactoring Test Code"
+      url: "https://www.amazon.com/xUnit-Test-Patterns-Refactoring-Code/dp/0131495054"
+      offline_cache: false
+
+    - id: "working-effectively-legacy"
+      name: "Working Effectively with Legacy Code"
+      url: "https://www.oreilly.com/library/view/working-effectively-with/0131177052/"
+      offline_cache: false
+
+  learning_resources:
+    - id: "xunit-patterns-fixtures"
+      title: "xUnit Test Patterns - Test Fixtures"
+      type: "book"
+      reference: "Gerard Meszaros, Part III"
+
+tooling:
+  static_analysis:
+    - tool: "eslint-plugin-jest"
+      purpose: "Jest setup/teardown analysis"
+      offline_capable: true
+
+  scripts:
+    - id: "test-data-scan"
+      language: "bash"
+      purpose: "Analyze test data patterns"
+      source: "inline"
+      code: |
+        echo "=== Test Data Management Analysis ==="
+        echo "--- Factory usage ---"
+        grep -rn "factory\|Factory" --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | head -20
+
+        echo "--- Fixture directories ---"
+        find . -type d \( -name "fixtures" -o -name "factories" -o -name "__fixtures__" \) 2>/dev/null
+
+        echo "--- Hardcoded data in tests ---"
+        grep -rn "email.*=.*@.*\.com\|password.*=\|api_key.*=" \
+          --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | head -30
+
+signals:
+  critical:
+    - id: "TDATA-CRIT-001"
+      signal: "Production data or real credentials in tests"
+      evidence_pattern: "real API keys|production database URLs|real user data"
+      explanation: |
+        Real credentials or production data in tests is a security breach.
+        Tests may leak data, and credentials could be exposed in logs.
+      remediation: "Use generated test data, mock services, and test-only credentials"
+
+    - id: "TDATA-CRIT-002"
+      signal: "Tests modify shared database without cleanup"
+      evidence_pattern: "INSERT|CREATE.*without afterEach DELETE|rollback"
+      explanation: |
+        Tests that leave data in shared databases affect other tests
+        and can cause intermittent failures or incorrect results.
+      remediation: "Use transactions with rollback, or clean up in afterEach"
+
+  high:
+    - id: "TDATA-HIGH-001"
+      signal: "Hardcoded test data duplicated across tests"
+      evidence_pattern: "Same literal values in multiple test files"
+      explanation: |
+        Duplicated hardcoded data becomes maintenance burden. Changes
+        require updating multiple files, leading to inconsistencies.
+      remediation: "Extract to fixtures, factories, or shared constants"
+
+    - id: "TDATA-HIGH-002"
+      signal: "Tests depend on specific database IDs"
+      evidence_pattern: "userId: 1|id: 42|where.*id.*=.*\\d+"
+      explanation: |
+        Depending on specific IDs makes tests fragile. ID generation
+        may differ between environments or after schema changes.
+      remediation: "Use factories to create data, reference created IDs dynamically"
+
+    - id: "TDATA-HIGH-003"
+      signal: "Large test data files without versioning strategy"
+      evidence_pattern: "Fixture files >100KB without migration plan"
+      explanation: |
+        Large fixture files are hard to maintain and may become stale.
+        Without versioning, schema changes break tests silently.
+      remediation: "Use factories for dynamic generation, version large fixtures"
+
+  medium:
+    - id: "TDATA-MED-001"
+      signal: "Inline data creation instead of factories"
+      evidence_pattern: "Repeated new User|new Product in tests"
+      remediation: "Extract to factory functions for consistency"
+
+    - id: "TDATA-MED-002"
+      signal: "Magic strings/numbers in test data"
+      evidence_pattern: "expect.*'test@example.com'|userId: 12345"
+      remediation: "Use named constants or factory-generated values"
+
+    - id: "TDATA-MED-003"
+      signal: "Fixture files too generic or too specific"
+      evidence_pattern: "single-use fixtures or overly generic fixtures"
+      remediation: "Balance fixture granularity for reuse vs clarity"
+
+  low:
+    - id: "TDATA-LOW-001"
+      signal: "Inconsistent test data naming"
+      evidence_pattern: "testUser1, test_user_2, UserForTesting"
+      remediation: "Standardize naming conventions for test entities"
+
+    - id: "TDATA-LOW-002"
+      signal: "No test data documentation"
+      evidence_pattern: "Missing README in fixtures directory"
+      remediation: "Document fixture purpose and usage"
+
+  positive:
+    - id: "TDATA-POS-001"
+      signal: "Consistent use of factories"
+      evidence_pattern: "Factory pattern throughout test suite"
+
+    - id: "TDATA-POS-002"
+      signal: "Test data isolation with transactions"
+      evidence_pattern: "BEGIN/ROLLBACK wrapping tests"
+
+    - id: "TDATA-POS-003"
+      signal: "Generated fake data (faker, Chance)"
+      evidence_pattern: "faker\\.name|Chance\\(\\)\\.email"
+
+procedure:
+  context:
+    cognitive_mode: "analytical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Data Sources"
+      description: |
+        Identify all sources of test data in the codebase.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find fixture directories"
+          command: |
+            find . -type d \( -name "fixtures" -o -name "factories" -o -name "__fixtures__" -o -name "seeds" \) \
+              -not -path "*/node_modules/*" 2>/dev/null
+        - purpose: "Find fixture files"
+          command: |
+            find . -name "*.fixture.*" -o -name "*Factory*" -o -name "conftest.py" | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Test data source inventory"
+        - "Data management approach"
+
+    - id: "2"
+      name: "Check for Hardcoded Sensitive Data"
+      description: |
+        Search for passwords, API keys, or production data in tests.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find potential secrets"
+          command: |
+            grep -rn "password.*=\|api_key.*=\|secret.*=\|token.*=" \
+              --include="*.test.js" --include="*.spec.ts" --include="test_*.py" \
+              --include="*.fixture.*" . 2>/dev/null | grep -v node_modules | head -30
+        - purpose: "Find production-looking URLs"
+          command: |
+            grep -rn "prod\|production\|api\.\w\+\.com" \
+              --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | head -20
+
+      expected_findings:
+        - "Potential credential exposure"
+        - "Production data references"
+
+    - id: "3"
+      name: "Analyze Factory/Fixture Usage"
+      description: |
+        Evaluate how factories and fixtures are used and whether they're
+        appropriate.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Count factory usage"
+          command: |
+            grep -rn "factory\|Factory\|fixture\|Fixture" \
+              --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | \
+              grep -v node_modules | wc -l
+        - purpose: "Find inline data creation"
+          command: |
+            grep -rn "new User\|new Product\|User\.create\|Product\.create" \
+              --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | head -30
+
+      expected_findings:
+        - "Factory adoption level"
+        - "Inline vs factory ratio"
+
+    - id: "4"
+      name: "Check Data Cleanup"
+      description: |
+        Verify tests clean up after themselves.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find cleanup patterns"
+          command: |
+            grep -rn "afterEach\|tearDown\|afterAll\|ROLLBACK\|DELETE FROM" \
+              --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | head -30
+        - purpose: "Check for transaction usage"
+          command: |
+            grep -rn "transaction\|BEGIN\|COMMIT\|ROLLBACK" \
+              --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | head -20
+
+      expected_findings:
+        - "Cleanup strategy"
+        - "Data isolation approach"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "data_sources"
+        - "sensitive_data_exposure"
+        - "management_patterns"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Security Findings"
+        - "Data Management Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear security issue or anti-pattern"
+    medium: "Potential issue requiring context"
+    low: "Subjective quality assessment"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "pytest-fixtures"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires thorough analysis"
+    full:
+      included: true
+      priority: 1
+    quality:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "tdata-001"
+    item: "No production credentials in tests"
+    level: "CRITICAL"
+    verification: "Sensitive data scan completed"
+    expected: "Zero credential exposure"
+
+  - id: "tdata-002"
+    item: "Test data cleanup verified"
+    level: "HIGH"
+    verification: "Cleanup patterns in place"
+    expected: "All tests clean up data"
+
+  - id: "tdata-003"
+    item: "Factory/fixture strategy documented"
+    level: "WARNING"
+    verification: "Test data approach established"
+    expected: "Documented strategy"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "OWASP"
+      controls: ["Sensitive Data Exposure"]
+    - framework: "ISO 25010"
+      controls: ["Security", "Maintainability"]
+
+relationships:
+  commonly_combined:
+    - "code-quality.test-code-quality.test-independence"
+    - "security.code.secrets-in-code"

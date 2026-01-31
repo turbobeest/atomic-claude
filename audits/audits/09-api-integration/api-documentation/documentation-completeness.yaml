@@ -1,0 +1,353 @@
+audit:
+  id: api-integration.api-documentation.documentation-completeness
+  name: Documentation Completeness Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: api-integration
+  category_number: 9
+  subcategory: api-documentation
+  tier: phd
+  estimated_duration: 120 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: documentation
+  default_profiles:
+  - full
+  - api
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates API documentation coverage including endpoint documentation,
+    request/response schemas, error codes, authentication requirements,
+    rate limits, and example requests. Analyzes whether documentation
+    provides sufficient information for API consumers.
+  why_it_matters: |
+    Incomplete documentation forces developers to reverse-engineer API
+    behavior, leading to incorrect implementations, support burden, and
+    slower adoption. Well-documented APIs reduce integration time by
+    60-80% and decrease support tickets significantly.
+  when_to_run:
+  - API release preparation
+  - Documentation reviews
+  - Developer experience audits
+  - After API changes
+prerequisites:
+  required_artifacts:
+  - type: documentation
+    description: API documentation (OpenAPI, Swagger, etc.)
+  - type: source_code
+    description: API endpoint implementations
+  access_requirements:
+  - Read access to API documentation
+  - Read access to API source code
+discovery:
+  code_patterns:
+  - pattern: '@api|@swagger|@openapi'
+    type: regex
+    scope: source
+    purpose: Detect inline API documentation
+  - pattern: '@param|@returns|@description'
+    type: regex
+    scope: source
+    purpose: Detect parameter documentation
+  file_patterns:
+  - glob: '**/openapi.yaml'
+    purpose: OpenAPI specification
+  - glob: '**/swagger.json'
+    purpose: Swagger specification
+  - glob: '**/api-docs/**'
+    purpose: API documentation files
+  - glob: '**/docs/api/**'
+    purpose: API documentation
+knowledge_sources:
+  specifications:
+  - id: openapi-spec
+    name: OpenAPI Specification
+    url: https://spec.openapis.org/oas/latest.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: api-doc-best-practices
+    name: API Documentation Best Practices
+    url: https://swagger.io/blog/api-documentation/best-practices-in-api-documentation/
+    offline_cache: true
+  - id: developer-experience
+    name: Developer Experience Guidelines
+    url: https://www.postman.com/api-platform/api-documentation/
+    offline_cache: true
+  learning_resources:
+  - id: docs-as-code
+    title: Docs as Code
+    type: book
+    reference: Anne Gentle - Docs Like Code
+tooling:
+  static_analysis:
+  - tool: openapi-generator
+    purpose: Validate OpenAPI specification
+    offline_capable: true
+  - tool: spectral
+    purpose: Lint API specifications
+    offline_capable: true
+  scripts:
+  - id: doc-completeness-scan
+    language: bash
+    purpose: Analyze documentation coverage
+    source: inline
+    code: |
+      echo "=== Documentation Completeness Analysis ==="
+      echo "--- OpenAPI/Swagger files ---"
+      find . -name "openapi*.yaml" -o -name "openapi*.json" \
+        -o -name "swagger*.yaml" -o -name "swagger*.json" 2>/dev/null | \
+        grep -v node_modules | head -10
+
+      echo "--- API routes in code ---"
+      grep -rn "@Get\|@Post\|@Put\|@Delete\|app\.get\|app\.post" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | wc -l
+
+      echo "--- Documented descriptions ---"
+      grep -rn "description:" \
+        --include="*.yaml" --include="*.json" . 2>/dev/null | \
+        grep -i "api\|openapi\|swagger" | grep -v node_modules | wc -l
+signals:
+  critical:
+  - id: DC-CRIT-001
+    signal: No API documentation exists
+    evidence_pattern: No OpenAPI, Swagger, or API docs found
+    explanation: |
+      Without any documentation, API consumers have no reference for
+      integration. They must rely on trial and error or direct
+      communication with the development team.
+    remediation: Create OpenAPI specification for all endpoints
+  - id: DC-CRIT-002
+    signal: Authentication requirements not documented
+    evidence_pattern: Security schemes missing from API spec
+    explanation: |
+      Without documented authentication requirements, developers cannot
+      properly integrate. They may expose security vulnerabilities by
+      making incorrect authentication assumptions.
+    remediation: Document all authentication methods and requirements
+  high:
+  - id: DC-HIGH-001
+    signal: Response schemas not documented
+    evidence_pattern: Endpoints missing response schema definitions
+    explanation: |
+      Without response schemas, consumers cannot validate their parsing
+      or generate type-safe clients. Changes to response format will
+      break integrations silently.
+    remediation: Define response schemas for all endpoints
+  - id: DC-HIGH-002
+    signal: Error responses not documented
+    evidence_pattern: Only success responses documented
+    explanation: |
+      Error handling is critical for robust integrations. Without
+      documented error codes and formats, consumers cannot properly
+      handle failure scenarios.
+    remediation: Document all error response codes and formats
+  - id: DC-HIGH-003
+    signal: Request validation rules not documented
+    evidence_pattern: Parameter constraints not specified
+    explanation: |
+      Without documented validation rules, developers submit invalid
+      requests and learn constraints through trial and error, slowing
+      integration and increasing support burden.
+    remediation: Document all parameter constraints (required, format, length, etc.)
+  medium:
+  - id: DC-MED-001
+    signal: No example requests/responses
+    evidence_pattern: Endpoints lacking example payloads
+    remediation: Add realistic examples for all endpoints
+  - id: DC-MED-002
+    signal: Rate limits not documented
+    evidence_pattern: No rate limit information in documentation
+    remediation: Document rate limits and quota policies
+  - id: DC-MED-003
+    signal: Pagination not documented
+    evidence_pattern: List endpoints without pagination documentation
+    remediation: Document pagination parameters and response format
+  low:
+  - id: DC-LOW-001
+    signal: Deprecated endpoints not marked
+    evidence_pattern: Old endpoints without deprecation notices
+    remediation: Mark deprecated endpoints with sunset dates
+  positive:
+  - id: DC-POS-001
+    signal: Complete OpenAPI specification
+    evidence_pattern: All endpoints documented with schemas
+  - id: DC-POS-002
+    signal: Examples for all operations
+    evidence_pattern: Request and response examples present
+  - id: DC-POS-003
+    signal: Documentation generated from code
+    evidence_pattern: OpenAPI spec auto-generated ensuring sync
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory API Endpoints
+    description: |
+      Count all API endpoints in the codebase.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Count route definitions
+      command: |
+        grep -rn "@Get\|@Post\|@Put\|@Delete\|@Patch\|app\.get\|app\.post\|router\." \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | grep -v test | wc -l
+    expected_findings:
+    - Total endpoint count
+    - Endpoint categories
+  - id: '2'
+    name: Find API Documentation
+    description: |
+      Locate all API documentation sources.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find OpenAPI files
+      command: |
+        find . -type f \( -name "openapi*.yaml" -o -name "openapi*.json" \
+          -o -name "swagger*.yaml" -o -name "swagger*.json" \
+          -o -name "api*.yaml" \) 2>/dev/null | \
+          grep -v node_modules | head -20
+    - purpose: Find documentation folders
+      command: |
+        find . -type d -name "docs" -o -name "api-docs" 2>/dev/null | \
+          grep -v node_modules | head -10
+    expected_findings:
+    - Documentation locations
+    - Documentation format
+  - id: '3'
+    name: Analyze Documentation Coverage
+    description: |
+      Compare documented vs implemented endpoints.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Count documented endpoints
+      command: |
+        grep -rn "paths:" \
+          --include="*.yaml" --include="*.json" . 2>/dev/null | \
+          grep -i "openapi\|swagger\|api" | grep -v node_modules | head -10
+    - purpose: Check response documentation
+      command: |
+        grep -rn "responses:" \
+          --include="*.yaml" --include="*.json" . 2>/dev/null | \
+          grep -v node_modules | wc -l
+    expected_findings:
+    - Coverage percentage
+    - Missing documentation
+  - id: '4'
+    name: Review Schema Completeness
+    description: |
+      Check if request/response schemas are defined.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find schema definitions
+      command: |
+        grep -rn "schema:\|components:\|definitions:" \
+          --include="*.yaml" --include="*.json" . 2>/dev/null | \
+          grep -v node_modules | wc -l
+    - purpose: Check for examples
+      command: |
+        grep -rn "example:\|examples:" \
+          --include="*.yaml" --include="*.json" . 2>/dev/null | \
+          grep -v node_modules | wc -l
+    expected_findings:
+    - Schema coverage
+    - Example presence
+  - id: '5'
+    name: Verify Error Documentation
+    description: |
+      Check if error responses are documented.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find error response definitions
+      command: |
+        grep -rn "4[0-9][0-9]:\|5[0-9][0-9]:" \
+          --include="*.yaml" --include="*.json" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Error documentation
+    - Error code coverage
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - endpoint_inventory
+    - documentation_coverage
+    - schema_completeness
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Coverage Analysis
+    - Gap Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Clear documentation gaps or missing spec
+    medium: Documentation exists but completeness uncertain
+    low: Requires detailed comparison to confirm gaps
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: openapi-spec
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed analysis
+    full:
+      included: true
+      priority: 1
+    api:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: dc-001
+  item: API specification exists
+  level: CRITICAL
+  verification: |
+    find . -type f \( -name "openapi*.yaml" -o -name "openapi*.json" \
+      -o -name "swagger*.yaml" -o -name "swagger*.json" \) 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: dc-002
+  item: Response schemas documented
+  level: BLOCKING
+  verification: |
+    grep -rn "responses:\|schema:" \
+      --include="*.yaml" --include="*.json" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: dc-003
+  item: Error responses documented
+  level: WARNING
+  verification: |
+    grep -rn "4[0-9][0-9]:\|5[0-9][0-9]:" \
+      --include="*.yaml" --include="*.json" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 5 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Usability
+    - Maintainability
+relationships:
+  commonly_combined:
+  - api-integration.api-documentation.documentation-accuracy
+  - api-integration.api-documentation.interactive-documentation
+  - code-quality.documentation.api-documentation

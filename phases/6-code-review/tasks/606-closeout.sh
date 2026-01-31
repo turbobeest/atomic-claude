@@ -44,11 +44,13 @@ task_606_closeout() {
     if [[ -f "$findings_file" ]]; then
         critical_found=$(jq -r '.totals.critical // 0' "$findings_file")
         major_found=$(jq -r '.totals.major // 0' "$findings_file")
+    fi
 
     if [[ -f "$refinement_file" ]]; then
         critical_fixed=$(jq -r '.refinements.critical.fixed // 0' "$refinement_file")
         major_fixed=$(jq -r '.refinements.major.fixed // 0' "$refinement_file")
         tests_passing=$(jq -r '.test_verification.all_passing // false' "$refinement_file")
+    fi
 
     # Check code review complete
     if [[ -f "$findings_file" ]]; then
@@ -58,6 +60,7 @@ task_606_closeout() {
         echo -e "  ${RED}[CRIT]${NC} ${RED}✗${NC} Code review not complete"
         checklist+=("Code review complete:FAIL")
         all_passed=false
+    fi
 
     # Check critical issues resolved
     if [[ "$critical_fixed" -ge "$critical_found" ]]; then
@@ -67,6 +70,7 @@ task_606_closeout() {
         echo -e "  ${RED}[CRIT]${NC} ${RED}✗${NC} Critical issues unresolved ($critical_fixed/$critical_found)"
         checklist+=("Critical issues resolved:FAIL")
         all_passed=false
+    fi
 
     # Check major issues resolved
     if [[ "$major_fixed" -ge "$major_found" ]]; then
@@ -75,6 +79,7 @@ task_606_closeout() {
     else
         echo -e "  ${YELLOW}[CRIT]${NC} ${YELLOW}!${NC} Major issues partially resolved ($major_fixed/$major_found)"
         checklist+=("Major issues resolved:WARN")
+    fi
 
     # Check tests passing
     if [[ "$tests_passing" == "true" ]]; then
@@ -84,6 +89,7 @@ task_606_closeout() {
         echo -e "  ${RED}[BLCK]${NC} ${RED}✗${NC} Tests failing after refinements"
         checklist+=("Tests passing:FAIL")
         all_passed=false
+    fi
 
     # Check audit
     if [[ -f "$audit_file" ]]; then
@@ -114,6 +120,7 @@ task_606_closeout() {
     else
         echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Audit not completed"
         checklist+=("Audit:SKIP")
+    fi
 
     # Check review artifacts
     if [[ -f "$findings_file" && -f "$refinement_file" ]]; then
@@ -122,6 +129,7 @@ task_606_closeout() {
     else
         echo -e "  ${YELLOW}[PASS]${NC} ${YELLOW}!${NC} Some review artifacts missing"
         checklist+=("Review artifacts:WARN")
+    fi
 
     echo ""
 
@@ -136,6 +144,7 @@ task_606_closeout() {
     if [[ "$all_passed" == false ]]; then
         echo -e "  ${YELLOW}Some critical items need attention before closeout.${NC}"
         echo ""
+    fi
 
     echo -e "  ${CYAN}Closeout options:${NC}"
     echo ""

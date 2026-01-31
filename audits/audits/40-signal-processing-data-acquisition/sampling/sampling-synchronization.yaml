@@ -1,0 +1,312 @@
+audit:
+  id: signal-processing-data-acquisition.sampling.sampling-synchronization
+  name: Sampling Synchronization Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: sampling
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: hardware-software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates sampling synchronization for multi-channel data
+    acquisition systems and external timing references. It examines:
+    - Inter-channel sampling synchronization and skew
+    - External clock synchronization
+    - Trigger synchronization and latency
+    - Multi-device synchronization
+    - GPS/PTP/NTP time synchronization
+    - Sample timestamp accuracy and alignment
+  why_it_matters: |
+    Synchronization is critical for accurate multi-channel measurements:
+    - Inter-channel skew corrupts phase measurements between channels
+    - Unsynchronized samples make channel comparisons meaningless
+    - Trigger latency variation affects event capture reproducibility
+    - Distributed systems need common time reference for data correlation
+    - IEEE 1588 (PTP) provides sub-microsecond synchronization capability
+
+    Without proper synchronization, multi-channel data cannot be correctly
+    compared, correlated, or analyzed for phase relationships.
+  when_to_run:
+  - Multi-channel system design
+  - Distributed data acquisition setup
+  - Phase measurement applications
+  - Triggered acquisition systems
+  - Timing-critical applications
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Synchronization configuration and timing code
+  - type: timing_specification
+    description: Required synchronization accuracy specification
+  - type: system_architecture
+    description: Multi-channel or distributed system architecture
+  access_requirements:
+  - Read access to timing configuration code
+  - Access to clock distribution documentation
+  - Test equipment for timing measurement
+discovery:
+  code_patterns:
+  - pattern: (sync|synchron|trigger|clock)_(source|enable|mode)
+    type: regex
+    scope: source
+    purpose: Detect synchronization configuration
+  - pattern: (ptp|ieee1588|ntp|gps)_(init|config|sync)
+    type: regex
+    scope: source
+    purpose: Detect time protocol configuration
+  - pattern: (channel|ch)_(skew|delay|offset)
+    type: regex
+    scope: source
+    purpose: Detect inter-channel timing
+  - pattern: (timestamp|time_tag|sample_time)
+    type: regex
+    scope: source
+    purpose: Detect timestamp handling
+  file_patterns:
+  - glob: '**/sync*.{c,h,cpp,py}'
+    purpose: Synchronization code
+  - glob: '**/timing*.{c,h,cpp,py}'
+    purpose: Timing configuration
+  - glob: '**/ptp*.{c,h,cpp}'
+    purpose: PTP implementation
+  - glob: '**/trigger*.{c,h,cpp}'
+    purpose: Trigger configuration
+knowledge_sources:
+  specifications:
+  - id: ieee-1588
+    name: IEEE 1588 - Precision Time Protocol
+    url: https://standards.ieee.org/standard/1588-2019.html
+    offline_cache: true
+    priority: required
+  - id: ieee-1057-sync
+    name: IEEE 1057 - Multi-channel Synchronization
+    url: https://standards.ieee.org/standard/1057-2017.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: ni-sync-guide
+    name: National Instruments Synchronization Guide
+    url: https://www.ni.com/en-us/innovations/white-papers/synchronization.html
+    offline_cache: true
+signals:
+  critical:
+  - id: SYNC-CRIT-001
+    signal: Multi-channel samples not synchronized
+    evidence_indicators:
+    - Independent sample clocks per channel
+    - No common trigger or synchronization signal
+    - Variable inter-channel skew
+    explanation: |
+      Unsynchronized multi-channel sampling makes phase measurements
+      invalid and channel comparisons meaningless. Each channel must
+      sample at the same instant or have calibrated, known skew.
+    remediation: |
+      - Use common sample clock for all channels
+      - Implement simultaneous sample-and-hold
+      - Add synchronization trigger signal
+      - Calibrate and compensate for known skew
+    cwe: CWE-682
+  - id: SYNC-CRIT-002
+    signal: Trigger latency undefined or variable
+    evidence_indicators:
+    - Software-triggered acquisition with variable latency
+    - No characterization of trigger-to-sample delay
+    - Inconsistent event capture timing
+    explanation: |
+      Variable trigger latency makes event capture non-reproducible.
+      For transient events, the time between trigger and first sample
+      must be deterministic and known for proper analysis.
+    remediation: |
+      - Use hardware trigger with deterministic latency
+      - Characterize and document trigger delay
+      - Implement pre-trigger buffer for event capture
+      - Add trigger timestamp for correlation
+    cwe: CWE-362
+  high:
+  - id: SYNC-HIGH-001
+    signal: Inter-channel skew exceeds application tolerance
+    evidence_indicators:
+    - Channel skew > 1/(10*fmax) for phase measurement
+    - Skew not calibrated or compensated
+    - Phase errors in multi-channel analysis
+    explanation: |
+      Inter-channel skew causes phase errors proportional to
+      2*pi*f*skew. For accurate phase measurement, skew must be
+      << 1/(10*fmax) or accurately calibrated and compensated.
+    remediation: |
+      - Use simultaneous sample-and-hold ADCs
+      - Calibrate inter-channel skew
+      - Implement digital skew compensation
+      - Specify and verify skew requirements
+  - id: SYNC-HIGH-002
+    signal: Time synchronization protocol not implemented
+    evidence_indicators:
+    - Distributed system without PTP/NTP
+    - Samples from different nodes not correlatable
+    - Timestamp accuracy insufficient for application
+    explanation: |
+      Distributed data acquisition requires common time reference.
+      Without PTP (sub-microsecond) or NTP (milliseconds), data from
+      different nodes cannot be accurately correlated in time.
+    remediation: |
+      - Implement IEEE 1588 PTP for high-precision applications
+      - Use NTP for lower-precision requirements
+      - Add GPS time reference for wide-area systems
+      - Verify achievable synchronization accuracy
+  medium:
+  - id: SYNC-MED-001
+    signal: Clock source quality not verified
+    evidence_indicators:
+    - Clock source stability not specified
+    - No clock quality monitoring
+    - Potential clock drift over time
+    explanation: |
+      Sample clock quality affects both timing accuracy and frequency
+      measurement precision. Unstable clocks cause timing drift and
+      reduce measurement accuracy over long acquisitions.
+    remediation: |
+      - Use crystal oscillator with specified stability
+      - Implement clock quality monitoring
+      - Synchronize to external reference if available
+      - Document clock accuracy and drift requirements
+  - id: SYNC-MED-002
+    signal: No timestamp validation or error detection
+    evidence_indicators:
+    - Timestamps accepted without validation
+    - No detection of timestamp discontinuities
+    - Silent time jumps or gaps
+    explanation: |
+      Timestamp errors from synchronization issues, buffer overflows,
+      or clock problems can corrupt time-domain analysis. Detection
+      and reporting enables diagnosis and recovery.
+    remediation: |
+      - Validate timestamp continuity
+      - Detect and report time jumps
+      - Add sequence numbers for gap detection
+      - Log synchronization status
+  low:
+  - id: SYNC-LOW-001
+    signal: Synchronization architecture not documented
+    evidence_indicators:
+    - No timing architecture documentation
+    - Clock distribution not specified
+    - Synchronization requirements unclear
+    explanation: |
+      Without documentation, synchronization architecture cannot
+      be verified or maintained. Changes may inadvertently break
+      timing relationships.
+    remediation: |
+      - Document clock distribution architecture
+      - Specify synchronization requirements
+      - Include timing diagrams in documentation
+      - Document calibration procedures
+  positive:
+  - id: SYNC-POS-001
+    signal: Well-designed synchronization architecture
+    evidence_indicators:
+    - Common clock for all channels
+    - Deterministic trigger latency
+    - Documented and verified timing
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: timing-engineer
+  steps:
+  - id: '1'
+    name: Synchronization Configuration Review
+    description: |
+      Review synchronization configuration and clock distribution.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find synchronization configuration
+      command: |
+        grep -rniE "(sync|clock|trigger)_(source|mode|config)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -30
+    expected_findings:
+    - Synchronization settings
+    - Clock distribution configuration
+    - Trigger configuration
+  - id: '2'
+    name: Timing Accuracy Verification
+    description: |
+      Verify timing accuracy meets requirements.
+    duration_estimate: 45 min
+    manual_verification: true
+    expected_findings:
+    - Inter-channel skew measurement
+    - Trigger latency measurement
+    - Clock stability verification
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Synchronization Architecture Review
+    - Timing Accuracy Analysis
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 3
+    signal-processing:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: sync-001
+  item: Multi-channel sampling properly synchronized
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify common clock or characterized skew
+  expected: Confirmed by reviewer
+- id: sync-002
+  item: Trigger latency deterministic and documented
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify trigger-to-sample timing is characterized
+  expected: Confirmed by reviewer
+- id: sync-003
+  item: Time synchronization protocol implemented if needed
+  level: WARNING
+  verification: |
+    grep -rniE "(ptp|ntp|ieee1588)" \
+      --include="*.c" --include="*.h" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "N/A"
+  expected: PASS or N/A
+governance:
+  applicable_to:
+    archetypes:
+    - embedded-systems
+    - industrial-control
+    - scientific-instruments
+    - distributed-systems
+relationships:
+  commonly_combined:
+  - signal-processing.sampling.clock-accuracy
+  - signal-processing.data-integrity.timestamp-accuracy
+  - signal-processing.adc-dac.conversion-timing
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

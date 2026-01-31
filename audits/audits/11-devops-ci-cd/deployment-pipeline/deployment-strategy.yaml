@@ -1,0 +1,351 @@
+# ============================================================
+# AUDIT: Deployment Strategy
+# ============================================================
+# Evaluates deployment patterns and risk mitigation approaches
+
+audit:
+  id: "devops-ci-cd.deployment-pipeline.deployment-strategy"
+  name: "Deployment Strategy"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "deployment-pipeline"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "deployment"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Examines the deployment strategies used for releasing changes to
+    production including rolling deployments, blue-green, canary,
+    recreate, and feature flags. Evaluates how strategies are chosen,
+    implemented, and monitored for different types of changes.
+
+  why_it_matters: |
+    The wrong deployment strategy can result in downtime, partial
+    outages, data corruption, or inability to recover from failures.
+    Proper strategy selection balances risk, speed, and operational
+    complexity. Advanced strategies like canary and blue-green enable
+    safe, zero-downtime deployments with quick rollback capability.
+
+  when_to_run:
+    - "Initial deployment audit"
+    - "Before high-risk releases"
+    - "After deployment incidents"
+    - "When designing new services"
+
+prerequisites:
+  required_artifacts:
+    - type: "deployment_configuration"
+      description: "Kubernetes manifests, deployment scripts, or IaC"
+    - type: "architecture_documentation"
+      description: "System architecture and deployment topology"
+
+  access_requirements:
+    - "Deployment configuration access"
+    - "Infrastructure documentation"
+
+discovery:
+  code_patterns:
+    - pattern: "strategy:|RollingUpdate|Recreate|maxSurge|maxUnavailable"
+      type: "regex"
+      scope: "config"
+      purpose: "Kubernetes deployment strategies"
+
+    - pattern: "blue.*green|canary|progressive|traffic.*split"
+      type: "regex"
+      scope: "config"
+      purpose: "Advanced deployment strategies"
+
+  file_patterns:
+    - glob: "**/k8s/**/*.yaml"
+      purpose: "Kubernetes deployment configurations"
+
+    - glob: "**/helm/**/values*.yaml"
+      purpose: "Helm deployment values"
+
+    - glob: "**/deploy/**"
+      purpose: "Deployment configurations"
+
+knowledge_sources:
+  guides:
+    - id: "k8s-deployments"
+      name: "Kubernetes Deployment Strategies"
+      url: "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/"
+      offline_cache: true
+
+    - id: "argo-rollouts"
+      name: "Argo Rollouts Progressive Delivery"
+      url: "https://argoproj.github.io/argo-rollouts/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Inspect deployment configuration"
+      command: "kubectl get deployment -o yaml"
+
+    - tool: "helm"
+      purpose: "Check Helm deployment values"
+      command: "helm get values RELEASE"
+
+  scripts:
+    - id: "check-deployment-strategy"
+      language: "bash"
+      purpose: "Identify deployment strategy in use"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        for f in k8s/*.yaml; do
+          if grep -q 'strategy:' "$f" 2>/dev/null; then
+            echo "=== $f ==="
+            grep -A 5 'strategy:' "$f"
+          fi
+        done
+
+signals:
+  critical:
+    - id: "CICD-STRATEGY-CRIT-001"
+      signal: "Production uses Recreate strategy without maintenance window"
+      evidence_pattern: "strategy: Recreate without scheduled downtime"
+      explanation: |
+        Recreate strategy terminates all pods before starting new ones,
+        causing guaranteed downtime. This is only acceptable with
+        scheduled maintenance windows and user notification.
+      remediation: "Switch to RollingUpdate or implement maintenance windows"
+
+    - id: "CICD-STRATEGY-CRIT-002"
+      signal: "No strategy defined - defaults used without understanding"
+      evidence_pattern: "No explicit strategy configuration in deployments"
+      explanation: |
+        Relying on defaults without understanding them leads to
+        unexpected behavior during deployments. Default strategies
+        may not be appropriate for your application's needs.
+      remediation: "Explicitly configure deployment strategy"
+
+  high:
+    - id: "CICD-STRATEGY-HIGH-001"
+      signal: "Rolling deployment with inadequate surge/unavailable settings"
+      evidence_pattern: "maxSurge: 25% with maxUnavailable: 25%"
+      explanation: |
+        Poorly tuned rolling update parameters can cause capacity
+        issues (too aggressive surge) or extended deployment times
+        (too conservative settings).
+      remediation: "Tune maxSurge and maxUnavailable based on capacity requirements"
+
+    - id: "CICD-STRATEGY-HIGH-002"
+      signal: "No progressive delivery for high-risk changes"
+      evidence_pattern: "Full rollout without canary or staged deployment"
+      explanation: |
+        Deploying high-risk changes to 100% of traffic immediately
+        maximizes blast radius if issues occur.
+      remediation: "Implement canary or blue-green for high-risk changes"
+
+  medium:
+    - id: "CICD-STRATEGY-MED-001"
+      signal: "Inconsistent deployment strategies across services"
+      evidence_pattern: "Different strategies without clear rationale"
+      remediation: "Document strategy selection criteria and standardize"
+
+    - id: "CICD-STRATEGY-MED-002"
+      signal: "No health checks integrated with deployment strategy"
+      remediation: "Configure readiness probes to gate traffic during rollout"
+
+  low:
+    - id: "CICD-STRATEGY-LOW-001"
+      signal: "Strategy not documented for operators"
+
+    - id: "CICD-STRATEGY-LOW-002"
+      signal: "No strategy variation by change type"
+
+  positive:
+    - id: "CICD-STRATEGY-POS-001"
+      signal: "Progressive delivery implemented with canary analysis"
+
+    - id: "CICD-STRATEGY-POS-002"
+      signal: "Strategy selection documented and consistent"
+
+    - id: "CICD-STRATEGY-POS-003"
+      signal: "Automated rollback based on health metrics"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory deployment configurations"
+      description: |
+        Identify all deployment configurations across environments
+        and services. Document the strategy used by each.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find Kubernetes deployment configs"
+          command: |
+            grep -r 'kind: Deployment' k8s/ helm/ --include='*.yaml' -l 2>/dev/null | head -20
+
+        - purpose: "Extract deployment strategies"
+          command: |
+            grep -rA 5 'strategy:' k8s/ helm/ --include='*.yaml' 2>/dev/null
+
+      expected_findings:
+        - "Complete list of deployment strategies in use"
+
+    - id: "2"
+      name: "Evaluate strategy appropriateness"
+      description: |
+        For each service, assess whether the deployment strategy
+        matches the application's requirements and risk profile.
+      duration_estimate: "30 min"
+
+      questions:
+        - "Does the application support concurrent versions?"
+        - "What is the acceptable downtime tolerance?"
+        - "Are there database migrations that affect strategy choice?"
+
+      expected_findings:
+        - "Strategy appropriateness assessment per service"
+
+    - id: "3"
+      name: "Check health check integration"
+      description: |
+        Verify that readiness and liveness probes are configured
+        and integrated with deployment strategy.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Check for readiness probes"
+          command: |
+            grep -rB 2 -A 10 'readinessProbe:' k8s/ helm/ --include='*.yaml' 2>/dev/null | head -30
+
+      expected_findings:
+        - "Health check configuration status"
+
+    - id: "4"
+      name: "Assess progressive delivery capability"
+      description: |
+        Determine if canary, blue-green, or other progressive
+        delivery patterns are available and when they're used.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Check for Argo Rollouts"
+          command: |
+            find . -name '*.yaml' -exec grep -l 'Rollout' {} \; 2>/dev/null | head -10
+
+        - purpose: "Check for Istio traffic management"
+          command: |
+            grep -r 'VirtualService\|DestinationRule' --include='*.yaml' 2>/dev/null | head -10
+
+      expected_findings:
+        - "Progressive delivery capabilities"
+
+    - id: "5"
+      name: "Review strategy documentation"
+      description: |
+        Check if deployment strategy rationale and procedures
+        are documented for operators.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Find deployment documentation"
+          command: |
+            find . -name '*deploy*.md' -o -name '*runbook*.md' 2>/dev/null | head -10
+
+      expected_findings:
+        - "Documentation coverage assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Strategy Inventory"
+        - "Appropriateness Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full deployment configuration reviewed with health check analysis"
+    medium: "Configuration reviewed but health check integration not verified"
+    low: "Based on documentation and partial configuration review"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "k8s-deployments"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed configuration analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "deployment-strategy-001"
+    item: "Deployment strategy explicitly configured"
+    level: "CRITICAL"
+    verification: |
+      grep -r 'strategy:' k8s/ helm/ --include='*.yaml' 2>/dev/null && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "deployment-strategy-002"
+    item: "Health checks integrated with deployment"
+    level: "CRITICAL"
+    verification: |
+      grep -r 'readinessProbe:' k8s/ helm/ --include='*.yaml' 2>/dev/null && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "deployment-strategy-003"
+    item: "No Recreate strategy without maintenance window"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify Recreate strategies have documented maintenance procedures"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "DORA"
+      controls: ["Change Failure Rate"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.deployment-pipeline.canary-deployment"
+    - "devops-ci-cd.deployment-pipeline.blue-green-deployment"
+    - "devops-ci-cd.deployment-pipeline.rollback-capability"

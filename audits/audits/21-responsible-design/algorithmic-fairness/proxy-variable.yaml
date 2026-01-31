@@ -1,0 +1,488 @@
+audit:
+  id: responsible-design.algorithmic-fairness.proxy-variable
+  name: Proxy Variable Audit
+  version: 1.0.0
+  last_updated: '2025-01-19'
+  status: active
+  category: ethical-societal
+  category_number: 21
+  subcategory: algorithmic-fairness
+  tier: phd
+  estimated_duration: 4-6 hours  # median: 5h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: qualitative
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Identifies and assesses proxy variables in algorithmic systems - features
+    that correlate strongly with protected characteristics and can enable
+    indirect discrimination. Evaluates whether algorithms use zip codes, names,
+    schools, purchase patterns, or other variables that serve as proxies for
+    race, gender, age, or other protected attributes.
+
+    Examines both direct feature correlations and more subtle pathways where
+    combinations of features reconstruct protected characteristics.
+  why_it_matters: |
+    Proxy discrimination is legally equivalent to direct discrimination:
+
+    - Courts recognize proxy variables as discriminatory when they correlate
+      with protected characteristics and lack business justification
+    - Zip code discrimination can constitute racial discrimination (redlining)
+    - Name-based discrimination can proxy for gender or ethnicity
+    - School/college proxies can encode socioeconomic and racial bias
+
+    Organizations often believe removing explicit protected characteristics
+    is sufficient, but proxy variables can reproduce discriminatory patterns
+    while appearing facially neutral.
+  when_to_run:
+  - During model development feature selection
+  - Before deploying high-stakes algorithms
+  - When adding new features to existing models
+  - After identifying unexplained disparate impact
+  - Annually for production ML systems
+prerequisites:
+  required_artifacts:
+  - type: feature_list
+    description: Complete list of features used by algorithmic models
+  - type: training_data_access
+    description: Access to training data with both features and demographic information
+  - type: correlation_analysis_capability
+    description: Ability to compute correlations between features and protected characteristics
+  optional_artifacts:
+  - type: feature_importance_analysis
+    description: Model feature importance or SHAP values
+  access_requirements:
+  - Access to training data with demographic fields
+  - Ability to run statistical analysis on data
+  - Interview access to ML/data science teams
+discovery:
+  interviews:
+  - role: ML/Data Science Lead
+    questions:
+    - How do you assess features for proxy discrimination risk?
+    - What correlation analysis is performed during feature selection?
+    - Which features have you identified as potential proxies?
+    - How do you handle features that correlate with protected characteristics?
+    purpose: Understand current proxy detection practices
+    duration: 45 min
+  - role: Domain Expert
+    questions:
+    - What features in this domain are known to correlate with demographics?
+    - Are there features that seem neutral but encode historical discrimination?
+    - What alternative features could provide predictive value without proxy risk?
+    purpose: Domain-specific proxy identification
+    duration: 30 min
+  documents_to_review:
+  - type: Feature Engineering Documentation
+    purpose: Review feature selection rationale
+    look_for:
+    - Proxy correlation analysis
+    - Feature selection criteria
+    - Documentation of proxy risks
+  - type: Model Cards
+    purpose: Assess disclosed limitations
+    look_for:
+    - Known proxy variables
+    - Correlation disclosures
+    - Limitations related to demographic proxies
+  metrics_queries:
+  - system: Statistical Analysis
+    query: 'Correlation matrix: features vs. protected characteristics'
+    purpose: Identify highly correlated features
+    threshold: Flag correlations > 0.5 for further investigation
+  - system: Feature Importance
+    query: SHAP values for features with demographic correlation
+    purpose: Assess proxy feature impact on decisions
+    threshold: Flag high-importance features with demographic correlation
+  file_patterns:
+  - glob: '**/ETHICS.md'
+    purpose: Ethics documentation
+  - glob: '**/PRIVACY*.md'
+    purpose: Privacy documentation
+  - glob: '**/terms*.md'
+    purpose: Terms of service
+  - glob: '**/policy*.md'
+    purpose: Policy documentation
+  code_patterns:
+  - pattern: consent|privacy|gdpr|ccpa|cookie
+    type: regex
+    scope: all
+    purpose: Privacy/consent references
+knowledge_sources:
+  specifications:
+  - id: cfpb-proxy-methodology
+    name: CFPB BISG Proxy Methodology
+    url: https://www.consumerfinance.gov/data-research/research-reports/using-publicly-available-information-to-proxy-for-unidentified-race-and-ethnicity/
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: proxy-discrimination-paper
+    name: 'Proxy Discrimination: A Framework for Thinking About Discrimination in the Big Data Age'
+    url: https://scholarship.law.uc.edu/uclr/vol89/iss1/5/
+    offline_cache: true
+    priority: recommended
+  papers:
+  - id: zip-code-proxy
+    title: Zip Code Proxies for Race and Their Effects
+    url: https://www.urban.org/
+  learning_resources:
+  - id: fairlearn-proxy
+    title: 'Fairlearn: Identifying Proxy Features'
+    type: documentation
+    reference: https://fairlearn.org/
+    relevance: Technical guidance on proxy detection
+tooling:
+  assessment_tools:
+  - tool: Proxy Correlation Matrix
+    purpose: Calculate feature-demographic correlations
+    description: |
+      Compute correlation coefficients between all features
+      and available protected characteristics. Flag correlations
+      above threshold (typically 0.5 for high concern).
+    offline_capable: true
+  - tool: Mutual Information Analysis
+    purpose: Detect non-linear proxy relationships
+    description: |
+      Mutual information captures non-linear relationships
+      that correlation misses. Higher values indicate features
+      can be used to predict protected characteristics.
+    offline_capable: true
+  infrastructure_tools:
+  - tool: SHAP
+    purpose: Identify feature importance for proxy features
+    install: pip install shap
+    command: shap.summary_plot(shap_values, X)
+    offline_capable: true
+  - tool: Aequitas
+    purpose: Bias detection including proxy analysis
+    install: pip install aequitas
+    offline_capable: true
+  scripts:
+  - id: proxy-correlation-analysis
+    language: python
+    purpose: Calculate proxy correlations
+    source: inline
+    code: |
+      import pandas as pd
+      import numpy as np
+      from sklearn.feature_selection import mutual_info_classif
+
+      def analyze_proxy_risk(data, features, protected_attrs):
+          """
+          Analyze features for proxy discrimination risk.
+          Returns correlation and mutual information scores.
+          """
+          results = []
+          for feature in features:
+              for attr in protected_attrs:
+                  if data[feature].dtype in ['float64', 'int64']:
+                      corr = data[feature].corr(data[attr])
+                  else:
+                      # Encode categorical for correlation
+                      corr = np.nan
+
+                  mi = mutual_info_classif(
+                      data[[feature]].fillna(0),
+                      data[attr].fillna(0),
+                      discrete_features='auto'
+                  )[0]
+
+                  results.append({
+                      'feature': feature,
+                      'protected_attr': attr,
+                      'correlation': corr,
+                      'mutual_information': mi,
+                      'proxy_risk': 'HIGH' if (abs(corr) > 0.5 or mi > 0.3) else 'LOW'
+                  })
+          return pd.DataFrame(results)
+signals:
+  critical:
+  - id: PROXY-CRIT-001
+    signal: High-importance feature strongly correlates with protected characteristic
+    evidence_indicators:
+    - Correlation > 0.7 with protected characteristic
+    - Feature in top 10 by importance (SHAP, permutation)
+    - Feature encodes known discrimination pattern (e.g., zip code in lending)
+    explanation: |
+      A high-importance, highly correlated feature directly transmits
+      protected characteristic information into decisions. This creates
+      the same discriminatory effect as using the protected characteristic
+      directly, with the same legal exposure.
+    remediation: |
+      - Evaluate removing or transforming the feature
+      - Assess business necessity for the feature
+      - Consider fairness-aware alternatives
+      - Document justification if retained
+      - Monitor disparate impact from this feature pathway
+  - id: PROXY-CRIT-002
+    signal: Feature combination reconstructs protected characteristic
+    evidence_indicators:
+    - Multiple features jointly predict protected characteristic with high accuracy
+    - Feature interaction reveals protected characteristic
+    - Seemingly innocuous features combine to encode demographics
+    explanation: |
+      Even when individual features don't strongly correlate, combinations
+      can effectively encode protected characteristics. Name + location +
+      shopping patterns can predict race with high accuracy.
+    remediation: |
+      - Conduct interaction analysis for feature combinations
+      - Consider feature engineering to break proxy pathways
+      - Apply fair representation learning
+      - Limit feature combinations available to models
+  high:
+  - id: PROXY-HIGH-001
+    signal: Zip code or geographic features used in sensitive contexts
+    evidence_indicators:
+    - Zip code as feature in lending/credit models
+    - Geographic features in housing algorithms
+    - Location data in employment screening
+    - No documentation of geographic necessity
+    explanation: |
+      Geographic features are well-established proxies for race due to
+      historical segregation. Their use in regulated domains faces
+      heightened scrutiny and potential redlining liability.
+    remediation: |
+      - Document business necessity for geographic features
+      - Consider more granular or alternative features
+      - Monitor for disparate impact
+      - Review against fair lending/housing regulations
+  - id: PROXY-HIGH-002
+    signal: Name-derived features without proxy mitigation
+    evidence_indicators:
+    - First name as feature (gender proxy)
+    - Last name as feature (ethnicity proxy)
+    - Name frequency or uniqueness features
+    - No analysis of name-demographic correlation
+    explanation: |
+      Names are strong proxies for gender, ethnicity, and national origin.
+      Their use in algorithms can enable discrimination that appears
+      facially neutral.
+    remediation: |
+      - Remove name-derived features unless clearly necessary
+      - Document any legitimate use (e.g., fraud detection)
+      - Conduct disparate impact analysis
+      - Consider anonymization before algorithmic processing
+  - id: PROXY-HIGH-003
+    signal: Educational institution features without proxy analysis
+    evidence_indicators:
+    - School/college name as feature
+    - Institution tier or ranking features
+    - Degree type without necessity documentation
+    - Historical bias in educational opportunity not considered
+    explanation: |
+      Educational institution features can encode socioeconomic status,
+      race, and geographic discrimination due to historical inequities
+      in educational access.
+    remediation: |
+      - Evaluate job-relatedness of educational features
+      - Consider skills-based alternatives
+      - Conduct disparate impact analysis
+      - Document business necessity
+  medium:
+  - id: PROXY-MED-001
+    signal: No systematic proxy analysis during feature selection
+    evidence_indicators:
+    - Features selected without correlation analysis
+    - No documentation of proxy considerations
+    - Proxy risk not part of feature engineering process
+    remediation: |
+      - Implement proxy analysis in feature engineering pipeline
+      - Document correlation analysis for new features
+      - Establish proxy risk thresholds
+  - id: PROXY-MED-002
+    signal: Moderate proxy correlations without documentation
+    evidence_indicators:
+    - Features with 0.3-0.5 correlation with protected characteristics
+    - No analysis of cumulative proxy effect
+    - Undocumented proxy risks
+    remediation: |
+      - Document known moderate-risk proxies
+      - Monitor for disparate impact
+      - Conduct periodic re-evaluation
+  positive:
+  - id: PROXY-POS-001
+    signal: Systematic proxy detection in ML pipeline
+    evidence_indicators:
+    - Automated proxy correlation analysis
+    - Feature selection includes proxy risk assessment
+    - Documentation of proxy decisions
+    - Regular re-evaluation of proxy risk
+  - id: PROXY-POS-002
+    signal: Fair representation learning applied
+    evidence_indicators:
+    - Techniques applied to reduce proxy information
+    - Adversarial debiasing in use
+    - Feature transformation to limit proxy pathways
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  preparation:
+  - step: Obtain complete feature list for algorithmic systems
+  - step: Secure access to training data with demographic fields
+  - step: Identify relevant protected characteristics for domain
+  - step: Set up correlation analysis environment
+  steps:
+  - id: '1'
+    name: Feature Inventory
+    description: |
+      Create complete inventory of features used in algorithmic models,
+      including derived and engineered features.
+    duration_estimate: 30-60 min
+    expected_findings:
+    - Complete feature list
+    - Feature categorization (demographic, behavioral, geographic, etc.)
+  - id: '2'
+    name: Correlation Analysis
+    description: |
+      Calculate correlation between all features and available
+      protected characteristics. Flag features above threshold.
+    duration_estimate: 1-2 hours
+    commands:
+    - purpose: Calculate feature-demographic correlations
+      command: |
+        # For each feature and protected characteristic:
+        # Compute Pearson correlation (continuous)
+        # Compute Cramer's V (categorical)
+    expected_findings:
+    - Correlation matrix
+    - High-correlation features flagged
+  - id: '3'
+    name: Mutual Information Analysis
+    description: |
+      Calculate mutual information to detect non-linear proxy
+      relationships that correlation misses.
+    duration_estimate: 1 hour
+    expected_findings:
+    - Mutual information scores
+    - Non-linear proxy relationships
+  - id: '4'
+    name: Feature Importance Analysis
+    description: |
+      Assess importance of potential proxy features in model decisions
+      using SHAP or permutation importance.
+    duration_estimate: 1-2 hours
+    expected_findings:
+    - Importance ranking for proxy-risk features
+    - Impact assessment of proxies
+  - id: '5'
+    name: Domain-Specific Review
+    description: |
+      Interview domain experts to identify context-specific proxy
+      variables that may not appear in statistical analysis.
+    duration_estimate: 45 min
+    expected_findings:
+    - Domain-specific proxy risks
+    - Historical context for features
+  - id: '6'
+    name: Synthesize Findings
+    description: |
+      Compile proxy analysis into prioritized recommendations.
+    duration_estimate: 30 min
+    expected_findings:
+    - Prioritized proxy risk list
+    - Remediation recommendations
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: proxy_analysis_report
+    format: structured
+    description: Correlation and mutual information analysis results
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Proxy Analysis Methodology
+    - High-Risk Proxies Identified
+    - Feature Importance Impact
+    - Recommendations
+  confidence_guidance:
+    high: Strong statistical correlation, domain expertise confirms, high feature importance
+    medium: Moderate correlation, some domain support
+    low: Weak correlation, theoretical proxy risk without empirical confirmation
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: proxy-discrimination-paper
+      priority: recommended
+  degradation:
+  - feature: None - core analysis is offline capable
+    impact: Minimal
+    mitigation: N/A
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive correlation analysis
+    security:
+      included: true
+      priority: 75
+      reason: Legal and discrimination risk
+    full:
+      included: true
+      priority: 85
+closeout_checklist:
+- id: proxy-001
+  item: Correlation analysis completed for all features
+  level: CRITICAL
+  verification: manual
+  verification_notes: Reviewer confirms correlation calculated for all feature-demographic pairs
+  expected: Confirmed by reviewer
+- id: proxy-002
+  item: High-correlation features documented
+  level: CRITICAL
+  verification: manual
+  verification_notes: Features with correlation > 0.5 documented with assessment
+  expected: Confirmed by reviewer
+- id: proxy-003
+  item: Feature importance analyzed for proxy features
+  level: BLOCKING
+  verification: manual
+  verification_notes: SHAP or importance analysis completed for flagged proxies
+  expected: Confirmed by reviewer
+- id: proxy-004
+  item: Remediation recommendations provided
+  level: WARNING
+  verification: manual
+  verification_notes: Each high-risk proxy has documented remediation path
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+    domains:
+    - Machine Learning
+    - Automated Decision Making
+    team_sizes:
+    - small
+    - medium
+    - large
+  compliance_frameworks:
+  - framework: Title VII
+    controls:
+    - Disparate impact (proxy discrimination)
+  - framework: ECOA
+    controls:
+    - Prohibited basis proxies
+  - framework: Fair Housing Act
+    controls:
+    - Digital redlining
+  - framework: EU AI Act
+    controls:
+    - Article 10 (data governance)
+relationships:
+  commonly_combined:
+  - responsible-design.algorithmic-fairness.bias-detection
+  - responsible-design.algorithmic-fairness.protected-class-treatment
+  - responsible-design.algorithmic-fairness.disparate-impact

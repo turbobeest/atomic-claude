@@ -1,0 +1,293 @@
+audit:
+  id: performance-efficiency.resource-utilization.container-resource-limits
+  name: Container Resource Limits Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: resource-utilization
+  tier: expert
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: high
+  scope: config
+  default_profiles:
+  - full
+  - production
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines Kubernetes container resource configurations including
+    CPU/memory requests and limits, QoS class assignments, LimitRange and
+    ResourceQuota policies, and identifies misconfigurations that affect
+    scheduling, stability, and cost efficiency.
+  why_it_matters: |
+    Proper resource limits are foundational to Kubernetes cluster stability.
+    Missing limits allow runaway containers to starve others. Mismatched
+    requests cause poor scheduling decisions and node overcommitment.
+    Incorrect QoS classes affect eviction priority during node pressure.
+    This is the most common source of production Kubernetes issues.
+  when_to_run:
+  - Before deploying to production
+  - During cluster capacity planning
+  - After adding new workloads
+  - As part of cost optimization reviews
+prerequisites:
+  required_artifacts:
+  - type: kubernetes-config
+    description: Access to Kubernetes deployment manifests
+  - type: cluster-access
+    description: kubectl access to cluster
+  access_requirements:
+  - Read access to Kubernetes API
+  - Access to deployment manifests
+  - Read access to namespace policies
+discovery:
+  file_patterns:
+  - glob: '**/deployment*.yaml'
+    purpose: Kubernetes deployment configurations
+  - glob: '**/statefulset*.yaml'
+    purpose: StatefulSet configurations
+  - glob: '**/daemonset*.yaml'
+    purpose: DaemonSet configurations
+  - glob: '**/limitrange*.yaml'
+    purpose: LimitRange policies
+  - glob: '**/resourcequota*.yaml'
+    purpose: ResourceQuota policies
+  code_patterns:
+  - pattern: resources:\s*\{\}
+    type: regex
+    scope: config
+    purpose: Empty resource specifications
+  - pattern: limits:\s*$
+    type: regex
+    scope: config
+    purpose: Missing resource limits
+knowledge_sources:
+  specifications:
+  - id: k8s-resource-management
+    name: Kubernetes Resource Management
+    url: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+    offline_cache: true
+    priority: required
+  - id: k8s-qos
+    name: Kubernetes QoS Classes
+    url: https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: k8s-best-practices
+    name: Kubernetes Best Practices - Resource Management
+    url: https://cloud.google.com/blog/products/containers-kubernetes/kubernetes-best-practices-resource-requests-and-limits
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: kubectl
+    purpose: Inspect pod resource configurations
+    command: 'kubectl get pods -A -o jsonpath=''{range .items[*]}{.metadata.namespace}/{.metadata.name}:
+      requests={.spec.containers[*].resources.requests} limits={.spec.containers[*].resources.limits}{"\n"}{end}'''
+  - tool: kube-score
+    purpose: Static analysis of Kubernetes manifests
+    command: kube-score score deployment.yaml
+  static_analysis:
+  - tool: kubeval
+    purpose: Validate Kubernetes manifests
+    offline_capable: true
+  - tool: conftest
+    purpose: Policy-based validation
+    offline_capable: true
+signals:
+  critical:
+  - id: LIMIT-CRIT-001
+    signal: Production pods without memory limits
+    explanation: |
+      Containers without memory limits can consume unlimited memory,
+      potentially crashing the node or triggering system OOM killer.
+      This is the most dangerous Kubernetes misconfiguration.
+    remediation: Set memory limits based on application requirements plus 20% headroom
+    evidence_description: 'spec.containers[].resources.limits.memory: null'
+  - id: LIMIT-CRIT-002
+    signal: BestEffort QoS for production workloads
+    evidence_pattern: No requests or limits defined
+    explanation: |
+      BestEffort pods are first to be evicted under resource pressure.
+      Production workloads with this QoS class will fail during cluster
+      stress, exactly when stability matters most.
+    remediation: Configure both requests and limits for Guaranteed or Burstable QoS
+  high:
+  - id: LIMIT-HIGH-001
+    signal: CPU limits without requests
+    evidence_pattern: limits.cpu defined but requests.cpu missing
+    explanation: |
+      Without CPU requests, Kubernetes scheduler cannot make informed
+      placement decisions. This leads to node overcommitment and
+      noisy neighbor problems.
+    remediation: Set CPU requests based on typical utilization
+  - id: LIMIT-HIGH-002
+    signal: Requests significantly exceeding typical usage
+    evidence_threshold: requests > 2x actual usage
+    explanation: |
+      Over-requesting resources prevents efficient bin-packing and
+      wastes cluster capacity. Nodes appear full while having idle
+      resources that cannot be scheduled.
+    remediation: Right-size requests based on actual utilization metrics
+  medium:
+  - id: LIMIT-MED-001
+    signal: No LimitRange defined for namespace
+    evidence_pattern: Namespace without LimitRange
+    remediation: Create LimitRange to enforce default limits
+  - id: LIMIT-MED-002
+    signal: Burstable QoS for latency-sensitive services
+    evidence_pattern: requests != limits for critical services
+    remediation: Consider Guaranteed QoS (requests == limits) for critical services
+  low:
+  - id: LIMIT-LOW-001
+    signal: Inconsistent resource specifications across similar workloads
+  positive:
+  - id: LIMIT-POS-001
+    signal: Guaranteed QoS configured for critical services
+  - id: LIMIT-POS-002
+    signal: LimitRange and ResourceQuota enforced across namespaces
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory resource configurations
+    description: |
+      Collect resource requests and limits from all workloads across
+      the cluster.
+    duration_estimate: 20 min
+    commands:
+    - purpose: List all pods with resource configurations
+      command: |
+        kubectl get pods -A -o json | jq -r '.items[] | "\(.metadata.namespace)/\(.metadata.name),\(.spec.containers[0].resources.requests.cpu // "none"),\(.spec.containers[0].resources.limits.cpu // "none"),\(.spec.containers[0].resources.requests.memory // "none"),\(.spec.containers[0].resources.limits.memory // "none")"' | column -t -s,
+    - purpose: Find pods without any resource specs
+      command: |
+        kubectl get pods -A -o json | jq -r '.items[] | select(.spec.containers[].resources == {} or .spec.containers[].resources == null) | "\(.metadata.namespace)/\(.metadata.name)"'
+    expected_findings:
+    - Complete resource configuration inventory
+    - Pods without resource specifications
+  - id: '2'
+    name: Analyze QoS class distribution
+    description: |
+      Determine the QoS class of each pod and evaluate appropriateness
+      for workload criticality.
+    duration_estimate: 15 min
+    commands:
+    - purpose: List pods by QoS class
+      command: |
+        kubectl get pods -A -o jsonpath='{range .items[*]}{.status.qosClass}{"\t"}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' | sort
+    - purpose: Count pods per QoS class
+      command: |
+        kubectl get pods -A -o jsonpath='{range .items[*]}{.status.qosClass}{"\n"}{end}' | sort | uniq -c
+    expected_findings:
+    - QoS class distribution
+    - Critical workloads with inappropriate QoS
+  - id: '3'
+    name: Check namespace policies
+    description: |
+      Examine LimitRange and ResourceQuota policies that govern
+      resource allocation in each namespace.
+    duration_estimate: 15 min
+    commands:
+    - purpose: List LimitRanges
+      command: kubectl get limitranges -A -o yaml
+    - purpose: List ResourceQuotas
+      command: kubectl get resourcequotas -A -o yaml
+    - purpose: Find namespaces without LimitRange
+      command: |
+        comm -23 <(kubectl get ns -o name | sort) <(kubectl get limitranges -A -o jsonpath='{range .items[*]}namespace/{.metadata.namespace}{"\n"}{end}' | sort -u)
+    expected_findings:
+    - LimitRange coverage
+    - ResourceQuota configurations
+    - Unprotected namespaces
+  - id: '4'
+    name: Validate against static analysis
+    description: |
+      Run static analysis tools on manifests to identify additional
+      configuration issues.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Score manifests with kube-score
+      command: kube-score score *.yaml 2>/dev/null | grep -E 'CRITICAL|WARNING'
+    - purpose: Validate manifest structure
+      command: kubeval --strict *.yaml 2>&1 | grep -E 'WARN|ERR'
+    expected_findings:
+    - Static analysis findings
+    - Manifest validation issues
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Resource Configuration Inventory
+    - QoS Analysis
+    - Policy Coverage
+    - Recommendations
+  confidence_guidance:
+    high: Direct kubectl query with manifest review
+    medium: Manifest analysis without runtime verification
+    low: Partial manifest coverage
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: k8s-resource-management
+      priority: required
+    - source_id: k8s-qos
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 1
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: limit-001
+  item: All production pods have memory limits
+  level: CRITICAL
+  verification: |
+    kubectl get pods -A -o json | jq '[.items[] | select(.metadata.namespace != "kube-system") | select(.spec.containers[].resources.limits.memory == null)] | length == 0'
+  expected: 'true'
+- id: limit-002
+  item: No BestEffort QoS pods in production namespaces
+  level: CRITICAL
+  verification: |
+    kubectl get pods -A -o json | jq '[.items[] | select(.metadata.namespace != "kube-system") | select(.status.qosClass == "BestEffort")] | length == 0'
+  expected: 'true'
+- id: limit-003
+  item: LimitRange exists in all production namespaces
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify LimitRange configured for each production namespace
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CIS Kubernetes Benchmark
+    controls:
+    - 5.2.1
+    - 5.2.2
+relationships:
+  commonly_combined:
+  - performance-efficiency.resource-utilization.cpu-utilization
+  - performance-efficiency.resource-utilization.memory-utilization

@@ -1,0 +1,282 @@
+audit:
+  id: code-quality.error-handling.empty-catch-block
+  name: Empty Catch Block Detection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: error-handling
+  tier: expert
+  estimated_duration: 25 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - quality
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Identifies catch blocks that are empty or contain only comments, effectively
+    silencing exceptions without any handling, logging, or recovery action.
+    This includes try-catch blocks where the catch does nothing with the exception.
+  why_it_matters: |
+    Empty catch blocks hide errors, making debugging extremely difficult.
+    They can mask security vulnerabilities, data corruption, and system
+    failures. When exceptions are silently swallowed, the system continues
+    in an inconsistent state, often causing more severe failures later.
+  when_to_run:
+  - During code reviews
+  - Before production deployments
+  - After production incidents
+  - Security audits
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  access_requirements:
+  - Read access to source code repository
+discovery:
+  code_patterns:
+  - pattern: catch\s*\([^)]*\)\s*\{\s*\}
+    type: regex
+    scope: source
+    purpose: Detect empty catch blocks
+  - pattern: catch\s*\([^)]*\)\s*\{\s*//[^}]*\}
+    type: regex
+    scope: source
+    purpose: Detect catch blocks with only comments
+  - pattern: except[^:]*:\s*pass
+    type: regex
+    scope: source
+    purpose: Detect Python except pass
+  - pattern: catch\s*\{\s*\}
+    type: regex
+    scope: source
+    purpose: Detect Swift/Kotlin empty catch
+  file_patterns:
+  - glob: '**/*.{java,cs,ts,js,py,rb,go,swift,kt}'
+    purpose: Source code files
+knowledge_sources:
+  specifications:
+  - id: cwe-391
+    name: 'CWE-391: Unchecked Error Condition'
+    url: https://cwe.mitre.org/data/definitions/391.html
+    offline_cache: true
+    priority: required
+  - id: cwe-390
+    name: 'CWE-390: Detection of Error Condition Without Action'
+    url: https://cwe.mitre.org/data/definitions/390.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: sonar-empty-catch
+    name: SonarQube - Empty Catch Block
+    url: https://rules.sonarsource.com/java/RSPEC-108
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: eslint
+    purpose: JavaScript/TypeScript no-empty rule
+    offline_capable: true
+  - tool: checkstyle
+    purpose: Java empty catch detection
+    offline_capable: true
+  - tool: pylint
+    purpose: Python W0702 (bare-except)
+    offline_capable: true
+  - tool: sonarqube
+    purpose: Multi-language empty catch detection
+    offline_capable: false
+  scripts:
+  - id: empty-catch-scan
+    language: bash
+    purpose: Detect empty catch blocks
+    source: inline
+    code: |
+      # Find empty catch blocks in Java/TypeScript
+      grep -Pzro --include="*.{java,ts}" "catch\s*\([^)]*\)\s*\{\s*\}" . 2>/dev/null | head -50
+signals:
+  critical:
+  - id: EH-EMPTY-CRIT-001
+    signal: Empty catch block in security-critical code
+    evidence_pattern: catch.*\{\s*\}.*(auth|security|crypt|valid)
+    cwe: CWE-391
+    explanation: |
+      Empty catches in security code may silently skip authentication,
+      authorization, or validation, creating serious vulnerabilities.
+    remediation: Add proper error handling or fail securely
+  - id: EH-EMPTY-CRIT-002
+    signal: Empty catch block in data persistence code
+    evidence_pattern: catch.*\{\s*\}.*(save|update|delete|persist)
+    cwe: CWE-391
+    explanation: |
+      Empty catches in persistence code may silently fail to save data,
+      leading to data loss without any indication of failure.
+    remediation: Add error handling and transaction rollback
+  high:
+  - id: EH-EMPTY-HIGH-001
+    signal: Empty catch block with only comment
+    evidence_pattern: catch\s*\([^)]*\)\s*\{\s*//.*\s*\}
+    cwe: CWE-390
+    explanation: |
+      Comments don't handle errors. This pattern indicates the developer
+      knew an error could occur but chose to ignore it.
+    remediation: Add logging at minimum, proper handling if possible
+  - id: EH-EMPTY-HIGH-002
+    signal: 'Python except: pass pattern'
+    evidence_pattern: except.*:\s*pass
+    cwe: CWE-391
+    explanation: |
+      The except/pass pattern is a common anti-pattern that silently
+      ignores all errors including critical system errors.
+    remediation: Add specific exception handling or logging
+  medium:
+  - id: EH-EMPTY-MED-001
+    signal: Empty catch in utility/helper code
+    evidence_pattern: (util|helper).*catch.*\{\s*\}
+    remediation: Add logging or propagate exception
+  - id: EH-EMPTY-MED-002
+    signal: Multiple empty catches in same file
+    evidence_pattern: file.*empty_catch_count > 2
+    remediation: Review file's error handling strategy
+  low:
+  - id: EH-EMPTY-LOW-001
+    signal: Empty catch in test code
+    evidence_pattern: test.*catch.*\{\s*\}
+    remediation: Use assertThrows or expect().toThrow()
+  positive:
+  - id: EH-EMPTY-POS-001
+    signal: No empty catch blocks detected
+    evidence_pattern: zero_empty_catches
+  - id: EH-EMPTY-POS-002
+    signal: Lint rule prevents empty catches
+    evidence_pattern: eslint.*no-empty.*error
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Scan for Empty Catch Patterns
+    description: |
+      Search the codebase for empty catch blocks using regex patterns
+      that match various language syntaxes.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find empty Java/TypeScript catches
+      command: |
+        grep -rn --include="*.{java,ts,js}" -E "catch\s*\([^)]*\)\s*\{\s*\}" . 2>/dev/null | head -50
+    - purpose: Find Python except pass
+      command: |
+        grep -rn --include="*.py" -E "except.*:\s*$" -A1 . 2>/dev/null | grep -B1 "pass" | head -50
+    expected_findings:
+    - Empty catch block locations
+    - Count by file
+  - id: '2'
+    name: Identify Context
+    description: |
+      For each empty catch, determine the surrounding context to
+      assess severity (security, data, etc.).
+    duration_estimate: 10 min
+    commands:
+    - purpose: Check for security context
+      command: |
+        grep -rn --include="*.{java,ts}" -B5 "catch.*\{\s*\}" . 2>/dev/null | grep -iE "auth|security|crypt" | head -30
+    expected_findings:
+    - Security-context catches
+    - Data-context catches
+  - id: '3'
+    name: Classify Severity
+    description: |
+      Classify each empty catch by severity based on context and
+      potential impact.
+    duration_estimate: 5 min
+    expected_findings:
+    - Severity classification
+    - Priority list
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - location
+    - context
+    - severity
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Empty Catch Inventory
+    - Risk Assessment
+    - Remediation Recommendations
+  confidence_guidance:
+    high: Pattern match confirms empty catch
+    medium: Catch may have minimal handling
+    low: May need manual verification
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-391
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 1
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: empty-catch-001
+  item: Empty catch scan completed
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.{java,ts,js}" -E "catch\s*\([^)]*\)\s*\{\s*\}" . 2>/dev/null | wc -l
+  expected: Count documented
+- id: empty-catch-002
+  item: No empty catches in security code
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{java,ts}" "catch.*\{\s*\}" . 2>/dev/null | grep -iE "auth|security|crypt" | wc -l
+  expected: '0'
+- id: empty-catch-003
+  item: All empty catches documented
+  level: WARNING
+  verification: manual
+  verification_notes: Review audit output
+  expected: All documented
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-390
+    - CWE-391
+  - framework: OWASP
+    controls:
+    - Error Handling
+  - framework: ISO 25010
+    controls:
+    - Reliability
+relationships:
+  commonly_combined:
+  - code-quality.error-handling.exception-swallowing
+  - code-quality.error-handling.exception-granularity
+  - code-quality.error-handling.error-message-quality

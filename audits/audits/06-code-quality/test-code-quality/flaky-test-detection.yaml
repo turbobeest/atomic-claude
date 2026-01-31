@@ -1,0 +1,394 @@
+# ============================================================
+# AUDIT: Flaky Test Detection
+# ============================================================
+
+audit:
+  id: "code-quality.test-code-quality.flaky-test-detection"
+  name: "Flaky Test Detection Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "code-quality"
+  category_number: 6
+  subcategory: "test-code-quality"
+
+  tier: "expert"
+  estimated_duration: "90 minutes"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "testing"
+
+  default_profiles:
+    - "full"
+    - "quality"
+
+  blocks_phase: false
+  parallelizable: false
+
+description:
+  what: |
+    Identifies tests that pass and fail intermittently without code changes,
+    known as flaky tests. This includes detecting common causes such as race
+    conditions, timing dependencies, shared state, random data, and environment
+    dependencies, as well as running tests multiple times to identify
+    non-deterministic behavior.
+
+  why_it_matters: |
+    Flaky tests erode confidence in the test suite. Developers learn to ignore
+    failures, retry builds until they pass, or disable tests. This hides real
+    bugs, slows CI/CD, and creates toil. Research shows flaky tests cost
+    engineering teams significant time - up to 25% of CI build time in some
+    organizations.
+
+  when_to_run:
+    - "CI/CD reliability issues"
+    - "Test suite maintenance"
+    - "Before enabling parallel execution"
+    - "When developers report 'just retry it'"
+
+prerequisites:
+  required_artifacts:
+    - type: "test_code"
+      description: "Test files"
+    - type: "ci_logs"
+      description: "CI build history for flaky detection"
+
+  access_requirements:
+    - "Read access to test directories"
+    - "Ability to run tests multiple times"
+    - "Access to CI build logs"
+
+discovery:
+  code_patterns:
+    - pattern: "setTimeout|setInterval|sleep|wait|delay"
+      type: "regex"
+      scope: "testing"
+      purpose: "Detect timing-dependent code"
+
+    - pattern: "Math\\.random|random\\(\\)|uuid\\(\\)"
+      type: "regex"
+      scope: "testing"
+      purpose: "Detect random value usage"
+
+    - pattern: "new Date\\(\\)|Date\\.now\\(\\)|time\\.time\\(\\)"
+      type: "regex"
+      scope: "testing"
+      purpose: "Detect time-dependent code"
+
+    - pattern: "async.*await.*Promise\\.race|Promise\\.all"
+      type: "regex"
+      scope: "testing"
+      purpose: "Detect concurrent operations"
+
+  file_patterns:
+    - glob: "**/*.test.{js,ts,jsx,tsx}"
+      purpose: "Jest/Vitest test files"
+    - glob: "**/test_*.py"
+      purpose: "Python test files"
+    - glob: "**/*_test.go"
+      purpose: "Go test files"
+
+knowledge_sources:
+  guides:
+    - id: "google-flaky"
+      name: "Google Testing Blog - Flaky Tests"
+      url: "https://testing.googleblog.com/2016/05/flaky-tests-at-google-and-how-we.html"
+      offline_cache: true
+
+    - id: "xunit-patterns"
+      name: "xUnit Test Patterns: Refactoring Test Code"
+      url: "https://www.amazon.com/xUnit-Test-Patterns-Refactoring-Code/dp/0131495054"
+      offline_cache: false
+
+    - id: "working-effectively-legacy"
+      name: "Working Effectively with Legacy Code"
+      url: "https://www.oreilly.com/library/view/working-effectively-with/0131177052/"
+      offline_cache: false
+
+  papers:
+    - id: "deflaker"
+      title: "DeFlaker: Automatically Detecting Flaky Tests"
+      url: "https://mir.cs.illinois.edu/marinov/publications/LamETAL19DeFlaker.pdf"
+
+  learning_resources:
+    - id: "flaky-tests-remedy"
+      title: "Flaky Tests: A War that Never Ends"
+      type: "article"
+      reference: "https://martinfowler.com/articles/nonDeterminism.html"
+
+tooling:
+  static_analysis:
+    - tool: "jest"
+      purpose: "Run tests multiple times with --repeat"
+      offline_capable: true
+
+    - tool: "pytest-repeat"
+      purpose: "Run Python tests multiple times"
+      offline_capable: true
+
+    - tool: "flaky"
+      purpose: "pytest plugin for marking flaky tests"
+      offline_capable: true
+
+  scripts:
+    - id: "flaky-detection"
+      language: "bash"
+      purpose: "Run tests multiple times to detect flakiness"
+      source: "inline"
+      code: |
+        echo "=== Running tests 5 times to detect flakiness ==="
+        for i in {1..5}; do
+          echo "=== Run $i ==="
+          npm test 2>&1 | tail -10 || true
+        done
+
+        echo "=== Analyzing flaky patterns ==="
+        grep -rn "setTimeout\|setInterval\|Math\.random\|new Date" \
+          --include="*.test.js" --include="*.spec.ts" . 2>/dev/null | head -30
+
+signals:
+  critical:
+    - id: "FLAKY-CRIT-001"
+      signal: "Test passes/fails inconsistently in CI"
+      evidence_pattern: "CI logs showing same test pass then fail"
+      explanation: |
+        Tests that sometimes pass and sometimes fail without code changes
+        are actively harmful. They hide real failures and waste CI resources.
+      remediation: "Identify and fix root cause (timing, state, randomness)"
+
+    - id: "FLAKY-CRIT-002"
+      signal: "Test uses unbounded waits or polling"
+      evidence_pattern: "while.*wait|for.*sleep.*retry"
+      explanation: |
+        Unbounded waiting can pass when fast but fail under load or on
+        slower machines. This creates environment-dependent flakiness.
+      remediation: "Use explicit waits with reasonable timeouts and clear assertions"
+
+  high:
+    - id: "FLAKY-HIGH-001"
+      signal: "Test depends on wall clock time"
+      evidence_pattern: "new Date\\(\\)|Date\\.now\\(\\)|time\\.time\\(\\)"
+      explanation: |
+        Tests depending on current time fail at different times of day,
+        near midnight, or at daylight saving boundaries.
+      remediation: "Mock time functions, use relative time, or inject clock"
+
+    - id: "FLAKY-HIGH-002"
+      signal: "Test uses random data without seeding"
+      evidence_pattern: "Math\\.random\\(\\)|random\\.choice|uuid\\(\\)"
+      explanation: |
+        Random data can create edge cases that sometimes pass and sometimes
+        fail. Without seeding, failures aren't reproducible.
+      remediation: "Seed random generators or use deterministic test data"
+
+    - id: "FLAKY-HIGH-003"
+      signal: "Test has race conditions"
+      evidence_pattern: "async operations without proper await|parallel writes"
+      explanation: |
+        Race conditions cause tests to pass when timing aligns but fail
+        when operations complete in different orders.
+      remediation: "Properly await all async operations, avoid shared state"
+
+  medium:
+    - id: "FLAKY-MED-001"
+      signal: "Hardcoded sleep/delay in tests"
+      evidence_pattern: "sleep\\(\\d+\\)|setTimeout.*\\d{3,}"
+      remediation: "Use explicit waits for conditions instead of arbitrary delays"
+
+    - id: "FLAKY-MED-002"
+      signal: "Test depends on external services"
+      evidence_pattern: "fetch\\(|axios\\.|requests\\."
+      remediation: "Mock external services or use contract testing"
+
+    - id: "FLAKY-MED-003"
+      signal: "Test depends on specific resource ordering"
+      evidence_pattern: "Tests assume specific ID sequences or ordering"
+      remediation: "Sort results before comparison or don't depend on order"
+
+  low:
+    - id: "FLAKY-LOW-001"
+      signal: "Tests skipped for flakiness without investigation"
+      evidence_pattern: "@skip.*flaky|it\\.skip.*intermittent"
+      remediation: "Fix flaky tests rather than skipping indefinitely"
+
+    - id: "FLAKY-LOW-002"
+      signal: "Retry logic in tests"
+      evidence_pattern: "@retry|flaky decorator|retry.*failed"
+      remediation: "Fix underlying flakiness rather than adding retries"
+
+  positive:
+    - id: "FLAKY-POS-001"
+      signal: "Tests pass consistently across multiple runs"
+      evidence_pattern: "5+ runs with no failures"
+
+    - id: "FLAKY-POS-002"
+      signal: "Explicit time mocking"
+      evidence_pattern: "jest.useFakeTimers|freezegun|time.freeze"
+
+    - id: "FLAKY-POS-003"
+      signal: "Seeded random in tests"
+      evidence_pattern: "random.seed|Math.random = jest.fn"
+
+procedure:
+  context:
+    cognitive_mode: "investigative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Analyze CI History"
+      description: |
+        Review CI build logs for tests that have passed and failed
+        without corresponding code changes.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check recent CI failures (if available)"
+          command: |
+            echo "Review CI logs for intermittent failures"
+            # This would typically query CI API or logs
+
+      expected_findings:
+        - "Known flaky tests from CI history"
+        - "Failure patterns and frequency"
+
+    - id: "2"
+      name: "Scan for Flaky Patterns"
+      description: |
+        Search for code patterns known to cause flakiness.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find timing dependencies"
+          command: |
+            grep -rn "setTimeout\|setInterval\|sleep\|wait\|delay" \
+              --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+        - purpose: "Find randomness"
+          command: |
+            grep -rn "Math\.random\|random\.\|uuid\|uuidv4" \
+              --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | \
+              grep -v node_modules | head -20
+        - purpose: "Find time dependencies"
+          command: |
+            grep -rn "new Date\|Date\.now\|time\.time\|datetime\.now" \
+              --include="*.test.js" --include="*.spec.ts" --include="test_*.py" . 2>/dev/null | \
+              grep -v node_modules | head -20
+
+      expected_findings:
+        - "Potential flaky patterns"
+        - "Pattern frequency"
+
+    - id: "3"
+      name: "Run Repeated Test Execution"
+      description: |
+        Run tests multiple times to detect non-deterministic behavior.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Run tests multiple times (Jest)"
+          command: |
+            npx jest --bail=false --testPathPattern="" 2>&1 | tail -20 || echo "Jest not available"
+        - purpose: "Run tests multiple times (pytest)"
+          command: |
+            python -m pytest --count=3 2>&1 | tail -20 || echo "pytest-repeat not installed"
+
+      expected_findings:
+        - "Tests that fail on some runs"
+        - "Flaky test identification"
+
+    - id: "4"
+      name: "Analyze Race Conditions"
+      description: |
+        Look for async patterns that could cause race conditions.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find async without await"
+          command: |
+            grep -rn "async.*{" --include="*.test.js" --include="*.spec.ts" . 2>/dev/null | head -30
+        - purpose: "Find Promise.all usage"
+          command: |
+            grep -rn "Promise\.all\|Promise\.race" \
+              --include="*.test.js" --include="*.spec.ts" . 2>/dev/null | head -20
+
+      expected_findings:
+        - "Potential race conditions"
+        - "Async handling patterns"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "flaky_test_inventory"
+        - "flaky_patterns"
+        - "root_cause_analysis"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Flaky Test Inventory"
+        - "Root Cause Analysis"
+        - "Remediation Recommendations"
+
+  confidence_guidance:
+    high: "Test failed inconsistently in repeated runs"
+    medium: "Known flaky pattern detected"
+    low: "Potential flakiness requiring monitoring"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "google-flaky"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires repeated test execution"
+    full:
+      included: true
+      priority: 1
+    quality:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "flaky-001"
+    item: "No tests failed inconsistently"
+    level: "CRITICAL"
+    verification: "Tests pass consistently across 5+ runs"
+    expected: "Zero flaky tests"
+
+  - id: "flaky-002"
+    item: "Time dependencies mocked"
+    level: "HIGH"
+    verification: "All Date/time usage in tests is mocked"
+    expected: "No wall clock dependencies"
+
+  - id: "flaky-003"
+    item: "Random values seeded or mocked"
+    level: "HIGH"
+    verification: "All randomness is deterministic"
+    expected: "Reproducible test runs"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Reliability", "Testability"]
+
+relationships:
+  commonly_combined:
+    - "code-quality.test-code-quality.test-independence"
+    - "code-quality.test-code-quality.mock-stub-appropriateness"

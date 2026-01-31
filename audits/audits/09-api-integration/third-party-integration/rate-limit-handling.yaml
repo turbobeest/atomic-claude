@@ -1,0 +1,392 @@
+# ============================================================
+# AUDIT: Rate Limit Handling
+# ============================================================
+
+audit:
+  id: "api-integration.third-party-integration.rate-limit-handling"
+  name: "Rate Limit Handling Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "api-integration"
+  category_number: 9
+  subcategory: "third-party-integration"
+
+  tier: "expert"
+  estimated_duration: "75 minutes"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "reliability"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates how the system handles third-party API rate limits
+    including rate limit detection, backoff strategies, request
+    queuing, rate limit monitoring, and proactive limiting. Analyzes
+    whether rate limits are handled gracefully without service disruption.
+
+  why_it_matters: |
+    Third-party APIs enforce rate limits that can block your requests.
+    Without proper handling, rate limit errors cascade through your
+    system, cause retries that make it worse, and degrade user
+    experience. Proper rate limit handling is essential for reliability.
+
+  when_to_run:
+    - "Integration implementation review"
+    - "After rate limit incidents"
+    - "Scaling preparation"
+    - "Usage growth planning"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Third-party API integration code"
+    - type: "documentation"
+      description: "Third-party rate limit documentation"
+
+  access_requirements:
+    - "Read access to integration code"
+    - "Access to vendor rate limit documentation"
+
+discovery:
+  code_patterns:
+    - pattern: "rateLimit|rate.limit|rateLimited|429"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect rate limit handling"
+
+    - pattern: "Retry-After|retry.after|retryAfter"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect retry header handling"
+
+    - pattern: "throttle|Throttle|queue|Queue"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect throttling/queuing"
+
+  file_patterns:
+    - glob: "**/clients/**"
+      purpose: "API clients"
+    - glob: "**/throttle/**"
+      purpose: "Throttle implementations"
+    - glob: "**/ratelimit/**"
+      purpose: "Rate limit handling"
+
+knowledge_sources:
+  guides:
+    - id: "rate-limit-patterns"
+      name: "Rate Limiting Best Practices"
+      url: "https://stripe.com/docs/rate-limits"
+      offline_cache: true
+
+    - id: "429-handling"
+      name: "Handling 429 Responses"
+      url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429"
+      offline_cache: true
+
+  learning_resources:
+    - id: "api-throttling"
+      title: "API Throttling Patterns"
+      type: "article"
+      reference: "AWS Architecture Blog"
+
+tooling:
+  static_analysis:
+    - tool: "semgrep"
+      purpose: "Detect rate limit handling patterns"
+      offline_capable: true
+
+  scripts:
+    - id: "rate-limit-scan"
+      language: "bash"
+      purpose: "Analyze rate limit handling"
+      source: "inline"
+      code: |
+        echo "=== Rate Limit Handling Analysis ==="
+        echo "--- Rate limit handling ---"
+        grep -rn "rateLimit\|rate.limit\|429\|TooManyRequests" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+
+        echo "--- Retry-After handling ---"
+        grep -rn "Retry-After\|retry.after\|retryAfter" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+
+        echo "--- Request throttling ---"
+        grep -rn "throttle\|queue\|limiter" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+
+signals:
+  critical:
+    - id: "RLH-CRIT-001"
+      signal: "429 responses not handled"
+      evidence_pattern: "Third-party 429 errors thrown without retry logic"
+      explanation: |
+        Unhandled rate limit errors cause immediate failures. Users see
+        errors for requests that would succeed with a brief delay.
+        The system fails when it should gracefully wait and retry.
+      remediation: "Detect 429 responses and implement retry with backoff"
+
+    - id: "RLH-CRIT-002"
+      signal: "Retry-After header ignored"
+      evidence_pattern: "Immediate retry on 429 without checking Retry-After"
+      explanation: |
+        Ignoring Retry-After causes retries before the rate limit window
+        resets, wasting requests and potentially extending the block.
+        The vendor tells you when to retry - use that information.
+      remediation: "Parse and respect Retry-After header before retrying"
+
+  high:
+    - id: "RLH-HIGH-001"
+      signal: "No proactive rate limiting"
+      evidence_pattern: "Requests sent at maximum speed until 429"
+      explanation: |
+        Waiting for 429 errors before slowing down means hitting the
+        limit regularly. Proactive limiting stays under the threshold,
+        avoiding errors entirely.
+      remediation: "Implement client-side rate limiting to stay under quota"
+
+    - id: "RLH-HIGH-002"
+      signal: "Rate limit errors not monitored"
+      evidence_pattern: "No metrics or alerts on rate limit hits"
+      explanation: |
+        Without monitoring, you don't know how close you are to limits
+        or how often you're being rate limited. You can't plan capacity
+        or identify usage patterns.
+      remediation: "Track rate limit errors and proximity to quotas"
+
+    - id: "RLH-HIGH-003"
+      signal: "Bulk operations ignore rate limits"
+      evidence_pattern: "Batch jobs making unlimited parallel requests"
+      explanation: |
+        Background jobs and bulk operations can quickly exhaust rate
+        limits, blocking real-time user requests. Batch operations need
+        their own rate limiting.
+      remediation: "Rate limit batch operations separately from user requests"
+
+  medium:
+    - id: "RLH-MED-001"
+      signal: "No request queuing for rate limits"
+      evidence_pattern: "Excess requests dropped instead of queued"
+      remediation: "Queue excess requests and process when quota available"
+
+    - id: "RLH-MED-002"
+      signal: "Shared rate limit across all operations"
+      evidence_pattern: "All API calls compete for single rate limit"
+      remediation: "Partition rate limit budget by operation priority"
+
+    - id: "RLH-MED-003"
+      signal: "Rate limit quotas not documented"
+      evidence_pattern: "No documentation of third-party rate limits"
+      remediation: "Document rate limits for all third-party APIs"
+
+  low:
+    - id: "RLH-LOW-001"
+      signal: "Rate limit approach not tested"
+      evidence_pattern: "No tests simulating rate limit scenarios"
+      remediation: "Test behavior under rate limiting conditions"
+
+  positive:
+    - id: "RLH-POS-001"
+      signal: "Retry-After header respected"
+      evidence_pattern: "Delay calculated from Retry-After before retry"
+
+    - id: "RLH-POS-002"
+      signal: "Proactive client-side rate limiting"
+      evidence_pattern: "Request rate controlled before hitting vendor limit"
+
+    - id: "RLH-POS-003"
+      signal: "Rate limit dashboard available"
+      evidence_pattern: "Visibility into rate limit usage and headroom"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Rate Limited APIs"
+      description: |
+        Find third-party APIs with rate limits.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find API clients"
+          command: |
+            grep -rn "stripe\|twilio\|sendgrid\|github\|slack" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Third-party APIs"
+        - "Rate limit documentation"
+
+    - id: "2"
+      name: "Analyze 429 Handling"
+      description: |
+        Check how rate limit responses are handled.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find 429 handling"
+          command: |
+            grep -rn "429\|TooManyRequests\|rateLimit" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+        - purpose: "Find Retry-After handling"
+          command: |
+            grep -rn "Retry-After\|retryAfter\|retry.after" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -20
+
+      expected_findings:
+        - "Error handling"
+        - "Retry logic"
+
+    - id: "3"
+      name: "Check Proactive Limiting"
+      description: |
+        Verify client-side rate limiting exists.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find rate limiter"
+          command: |
+            grep -rn "rateLimiter\|RateLimiter\|throttle\|Bottleneck" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -20
+
+      expected_findings:
+        - "Proactive limiting"
+        - "Throttling implementation"
+
+    - id: "4"
+      name: "Review Monitoring"
+      description: |
+        Check rate limit monitoring and alerting.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find rate limit metrics"
+          command: |
+            grep -rn "metric\|counter\|gauge\|alert" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -i "rate\|limit\|429" | grep -v node_modules | head -20
+
+      expected_findings:
+        - "Monitoring presence"
+        - "Alert configuration"
+
+    - id: "5"
+      name: "Evaluate Queue Strategy"
+      description: |
+        Check if excess requests are queued.
+      duration_estimate: "10 min"
+      commands:
+        - purpose: "Find request queuing"
+          command: |
+            grep -rn "queue\|Queue\|buffer\|pending" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -i "request\|api" | grep -v node_modules | head -20
+
+      expected_findings:
+        - "Queue implementation"
+        - "Overflow handling"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "rate_limited_apis"
+        - "handling_assessment"
+        - "monitoring_status"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Rate Limit Coverage"
+        - "Handling Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear missing 429 handling or ignored Retry-After"
+    medium: "Handling exists but completeness uncertain"
+    low: "Requires load testing to confirm behavior"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "rate-limit-patterns"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed analysis"
+    full:
+      included: true
+      priority: 1
+    reliability:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "rlh-001"
+    item: "429 responses handled with retry"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "429\|TooManyRequests\|rateLimit" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "rlh-002"
+    item: "Retry-After header respected"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "Retry-After\|retryAfter" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "rlh-003"
+    item: "Client-side rate limiting implemented"
+    level: "WARNING"
+    verification: |
+      grep -rn "rateLimiter\|throttle\|Bottleneck" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Reliability", "Performance Efficiency"]
+
+relationships:
+  commonly_combined:
+    - "api-integration.third-party-integration.third-party-api-dependency"
+    - "api-integration.integration-patterns.retry-pattern"
+    - "reliability-resilience.throttling.request-throttling"

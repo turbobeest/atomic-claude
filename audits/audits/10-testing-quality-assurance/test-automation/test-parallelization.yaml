@@ -1,0 +1,315 @@
+# ============================================================
+# AUDIT: Test Parallelization
+# ============================================================
+# Evaluates test parallelization strategies for optimizing
+# test execution time and resource utilization.
+# ============================================================
+
+audit:
+  id: "testing-quality-assurance.test-automation.test-parallelization"
+  name: "Test Parallelization"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "testing-quality-assurance"
+  category_number: 10
+  subcategory: "test-automation"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "testing"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Examines test parallelization practices including parallel execution
+    configuration, resource allocation, test isolation, and load balancing.
+    Reviews strategies for distributing tests across workers, sharding,
+    and avoiding race conditions in parallel execution.
+
+  why_it_matters: |
+    Long test execution times slow development velocity and delay feedback.
+    Parallelization dramatically reduces total test time, enabling faster
+    iterations. However, poor parallelization causes flaky tests, resource
+    contention, and misleading results.
+
+  when_to_run:
+    - "When test suite execution time exceeds 15 minutes"
+    - "After significant test suite growth"
+    - "When adding CI parallelization capabilities"
+    - "During performance optimization efforts"
+
+prerequisites:
+  required_artifacts:
+    - type: "test-configuration"
+      description: "Test runner and parallelization configuration"
+    - type: "ci-configuration"
+      description: "CI/CD parallel execution setup"
+
+  access_requirements:
+    - "Test execution logs"
+    - "CI/CD system access"
+    - "Test timing data"
+
+discovery:
+  file_patterns:
+    - glob: "**/jest.config.*"
+      purpose: "Jest configuration with parallelization"
+    - glob: "**/pytest.ini"
+      purpose: "pytest configuration"
+    - glob: "**/conftest.py"
+      purpose: "pytest fixtures and configuration"
+    - glob: "**/.github/workflows/**"
+      purpose: "CI parallelization configuration"
+
+  code_patterns:
+    - pattern: "parallel|workers|maxWorkers|concurrency"
+      type: "keyword"
+      scope: "config"
+      purpose: "Parallelization configuration"
+    - pattern: "shard|split|matrix"
+      type: "keyword"
+      scope: "config"
+      purpose: "Test sharding configuration"
+    - pattern: "xdist|parallel.*test|concurrent"
+      type: "keyword"
+      scope: "config"
+      purpose: "Parallel test runner usage"
+
+knowledge_sources:
+  guides:
+    - id: "jest-parallel"
+      name: "Jest Parallel Testing"
+      url: "https://jestjs.io/docs/cli#--maxworkersnumstring"
+      offline_cache: true
+    - id: "pytest-xdist"
+      name: "pytest-xdist Documentation"
+      url: "https://pytest-xdist.readthedocs.io/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "pytest-xdist"
+      purpose: "pytest parallel execution"
+      offline_capable: true
+    - tool: "jest"
+      purpose: "JavaScript parallel test runner"
+      offline_capable: true
+    - tool: "parallel_tests"
+      purpose: "Ruby parallel testing"
+      offline_capable: true
+
+  scripts:
+    - id: "analyze-timing"
+      language: "bash"
+      purpose: "Analyze test timing distribution"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Analyze test timing for parallelization opportunities
+        pytest --durations=0 2>&1 | grep -E "^\d+\.\d+s" | sort -rn | head -20
+
+signals:
+  critical:
+    - id: "PARALLEL-CRIT-001"
+      signal: "Tests share mutable state causing race conditions"
+      evidence_pattern: "Shared fixtures without isolation or locking"
+      explanation: |
+        Tests that share mutable state fail intermittently when run in parallel.
+        Race conditions make test results unreliable and debugging extremely
+        difficult. This undermines trust in the entire test suite.
+      remediation: "Isolate test state using per-test fixtures or immutable data"
+
+    - id: "PARALLEL-CRIT-002"
+      signal: "Parallelization disabled due to flakiness"
+      evidence_pattern: "--workers=1 or runInBand flags without explanation"
+      explanation: |
+        Disabling parallelization masks underlying test isolation problems.
+        This slows down CI feedback while the root cause of flakiness remains
+        unaddressed. Tests should be fixed, not sequentialized.
+      remediation: "Fix test isolation issues rather than disabling parallelization"
+
+  high:
+    - id: "PARALLEL-HIGH-001"
+      signal: "No parallelization despite long test times"
+      evidence_pattern: "Sequential test execution >15 minutes"
+      explanation: |
+        Long sequential test times slow development feedback loops.
+        Developers wait too long for results, reducing productivity and
+        encouraging skipping tests locally.
+      remediation: "Implement test parallelization to reduce feedback time"
+
+    - id: "PARALLEL-HIGH-002"
+      signal: "Uneven test distribution across workers"
+      evidence_pattern: "Some workers finish much faster than others"
+      explanation: |
+        Poor load balancing wastes parallel capacity. Some workers sit idle
+        while others remain busy, extending total execution time unnecessarily.
+      remediation: "Implement load balancing or time-based test sharding"
+
+  medium:
+    - id: "PARALLEL-MED-001"
+      signal: "Resource contention in parallel tests"
+      evidence_pattern: "Tests competing for ports, files, or databases"
+      remediation: "Use dynamic resource allocation and unique test resources"
+
+    - id: "PARALLEL-MED-002"
+      signal: "Parallel configuration not optimized"
+      evidence_pattern: "Default worker counts without tuning"
+      remediation: "Tune worker count based on available resources and test characteristics"
+
+  low:
+    - id: "PARALLEL-LOW-001"
+      signal: "Parallel test timing not tracked"
+      remediation: "Track and visualize parallel test execution metrics"
+
+  positive:
+    - id: "PARALLEL-POS-001"
+      signal: "Well-isolated tests with effective parallelization"
+    - id: "PARALLEL-POS-002"
+      signal: "Load-balanced test distribution with fast feedback"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify parallelization configuration"
+      description: |
+        Search for test parallelization settings in test runner and CI
+        configurations.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check jest configuration"
+          command: "grep -r 'maxWorkers\\|runInBand' . --include='jest*.js' --include='jest*.json' 2>/dev/null"
+        - purpose: "Check pytest configuration"
+          command: "grep -r 'xdist\\|-n\\|numprocesses' . --include='pytest.ini' --include='setup.cfg' --include='pyproject.toml' 2>/dev/null"
+        - purpose: "Check CI parallelization"
+          command: "grep -r 'matrix\\|parallel\\|shard' .github/workflows/ 2>/dev/null | head -20"
+      expected_findings:
+        - "Parallelization configuration"
+        - "Worker count settings"
+
+    - id: "2"
+      name: "Review test isolation"
+      description: |
+        Examine test fixtures and setup for proper isolation in
+        parallel execution.
+      duration_estimate: "40 min"
+      commands:
+        - purpose: "Check for shared fixtures"
+          command: "grep -r 'scope.*session\\|global.*fixture\\|shared' . --include='conftest.py' --include='*.spec.ts' 2>/dev/null | head -20"
+        - purpose: "Check for dynamic ports"
+          command: "grep -r 'port\\|PORT\\|dynamic.*port' . --include='conftest.py' --include='*.test.js' 2>/dev/null | head -20"
+      expected_findings:
+        - "Fixture scoping"
+        - "Resource isolation patterns"
+
+    - id: "3"
+      name: "Analyze test timing distribution"
+      description: |
+        Review test execution times to identify parallelization opportunities
+        and load balancing issues.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check for timing analysis tools"
+          command: "grep -r 'durations\\|timing\\|split-by' . --include='*.yaml' --include='*.yml' 2>/dev/null"
+      expected_findings:
+        - "Test timing analysis"
+        - "Load distribution patterns"
+
+    - id: "4"
+      name: "Verify parallel execution stability"
+      description: |
+        Check for evidence of parallel execution issues like flakiness
+        or race conditions.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Check for retry configurations"
+          command: "grep -r 'retry\\|flaky\\|rerun' . --include='*.yaml' --include='jest*.js' --include='pytest.ini' 2>/dev/null"
+      expected_findings:
+        - "Retry/flakiness handling"
+        - "Stability indicators"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Parallelization Configuration Analysis"
+        - "Test Isolation Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Parallelization verified, isolation confirmed, timing analyzed"
+    medium: "Configuration reviewed but execution not observed"
+    low: "Limited visibility into parallelization"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "jest-parallel"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed timing and isolation analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "test-parallelization-001"
+    item: "Test parallelization configured"
+    level: "CRITICAL"
+    verification: "grep -r 'parallel\\|workers\\|xdist\\|-n' . --include='*.yaml' --include='jest*.js' --include='pytest.ini' 2>/dev/null | grep -q . && echo PASS || echo FAIL"
+    expected: "PASS"
+
+  - id: "test-parallelization-002"
+    item: "Tests properly isolated for parallel execution"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms tests do not share mutable state"
+    expected: "Confirmed by reviewer"
+
+  - id: "test-parallelization-003"
+    item: "No serialization workarounds for flakiness"
+    level: "WARNING"
+    verification: "! grep -r 'runInBand\\|--workers.*1' . 2>/dev/null | grep -q . && echo PASS || echo FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Internal"
+      controls: ["DEV-002"]
+
+relationships:
+  commonly_combined:
+    - "testing-quality-assurance.test-automation.ci-integration"
+    - "testing-quality-assurance.test-automation.flaky-test-management"
+    - "testing-quality-assurance.test-automation.test-reporting"

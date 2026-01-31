@@ -1,0 +1,460 @@
+audit:
+  id: security-trust.authentication.certificate-authentication
+  name: Certificate-Based Authentication Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: authentication
+  tier: phd
+  estimated_duration: 3 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines X.509 certificate-based authentication and mutual
+    TLS (mTLS) implementations for security vulnerabilities. It evaluates
+    certificate validation, chain of trust verification, revocation checking
+    (CRL/OCSP), private key protection, certificate lifecycle management,
+    and mTLS configuration in service mesh and API gateway contexts.
+  why_it_matters: |
+    Certificate-based authentication provides stronger security than passwords
+    by using cryptographic proof of identity. However, implementation flaws
+    can bypass authentication entirely. Common issues include disabled
+    certificate validation, missing revocation checks, expired certificates,
+    weak key generation, and improper hostname verification. In zero-trust
+    architectures with mTLS, service mesh misconfigurations can expose
+    internal services.
+  when_to_run:
+  - Before deploying mTLS in production
+  - After certificate infrastructure changes
+  - During security assessments of API security
+  - When implementing zero-trust networking
+prerequisites:
+  required_artifacts:
+  - type: configuration
+    description: TLS/mTLS configuration files, certificate trust stores
+  - type: source_code
+    description: Certificate validation and authentication code
+  access_requirements:
+  - Read access to TLS configuration
+  - Access to certificate infrastructure documentation
+  - Understanding of PKI architecture
+discovery:
+  code_patterns:
+  - pattern: mtls|mTLS|mutual.*tls|clientAuth
+    type: regex
+    scope: config
+    purpose: Locate mTLS configuration
+  - pattern: x509|X509|certificate|Certificate
+    type: regex
+    scope: source
+    purpose: Find certificate handling code
+  - pattern: verify.*cert|validateCertificate|checkCertificate
+    type: regex
+    scope: source
+    purpose: Locate certificate validation
+  - pattern: rejectUnauthorized\s*[=:]\s*false|verify_mode.*NONE
+    type: regex
+    scope: source
+    purpose: Detect disabled certificate verification
+  - pattern: insecure.*skip.*verify|InsecureSkipVerify
+    type: regex
+    scope: source
+    purpose: Find TLS verification bypass
+  - pattern: CRL|OCSP|revocation
+    type: regex
+    scope: source
+    purpose: Check for revocation checking
+  - pattern: ca.*cert|CA_CERT|trustStore|rootCA
+    type: regex
+    scope: config
+    purpose: Find CA trust configuration
+  - pattern: private.*key|privateKey|KEY_FILE
+    type: regex
+    scope: config
+    purpose: Locate private key references
+  - pattern: notAfter|expir.*cert|validity
+    type: regex
+    scope: source
+    purpose: Check certificate expiration handling
+  - pattern: istio|linkerd|envoy|nginx.*ssl_client
+    type: regex
+    scope: config
+    purpose: Identify service mesh mTLS
+  file_patterns:
+  - glob: '**/*.pem'
+    purpose: PEM certificate files
+  - glob: '**/*.crt'
+    purpose: Certificate files
+  - glob: '**/*.key'
+    purpose: Private key files
+  - glob: '**/ssl*'
+    purpose: SSL/TLS configuration
+  - glob: '**/tls*'
+    purpose: TLS configuration
+  - glob: '**/certs/**'
+    purpose: Certificate directories
+knowledge_sources:
+  specifications:
+  - id: rfc5280
+    name: RFC 5280 - X.509 PKI Certificate Profile
+    url: https://datatracker.ietf.org/doc/html/rfc5280
+    offline_cache: true
+    priority: required
+  - id: rfc6125
+    name: RFC 6125 - TLS Server Identity Verification
+    url: https://datatracker.ietf.org/doc/html/rfc6125
+    offline_cache: true
+    priority: recommended
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: NIST SP 800-207 Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-tls
+    name: OWASP TLS Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Protection_Cheat_Sheet.html
+    offline_cache: true
+  - id: nist-tls
+    name: NIST SP 800-52 - TLS Guidelines
+    url: https://csrc.nist.gov/publications/detail/sp/800-52/rev-2/final
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: TLS/certificate security patterns
+    offline_capable: true
+  - tool: testssl.sh
+    purpose: TLS configuration testing
+    offline_capable: false
+  infrastructure_tools:
+  - tool: openssl
+    purpose: Certificate inspection and validation
+    command: openssl x509 -in cert.pem -text -noout
+  scripts:
+  - id: cert-security-scanner
+    language: bash
+    purpose: Scan for certificate security issues
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Certificate Security Scanner ==="
+      echo "Disabled Verification:"
+      grep -rn "InsecureSkipVerify\|rejectUnauthorized.*false\|verify_mode.*NONE" --include="*.go" --include="*.js" --include="*.ts" --include="*.py" .
+      echo ""
+      echo "mTLS Configuration:"
+      grep -rn "mtls\|clientAuth\|ssl_verify_client" --include="*.yaml" --include="*.yml" --include="*.conf" .
+      echo ""
+      echo "Private Keys in Code:"
+      grep -rn "PRIVATE KEY\|BEGIN RSA" --include="*.js" --include="*.ts" --include="*.py" --include="*.go" .
+signals:
+  critical:
+  - id: AUTH-CERT-CRIT-001
+    signal: Certificate verification disabled in production code
+    cwe: CWE-295
+    evidence_pattern: InsecureSkipVerify\s*[=:]\s*true|rejectUnauthorized\s*[=:]\s*false|verify_mode\s*=\s*ssl\.CERT_NONE
+    explanation: |
+      Disabling certificate verification removes authentication entirely
+      for TLS connections. Attackers can perform man-in-the-middle attacks
+      by presenting any certificate. This is commonly done during development
+      but catastrophic if deployed to production.
+    remediation: |
+      Enable certificate verification in all environments. Use proper CA
+      certificates for validation. Configure separate TLS settings for
+      development and production. Implement certificate pinning for
+      high-security connections.
+  - id: AUTH-CERT-CRIT-002
+    signal: Private key embedded in source code or configuration
+    cwe: CWE-321
+    evidence_pattern: '-----BEGIN.*PRIVATE KEY-----|PRIVATE_KEY\s*[=:]\s*[''"]MII'
+    explanation: |
+      Private keys in source code are exposed to anyone with repository
+      access. Compromised private keys allow attackers to impersonate
+      services, decrypt traffic, and forge certificates.
+    remediation: |
+      Remove private keys from code immediately. Rotate compromised keys.
+      Use secrets management (Vault, KMS) for key storage. Implement
+      automated certificate management (cert-manager, ACME).
+  - id: AUTH-CERT-CRIT-003
+    signal: Self-signed certificates accepted in production
+    cwe: CWE-295
+    evidence_pattern: allowSelfSigned\s*[=:]\s*true|ALLOW_SELF_SIGNED|trust.*self.*signed
+    explanation: |
+      Accepting self-signed certificates bypasses the PKI trust model.
+      Attackers can generate their own self-signed certificates and
+      impersonate any service. This negates the security benefits of
+      certificate-based authentication.
+    remediation: |
+      Use CA-signed certificates from trusted certificate authorities.
+      For internal services, use an internal CA with proper trust chain.
+      Implement certificate pinning for known services.
+  high:
+  - id: AUTH-CERT-HIGH-001
+    signal: No certificate revocation checking (CRL/OCSP)
+    cwe: CWE-299
+    evidence_pattern: verify.*cert(?!.*revocation|.*CRL|.*OCSP)|checkCertificate(?!.*revoked)
+    explanation: |
+      Without revocation checking, compromised certificates remain valid
+      until expiration. CRL or OCSP verification is required to reject
+      revoked certificates that may have been compromised.
+    remediation: |
+      Enable OCSP stapling where supported. Implement CRL checking as
+      fallback. Cache revocation status appropriately. Consider OCSP
+      must-staple for critical services.
+  - id: AUTH-CERT-HIGH-002
+    signal: mTLS permissive mode allowing fallback to non-mTLS
+    cwe: CWE-306
+    evidence_pattern: mode:\s*PERMISSIVE|ssl_verify_client\s*optional|clientAuth:\s*optional
+    explanation: |
+      Permissive mTLS mode allows clients to connect without certificates,
+      bypassing mutual authentication. Attackers can simply omit client
+      certificates to access services intended for authenticated clients.
+    remediation: |
+      Use STRICT mTLS mode requiring client certificates. Implement
+      gradual rollout from permissive to strict. Configure service mesh
+      policies to enforce mTLS. Monitor for unauthenticated connections.
+  - id: AUTH-CERT-HIGH-003
+    signal: Certificate hostname verification disabled
+    cwe: CWE-297
+    evidence_pattern: checkHostname\s*[=:]\s*false|verify_hostname\s*=\s*False|NoHostnameVerification
+    explanation: |
+      Disabled hostname verification allows any valid certificate to
+      authenticate any server. Attackers with any trusted certificate
+      can impersonate any service, enabling man-in-the-middle attacks.
+    remediation: |
+      Enable hostname verification. Ensure certificate CN or SAN matches
+      expected hostname. Use SNI for virtual hosting. Implement proper
+      wildcard certificate handling.
+  - id: AUTH-CERT-HIGH-004
+    signal: Weak key size in certificate generation
+    cwe: CWE-326
+    evidence_pattern: keySize\s*[=:]\s*(512|1024)|RSA.*1024|genrsa\s+1024
+    explanation: |
+      RSA keys smaller than 2048 bits and ECDSA keys smaller than 256 bits
+      are considered weak and can be factored with sufficient resources.
+      NIST requires minimum 2048-bit RSA or 256-bit ECDSA.
+    remediation: |
+      Use minimum 2048-bit RSA keys (4096-bit recommended) or 256-bit
+      ECDSA keys. Audit existing certificates for weak keys. Implement
+      key size requirements in certificate policies.
+  medium:
+  - id: AUTH-CERT-MED-001
+    signal: No certificate expiration monitoring
+    cwe: CWE-324
+    evidence_pattern: certificate(?!.*expir|.*notAfter|.*validity|.*renew)
+    remediation: |
+      Implement certificate expiration monitoring and alerting.
+      Use cert-manager or similar for automated renewal.
+      Alert at 30, 14, and 7 days before expiration.
+  - id: AUTH-CERT-MED-002
+    signal: Trust store includes unnecessary CAs
+    cwe: CWE-296
+    evidence_pattern: trustStore.*system|ca-certificates|ssl/certs
+    remediation: |
+      Use minimal trust stores with only required CAs.
+      For internal services, trust only internal CA.
+      Implement certificate pinning for known endpoints.
+  - id: AUTH-CERT-MED-003
+    signal: Certificate chain not fully validated
+    cwe: CWE-296
+    evidence_pattern: verify.*depth\s*[=:]\s*[01]|max_depth\s*=\s*1
+    remediation: |
+      Validate complete certificate chain to root CA.
+      Set appropriate chain depth limits (3-5 levels typical).
+      Verify intermediate certificates are trusted.
+  - id: AUTH-CERT-MED-004
+    signal: Private key without password protection
+    cwe: CWE-522
+    evidence_pattern: passphrase\s*[=:]\s*['"]['"]|password.*key.*empty
+    remediation: |
+      Encrypt private keys with strong passphrases.
+      Use HSM or KMS for production private keys.
+      Implement key access auditing.
+  low:
+  - id: AUTH-CERT-LOW-001
+    signal: Certificate validity period exceeds 1 year
+    evidence_pattern: validity.*days.*[4-9][0-9]{2}|notAfter.*202[89]
+    remediation: |
+      Use short-lived certificates (90 days or less recommended).
+      Implement automated certificate rotation.
+      Follow CA/Browser Forum baseline requirements.
+  positive:
+  - id: AUTH-CERT-POS-001
+    signal: OCSP stapling enabled
+    evidence_pattern: ssl_stapling\s*on|ocsp.*stapling.*true|OCSP_STAPLING
+  - id: AUTH-CERT-POS-002
+    signal: Certificate pinning implemented
+    evidence_pattern: pin-sha256|certificate.*pin|HPKP|pinned.*certificate
+  - id: AUTH-CERT-POS-003
+    signal: Automated certificate management (cert-manager, ACME)
+    evidence_pattern: cert-manager|letsencrypt|acme|certbot
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Certificate Usage
+    description: |
+      Catalog all certificate-based authentication and mTLS usage.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find mTLS configuration
+      command: grep -rn 'mtls\|mTLS\|clientAuth\|ssl_verify_client' --include='*.yaml' --include='*.yml'
+        --include='*.conf' --include='*.json' .
+    - purpose: Find certificate handling code
+      command: grep -rn 'x509\|X509\|certificate\|Certificate' --include='*.js' --include='*.ts' --include='*.py'
+        --include='*.go' --include='*.java' .
+    expected_findings:
+    - Certificate usage inventory
+  - id: '2'
+    name: Audit Verification Settings
+    description: |
+      Check for disabled certificate verification.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find disabled verification
+      command: grep -rn 'InsecureSkipVerify\|rejectUnauthorized.*false\|CERT_NONE\|verify.*false' --include='*.go'
+        --include='*.js' --include='*.ts' --include='*.py' --include='*.java' .
+    - purpose: Check hostname verification
+      command: grep -rn 'checkHostname\|verify_hostname\|NoHostnameVerification' --include='*.go' --include='*.js'
+        --include='*.py' --include='*.java' .
+    expected_findings:
+    - Verification configuration status
+  - id: '3'
+    name: Review Key Management
+    description: |
+      Check for exposed or weak private keys.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find embedded private keys
+      command: grep -rn 'PRIVATE KEY\|BEGIN RSA' --include='*.js' --include='*.ts' --include='*.py' --include='*.go'
+        --include='*.java' .
+    - purpose: Check key file permissions
+      command: find . -name '*.key' -o -name '*.pem' | head -20
+    expected_findings:
+    - Private key exposure assessment
+  - id: '4'
+    name: Assess Revocation Checking
+    description: |
+      Verify CRL/OCSP revocation checking is implemented.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find revocation configuration
+      command: grep -rn 'CRL\|OCSP\|revocation\|stapling' --include='*.yaml' --include='*.yml' --include='*.conf'
+        --include='*.go' --include='*.py' .
+    expected_findings:
+    - Revocation checking status
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Certificate Security Assessment
+    - mTLS Configuration Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Direct evidence from code and configuration
+    medium: Configuration patterns requiring runtime verification
+    low: Potential issues requiring infrastructure inspection
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-tls
+      priority: required
+    - source_id: rfc5280
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Certificate security requires thorough analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: cert-001
+  item: Certificate verification enabled in all TLS connections
+  level: CRITICAL
+  verification: |
+    if grep -rq 'InsecureSkipVerify.*true\|rejectUnauthorized.*false\|CERT_NONE' --include='*.go' --include='*.js' --include='*.ts' --include='*.py' .; then echo "FAIL"; else echo "PASS"; fi
+  expected: PASS
+- id: cert-002
+  item: No private keys in source code
+  level: CRITICAL
+  verification: |
+    if grep -rq 'BEGIN.*PRIVATE KEY' --include='*.js' --include='*.ts' --include='*.py' --include='*.go' --include='*.java' .; then echo "FAIL"; else echo "PASS"; fi
+  expected: PASS
+- id: cert-003
+  item: Self-signed certificates not accepted in production
+  level: BLOCKING
+  verification: |
+    if grep -rq 'allowSelfSigned.*true\|ALLOW_SELF_SIGNED' --include='*.js' --include='*.ts' --include='*.py' --include='*.yaml' .; then echo "FAIL"; else echo "PASS"; fi
+  expected: PASS
+- id: cert-004
+  item: Hostname verification enabled
+  level: BLOCKING
+  verification: |
+    if grep -rq 'checkHostname.*false\|verify_hostname.*False\|NoHostnameVerification' --include='*.go' --include='*.js' --include='*.py' .; then echo "FAIL"; else echo "PASS"; fi
+  expected: PASS
+- id: cert-005
+  item: mTLS strict mode or proper fallback handling
+  level: WARNING
+  verification: |
+    if grep -rq 'mode:\s*STRICT\|ssl_verify_client\s*on' --include='*.yaml' --include='*.conf' .; then echo "PASS"; else echo "WARNING - Verify mTLS mode"; fi
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: NIST SP 800-52
+    controls:
+    - TLS Configuration
+  - framework: PCI DSS
+    controls:
+    - '4.1'
+  - framework: OWASP ASVS
+    controls:
+    - V9.1
+    - V9.2
+relationships:
+  commonly_combined:
+  - security-trust.authentication.service-account-security
+  - security-trust.authentication.api-key-management
+  - security-trust.authentication.sso-federated-identity

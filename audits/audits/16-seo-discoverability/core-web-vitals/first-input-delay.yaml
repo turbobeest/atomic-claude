@@ -1,0 +1,390 @@
+# ============================================================
+# AUDIT: First Input Delay (FID) Optimization
+# ============================================================
+# Evaluates FID performance, a Core Web Vital measuring input
+# responsiveness (being replaced by INP in March 2024).
+# ============================================================
+
+audit:
+  id: "seo-discoverability.core-web-vitals.first-input-delay"
+
+  name: "First Input Delay (FID) Optimization Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "seo-discoverability"
+  category_number: 16
+  subcategory: "core-web-vitals"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "runtime"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines First Input Delay (FID) performance, a Core
+    Web Vital that measures interactivity. FID quantifies the delay
+    between a user's first interaction (click, tap, key press) and
+    the browser's response. Note: FID was replaced by Interaction to
+    Next Paint (INP) as the Core Web Vital for responsiveness in
+    March 2024, but FID remains relevant for historical analysis.
+
+  why_it_matters: |
+    FID measures how quickly a page responds to user interaction.
+    Long FID (over 300ms) frustrates users as the page feels
+    unresponsive or "frozen." This typically occurs when the main
+    thread is blocked by JavaScript execution. Good FID (under 100ms)
+    provides a smooth, responsive experience.
+
+  when_to_run:
+    - "During JavaScript optimization"
+    - "After adding significant JavaScript features"
+    - "When users report unresponsiveness"
+    - "During Core Web Vitals audits"
+    - "For historical performance analysis"
+
+prerequisites:
+  required_artifacts:
+    - type: "website"
+      description: "Live website with interactive elements"
+    - type: "crux_data"
+      description: "Chrome User Experience Report data"
+
+  access_requirements:
+    - "PageSpeed Insights API access"
+    - "Google Search Console"
+    - "Chrome DevTools"
+
+discovery:
+  code_patterns:
+    - pattern: "addEventListener|onclick|onsubmit"
+      type: "regex"
+      scope: "source"
+      purpose: "Find event handlers"
+    - pattern: "setTimeout|setInterval"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find scheduled tasks"
+    - pattern: "async|await|Promise"
+      type: "keyword"
+      scope: "source"
+      purpose: "Find async patterns"
+
+  file_patterns:
+    - glob: "**/*.{js,jsx,ts,tsx}"
+      purpose: "Find JavaScript files"
+    - glob: "**/bundle*.js"
+      purpose: "Find bundled JavaScript"
+
+knowledge_sources:
+  specifications:
+    - id: "web-vitals-fid"
+      name: "web.dev: First Input Delay"
+      url: "https://web.dev/fid/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "google-optimize-fid"
+      name: "Google: Optimize FID"
+      url: "https://web.dev/optimize-fid/"
+      offline_cache: true
+    - id: "google-long-tasks"
+      name: "Google: Are Long Tasks Blocking Interactivity?"
+      url: "https://web.dev/long-tasks-devtools/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "Lighthouse"
+      purpose: "Total Blocking Time (TBT) as FID proxy"
+      offline_capable: true
+    - tool: "Chrome DevTools Performance Panel"
+      purpose: "Main thread analysis"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "PageSpeed Insights"
+      purpose: "Field FID data from CrUX"
+      command: "https://pagespeed.web.dev/"
+    - tool: "Google Search Console"
+      purpose: "Site-wide Core Web Vitals"
+      command: "Core Web Vitals report"
+    - tool: "WebPageTest"
+      purpose: "Detailed JavaScript execution analysis"
+      command: "https://www.webpagetest.org/"
+
+  scripts:
+    - id: "fid-checker"
+      language: "bash"
+      purpose: "Check FID via PageSpeed Insights API"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        URL=$1
+        API_KEY=$2
+
+        echo "=== FID Analysis for: $URL ==="
+
+        RESULT=$(curl -s "https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=$URL&key=$API_KEY&strategy=mobile")
+
+        # Field FID
+        echo "Field FID (75th percentile):"
+        echo $RESULT | jq '.loadingExperience.metrics.FIRST_INPUT_DELAY_MS.percentile'
+
+        # Lab TBT (proxy for FID)
+        echo ""
+        echo "Lab Total Blocking Time (ms):"
+        echo $RESULT | jq '.lighthouseResult.audits["total-blocking-time"].numericValue'
+
+        # Long Tasks
+        echo ""
+        echo "Main Thread Blocking Tasks:"
+        echo $RESULT | jq '.lighthouseResult.audits["mainthread-work-breakdown"]'
+
+signals:
+  critical:
+    - id: "FID-CRIT-001"
+      signal: "FID exceeds 300ms (poor threshold)"
+      evidence_threshold: "FID > 300ms"
+      explanation: |
+        FID over 300ms is classified as "poor" by Google. Users
+        experience significant lag between their interaction and
+        the browser's response, creating frustration.
+      remediation: "Break up long tasks, defer non-critical JavaScript, use web workers"
+
+    - id: "FID-CRIT-002"
+      signal: "Main thread blocked for over 5 seconds during page load"
+      evidence_indicators:
+        - "Long tasks exceeding 5000ms"
+        - "Total Blocking Time > 5000ms"
+      explanation: |
+        Extended main thread blocking prevents all user interactions
+        from being processed, making the page feel completely frozen.
+      remediation: "Code split JavaScript, defer execution, optimize bundles"
+
+  high:
+    - id: "FID-HIGH-001"
+      signal: "FID between 100-300ms (needs improvement)"
+      evidence_threshold: "FID > 100ms && FID <= 300ms"
+      explanation: |
+        FID in this range is classified as "needs improvement" and
+        creates noticeable delay in user interactions.
+      remediation: "Optimize JavaScript execution, reduce main thread work"
+
+    - id: "FID-HIGH-002"
+      signal: "Large JavaScript bundles blocking main thread"
+      explanation: |
+        Large JS bundles take longer to parse and execute, blocking
+        the main thread and delaying input processing.
+      remediation: "Code splitting, tree shaking, lazy loading"
+
+    - id: "FID-HIGH-003"
+      signal: "Third-party scripts blocking main thread"
+      explanation: |
+        Third-party scripts (analytics, ads, widgets) often execute
+        synchronously, blocking user input processing.
+      remediation: "Load third-party scripts async/defer, use facades"
+
+  medium:
+    - id: "FID-MED-001"
+      signal: "Long tasks (>50ms) during critical user flows"
+      remediation: "Break long tasks into smaller chunks using requestIdleCallback"
+
+    - id: "FID-MED-002"
+      signal: "Inefficient event handlers causing jank"
+      remediation: "Optimize event handler code, debounce if appropriate"
+
+    - id: "FID-MED-003"
+      signal: "No use of web workers for heavy computation"
+      remediation: "Move CPU-intensive work to web workers"
+
+  low:
+    - id: "FID-LOW-001"
+      signal: "FID varies significantly by page type"
+
+  positive:
+    - id: "FID-POS-001"
+      signal: "FID under 100ms (good threshold)"
+    - id: "FID-POS-002"
+      signal: "JavaScript efficiently code-split"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Gather FID Field Data"
+      description: |
+        Collect real-user FID data from Chrome User Experience
+        Report via PageSpeed Insights and Search Console.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Get field FID data"
+          command: "PageSpeed Insights for key pages"
+      expected_findings:
+        - "Field FID by page type"
+        - "FID distribution"
+        - "Mobile vs desktop FID"
+
+    - id: "2"
+      name: "Measure Total Blocking Time"
+      description: |
+        Use Lighthouse to measure TBT, which serves as a lab
+        proxy for FID.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Run Lighthouse"
+          command: "Chrome DevTools > Lighthouse > Performance"
+      expected_findings:
+        - "TBT scores"
+        - "Long task identification"
+        - "Main thread breakdown"
+
+    - id: "3"
+      name: "Analyze Main Thread Activity"
+      description: |
+        Use Chrome DevTools Performance panel to analyze main
+        thread work and identify long tasks.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Profile page load"
+          command: "Chrome DevTools > Performance > Record page load"
+      expected_findings:
+        - "Long tasks (>50ms)"
+        - "JavaScript execution time"
+        - "Task attribution"
+
+    - id: "4"
+      name: "Identify Blocking Scripts"
+      description: |
+        Determine which JavaScript files and third-party scripts
+        contribute most to main thread blocking.
+      duration_estimate: "30 min"
+      expected_findings:
+        - "Largest blocking scripts"
+        - "Third-party impact"
+        - "Bundle analysis"
+
+    - id: "5"
+      name: "Evaluate Code Splitting"
+      description: |
+        Assess whether JavaScript is appropriately code-split to
+        minimize initial parsing and execution time.
+      duration_estimate: "20 min"
+      expected_findings:
+        - "Bundle sizes"
+        - "Code splitting implementation"
+        - "Lazy loading usage"
+
+    - id: "6"
+      name: "Test Interactive Elements"
+      description: |
+        Manually test key interactive elements during page load
+        to experience FID impact firsthand.
+      duration_estimate: "20 min"
+      expected_findings:
+        - "Perceived responsiveness"
+        - "Problematic interactions"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "FID Performance Summary"
+        - "Main Thread Analysis"
+        - "JavaScript Optimization Opportunities"
+        - "Implementation Recommendations"
+
+  confidence_guidance:
+    high: "Field data from CrUX with large sample size"
+    medium: "Lab TBT data as FID proxy"
+    low: "Single test without field validation"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "web-vitals-fid"
+        priority: "required"
+      - source_id: "google-optimize-fid"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed JavaScript analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "fid-001"
+    item: "FID under 100ms on key pages"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Check PageSpeed Insights field data"
+    expected: "Confirmed by reviewer"
+
+  - id: "fid-002"
+    item: "No long tasks over 300ms during page load"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review DevTools Performance panel"
+    expected: "Confirmed by reviewer"
+
+  - id: "fid-003"
+    item: "JavaScript appropriately code-split"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify bundle sizes and lazy loading"
+    expected: "Confirmed by reviewer"
+
+  - id: "fid-004"
+    item: "Third-party scripts loaded async"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Check script loading attributes"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["web-application", "marketing-site", "ecommerce", "content-site"]
+
+  compliance_frameworks:
+    - framework: "Google Core Web Vitals"
+      controls: ["FID", "Interactivity"]
+
+relationships:
+  commonly_combined:
+    - "seo-discoverability.core-web-vitals.interaction-to-next-paint"
+    - "seo-discoverability.core-web-vitals.largest-contentful-paint"
+    - "seo-discoverability.core-web-vitals.cumulative-layout-shift"

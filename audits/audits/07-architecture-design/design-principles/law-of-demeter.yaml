@@ -1,0 +1,368 @@
+# ============================================================
+# AUDIT: Law of Demeter Compliance
+# ============================================================
+# Evaluates whether objects follow the principle of "only talk
+# to your immediate friends," avoiding chain of method calls.
+# ============================================================
+
+audit:
+  id: "architecture-design.design-principles.law-of-demeter"
+  name: "Law of Demeter Compliance"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "architecture-design"
+  category_number: 7
+  subcategory: "design-principles"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates compliance with the Law of Demeter (LoD), also
+    known as the Principle of Least Knowledge. It states that an object
+    should only call methods on: itself, its parameters, objects it creates,
+    and its direct components. It identifies "train wreck" method chains
+    that navigate through object graphs.
+
+  why_it_matters: |
+    LoD violations cause:
+    - Tight coupling to internal structure of other objects
+    - Fragile code that breaks when intermediate objects change
+    - Difficulty testing due to deep dependency chains
+    - Poor encapsulation - clients know too much about structure
+    - Code that's hard to understand and maintain
+    Following LoD creates loosely coupled, robust designs.
+
+  when_to_run:
+    - "During code reviews"
+    - "When refactoring for better encapsulation"
+    - "When experiencing fragile code issues"
+    - "During architecture quality assessments"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Complete source code"
+
+  access_requirements:
+    - "Read access to source code"
+
+discovery:
+  code_patterns:
+    - pattern: "\\.[a-z]+\\(\\)\\.[a-z]+\\(\\)\\.[a-z]+\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find method chains (train wrecks)"
+
+    - pattern: "\\.get[A-Z]\\w+\\(\\)\\.get[A-Z]\\w+\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Find getter chains"
+
+    - pattern: "\\.[a-z]+\\.[a-z]+\\.[a-z]+"
+      type: "regex"
+      scope: "source"
+      purpose: "Find field/property chains"
+
+  file_patterns:
+    - glob: "**/*.java"
+      purpose: "Java source files"
+    - glob: "**/*.ts"
+      purpose: "TypeScript source files"
+    - glob: "**/*.py"
+      purpose: "Python source files"
+
+knowledge_sources:
+  specifications:
+    - id: "law-of-demeter"
+      name: "Law of Demeter"
+      url: "https://en.wikipedia.org/wiki/Law_of_Demeter"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "tell-dont-ask"
+      name: "Tell, Don't Ask Principle"
+      url: "https://martinfowler.com/bliki/TellDontAsk.html"
+      offline_cache: true
+
+    - id: "clean-architecture"
+      name: "Clean Architecture"
+      url: "https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html"
+      offline_cache: true
+
+    - id: "clean-code"
+      name: "Clean Code Summary"
+      url: "https://gist.github.com/wojteklu/73c6914cc446146b8b533c0988cf8d29"
+      offline_cache: true
+
+  learning_resources:
+    - id: "pragmatic-programmer"
+      title: "The Pragmatic Programmer"
+      type: "book"
+      reference: "Hunt & Thomas - Decoupling and the Law of Demeter"
+
+    - id: "goos"
+      title: "Growing Object-Oriented Software, Guided by Tests"
+      type: "book"
+      reference: "Freeman & Pryce"
+
+tooling:
+  static_analysis:
+    - tool: "SonarQube"
+      purpose: "Detect method chain depth"
+      offline_capable: false
+
+    - tool: "PMD"
+      purpose: "Rule for Law of Demeter violations"
+      offline_capable: true
+
+    - tool: "Checkstyle"
+      purpose: "Method chain length checks"
+      offline_capable: true
+
+  scripts:
+    - id: "demeter-detector"
+      language: "bash"
+      purpose: "Find potential LoD violations"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Method Chains (3+ dots) ==="
+        grep -rn "\.[a-z].*\.[a-z].*\.[a-z]" --include="*.java" | grep -v "import\|package\|log\." | head -30
+
+        echo "=== Getter Chains ==="
+        grep -rn "\.get[A-Z].*\.get[A-Z]" --include="*.java" | head -30
+
+signals:
+  critical:
+    - id: "LOD-CRIT-001"
+      signal: "Deep method chains (4+ levels)"
+      evidence_pattern: "a.getB().getC().getD().doSomething()"
+      explanation: |
+        Deep chains couple the caller to the entire object graph structure.
+        Any change to intermediate objects breaks this code, creating
+        extremely fragile dependencies.
+      remediation: "Apply Tell Don't Ask - ask immediate object to do the work"
+
+    - id: "LOD-CRIT-002"
+      signal: "Navigation into third-party library internals"
+      evidence_pattern: "response.getData().getItems().get(0).getValue()"
+      explanation: |
+        Navigating deep into library objects creates coupling to their
+        internal structure which may change without notice.
+      remediation: "Create wrapper/adapter that encapsulates navigation"
+
+  high:
+    - id: "LOD-HIGH-001"
+      signal: "Getter chain for data access"
+      evidence_pattern: "order.getCustomer().getAddress().getCity()"
+      explanation: |
+        Getter chains expose internal structure and create coupling.
+        The caller shouldn't need to know about address to get city.
+      remediation: "Add method on Order: getCustomerCity() or pass needed data"
+
+    - id: "LOD-HIGH-002"
+      signal: "Method call on result of another method call"
+      evidence_pattern: "findUser(id).getPreferences().update(...)"
+      explanation: |
+        Calling methods on intermediate results creates temporal coupling
+        and null safety issues in addition to structural coupling.
+      remediation: "Return appropriate object or use command pattern"
+
+  medium:
+    - id: "LOD-MED-001"
+      signal: "Optional/nullable navigation chains"
+      evidence_pattern: "user?.profile?.settings?.theme"
+      explanation: |
+        Chains through nullable properties are fragile and obscure
+        where null can occur.
+      remediation: "Provide default values at each level; flatten access"
+
+    - id: "LOD-MED-002"
+      signal: "Collection navigation for single element"
+      evidence_pattern: "items.stream().filter(...).findFirst().get().process()"
+      explanation: |
+        Chaining stream operations with terminal operations creates
+        complex, hard-to-debug code.
+      remediation: "Extract into named method; handle empty case explicitly"
+
+  low:
+    - id: "LOD-LOW-001"
+      signal: "Fluent builder chains"
+      remediation: "Acceptable - builders are designed for chaining"
+
+  positive:
+    - id: "LOD-POS-001"
+      signal: "Methods operate on direct collaborators only"
+    - id: "LOD-POS-002"
+      signal: "Tell Don't Ask pattern followed consistently"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Find method chains"
+      description: |
+        Search for method chains that navigate through multiple
+        objects, indicating potential LoD violations.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find deep method chains"
+          command: "grep -rn '\\.[a-z].*\\.[a-z].*\\.[a-z]' --include='*.java' | grep -v 'import\\|package\\|log\\.' | head -40"
+        - purpose: "Find getter chains"
+          command: "grep -rn '\\.get[A-Z].*\\.get[A-Z]' --include='*.java' | head -30"
+      expected_findings:
+        - "Method chain locations"
+        - "Chain depth distribution"
+
+    - id: "2"
+      name: "Categorize chain types"
+      description: |
+        Distinguish between acceptable chains (builders, streams)
+        and problematic navigation chains.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find builder patterns"
+          command: "grep -rn '\\.set.*\\.set.*\\.build()' --include='*.java' | head -20"
+        - purpose: "Find stream chains"
+          command: "grep -rn '\\.stream().*\\.filter.*\\.map' --include='*.java' | head -20"
+      expected_findings:
+        - "Acceptable chain patterns"
+        - "Problematic navigation chains"
+
+    - id: "3"
+      name: "Analyze chain dependencies"
+      description: |
+        For problematic chains, identify what intermediate
+        objects the caller becomes coupled to.
+      duration_estimate: "25 min"
+      questions:
+        - "What objects does the caller now depend on?"
+        - "Could intermediate objects change without affecting caller?"
+        - "What would break if an intermediate returns null?"
+      expected_findings:
+        - "Dependency analysis per chain"
+        - "Fragility assessment"
+
+    - id: "4"
+      name: "Identify refactoring opportunities"
+      description: |
+        Develop specific refactorings to eliminate problematic
+        chains using Tell Don't Ask pattern.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find repeated chain patterns"
+          command: "grep -rh '\\.get[A-Z].*\\.get[A-Z]' --include='*.java' | sort | uniq -c | sort -rn | head -15"
+      expected_findings:
+        - "Common chain patterns"
+        - "Refactoring candidates"
+
+    - id: "5"
+      name: "Review Tell Don't Ask compliance"
+      description: |
+        Assess whether code follows Tell Don't Ask - telling
+        objects what to do rather than querying their state.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find ask patterns"
+          command: "grep -rn 'if.*\\.get.*\\.get' --include='*.java' | head -20"
+      expected_findings:
+        - "Ask pattern locations"
+        - "Tell pattern adoption"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "LoD Violations"
+        - "Refactoring Recommendations"
+        - "Tell Don't Ask Guidance"
+
+  confidence_guidance:
+    high: "Clear navigation chain with 4+ levels"
+    medium: "Chain of 2-3 levels, context-dependent"
+    low: "Potential concern requiring analysis"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "law-of-demeter"
+        priority: "required"
+      - source_id: "tell-dont-ask"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires chain analysis"
+    full:
+      included: true
+      priority: 2
+    architecture:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "lod-001"
+    item: "No method chains deeper than 3 levels"
+    level: "CRITICAL"
+    verification: "grep -rn '\\.[a-z].*\\.[a-z].*\\.[a-z].*\\.[a-z]' --include='*.java' | wc -l"
+    expected: "0 or documented exceptions"
+
+  - id: "lod-002"
+    item: "Getter chains refactored to direct methods"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Common getter chains have encapsulating methods"
+    expected: "Confirmed by reviewer"
+
+  - id: "lod-003"
+    item: "Tell Don't Ask pattern adopted for stateful objects"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Objects tell rather than ask where appropriate"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Modularity"]
+
+relationships:
+  commonly_combined:
+    - "architecture-design.coupling.tight-coupling-detection"
+    - "architecture-design.design-principles.single-responsibility"
+    - "architecture-design.cohesion.class-cohesion"

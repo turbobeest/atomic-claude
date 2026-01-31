@@ -1,0 +1,305 @@
+# ============================================================
+# AUDIT: Instance Size Optimization Audit
+# Category: Scalability & Capacity > Vertical Scaling
+# ============================================================
+
+audit:
+  id: "scalability-capacity.vertical-scaling.instance-size-optimization"
+  name: "Instance Size Optimization Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "vertical-scaling"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "medium"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates whether instance sizes are optimized for workload characteristics.
+    Reviews CPU-to-memory ratios, instance family selection, burstable vs
+    dedicated instances, and specialized instance types (compute-optimized,
+    memory-optimized, etc.) against actual workload profiles.
+
+  why_it_matters: |
+    Mismatched instance types waste money and underperform. A memory-intensive
+    workload on compute-optimized instances pays for unused CPU while being
+    memory-constrained. Proper instance sizing optimizes both cost and
+    performance.
+
+  when_to_run:
+    - "During cost optimization reviews"
+    - "When provisioning new services"
+    - "After workload characteristic changes"
+    - "Quarterly capacity reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure_config"
+      description: "Instance/node configuration"
+    - type: "metrics_data"
+      description: "Resource utilization metrics"
+
+  access_requirements:
+    - "Cloud console or CLI access"
+    - "Metrics system access"
+    - "Cost data access"
+
+discovery:
+  code_patterns:
+    - pattern: "(instance.*type|machine.*type|node.*size)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect instance type configuration"
+
+    - pattern: "(t3|t4|m5|m6|c5|c6|r5|r6|x1|z1)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect AWS instance families"
+
+  file_patterns:
+    - glob: "**/terraform/**/*.tf"
+      purpose: "Terraform instance configuration"
+    - glob: "**/k8s/**/*node*.yaml"
+      purpose: "Kubernetes node configuration"
+
+knowledge_sources:
+  guides:
+    - id: "aws-instance-types"
+      name: "AWS EC2 Instance Types"
+      url: "https://aws.amazon.com/ec2/instance-types/"
+      offline_cache: true
+
+    - id: "gcp-machine-types"
+      name: "GCP Machine Types"
+      url: "https://cloud.google.com/compute/docs/machine-types"
+      offline_cache: true
+
+  learning_resources:
+    - id: "cost-optimization"
+      title: "Cloud Cost Optimization Strategies"
+      type: "article"
+      reference: "https://aws.amazon.com/architecture/cost-optimization/"
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws-cli"
+      purpose: "List instance types in use"
+      command: "aws ec2 describe-instances --query 'Reservations[*].Instances[*].[InstanceType,InstanceId]'"
+
+    - tool: "kubectl"
+      purpose: "Check node instance types"
+      command: "kubectl get nodes -o custom-columns='NAME:.metadata.name,TYPE:.metadata.labels.node\\.kubernetes\\.io/instance-type'"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: "avg(container_memory_working_set_bytes) by (node) / avg(kube_node_status_capacity{resource=\"memory\"}) by (node)"
+      purpose: "Memory utilization by node"
+      threshold: "40-70% for optimal sizing"
+
+    - system: "Prometheus"
+      query: "avg(rate(container_cpu_usage_seconds_total[5m])) by (node) / avg(kube_node_status_capacity{resource=\"cpu\"}) by (node)"
+      purpose: "CPU utilization by node"
+      threshold: "40-70% for optimal sizing"
+
+  scripts:
+    - id: "instance-optimizer"
+      language: "bash"
+      purpose: "Analyze instance sizing"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Current Instance Types ==="
+        kubectl get nodes -o custom-columns='NAME:.metadata.name,TYPE:.metadata.labels.node\.kubernetes\.io/instance-type,CPU:.status.capacity.cpu,MEM:.status.capacity.memory'
+        echo "=== Resource Utilization ==="
+        kubectl top nodes
+        echo "=== Instance Type Details ==="
+        aws ec2 describe-instance-types --instance-types $(kubectl get nodes -o jsonpath='{.items[*].metadata.labels.node\.kubernetes\.io/instance-type}' | tr ' ' ',') \
+          --query 'InstanceTypes[*].[InstanceType,VCpuInfo.DefaultVCpus,MemoryInfo.SizeInMiB]' --output table
+
+signals:
+  critical:
+    - id: "OPT-CRIT-001"
+      signal: "Burstable instances for sustained high-utilization workloads"
+      evidence_indicators:
+        - "t2/t3/t4 instances with CPU > 80%"
+        - "CPU credits exhausted frequently"
+      explanation: |
+        Burstable instances throttle when credits are exhausted. Sustained
+        high utilization should use dedicated compute instances.
+      remediation: "Migrate sustained workloads to m-series or c-series instances"
+
+  high:
+    - id: "OPT-HIGH-001"
+      signal: "Instance type mismatch with workload characteristics"
+      evidence_indicators:
+        - "High memory usage on compute-optimized"
+        - "High CPU usage on memory-optimized"
+      explanation: |
+        Mismatched instances waste the abundant resource while being
+        constrained by the scarce one.
+      remediation: "Match instance family to workload: c-series for CPU, r-series for memory"
+
+    - id: "OPT-HIGH-002"
+      signal: "Using previous generation instances"
+      evidence_pattern: "(m4|c4|r4|t2)\\."
+      explanation: |
+        Previous generation instances often cost more per performance unit
+        than current generation equivalents.
+      remediation: "Migrate to current generation instances (m6i, c6i, r6i)"
+
+  medium:
+    - id: "OPT-MED-001"
+      signal: "Oversized instances with low utilization"
+      evidence_threshold: "cpu_utilization < 20% AND memory_utilization < 20%"
+      remediation: "Downsize instances or consolidate workloads"
+
+    - id: "OPT-MED-002"
+      signal: "Not using Graviton/ARM instances where suitable"
+      evidence_pattern: "(m6i|c6i|r6i)(?!g)"
+      remediation: "Evaluate Graviton instances for compatible workloads (20% cost savings)"
+
+  positive:
+    - id: "OPT-POS-001"
+      signal: "Instance type matches workload profile"
+      evidence_threshold: "cpu:memory ratio matches instance family"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Profile workload characteristics"
+      description: |
+        Analyze resource utilization patterns to understand workload
+        characteristics (CPU-bound, memory-bound, balanced).
+      duration_estimate: "60 min"
+      commands:
+        - purpose: "CPU utilization analysis"
+          command: "kubectl top nodes"
+        - purpose: "Memory utilization analysis"
+          command: "kubectl top pods --all-namespaces --sort-by=memory"
+      expected_findings:
+        - "Workload resource profile"
+        - "CPU-to-memory usage ratio"
+
+    - id: "2"
+      name: "Review current instance selection"
+      description: |
+        Map current instance types and understand their characteristics
+        relative to workload needs.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Current instance types"
+          command: "kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{\" \"}{.metadata.labels.node\\.kubernetes\\.io/instance-type}{\"\\n\"}{end}'"
+      expected_findings:
+        - "Instance types in use"
+        - "Instance family characteristics"
+
+    - id: "3"
+      name: "Calculate optimal sizing"
+      description: |
+        Compare workload requirements against available instance types
+        to identify optimization opportunities.
+      duration_estimate: "45 min"
+      questions:
+        - "Does the CPU-to-memory ratio match the instance family?"
+        - "Are burstable instances used appropriately?"
+        - "Would newer generation instances provide better value?"
+      expected_findings:
+        - "Recommended instance types"
+        - "Estimated cost impact"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Workload Profiling Results"
+        - "Current Instance Analysis"
+        - "Optimization Recommendations"
+        - "Cost Impact Estimate"
+
+  confidence_guidance:
+    high: "Analysis based on extended metrics period (>7 days)"
+    medium: "Analysis based on limited metrics window"
+    low: "Configuration review without utilization data"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-instance-types"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed analysis"
+    full:
+      included: true
+      priority: 3
+    production:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "instance-opt-001"
+    item: "Instance types match workload profiles"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Compare CPU:memory ratios of workloads vs instances"
+    expected: "Appropriate instance family for workload type"
+
+  - id: "instance-opt-002"
+    item: "No sustained workloads on burstable instances"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify high-utilization workloads use dedicated instances"
+    expected: "Burstable only for variable/low-utilization workloads"
+
+  - id: "instance-opt-003"
+    item: "Using current generation instances"
+    level: "WARNING"
+    verification: "kubectl get nodes -o jsonpath='{.items[*].metadata.labels.node\\.kubernetes\\.io/instance-type}' | grep -E '(m4|c4|r4|t2)' || echo 'PASS'"
+    expected: "PASS (no previous generation)"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "AWS Well-Architected"
+      controls: ["COST-4", "COST-5", "PERF-1"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.vertical-scaling.oversizing-rightsizing"
+    - "scalability-capacity.vertical-scaling.resource-ceiling"

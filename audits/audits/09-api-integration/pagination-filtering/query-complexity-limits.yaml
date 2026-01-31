@@ -1,0 +1,370 @@
+audit:
+  id: api-integration.pagination-filtering.query-complexity-limits
+  name: Query Complexity Limits Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: api-integration
+  category_number: 9
+  subcategory: pagination-filtering
+  tier: phd
+  estimated_duration: 90 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - api
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates API query complexity controls including depth limits,
+    breadth limits, cost analysis, timeout enforcement, and rate
+    limiting per complexity. Analyzes whether the API is protected
+    from complex query attacks that exhaust server resources.
+  why_it_matters: |
+    Complex queries can be weaponized for denial-of-service attacks.
+    GraphQL is especially vulnerable to nested query attacks that
+    create exponential database load. REST APIs with complex filtering,
+    sorting, and field selection also need complexity controls to
+    prevent resource exhaustion.
+  when_to_run:
+  - API design or review
+  - Security assessments
+  - After DoS incidents
+  - GraphQL implementation review
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: API endpoint implementations
+  - type: configuration
+    description: API gateway or server configuration
+  access_requirements:
+  - Read access to API source code
+  - Access to API configuration
+discovery:
+  code_patterns:
+  - pattern: maxDepth|depthLimit|MAX_DEPTH
+    type: regex
+    scope: source
+    purpose: Detect depth limits
+  - pattern: complexity|cost|weight|budget
+    type: regex
+    scope: source
+    purpose: Detect cost analysis
+  - pattern: timeout|maxTime|queryTimeout
+    type: regex
+    scope: source
+    purpose: Detect timeout configuration
+  - pattern: rateLimit|throttle|rateLimiter
+    type: regex
+    scope: source
+    purpose: Detect rate limiting
+  file_patterns:
+  - glob: '**/graphql/**'
+    purpose: GraphQL implementations
+  - glob: '**/middleware/**'
+    purpose: Middleware configurations
+  - glob: '**/api/**'
+    purpose: API implementations
+knowledge_sources:
+  specifications:
+  - id: graphql-spec
+    name: GraphQL Specification
+    url: https://spec.graphql.org/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: graphql-security
+    name: GraphQL Security Best Practices
+    url: https://www.apollographql.com/blog/graphql/security/9-ways-to-secure-your-graphql-api-security-checklist/
+    offline_cache: true
+  - id: api-dos-prevention
+    name: API DoS Prevention
+    url: https://owasp.org/www-community/attacks/Denial_of_Service
+    offline_cache: true
+  learning_resources:
+  - id: graphql-attacks
+    title: GraphQL Security Considerations
+    type: article
+    reference: OWASP Cheat Sheet
+tooling:
+  static_analysis:
+  - tool: graphql-depth-limit
+    purpose: Analyze GraphQL query depth
+    offline_capable: true
+  - tool: graphql-query-complexity
+    purpose: Calculate query complexity
+    offline_capable: true
+  scripts:
+  - id: complexity-scan
+    language: bash
+    purpose: Analyze complexity controls
+    source: inline
+    code: |
+      echo "=== Query Complexity Analysis ==="
+      echo "--- Depth limits ---"
+      grep -rn "maxDepth\|depthLimit\|MAX_DEPTH" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+
+      echo "--- Complexity/cost limits ---"
+      grep -rn "complexity\|cost\|weight\|budget" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+
+      echo "--- Timeout configuration ---"
+      grep -rn "timeout\|maxTime\|queryTimeout" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+signals:
+  critical:
+  - id: QC-CRIT-001
+    signal: No query depth limit in GraphQL
+    evidence_pattern: GraphQL endpoint without depthLimit validation
+    explanation: |
+      Without depth limits, attackers can craft deeply nested queries
+      like { user { friends { friends { friends ... } } } } that
+      cause exponential database load and memory exhaustion.
+    remediation: Implement depth limit (typically 7-10 levels max)
+  - id: QC-CRIT-002
+    signal: No query complexity analysis
+    evidence_pattern: Complex queries accepted without cost calculation
+    explanation: |
+      Without complexity analysis, expensive queries consuming
+      disproportionate resources cannot be detected or blocked.
+      Attackers can craft queries that are cheap to send but
+      expensive to execute.
+    remediation: Implement query cost analysis with complexity budget
+  - id: QC-CRIT-003
+    signal: No query timeout enforcement
+    evidence_pattern: Queries can run indefinitely
+    explanation: |
+      Without timeouts, slow queries tie up connections and threads
+      indefinitely. Attackers can exploit this to exhaust the
+      connection pool and cause denial of service.
+    remediation: Implement query timeout (typically 30-60 seconds)
+  high:
+  - id: QC-HIGH-001
+    signal: Introspection enabled in production
+    evidence_pattern: __schema query available in production
+    explanation: |
+      GraphQL introspection exposes the entire API schema to
+      attackers, making it easier to craft targeted attacks.
+      Should be disabled in production.
+    remediation: Disable introspection in production environment
+  - id: QC-HIGH-002
+    signal: No batch query limits
+    evidence_pattern: Unlimited queries in single request
+    explanation: |
+      Batch query attacks send thousands of queries in a single
+      request to bypass rate limiting. Without batch limits,
+      attackers can multiply their attack surface.
+    remediation: Limit queries per batch (typically 10-20 max)
+  - id: QC-HIGH-003
+    signal: No alias abuse protection
+    evidence_pattern: Unlimited field aliases in query
+    explanation: |
+      GraphQL aliases can be abused to request the same expensive
+      field hundreds of times in a single query. Without limits,
+      this bypasses field-based complexity counting.
+    remediation: Limit field aliases per query
+  medium:
+  - id: QC-MED-001
+    signal: Complexity limits too generous
+    evidence_pattern: Max complexity set to very high value
+    remediation: Set complexity limits based on typical legitimate query patterns
+  - id: QC-MED-002
+    signal: No per-field cost assignment
+    evidence_pattern: All fields weighted equally regardless of expense
+    remediation: Assign higher costs to expensive fields (e.g., aggregations)
+  - id: QC-MED-003
+    signal: No request size limits
+    evidence_pattern: Query body size unlimited
+    remediation: Limit request body size (typically 1MB max)
+  low:
+  - id: QC-LOW-001
+    signal: Complexity limits not documented
+    evidence_pattern: No documentation of query limits for clients
+    remediation: Document complexity limits and rejected query behavior
+  positive:
+  - id: QC-POS-001
+    signal: Query depth limit enforced
+    evidence_pattern: depthLimit middleware or validation
+  - id: QC-POS-002
+    signal: Query complexity analysis implemented
+    evidence_pattern: Cost calculation before query execution
+  - id: QC-POS-003
+    signal: Query timeout enforced
+    evidence_pattern: Statement timeout or query cancellation
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Query Complexity Controls
+    description: |
+      Find depth limits, complexity analysis, and timeouts.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find depth limits
+      command: |
+        grep -rn "maxDepth\|depthLimit\|MAX_DEPTH" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    - purpose: Find complexity analysis
+      command: |
+        grep -rn "complexity\|cost\|weight" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Depth limit configuration
+    - Complexity analysis presence
+  - id: '2'
+    name: Review Timeout Configuration
+    description: |
+      Check query timeout settings.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find timeout configuration
+      command: |
+        grep -rn "timeout\|maxTime\|statement_timeout" \
+          --include="*.ts" --include="*.java" --include="*.py" --include="*.yaml" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Timeout values
+    - Enforcement mechanism
+  - id: '3'
+    name: Check GraphQL-Specific Protections
+    description: |
+      If GraphQL, verify introspection and batch limits.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find introspection settings
+      command: |
+        grep -rn "introspection\|__schema\|disableIntrospection" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    - purpose: Find batch limits
+      command: |
+        grep -rn "batch\|maxOperations\|maxQueries" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    expected_findings:
+    - Introspection status
+    - Batch query limits
+  - id: '4'
+    name: Review Rate Limiting
+    description: |
+      Check rate limiting configuration.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find rate limiting
+      command: |
+        grep -rn "rateLimit\|throttle\|rateLimiter" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Rate limit configuration
+    - Per-complexity limiting
+  - id: '5'
+    name: Verify Request Size Limits
+    description: |
+      Check request body size limits.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find size limits
+      command: |
+        grep -rn "maxSize\|limit.*body\|bodyLimit\|payload" \
+          --include="*.ts" --include="*.java" --include="*.py" --include="*.yaml" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    expected_findings:
+    - Body size limits
+    - Configuration values
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - depth_limit_status
+    - complexity_analysis_status
+    - timeout_configuration
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Complexity Controls
+    - Security Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Clear missing depth/complexity limits or no timeouts
+    medium: Limits exist but values may be too generous
+    low: Requires load testing to confirm vulnerability
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: graphql-security
+      priority: required
+    - source_id: api-dos-prevention
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 1
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: qc-001
+  item: Query depth limit enforced
+  level: CRITICAL
+  verification: |
+    grep -rn "maxDepth\|depthLimit\|MAX_DEPTH" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: qc-002
+  item: Query timeout configured
+  level: CRITICAL
+  verification: |
+    grep -rn "timeout\|maxTime\|statement_timeout" \
+      --include="*.ts" --include="*.java" --include="*.py" --include="*.yaml" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: qc-003
+  item: Complexity analysis implemented
+  level: CRITICAL
+  verification: |
+    grep -rn "complexity\|cost\|weight" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP
+    controls:
+    - A05:2021-Security Misconfiguration
+  - framework: ISO 25010
+    controls:
+    - Security
+    - Reliability
+relationships:
+  commonly_combined:
+  - api-integration.pagination-filtering.pagination-strategy
+  - api-integration.pagination-filtering.filtering-capability
+  - reliability-resilience.denial-of-service.dos-protection

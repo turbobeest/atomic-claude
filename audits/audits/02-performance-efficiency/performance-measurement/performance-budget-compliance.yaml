@@ -1,0 +1,376 @@
+# ============================================================
+# AUDIT: Performance Budget Compliance Audit
+# ============================================================
+
+audit:
+  id: "performance-efficiency.performance-measurement.performance-budget-compliance"
+  name: "Performance Budget Compliance Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "performance-measurement"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "yes"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: true
+  parallelizable: true
+
+description:
+  what: |
+    Validates compliance with established performance budgets for page weight,
+    JavaScript bundle size, time-based metrics (LCP, FID, CLS), and API response
+    times. Verifies budget definitions exist, are enforced in CI/CD, and tracks
+    actual budget utilization over time.
+
+  why_it_matters: |
+    Performance budgets prevent death by a thousand cuts - small additions
+    that individually seem harmless but collectively degrade performance.
+    Alex Russell's research shows each 100KB of JavaScript costs 1 second
+    on mobile. Teams with enforced budgets ship 40% faster sites. Without
+    budgets, page weight typically grows 15-20% per year.
+
+  when_to_run:
+    - "Before every release"
+    - "When adding new dependencies"
+    - "Quarterly budget reviews"
+    - "After major feature launches"
+
+prerequisites:
+  required_artifacts:
+    - type: "budget_config"
+      description: "Performance budget configuration"
+    - type: "build_output"
+      description: "Production build artifacts"
+
+  access_requirements:
+    - "Performance budget definitions"
+    - "Build output for size analysis"
+    - "CI/CD pipeline access"
+
+discovery:
+  file_patterns:
+    - glob: "**/budget*.json"
+      purpose: "Lighthouse budget configuration"
+    - glob: "**/bundlesize*.json"
+      purpose: "bundlesize configuration"
+    - glob: "**/performance-budget*"
+      purpose: "Custom budget definitions"
+
+  code_patterns:
+    - pattern: "maxSize|budgets|threshold"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find budget definitions"
+    - pattern: "bundlesize|size-limit"
+      type: "keyword"
+      scope: "config"
+      purpose: "Find bundle size tools"
+
+knowledge_sources:
+  guides:
+    - id: "lighthouse-budgets"
+      name: "Lighthouse Performance Budgets"
+      url: "https://developer.chrome.com/docs/lighthouse/performance/performance-budgets/"
+      offline_cache: true
+    - id: "web-dev-budgets"
+      name: "Performance Budgets 101"
+      url: "https://web.dev/performance-budgets-101/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "web-perf-made-easy"
+      title: "Web Performance Made Easy"
+      type: "video"
+      reference: "Google Chrome Developers"
+
+tooling:
+  static_analysis:
+    - tool: "bundlesize"
+      purpose: "Enforce bundle size limits"
+      offline_capable: true
+    - tool: "size-limit"
+      purpose: "Alternative bundle size checker"
+      offline_capable: true
+    - tool: "lighthouse"
+      purpose: "Full performance budget audit"
+      offline_capable: false
+
+  infrastructure_tools:
+    - tool: "webpack-bundle-analyzer"
+      purpose: "Visualize bundle composition"
+      command: "npx webpack-bundle-analyzer dist/stats.json"
+
+  scripts:
+    - id: "budget-checker"
+      language: "bash"
+      purpose: "Check current sizes against budgets"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Performance Budget Check ==="
+
+        # Check JS bundle size
+        JS_SIZE=$(find dist -name '*.js' -exec cat {} + | wc -c)
+        JS_KB=$((JS_SIZE / 1024))
+        JS_BUDGET=${JS_BUDGET_KB:-300}
+
+        echo "JavaScript: ${JS_KB}KB / ${JS_BUDGET}KB budget"
+        if [ "$JS_KB" -gt "$JS_BUDGET" ]; then
+          echo "FAIL: Over budget by $((JS_KB - JS_BUDGET))KB"
+          exit 1
+        fi
+
+        # Check CSS bundle size
+        CSS_SIZE=$(find dist -name '*.css' -exec cat {} + | wc -c)
+        CSS_KB=$((CSS_SIZE / 1024))
+        CSS_BUDGET=${CSS_BUDGET_KB:-50}
+
+        echo "CSS: ${CSS_KB}KB / ${CSS_BUDGET}KB budget"
+        if [ "$CSS_KB" -gt "$CSS_BUDGET" ]; then
+          echo "FAIL: Over budget by $((CSS_KB - CSS_BUDGET))KB"
+          exit 1
+        fi
+
+        echo "PASS: All budgets met"
+
+signals:
+  critical:
+    - id: "BUDGET-CRIT-001"
+      signal: "No performance budgets defined"
+      evidence_pattern: "No budget configuration files found"
+      explanation: |
+        Without defined budgets, there's no objective measure for acceptable
+        performance. Developers cannot know if their changes are acceptable
+        or not. This leads to gradual performance degradation as each small
+        addition seems harmless but accumulates to major slowdowns.
+      remediation: "Define budgets for: JS size, CSS size, total page weight, LCP, FID, CLS"
+
+    - id: "BUDGET-CRIT-002"
+      signal: "JavaScript budget exceeded by more than 50%"
+      evidence_pattern: "JS bundle size > 1.5x budget"
+      explanation: |
+        Significantly exceeding JavaScript budget indicates loss of control
+        over dependencies and bundle size. Every 100KB of JS adds approximately
+        1 second to mobile load time. Being 50% over budget likely means 1-2
+        second longer load times than designed.
+      remediation: "Audit dependencies, implement code splitting, remove unused code"
+
+  high:
+    - id: "BUDGET-HIGH-001"
+      signal: "Budgets not enforced in CI/CD"
+      evidence_pattern: "No budget check in CI pipeline"
+      explanation: |
+        Defined budgets without CI enforcement are aspirational, not actionable.
+        Developers may be unaware they're breaking budgets. Enforcement makes
+        budget compliance part of the definition of "done" for every change.
+      remediation: "Add budget check to CI pipeline as required gate"
+
+    - id: "BUDGET-HIGH-002"
+      signal: "Core Web Vitals budgets missing"
+      evidence_pattern: "Only size budgets, no time-based budgets"
+      explanation: |
+        Size budgets are proxies for performance; time budgets measure what
+        users actually experience. LCP, FID, and CLS budgets ensure the user
+        experience remains acceptable regardless of how size budgets are met.
+      remediation: "Add Core Web Vitals budgets: LCP < 2.5s, FID < 100ms, CLS < 0.1"
+
+  medium:
+    - id: "BUDGET-MED-001"
+      signal: "Budget thresholds set too high to be meaningful"
+      evidence_pattern: "JS budget > 1MB, LCP budget > 5 seconds"
+      remediation: "Set realistic budgets: JS < 300KB, LCP < 2.5s based on user needs"
+
+    - id: "BUDGET-MED-002"
+      signal: "No per-route budgets for SPA"
+      evidence_pattern: "Single global budget for multi-route application"
+      remediation: "Define per-route budgets for critical user journeys"
+
+  low:
+    - id: "BUDGET-LOW-001"
+      signal: "Budget history/trends not tracked"
+
+  positive:
+    - id: "BUDGET-POS-001"
+      signal: "Comprehensive budgets for size and time metrics"
+    - id: "BUDGET-POS-002"
+      signal: "CI enforcement with blocking gate"
+    - id: "BUDGET-POS-003"
+      signal: "Current performance under budget with margin"
+    - id: "BUDGET-POS-004"
+      signal: "Budget trends tracked over time"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Locate Budget Definitions"
+      description: |
+        Find performance budget configuration files and document
+        the budgets currently defined.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Find budget configuration"
+          command: "find . -name '*budget*' -o -name '*bundlesize*' -o -name '*size-limit*' | head -10"
+        - purpose: "Check package.json for budget tools"
+          command: "grep -E 'bundlesize|size-limit|lighthouse' package.json"
+        - purpose: "Find Lighthouse budget config"
+          command: "cat lighthouserc.js 2>/dev/null | grep -A20 'budgets'"
+
+      expected_findings:
+        - "Budget configuration files"
+        - "Defined size limits"
+
+    - id: "2"
+      name: "Measure Current Performance"
+      description: |
+        Build the application and measure current sizes against
+        defined budgets.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Build production bundle"
+          command: "npm run build 2>/dev/null || yarn build"
+        - purpose: "Measure JS size"
+          command: "find dist -name '*.js' -exec ls -lh {} + | awk '{sum += $5} END {print sum}'"
+        - purpose: "Run bundlesize check"
+          command: "npx bundlesize 2>/dev/null || echo 'bundlesize not configured'"
+
+      expected_findings:
+        - "Current bundle sizes"
+        - "Budget compliance status"
+
+    - id: "3"
+      name: "Verify CI Enforcement"
+      description: |
+        Check that performance budgets are enforced in CI/CD
+        and block non-compliant changes.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Check CI config for budget job"
+          command: "grep -rn 'budget\\|bundlesize\\|size-limit' .github/workflows/*.yaml 2>/dev/null"
+        - purpose: "Verify blocking status"
+          command: "grep -A5 'budgets\\|bundlesize' .github/workflows/*.yaml 2>/dev/null | grep -E 'required|continue-on-error'"
+
+      expected_findings:
+        - "Budget check job in CI"
+        - "Job is required (blocking)"
+
+    - id: "4"
+      name: "Review Core Web Vitals Budgets"
+      description: |
+        Verify time-based budgets exist for LCP, FID, CLS
+        in addition to size budgets.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Check for CWV budgets in Lighthouse"
+          command: "grep -rn 'largest-contentful-paint\\|first-input-delay\\|cumulative-layout-shift' . --include='*.json' --include='*.yaml'"
+        - purpose: "Find time threshold definitions"
+          command: "grep -rn 'maxNumericValue\\|threshold.*ms\\|threshold.*s' . --include='*.json'"
+
+      expected_findings:
+        - "LCP budget defined"
+        - "FID budget defined"
+        - "CLS budget defined"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Budget Definition Analysis"
+        - "Current Compliance Status"
+        - "CI Enforcement Status"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct build output and budget file analysis"
+    medium: "Configuration analysis without build"
+    low: "Inferred from partial data"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "lighthouse-budgets"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      reason: "Budget check is fast and essential"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "budget-001"
+    item: "Performance budgets defined"
+    level: "CRITICAL"
+    verification: |
+      BUDGETS=$(find . -name '*budget*.json' -o -name 'bundlesize*' 2>/dev/null | wc -l)
+      if [ "$BUDGETS" -gt 0 ]; then echo "PASS"; else echo "FAIL: No budget files"; fi
+    expected: "PASS"
+
+  - id: "budget-002"
+    item: "JavaScript bundle under budget"
+    level: "CRITICAL"
+    verification: |
+      JS_SIZE=$(find dist -name '*.js' -exec cat {} + 2>/dev/null | wc -c)
+      JS_KB=$((JS_SIZE / 1024))
+      BUDGET=${JS_BUDGET_KB:-300}
+      if [ "$JS_KB" -le "$BUDGET" ]; then echo "PASS: ${JS_KB}KB"; else echo "FAIL: ${JS_KB}KB > ${BUDGET}KB"; fi
+    expected: "PASS"
+
+  - id: "budget-003"
+    item: "Budgets enforced in CI"
+    level: "BLOCKING"
+    verification: |
+      CI_BUDGET=$(grep -rn 'budget\|bundlesize' .github/workflows/*.yaml 2>/dev/null | wc -l)
+      if [ "$CI_BUDGET" -gt 0 ]; then echo "PASS"; else echo "FAIL: No CI enforcement"; fi
+    expected: "PASS"
+
+  - id: "budget-004"
+    item: "Core Web Vitals budgets defined"
+    level: "BLOCKING"
+    verification: |
+      CWV=$(grep -rn 'largest-contentful\|first-input\|cumulative-layout' . --include='*.json' 2>/dev/null | wc -l)
+      if [ "$CWV" -gt 0 ]; then echo "PASS"; else echo "FAIL: No CWV budgets"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.performance-measurement.performance-baseline"
+    - "performance-efficiency.network-efficiency.payload-size"

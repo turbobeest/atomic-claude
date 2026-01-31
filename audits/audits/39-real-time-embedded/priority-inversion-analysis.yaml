@@ -1,0 +1,316 @@
+# ============================================================
+# AUDIT: Priority Inversion Analysis
+# Category: 39 - Real-Time & Embedded Systems
+# Subcategory: rtos-configuration
+# ============================================================
+
+audit:
+  id: "real-time-embedded.rtos-configuration.priority-inversion-analysis"
+  name: "Priority Inversion Analysis Audit"
+  version: "1.0.0"
+  last_updated: "2025-01-22"
+  status: "active"
+
+  category: "real-time-embedded"
+  category_number: 39
+  subcategory: "rtos-configuration"
+
+  tier: "expert"
+  estimated_duration: "4-6 hours"  # median: 5h
+
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "embedded-systems"
+
+  default_profiles:
+    - "full"
+    - "quick"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Identifies and analyzes priority inversion scenarios where high-priority
+    tasks are blocked by lower-priority tasks due to resource sharing. Reviews
+    mutex and semaphore usage patterns, evaluates implementation of priority
+    inheritance and priority ceiling protocols, and calculates maximum blocking
+    times for schedulability analysis.
+
+  why_it_matters: |
+    Priority inversion can cause unbounded blocking, leading to deadline misses
+    and system failures. The Mars Pathfinder mission experienced priority
+    inversion causing repeated system resets. Proper protocols (priority
+    inheritance, priority ceiling) bound blocking time, but must be correctly
+    implemented and configured.
+
+  when_to_run:
+    - "After adding shared resources"
+    - "When experiencing deadline misses"
+    - "Before safety certification"
+    - "During system integration"
+    - "After RTOS configuration changes"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Complete application source code"
+    - type: "resource_model"
+      description: "Shared resource documentation"
+    - type: "mutex_configuration"
+      description: "Mutex and semaphore definitions"
+    - type: "rtos_configuration"
+      description: "RTOS protocol configuration"
+
+  access_requirements:
+    - "Access to source code"
+    - "Access to RTOS configuration"
+    - "Debug/trace capabilities"
+    - "Timing analysis tools"
+
+discovery:
+  file_patterns:
+    - glob: "**/mutex*.c"
+      purpose: "Find mutex implementations"
+    - glob: "**/semaphore*.c"
+      purpose: "Find semaphore usage"
+    - glob: "**/FreeRTOSConfig.h"
+      purpose: "Find RTOS mutex settings"
+    - glob: "**/shared_*.c"
+      purpose: "Find shared resources"
+    - glob: "**/critical_section*.c"
+      purpose: "Find critical sections"
+
+knowledge_sources:
+  guides:
+    - id: "priority-inheritance"
+      name: "Priority Inheritance Protocol"
+      url: "https://ieeexplore.ieee.org/document/57058"
+    - id: "ceiling-protocol"
+      name: "Priority Ceiling Protocol"
+      url: "https://www.cs.cmu.edu/~sha/pcp.pdf"
+    - id: "mars-pathfinder"
+      name: "Mars Pathfinder Priority Inversion"
+      url: "https://www.cs.cmu.edu/~raj/papers/MarsPathfinder/"
+
+  standards:
+    - id: "posix-priority"
+      name: "POSIX Priority Protocols"
+      relevance: "Standard mutex protocols"
+    - id: "autosar-resources"
+      name: "AUTOSAR Resource Management"
+      relevance: "Automotive resource protocols"
+
+tooling:
+  analysis_tools:
+    - tool: "tracealyzer"
+      purpose: "Visualize priority inversions"
+    - tool: "lauterbach"
+      purpose: "Debug priority behavior"
+    - tool: "cheddar"
+      purpose: "Blocking analysis"
+    - tool: "valgrind-helgrind"
+      purpose: "Lock order analysis"
+
+signals:
+  critical:
+    - id: "PRI-CRIT-001"
+      signal: "Unbounded priority inversion possible"
+      evidence_indicators:
+        - "Shared resource without inheritance or ceiling"
+        - "No blocking bound calculable"
+        - "Medium-priority task can extend blocking"
+      explanation: |
+        Unbounded priority inversion allows arbitrary blocking of high-
+        priority tasks. A medium-priority task can preempt the low-priority
+        resource holder indefinitely, blocking the high-priority waiter.
+      remediation: "Enable priority inheritance or priority ceiling protocol"
+
+    - id: "PRI-CRIT-002"
+      signal: "Priority ceiling incorrectly configured"
+      evidence_indicators:
+        - "Ceiling lower than highest accessor priority"
+        - "Protocol provides no protection"
+        - "Blocking still unbounded"
+      explanation: |
+        Incorrect ceiling configuration defeats the protocol's purpose.
+        The ceiling must be at or above the highest priority of any task
+        that can access the resource.
+      remediation: "Set ceiling to maximum priority of all accessing tasks"
+
+  high:
+    - id: "PRI-HIGH-001"
+      signal: "Priority inheritance not enabled for critical mutexes"
+      evidence_indicators:
+        - "Mutex created without inheritance flag"
+        - "RTOS supports inheritance but not configured"
+        - "Blocking time exceeds budget"
+      explanation: |
+        Without priority inheritance, blocking time can extend beyond
+        worst-case analysis, causing deadline violations.
+      remediation: "Enable priority inheritance for shared resources"
+
+    - id: "PRI-HIGH-002"
+      signal: "Excessive blocking time in schedulability analysis"
+      evidence_indicators:
+        - "Blocking term dominates response time"
+        - "Long critical sections"
+        - "Frequent resource contention"
+      explanation: |
+        Even bounded blocking can be excessive if critical sections are
+        long or resources are highly contended.
+      remediation: "Reduce critical section length and contention"
+
+  medium:
+    - id: "PRI-MED-001"
+      signal: "Nested resource acquisition may cause deadlock"
+      evidence_indicators:
+        - "Multiple mutexes acquired by same task"
+        - "Inconsistent lock ordering"
+        - "Potential circular wait"
+      explanation: |
+        Nested resource acquisition with inconsistent ordering can cause
+        deadlock, which is effectively infinite blocking.
+      remediation: "Enforce consistent lock ordering or use lock hierarchy"
+
+    - id: "PRI-MED-002"
+      signal: "ISR and task share resources without proper protection"
+      evidence_indicators:
+        - "ISR accesses mutex-protected resource"
+        - "Interrupt disable used for protection"
+        - "Timing analysis incomplete"
+      explanation: |
+        ISR-task resource sharing requires special handling. Standard
+        mutexes typically cannot be used from ISR context.
+      remediation: "Use interrupt-safe mechanisms for ISR-task sharing"
+
+  low:
+    - id: "PRI-LOW-001"
+      signal: "Blocking analysis documentation incomplete"
+      evidence_indicators:
+        - "Blocking times not documented"
+        - "Resource access patterns unclear"
+        - "Protocol choice not justified"
+      explanation: |
+        Complete documentation supports maintenance and enables accurate
+        schedulability analysis updates.
+      remediation: "Document blocking analysis and protocol rationale"
+
+  positive:
+    - id: "PRI-POS-001"
+      signal: "Priority inversion fully mitigated"
+      evidence_indicators:
+        - "All shared resources use inheritance or ceiling"
+        - "Blocking times bounded and documented"
+        - "Schedulability analysis includes blocking"
+
+    - id: "PRI-POS-002"
+      signal: "Resource usage patterns well-structured"
+      evidence_indicators:
+        - "Consistent lock ordering"
+        - "Minimal nesting"
+        - "Short critical sections"
+
+procedure:
+  context:
+    cognitive_mode: "analytical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Shared Resources"
+      description: "Identify all mutexes, semaphores, and shared data"
+      duration_estimate: "1 hour"
+
+    - id: "2"
+      name: "Map Resource Access Patterns"
+      description: "Document which tasks access which resources"
+      duration_estimate: "1 hour"
+
+    - id: "3"
+      name: "Review Protocol Configuration"
+      description: "Verify inheritance or ceiling protocol settings"
+      duration_estimate: "1 hour"
+
+    - id: "4"
+      name: "Calculate Blocking Times"
+      description: "Determine maximum blocking for each task"
+      duration_estimate: "1-2 hours"
+
+    - id: "5"
+      name: "Analyze for Deadlock Potential"
+      description: "Check for circular wait conditions"
+      duration_estimate: "30 minutes"
+
+    - id: "6"
+      name: "Document Findings"
+      description: "Compile analysis results and recommendations"
+      duration_estimate: "30 minutes"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Resource Inventory"
+        - "Protocol Analysis"
+        - "Blocking Time Analysis"
+        - "Recommendations"
+
+closeout_checklist:
+  - id: "pri-001"
+    item: "All shared resources identified"
+    level: "CRITICAL"
+    verification: "manual"
+  - id: "pri-002"
+    item: "Access patterns documented"
+    level: "HIGH"
+    verification: "manual"
+  - id: "pri-003"
+    item: "Protocol configuration verified"
+    level: "CRITICAL"
+    verification: "automated"
+  - id: "pri-004"
+    item: "Blocking times calculated"
+    level: "HIGH"
+    verification: "manual"
+
+governance:
+  applicable_to:
+    archetypes: ["embedded-systems", "safety-critical", "automotive", "avionics"]
+
+  compliance_mappings:
+    - framework: "DO-178C"
+      control: "6.3.3"
+      description: "Resource management"
+    - framework: "ISO 26262"
+      control: "Part 6"
+      description: "Software design"
+    - framework: "AUTOSAR"
+      control: "Resources"
+      description: "Resource management"
+
+relationships:
+  commonly_combined:
+    - "real-time-embedded.timing-analysis.response-time-analysis"
+    - "real-time-embedded.rtos-configuration.task-priority-analysis"
+  depends_on:
+    - "real-time-embedded.rtos-configuration.task-priority-analysis"
+  feeds_into:
+    - "real-time-embedded.timing-analysis.deadline-verification"
+    - "reliability.deadlock-analysis"
+
+# Glossary of domain-specific terms:
+glossary:
+  "WCET": "Worst-Case Execution Time - maximum possible execution time for a code path"
+  "ISR": "Interrupt Service Routine - function executed in response to hardware interrupt"
+  "jitter": "Variation in timing between expected and actual execution"

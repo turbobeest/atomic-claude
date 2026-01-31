@@ -1,0 +1,345 @@
+# ============================================================
+# Memory Leak Detection Audit
+# ============================================================
+# Identifies memory leak patterns, growth trends, and accumulation
+# issues across application and infrastructure components.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.resource-utilization.memory-leak-detection"
+  name: "Memory Leak Detection Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "resource-utilization"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "metrics"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit detects memory leaks by analyzing memory growth patterns over
+    time, identifying containers with steadily increasing memory consumption,
+    examining heap dumps and profiling data, and correlating memory growth
+    with application behavior patterns.
+
+  why_it_matters: |
+    Memory leaks cause gradual degradation of service stability, eventually
+    leading to OOMKilled events and service disruption. Unlike sudden memory
+    spikes, leaks are insidious - they may take days or weeks to manifest as
+    outages. Early detection prevents production incidents and reduces
+    on-call burden.
+
+  when_to_run:
+    - "Weekly as part of stability monitoring"
+    - "After major releases or feature launches"
+    - "When investigating gradual performance degradation"
+    - "Following OOMKilled events with no obvious cause"
+
+prerequisites:
+  required_artifacts:
+    - type: "metrics-system"
+      description: "Access to Prometheus with at least 7 days retention"
+    - type: "container-orchestration"
+      description: "Kubernetes cluster access"
+
+  access_requirements:
+    - "Read access to historical metrics (7+ days)"
+    - "Access to profiling tools if available"
+    - "Read access to application logs"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus"
+      query: "deriv(container_memory_working_set_bytes[1h])"
+      purpose: "Memory growth rate per container"
+      threshold: "Should be near zero for stable applications"
+    - system: "Prometheus"
+      query: |
+        (container_memory_working_set_bytes - container_memory_working_set_bytes offset 1d)
+        / container_memory_working_set_bytes offset 1d
+      purpose: "Day-over-day memory growth percentage"
+      threshold: "< 5% daily growth for stable services"
+    - system: "Prometheus"
+      query: "predict_linear(container_memory_working_set_bytes[1d], 86400)"
+      purpose: "Predicted memory in 24 hours"
+      threshold: "Should not exceed limits"
+
+  code_patterns:
+    - pattern: "addEventListener.*(?!removeEventListener)"
+      type: "regex"
+      scope: "source"
+      purpose: "JavaScript event listener leaks"
+    - pattern: "setInterval|setTimeout"
+      type: "regex"
+      scope: "source"
+      purpose: "Uncleaned timers in JavaScript"
+    - pattern: "static\\s+(?:List|Map|Set|Collection)"
+      type: "regex"
+      scope: "source"
+      purpose: "Static collections that may accumulate data"
+
+knowledge_sources:
+  specifications:
+    - id: "jvm-troubleshooting"
+      name: "Java Platform Troubleshooting Guide"
+      url: "https://docs.oracle.com/javase/8/docs/technotes/guides/troubleshoot/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "node-memory"
+      name: "Node.js Memory Management"
+      url: "https://nodejs.org/en/learn/getting-started/debugging-memory-leaks"
+      offline_cache: true
+    - id: "go-memory"
+      name: "Go Memory Model and Profiling"
+      url: "https://go.dev/doc/diagnostics"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Compare memory usage over time"
+      command: "kubectl top pods -A --sort-by=memory"
+    - tool: "jmap"
+      purpose: "Generate Java heap dump for analysis"
+      command: "jmap -dump:format=b,file=heapdump.hprof <pid>"
+    - tool: "pprof"
+      purpose: "Go memory profiling"
+      command: "go tool pprof http://localhost:6060/debug/pprof/heap"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        topk(10,
+          (container_memory_working_set_bytes - container_memory_working_set_bytes offset 7d)
+          / container_memory_working_set_bytes offset 7d
+        )
+      purpose: "Top 10 containers by memory growth over 7 days"
+
+signals:
+  critical:
+    - id: "LEAK-CRIT-001"
+      signal: "Sustained linear memory growth indicating active leak"
+      evidence_threshold: "deriv(memory[1h]) > 0 consistently for 24+ hours"
+      explanation: |
+        Consistent positive memory derivative indicates a memory leak. The
+        container is accumulating memory over time without releasing it. Left
+        unchecked, this will inevitably lead to OOMKilled termination.
+      remediation: "Profile application, generate heap dump, identify leak source"
+
+    - id: "LEAK-CRIT-002"
+      signal: "Memory approaching limit with positive growth trend"
+      evidence_threshold: "current > 80% of limit AND deriv(memory[1h]) > 0"
+      explanation: |
+        Container is both near its memory limit and actively growing. OOM
+        termination is imminent without intervention. This represents an
+        immediate stability risk.
+      remediation: "Restart container immediately, then investigate root cause"
+
+  high:
+    - id: "LEAK-HIGH-001"
+      signal: "Memory growth exceeds 20% week-over-week"
+      evidence_threshold: "weekly_growth > 20%"
+      explanation: |
+        Significant week-over-week memory growth suggests a leak or accumulation
+        issue. While not immediately critical, this pattern will lead to problems
+        within days to weeks.
+      remediation: "Schedule investigation, review recent code changes"
+
+    - id: "LEAK-HIGH-002"
+      signal: "Memory never decreases after garbage collection"
+      evidence_threshold: "jvm_gc_memory_allocated_bytes increasing post-GC"
+      explanation: |
+        For JVM applications, memory should decrease after garbage collection.
+        If it doesn't, objects are being retained that shouldn't be, indicating
+        a classic memory leak pattern.
+      remediation: "Analyze heap dump for retained objects, check for reference leaks"
+
+  medium:
+    - id: "LEAK-MED-001"
+      signal: "Restart-only resolution pattern for memory issues"
+      evidence_indicators:
+        - "Pods restarted due to high memory"
+        - "Memory returns to baseline after restart"
+        - "Growth pattern resumes after restart"
+      remediation: "Profile application to find leak rather than relying on restarts"
+
+    - id: "LEAK-MED-002"
+      signal: "Cache sizes growing unbounded"
+      evidence_pattern: "cache_size_bytes increasing without eviction"
+      remediation: "Implement cache eviction policies and size limits"
+
+  low:
+    - id: "LEAK-LOW-001"
+      signal: "Minor memory growth in development environments"
+
+  positive:
+    - id: "LEAK-POS-001"
+      signal: "Stable memory footprint over extended periods"
+    - id: "LEAK-POS-002"
+      signal: "Effective garbage collection maintaining memory bounds"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify memory growth candidates"
+      description: |
+        Query metrics to find containers with positive memory growth trends
+        over the past 7 days.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find containers with highest memory growth"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=topk(20,(container_memory_working_set_bytes-container_memory_working_set_bytes offset 7d)/container_memory_working_set_bytes offset 7d)' | jq '.data.result'
+        - purpose: "Check growth derivatives"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=topk(10,deriv(container_memory_working_set_bytes[6h]))' | jq '.data.result'
+      expected_findings:
+        - "List of containers with memory growth"
+        - "Growth rates and trends"
+
+    - id: "2"
+      name: "Analyze growth patterns"
+      description: |
+        For identified candidates, analyze memory patterns to distinguish
+        leaks from legitimate growth (new features, increased load).
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Graph memory over time for suspect container"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query_range?query=container_memory_working_set_bytes{pod="<suspect-pod>"}&start=-7d&end=now&step=1h'
+        - purpose: "Check if growth correlates with load"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query_range?query=rate(http_requests_total{pod="<suspect-pod>"}[1h])&start=-7d&end=now&step=1h'
+      expected_findings:
+        - "Memory growth patterns over time"
+        - "Correlation with traffic patterns"
+
+    - id: "3"
+      name: "Check GC behavior (JVM applications)"
+      description: |
+        For Java applications, analyze garbage collection behavior to identify
+        heap growth after GC cycles.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check post-GC heap usage"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=jvm_memory_used_bytes{area="heap"}/jvm_memory_max_bytes{area="heap"}'
+        - purpose: "GC pause times"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=rate(jvm_gc_pause_seconds_sum[5m])'
+      expected_findings:
+        - "Heap utilization after GC"
+        - "GC effectiveness metrics"
+
+    - id: "4"
+      name: "Review code for leak patterns"
+      description: |
+        Search codebase for common memory leak patterns such as event listener
+        accumulation, unbounded caches, and reference retention.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find potential JavaScript memory leaks"
+          command: |
+            grep -r "addEventListener" --include="*.js" --include="*.ts" | grep -v "removeEventListener"
+        - purpose: "Find static collections in Java"
+          command: |
+            grep -r "static.*List\|static.*Map\|static.*Set" --include="*.java"
+      expected_findings:
+        - "Code patterns that may cause leaks"
+        - "Unbounded data structures"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Leak Candidates Identified"
+        - "Growth Pattern Analysis"
+        - "Root Cause Hypotheses"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Consistent growth pattern verified over 7+ days with code evidence"
+    medium: "Growth pattern observed but correlation unclear"
+    low: "Suspected based on single metric or short timeframe"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "jvm-troubleshooting"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires extended metrics analysis"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "leak-001"
+    item: "No containers with sustained positive memory derivative"
+    level: "CRITICAL"
+    verification: |
+      curl -s 'http://prometheus:9090/api/v1/query?query=count(deriv(container_memory_working_set_bytes[24h])>0)' | jq '.data.result[0].value[1] | tonumber < 5'
+    expected: "true"
+
+  - id: "leak-002"
+    item: "Week-over-week memory growth under 10% for production services"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review top 10 memory consumers for growth patterns"
+    expected: "Confirmed by reviewer"
+
+  - id: "leak-003"
+    item: "No services relying on restart-based memory management"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Check for scheduled restarts masking leak issues"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.resource-utilization.memory-utilization"
+    - "performance-efficiency.resource-utilization.container-resource-limits"

@@ -1,0 +1,330 @@
+# ============================================================
+# AUDIT: Constraint Definition
+# ============================================================
+# Evaluates database constraint definitions including check constraints,
+# unique constraints, not null constraints, and domain constraints.
+# ============================================================
+
+audit:
+  id: "data-state-management.schema-design.constraint-definition"
+
+  name: "Constraint Definition"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "schema-design"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates database constraint definitions to ensure data
+    integrity is enforced at the database level. It examines check constraints,
+    unique constraints, not null constraints, default values, and domain
+    constraints. The audit identifies missing constraints that allow
+    invalid data and overly restrictive constraints that impede operations.
+
+  why_it_matters: |
+    Database constraints are the last line of defense for data integrity.
+    Application-level validation can be bypassed through direct database
+    access, bulk operations, or bugs. Missing constraints allow invalid
+    data that causes application errors, corrupts analytics, and violates
+    business rules. Proper constraints prevent data corruption at its source.
+
+  when_to_run:
+    - "During database schema design"
+    - "When data quality issues arise"
+    - "Before exposing database to new access methods"
+    - "After business rule changes"
+
+prerequisites:
+  required_artifacts:
+    - type: "database-schema"
+      description: "Database schema with constraint definitions"
+    - type: "business-rules"
+      description: "Business rules that should be enforced"
+
+  access_requirements:
+    - "Read access to database schemas and migrations"
+    - "Business requirements documentation"
+    - "Access to data validation rules"
+
+discovery:
+  code_patterns:
+    - pattern: "CHECK\\s*\\(|CONSTRAINT.*CHECK"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify check constraints"
+    - pattern: "NOT NULL|UNIQUE|DEFAULT"
+      type: "keyword"
+      scope: "source"
+      purpose: "Identify basic constraints"
+    - pattern: "CREATE DOMAIN|CREATE TYPE"
+      type: "keyword"
+      scope: "source"
+      purpose: "Identify custom domain/type constraints"
+
+  file_patterns:
+    - glob: "**/migrations/**/*.sql"
+      purpose: "Database migration files"
+    - glob: "**/schema/**/*.prisma"
+      purpose: "Prisma schema definitions"
+    - glob: "**/constraints/**/*.sql"
+      purpose: "Constraint-specific migration files"
+
+knowledge_sources:
+  specifications:
+    - id: "sql-standard-constraints"
+      name: "SQL Standard - Constraints"
+      url: "https://en.wikipedia.org/wiki/Check_constraint"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "postgres-constraints"
+      name: "PostgreSQL Constraints Documentation"
+      url: "https://www.postgresql.org/docs/current/ddl-constraints.html"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "schema-validator"
+      purpose: "Validate constraint coverage"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "psql"
+      purpose: "PostgreSQL constraint inspection"
+      command: "psql -c \"SELECT conname, contype, pg_get_constraintdef(oid) FROM pg_constraint;\""
+    - tool: "mysql"
+      purpose: "MySQL constraint inspection"
+      command: "mysql -e 'SELECT * FROM information_schema.CHECK_CONSTRAINTS'"
+
+signals:
+  critical:
+    - id: "CONST-CRIT-001"
+      signal: "Missing NOT NULL on required business fields"
+      evidence_pattern: "Columns without NOT NULL that represent required data"
+      explanation: |
+        Missing NOT NULL constraints allow null values in required fields,
+        causing NullPointerExceptions, broken business logic, and data
+        quality issues. Required fields should always have NOT NULL.
+      remediation: "Add NOT NULL constraints to all required columns; provide default values where appropriate"
+
+    - id: "CONST-CRIT-002"
+      signal: "Missing unique constraints on business-unique fields"
+      evidence_pattern: "Email, username, SKU columns without UNIQUE constraint"
+      explanation: |
+        Missing unique constraints allow duplicate values that violate
+        business rules. Duplicate emails cause login failures, duplicate
+        SKUs cause inventory chaos, etc.
+      remediation: "Add UNIQUE constraints on columns that must be unique per business rules"
+
+  high:
+    - id: "CONST-HIGH-001"
+      signal: "Missing check constraints on enumerated values"
+      evidence_pattern: "Status, type, category columns without CHECK constraint"
+      explanation: |
+        Without check constraints, invalid enum values can enter the database.
+        A 'status' column might contain typos or invalid states that break
+        application logic expecting specific values.
+      remediation: "Add CHECK constraints to enforce valid values for enumerated columns"
+
+    - id: "CONST-HIGH-002"
+      signal: "Missing range constraints on bounded values"
+      evidence_pattern: "Percentage, rating, age columns without CHECK (value >= 0)"
+      explanation: |
+        Bounded values without range constraints can contain invalid data.
+        Negative percentages, ratings above maximum, or invalid ages corrupt
+        calculations and reporting.
+      remediation: "Add CHECK constraints to enforce valid ranges (e.g., CHECK (percentage >= 0 AND percentage <= 100))"
+
+  medium:
+    - id: "CONST-MED-001"
+      signal: "Inconsistent default values across similar columns"
+      evidence_pattern: "created_at columns with different or missing defaults"
+      remediation: "Standardize default values for common column types"
+
+    - id: "CONST-MED-002"
+      signal: "Missing constraints on computed column dependencies"
+      evidence_pattern: "Computed columns without constraints ensuring valid inputs"
+      remediation: "Add constraints to ensure computed columns have valid input values"
+
+  low:
+    - id: "CONST-LOW-001"
+      signal: "Complex business rules only in application layer"
+
+  positive:
+    - id: "CONST-POS-001"
+      signal: "Comprehensive constraint coverage enforcing business rules"
+    - id: "CONST-POS-002"
+      signal: "Custom domain types for repeated constraint patterns"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Constraint Inventory"
+      description: |
+        Catalog all constraints in the schema including NOT NULL,
+        UNIQUE, CHECK, DEFAULT, and custom domain constraints.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find NOT NULL constraints"
+          command: "grep -riE 'NOT NULL' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -50"
+        - purpose: "Find UNIQUE constraints"
+          command: "grep -riE 'UNIQUE|@@unique' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -40"
+        - purpose: "Find CHECK constraints"
+          command: "grep -riE 'CHECK\\s*\\(' --include='*.sql' . 2>/dev/null | head -30"
+        - purpose: "Find DEFAULT values"
+          command: "grep -riE 'DEFAULT\\s+' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -40"
+
+      expected_findings:
+        - "Complete constraint inventory"
+        - "Constraint types in use"
+
+    - id: "2"
+      name: "Required Field Analysis"
+      description: |
+        Identify columns that should be required (NOT NULL) based on
+        business semantics and column naming.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find columns likely to be required (common patterns)"
+          command: "grep -riE '(name|email|title|type|status|created_at)\\s+(VARCHAR|TEXT|INT|TIMESTAMP)' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -40"
+        - purpose: "Check which have NOT NULL"
+          command: "grep -riE '(name|email|title|type|status|created_at).*NOT NULL' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -40"
+
+      expected_findings:
+        - "Required columns with/without NOT NULL"
+        - "Potential NOT NULL gaps"
+
+    - id: "3"
+      name: "Business Uniqueness Analysis"
+      description: |
+        Identify columns that should be unique per business rules
+        and verify constraints exist.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find potentially unique columns"
+          command: "grep -riE '(email|username|slug|sku|code|identifier|external_id)' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -40"
+        - purpose: "Check for unique constraints"
+          command: "grep -riE 'UNIQUE.*email|UNIQUE.*username|@@unique.*email' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -30"
+
+      expected_findings:
+        - "Business-unique columns with/without UNIQUE constraint"
+        - "Uniqueness gaps"
+
+    - id: "4"
+      name: "Value Range Analysis"
+      description: |
+        Identify columns with bounded ranges and verify
+        appropriate CHECK constraints exist.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find bounded value columns"
+          command: "grep -riE '(percentage|percent|ratio|rating|score|age|quantity|price|amount)' --include='*.sql' --include='*.prisma' . 2>/dev/null | head -40"
+        - purpose: "Check for range constraints"
+          command: "grep -riE 'CHECK.*>=|CHECK.*<=|CHECK.*BETWEEN' --include='*.sql' . 2>/dev/null | head -20"
+
+      expected_findings:
+        - "Bounded columns with/without CHECK constraints"
+        - "Range validation gaps"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Constraint Inventory"
+        - "Coverage Analysis"
+        - "Business Rule Alignment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct schema evidence of missing constraints on clearly required fields"
+    medium: "Likely constraint gaps based on column naming and business patterns"
+    low: "Potential issues requiring business rule verification"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "sql-standard-constraints"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed constraint analysis"
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "const-001"
+    item: "All constraints inventoried"
+    level: "CRITICAL"
+    verification: "grep -riE 'NOT NULL|UNIQUE|CHECK|DEFAULT' --include='*.sql' --include='*.prisma' . 2>/dev/null | wc -l | xargs -I{} echo PASS"
+    expected: "PASS"
+
+  - id: "const-002"
+    item: "Required fields have NOT NULL constraints"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify all required business fields have NOT NULL"
+    expected: "Confirmed by reviewer"
+
+  - id: "const-003"
+    item: "Unique business fields have UNIQUE constraints"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer should verify email, username, etc. have UNIQUE constraints"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "Data Integrity Standards"
+      controls: ["DI-003", "DI-004"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.schema-design.null-handling-strategy"
+    - "data-state-management.schema-design.data-modeling-quality"

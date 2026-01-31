@@ -1,0 +1,309 @@
+audit:
+  id: signal-processing-data-acquisition.adc-dac.adc-resolution-adequacy
+  name: ADC Resolution Adequacy Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: adc-dac
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: hardware-software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates whether ADC resolution is adequate for the signal
+    measurement requirements. It examines:
+    - ADC bit depth relative to signal dynamic range
+    - Effective Number of Bits (ENOB) vs. nominal resolution
+    - Quantization noise relative to signal level
+    - Resolution vs. accuracy trade-offs
+    - Multi-range or gain-ranging requirements
+    - Noise budget allocation for ADC quantization
+  why_it_matters: |
+    ADC resolution determines measurement precision:
+    - Quantization noise = LSB/sqrt(12), sets noise floor
+    - Dynamic range = 6.02*N + 1.76 dB for N-bit ADC
+    - ENOB accounts for real-world ADC imperfections
+    - Excessive resolution wastes cost and power without benefit
+    - Insufficient resolution loses signal information
+    - IEEE 1241 defines ADC characterization methods
+
+    Proper resolution selection balances measurement requirements against
+    cost, power, and data rate constraints.
+  when_to_run:
+  - Signal acquisition system design
+  - ADC selection and evaluation
+  - Measurement accuracy analysis
+  - System optimization reviews
+  - Cost-performance trade-off studies
+prerequisites:
+  required_artifacts:
+  - type: signal_specification
+    description: Signal dynamic range and accuracy requirements
+  - type: adc_datasheet
+    description: ADC specifications including ENOB
+  - type: system_requirements
+    description: Overall measurement accuracy requirements
+  access_requirements:
+  - Access to ADC specifications
+  - Signal level documentation
+  - Measurement requirements documentation
+discovery:
+  code_patterns:
+  - pattern: (adc|ADC)_(bits|resolution|width)\s*[=:]\s*\d+
+    type: regex
+    scope: source
+    purpose: Detect ADC resolution configuration
+  - pattern: (lsb|LSB|quantization)\s*[=:]
+    type: regex
+    scope: source
+    purpose: Detect quantization handling
+  - pattern: (gain|range|scale)_(select|config)
+    type: regex
+    scope: source
+    purpose: Detect range selection
+  - pattern: (dynamic_range|dr|snr)
+    type: regex
+    scope: source
+    purpose: Detect dynamic range calculations
+  file_patterns:
+  - glob: '**/adc*.{c,h,cpp,py}'
+    purpose: ADC driver files
+  - glob: '**/config*.{json,yaml,h}'
+    purpose: System configuration
+  - glob: '**/signal*.{c,h,py}'
+    purpose: Signal processing files
+knowledge_sources:
+  specifications:
+  - id: ieee-1241
+    name: IEEE 1241 - Standard for ADC Terminology and Test Methods
+    url: https://standards.ieee.org/standard/1241-2010.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: ti-adc-selection
+    name: Texas Instruments ADC Selection Guide
+    url: https://www.ti.com/lit/an/sbaa004/sbaa004.pdf
+    offline_cache: true
+  - id: analog-adc-tutorial
+    name: Analog Devices ADC Tutorial
+    url: https://www.analog.com/media/en/training-seminars/tutorials/MT-001.pdf
+    offline_cache: true
+signals:
+  critical:
+  - id: ADC-CRIT-001
+    signal: ADC resolution insufficient for signal dynamic range
+    evidence_indicators:
+    - Signal dynamic range exceeds ADC capability
+    - Quantization noise floor above signal minimum
+    - Loss of small signals in quantization noise
+    explanation: |
+      When ADC dynamic range (6*N dB) is less than signal dynamic range,
+      small signals are lost in quantization noise. For 12-bit ADC,
+      dynamic range is ~72dB; signals below this range are lost.
+    remediation: |
+      - Select ADC with adequate resolution for signal range
+      - Implement gain-ranging to extend effective dynamic range
+      - Use sigma-delta ADC for high resolution requirements
+      - Consider analog compression for wide dynamic range signals
+    cwe: CWE-682
+  - id: ADC-CRIT-002
+    signal: ENOB significantly below nominal resolution
+    evidence_indicators:
+    - ENOB specification << nominal bits
+    - No accounting for ENOB in accuracy analysis
+    - Actual noise exceeds theoretical quantization noise
+    explanation: |
+      Effective Number of Bits (ENOB) accounts for real ADC imperfections
+      including noise, distortion, and non-linearity. ENOB is typically
+      1-2 bits below nominal, meaning actual performance differs from
+      theoretical calculations.
+    remediation: |
+      - Use ENOB, not nominal bits, for accuracy analysis
+      - Select ADC with ENOB meeting requirements
+      - Measure actual ENOB if not adequately specified
+      - Add margin for ENOB in resolution selection
+    cwe: CWE-682
+  high:
+  - id: ADC-HIGH-001
+    signal: No gain-ranging for wide dynamic range signals
+    evidence_indicators:
+    - Fixed ADC range for signals > 60dB dynamic range
+    - Small signals lost in quantization
+    - Large signals clipped
+    explanation: |
+      Wide dynamic range signals require gain-ranging to maintain
+      resolution across the signal range. Without gain adjustment,
+      either small signals are lost or large signals clip.
+    remediation: |
+      - Implement programmable gain amplifier (PGA)
+      - Add automatic gain control (AGC)
+      - Use multiple simultaneous ranges with digital selection
+      - Consider logarithmic compression for extreme ranges
+  - id: ADC-HIGH-002
+    signal: Resolution excessive for application requirements
+    evidence_indicators:
+    - ADC resolution >> measurement requirements
+    - Unnecessary cost, power, and data rate impact
+    - Lower bits dominated by system noise
+    explanation: |
+      Excessive resolution wastes resources without benefit. If system
+      noise exceeds quantization noise, additional bits provide no
+      information. Cost and power scale with resolution.
+    remediation: |
+      - Match ADC resolution to actual measurement requirements
+      - Consider lower-resolution ADC with cost/power savings
+      - Use oversampling lower-resolution ADC if appropriate
+      - Document resolution selection rationale
+  medium:
+  - id: ADC-MED-001
+    signal: Quantization noise not included in error budget
+    evidence_indicators:
+    - Accuracy analysis ignores quantization noise
+    - Error budget missing ADC contribution
+    - Noise floor assumptions don't account for ADC
+    explanation: |
+      Quantization noise (LSB/sqrt(12)) is a fundamental contribution
+      to measurement uncertainty. Error budgets must include this
+      contribution for accurate total uncertainty calculation.
+    remediation: |
+      - Include quantization noise in error budget
+      - Calculate LSB from range and resolution
+      - Add RSS contribution to total noise
+      - Document ADC contribution to measurement uncertainty
+  - id: ADC-MED-002
+    signal: ADC input range not matched to signal level
+    evidence_indicators:
+    - Signal << ADC full scale range
+    - Effective resolution reduced by underutilization
+    - No front-end gain to match signal to ADC range
+    explanation: |
+      Using only a fraction of ADC range wastes resolution. A signal
+      using half the range loses 1 bit of effective resolution; using
+      1/10 of range loses ~3 bits.
+    remediation: |
+      - Add analog gain to match signal to ADC range
+      - Adjust ADC reference voltage if configurable
+      - Implement automatic range matching
+      - Document expected signal levels vs. ADC range
+  low:
+  - id: ADC-LOW-001
+    signal: ADC selection rationale not documented
+    evidence_indicators:
+    - ADC selection not linked to requirements
+    - No justification for resolution choice
+    - ENOB vs. requirements not analyzed
+    explanation: |
+      Without documentation, ADC selection cannot be verified as
+      appropriate. Substitutions or redesigns may inadvertently
+      select inadequate ADCs.
+    remediation: |
+      - Document signal dynamic range requirements
+      - Justify ADC resolution selection
+      - Record ENOB analysis and margin
+      - Include in system design documentation
+  positive:
+  - id: ADC-POS-001
+    signal: Well-matched ADC resolution with documented analysis
+    evidence_indicators:
+    - Resolution matches requirements with appropriate margin
+    - ENOB analysis documented
+    - Signal range properly matched to ADC range
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: measurement-engineer
+  steps:
+  - id: '1'
+    name: Resolution Requirements Analysis
+    description: |
+      Analyze signal requirements and compare to ADC specifications.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find ADC configuration
+      command: |
+        grep -rniE "(adc|ADC).*(bits|resolution|width)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -20
+    expected_findings:
+    - ADC resolution configuration
+    - Dynamic range requirements
+    - ENOB specifications
+  - id: '2'
+    name: Signal Range Analysis
+    description: |
+      Verify signal range utilizes ADC range effectively.
+    duration_estimate: 30 min
+    manual_verification: true
+    expected_findings:
+    - Signal level vs. ADC range
+    - Effective resolution utilization
+    - Range matching configuration
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Resolution Analysis
+    - Signal Range Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 2
+    signal-processing:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: adc-res-001
+  item: ADC resolution adequate for signal dynamic range
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify ADC dynamic range exceeds signal dynamic range
+  expected: Confirmed by reviewer
+- id: adc-res-002
+  item: ENOB accounts for real ADC performance
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify ENOB is used in accuracy calculations
+  expected: Confirmed by reviewer
+- id: adc-res-003
+  item: Signal range utilizes ADC range effectively
+  level: WARNING
+  verification: manual
+  verification_notes: Verify signal uses >50% of ADC range
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - embedded-systems
+    - iot-devices
+    - scientific-instruments
+    - industrial-control
+relationships:
+  commonly_combined:
+  - signal-processing.adc-dac.adc-linearity
+  - signal-processing.sampling.nyquist-compliance
+  - signal-processing.signal-conditioning.dynamic-range
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

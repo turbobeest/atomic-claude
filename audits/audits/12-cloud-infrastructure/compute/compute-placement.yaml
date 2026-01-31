@@ -1,0 +1,369 @@
+audit:
+  id: cloud-infrastructure.compute.compute-placement
+  name: Compute Placement
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: cloud-infrastructure
+  category_number: 12
+  subcategory: compute
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates compute placement strategies including placement groups,
+    dedicated hosts, affinity/anti-affinity rules, and geographic
+    distribution. Examines whether placement decisions optimize for
+    performance, reliability, compliance, and cost requirements.
+  why_it_matters: |
+    Proper compute placement affects network latency between instances,
+    hardware failure blast radius, and compliance with data residency
+    requirements. Cluster placement groups can reduce inter-instance
+    latency by 10x for HPC workloads. Spread placement limits correlated
+    failures. Poor placement can violate compliance requirements or
+    create performance bottlenecks.
+  when_to_run:
+  - Architecture design reviews
+  - Performance optimization projects
+  - Compliance assessments
+  - When deploying HPC or low-latency workloads
+prerequisites:
+  required_artifacts:
+  - type: cloud_access
+    description: Read access to compute configurations
+  - type: compliance_requirements
+    description: Data residency and compliance requirements
+  access_requirements:
+  - EC2/Compute instance configurations
+  - Placement group configurations
+  - Dedicated host inventory
+discovery:
+  metrics_queries:
+  - system: CloudWatch
+    query: |
+      SELECT AVG(NetworkLatency)
+      FROM CustomMetrics
+      WHERE ClusterName = '{cluster}'
+      GROUP BY InstanceId
+    purpose: Measure inter-instance network latency
+    threshold: < 1ms for cluster placement, < 100us for HPC
+  file_patterns:
+  - glob: '**/terraform/**/*placement*.tf'
+    purpose: Find Terraform placement configurations
+  - glob: '**/k8s/**/*affinity*.yaml'
+    purpose: Find Kubernetes affinity rules
+  - glob: '**/cloudformation/**/*.yaml'
+    purpose: Find CloudFormation placement settings
+knowledge_sources:
+  specifications:
+  - id: aws-placement-groups
+    name: AWS EC2 Placement Groups
+    url: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/placement-groups.html
+    offline_cache: true
+    priority: required
+  - id: aws-dedicated-hosts
+    name: AWS Dedicated Hosts
+    url: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/dedicated-hosts-overview.html
+    offline_cache: true
+    priority: required
+  - id: k8s-affinity
+    name: Kubernetes Affinity and Anti-Affinity
+    url: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-hpc-best-practices
+    name: AWS HPC Best Practices
+    url: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/hpc-best-practices.html
+    offline_cache: true
+  - id: gcp-sole-tenant
+    name: GCP Sole-Tenant Nodes
+    url: https://cloud.google.com/compute/docs/nodes/sole-tenant-nodes
+    offline_cache: true
+tooling:
+  infrastructure_tools:
+  - tool: AWS CLI
+    purpose: List placement groups
+    command: aws ec2 describe-placement-groups
+  - tool: AWS CLI
+    purpose: List dedicated hosts
+    command: aws ec2 describe-hosts
+  - tool: kubectl
+    purpose: Check pod affinity rules
+    command: kubectl get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.affinity}{"\n"}{end}'
+  monitoring_queries:
+  - system: CloudWatch
+    query: |
+      aws ec2 describe-instances
+      --filters "Name=placement-group-name,Values=*"
+      --query 'Reservations[].Instances[].{ID:InstanceId,PlacementGroup:Placement.GroupName}'
+    purpose: Identify instances in placement groups
+  scripts:
+  - id: placement-analyzer
+    language: bash
+    purpose: Analyze compute placement configurations
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Compute Placement Analysis ==="
+
+      # Placement Groups
+      echo "Placement Groups:"
+      aws ec2 describe-placement-groups \
+        --query 'PlacementGroups[].{Name:GroupName,Strategy:Strategy,State:State}' \
+        --output table
+
+      # Instances in Placement Groups
+      echo "Instances in Placement Groups:"
+      aws ec2 describe-instances \
+        --filters "Name=placement-group-name,Values=*" \
+        --query 'Reservations[].Instances[].{ID:InstanceId,Type:InstanceType,Group:Placement.GroupName,AZ:Placement.AvailabilityZone}' \
+        --output table
+
+      # Dedicated Hosts
+      echo "Dedicated Hosts:"
+      aws ec2 describe-hosts \
+        --query 'Hosts[].{ID:HostId,Type:InstanceType,AZ:AvailabilityZone,State:State}' \
+        --output table
+signals:
+  critical:
+  - id: PLACEMENT-CRIT-001
+    signal: Data residency violation - compute in non-compliant region
+    evidence_indicators:
+    - Instances in regions prohibited by compliance requirements
+    - Data processing in unauthorized geographies
+    explanation: |
+      Data residency violations can result in regulatory fines,
+      contract breaches, and legal liability. Some regulations
+      mandate specific geographic boundaries for data processing.
+    remediation: Relocate workloads to compliant regions immediately
+  - id: PLACEMENT-CRIT-002
+    signal: All cluster nodes on same physical host
+    evidence_indicators:
+    - No spread placement group for critical clusters
+    - No anti-affinity rules for Kubernetes pods
+    explanation: |
+      Co-location on single hardware creates complete failure
+      scenario if that host fails. Critical workloads need
+      hardware diversity.
+    remediation: Implement spread placement groups or anti-affinity rules
+  high:
+  - id: PLACEMENT-HIGH-001
+    signal: HPC workload not using cluster placement group
+    evidence_pattern: Low-latency workloads without placement groups
+    explanation: |
+      HPC and low-latency workloads benefit significantly from
+      cluster placement groups which provide 10x better inter-
+      instance latency than default placement.
+    remediation: Configure cluster placement groups for HPC workloads
+  - id: PLACEMENT-HIGH-002
+    signal: License-bound software not on dedicated hosts
+    evidence_indicators:
+    - BYOL software on shared tenancy instances
+    - Socket-based licenses without host control
+    explanation: |
+      Some software licenses require dedicated hosts for compliance.
+      Running on shared tenancy may violate license terms.
+    remediation: Migrate license-bound workloads to dedicated hosts
+  - id: PLACEMENT-HIGH-003
+    signal: Partition placement not used for large distributed systems
+    evidence_indicators:
+    - HDFS/Cassandra clusters without partition placement
+    - Distributed systems lacking rack awareness
+    explanation: |
+      Distributed systems with replication should use partition
+      placement to ensure replicas are on different hardware
+      partitions, providing rack-level failure isolation.
+    remediation: Configure partition placement groups for distributed data systems
+  medium:
+  - id: PLACEMENT-MED-001
+    signal: Placement strategy not documented
+    remediation: Document placement decisions and rationale
+  - id: PLACEMENT-MED-002
+    signal: Kubernetes topology spread constraints not configured
+    remediation: Configure topology spread for zone/node distribution
+  - id: PLACEMENT-MED-003
+    signal: Capacity reservations not used for critical workloads
+    remediation: Consider capacity reservations for guaranteed availability
+  low:
+  - id: PLACEMENT-LOW-001
+    signal: Placement group capacity not monitored
+    remediation: Monitor placement group capacity limits
+  positive:
+  - id: PLACEMENT-POS-001
+    signal: Appropriate placement strategy for workload type
+  - id: PLACEMENT-POS-002
+    signal: Compliance-aware regional placement
+  - id: PLACEMENT-POS-003
+    signal: Pod anti-affinity ensures zone distribution
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Placement Configuration Discovery
+    description: |
+      Identify all placement groups, dedicated hosts, and
+      affinity configurations in use.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List all placement groups
+      command: aws ec2 describe-placement-groups --query 'PlacementGroups[].{Name:GroupName,Strategy:Strategy,Partitions:PartitionCount}'
+        --output table
+    - purpose: List dedicated hosts
+      command: aws ec2 describe-hosts --query 'Hosts[].{ID:HostId,Type:InstanceType,AZ:AvailabilityZone,Instances:Instances[].InstanceId}'
+        --output yaml
+    - purpose: Check Kubernetes affinity rules
+      command: 'kubectl get deployments -A -o json | jq ''.items[] | select(.spec.template.spec.affinity
+        != null) | {name: .metadata.name, namespace: .metadata.namespace, affinity: .spec.template.spec.affinity}'''
+    expected_findings:
+    - Placement group inventory
+    - Dedicated host inventory
+    - Kubernetes affinity configurations
+  - id: '2'
+    name: Workload-Placement Alignment
+    description: |
+      Evaluate whether workloads are using appropriate placement
+      strategies based on their requirements.
+    duration_estimate: 45 min
+    questions:
+    - Are HPC workloads using cluster placement groups?
+    - Are distributed systems using spread/partition placement?
+    - Are license-bound workloads on dedicated hosts?
+    expected_findings:
+    - Workload-placement alignment matrix
+    - Misaligned placements requiring remediation
+  - id: '3'
+    name: Compliance Assessment
+    description: |
+      Verify compute placement meets data residency and
+      compliance requirements.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List instances by region
+      command: for region in $(aws ec2 describe-regions --query 'Regions[].RegionName' --output text);
+        do echo "=== $region ==="; aws ec2 describe-instances --region $region --query 'length(Reservations[].Instances[])'
+        --output text; done
+    questions:
+    - What are the data residency requirements?
+    - Are all workloads in compliant regions?
+    expected_findings:
+    - Regional distribution of compute
+    - Compliance gap analysis
+  - id: '4'
+    name: Performance Impact Analysis
+    description: |
+      Assess performance implications of current placement
+      decisions, especially for latency-sensitive workloads.
+    duration_estimate: 30 min
+    questions:
+    - What is the inter-instance latency for clustered workloads?
+    - Are network-intensive workloads co-located appropriately?
+    - Is there unnecessary cross-AZ traffic?
+    expected_findings:
+    - Latency measurements for clustered workloads
+    - Network optimization opportunities
+  - id: '5'
+    name: Recommendations Development
+    description: |
+      Generate specific placement optimization recommendations
+      based on workload requirements.
+    duration_estimate: 30 min
+    expected_findings:
+    - Placement optimization recommendations
+    - Migration plan for misaligned workloads
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Placement Configuration Review
+    - Compliance Assessment
+    - Performance Analysis
+    - Recommendations
+  confidence_guidance:
+    high: Full config access, workload requirements documented, performance data
+    medium: Config access with partial requirements
+    low: Limited config access
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-placement-groups
+      priority: required
+    - source_id: k8s-affinity
+      priority: required
+  limitations:
+  - Cannot access live configurations offline
+  - Performance metrics require runtime access
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed workload analysis
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: placement-001
+  item: Placement groups inventoried
+  level: BLOCKING
+  verification: aws ec2 describe-placement-groups --query 'length(PlacementGroups)' 2>/dev/null | grep
+    -qE '[0-9]+' && echo PASS || echo FAIL
+  expected: PASS
+- id: placement-002
+  item: Workload-placement alignment verified
+  level: BLOCKING
+  verification: manual
+  verification_notes: Confirm workloads use appropriate placement strategies
+  expected: Confirmed by reviewer
+- id: placement-003
+  item: Data residency compliance verified
+  level: CRITICAL
+  verification: manual
+  verification_notes: All compute in compliant regions for regulatory requirements
+  expected: Confirmed by reviewer
+- id: placement-004
+  item: Anti-affinity rules verified for critical workloads
+  level: WARNING
+  verification: manual
+  verification_notes: Critical workloads have hardware diversity
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: GDPR
+    controls:
+    - Data Residency
+  - framework: HIPAA
+    controls:
+    - Physical Safeguards
+  - framework: SOC 2
+    controls:
+    - CC6.4
+relationships:
+  commonly_combined:
+  - cloud-infrastructure.compute.compute-redundancy
+  - cloud-infrastructure.compute.instance-right-sizing
+  - cloud-infrastructure.networking.vpc-design

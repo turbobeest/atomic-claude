@@ -1,0 +1,357 @@
+audit:
+  id: human-organizational.team-structure.bus-factor
+  name: Bus Factor Analysis
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: human-organizational
+  category_number: 17
+  subcategory: team-structure
+  tier: expert
+  estimated_duration: 4 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: organizational
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Bus factor analysis identifies critical knowledge dependencies where
+    the loss of one or two individuals would significantly impact the
+    organization's ability to:
+    - Maintain and evolve systems
+    - Respond to incidents effectively
+    - Make key technical decisions
+    - Continue normal operations
+
+    This audit combines code analysis (commit history, code ownership),
+    organizational data (on-call coverage, escalation paths), and
+    interviews to identify single points of failure.
+  why_it_matters: |
+    Low bus factor creates existential risk for systems and teams:
+    - Unexpected departures can halt critical projects
+    - Incidents become crises when the only knowledgeable person is unavailable
+    - Knowledge loss is permanent when undocumented
+    - Remaining team members face impossible knowledge transfer burden
+
+    Organizations with healthy bus factors are resilient to change
+    and provide better work-life balance by not over-relying on individuals.
+  when_to_run:
+  - Quarterly as part of operational risk assessment
+  - When key engineers announce departure
+  - Before critical project phases
+  - During succession planning
+prerequisites:
+  required_artifacts:
+  - type: codebase
+    description: Git repositories with commit history
+  - type: organizational
+    description: Team roster and escalation paths
+  access_requirements:
+  - Read access to git repositories
+  - Access to on-call schedules and escalation procedures
+  - Interviews with team members and managers
+discovery:
+  code_patterns:
+  - pattern: git log --format='%an' | sort | uniq -c | sort -rn
+    type: keyword
+    scope: source
+    purpose: Identify commit concentration by author
+  file_patterns:
+  - glob: '**/*.{py,js,ts,java,rb,go,rs,cpp,c,cs}'
+    purpose: Analyze file-level ownership patterns
+  interviews:
+  - role: Engineering Managers
+    questions:
+    - Who are the go-to people for different systems?
+    - What happens when those people are unavailable?
+    - Are there areas only one person understands?
+    - What knowledge transfer efforts are ongoing?
+    purpose: Identify known single points of failure
+  - role: Individual Contributors
+    questions:
+    - Are there parts of the codebase only you work on?
+    - Who would take over if you were unavailable?
+    - What knowledge have you documented vs. hold in your head?
+    purpose: Self-identification of knowledge concentration
+  documents_to_review:
+  - type: On-call rotation
+    purpose: Identify if some people are always escalation targets
+  - type: Code review assignments
+    purpose: Find bottleneck reviewers
+  - type: Incident postmortems
+    purpose: Identify reliance on specific individuals
+knowledge_sources:
+  guides:
+  - id: bus-factor-wiki
+    name: Bus Factor - Wikipedia
+    url: https://en.wikipedia.org/wiki/Bus_factor
+    offline_cache: true
+  papers:
+  - id: code-ownership-study
+    title: Don't Touch My Code! - Examining the Effects of Ownership on Software Quality
+    url: https://dl.acm.org/doi/10.1145/2025113.2025119
+  learning_resources:
+  - id: knowledge-management
+    title: The Knowledge-Creating Company
+    type: book
+    reference: ISBN 978-0195092691
+tooling:
+  static_analysis:
+  - tool: git-fame
+    purpose: Analyze code ownership distribution
+    offline_capable: true
+  - tool: git-quick-stats
+    purpose: Generate contributor statistics
+    offline_capable: true
+  scripts:
+  - id: bus-factor-analysis
+    language: bash
+    purpose: Calculate basic bus factor metrics from git
+    source: inline
+    code: |
+      #!/bin/bash
+      # Calculate percentage of code by top contributor
+      TOTAL=$(git log --oneline | wc -l)
+      TOP_CONTRIBUTOR=$(git log --format='%an' | sort | uniq -c | sort -rn | head -1)
+      echo "Total commits: $TOTAL"
+      echo "Top contributor: $TOP_CONTRIBUTOR"
+
+      # Files touched only by one person
+      echo "Files with single contributor:"
+      git log --format='%H %an' --name-only | \
+      awk '/^[a-f0-9]/ {author=$2} /^[^a-f0-9]/ && NF>0 {print $0, author}' | \
+      sort | uniq | cut -d' ' -f1 | sort | uniq -c | \
+      awk '$1==1 {print $2}' | head -20
+signals:
+  critical:
+  - id: BUS-CRIT-001
+    signal: Bus factor of 1 for critical system
+    evidence_indicators:
+    - Only one person has committed to system in 6+ months
+    - All incident escalations go to same person
+    - No documentation exists for system
+    explanation: |
+      A bus factor of 1 means the loss of a single person would
+      critically impair the organization's ability to maintain,
+      troubleshoot, or evolve the system. This is unacceptable
+      for any production system.
+    remediation: Immediate knowledge transfer and documentation effort
+  - id: BUS-CRIT-002
+    signal: Single person holds organization-wide critical knowledge
+    evidence_indicators:
+    - One person is escalation target across multiple teams
+    - Key architectural decisions require single individual
+    - Infrastructure or security knowledge concentrated in one person
+    explanation: |
+      When critical cross-cutting knowledge is held by one person,
+      the entire organization becomes vulnerable. This often happens
+      with founding engineers or long-tenured specialists.
+    remediation: Structured knowledge transfer program with documentation
+  high:
+  - id: BUS-HIGH-001
+    signal: Bus factor of 2 or less for multiple critical systems
+    evidence_indicators:
+    - Fewer than 3 active contributors to critical repos
+    - Same 2 people always handle certain types of incidents
+    - Code reviews bottleneck on small group
+    explanation: |
+      While slightly better than bus factor of 1, a bus factor of 2
+      still presents significant risk, especially if both individuals
+      could be unavailable simultaneously (vacation, illness, departure).
+    remediation: Cross-train additional team members in critical areas
+  - id: BUS-HIGH-002
+    signal: Key person has announced departure with no successor
+    evidence_indicators:
+    - Person leaving holds critical knowledge
+    - No knowledge transfer plan exists
+    - Replacement not yet identified or hired
+    explanation: |
+      Impending departure of key knowledge holder without succession
+      plan will result in permanent knowledge loss.
+    remediation: Immediate intensive knowledge transfer and documentation
+  medium:
+  - id: BUS-MED-001
+    signal: Undocumented expertise concentration
+    evidence_indicators:
+    - Certain areas have informal 'owners' everyone relies on
+    - Knowledge exists but isn't documented
+    - New team members struggle to contribute in certain areas
+    remediation: Document and share concentrated knowledge
+  - id: BUS-MED-002
+    signal: Review bottlenecks
+    evidence_indicators:
+    - Certain code reviews always wait for specific person
+    - Some PRs blocked for days when reviewer unavailable
+    remediation: Train additional reviewers, document review criteria
+  low:
+  - id: BUS-LOW-001
+    signal: Historical knowledge concentration
+    evidence_indicators:
+    - Legacy code was written by one person, now maintained by team
+    - Original author would be helpful but not required
+    remediation: Continue gradual knowledge distribution
+  positive:
+  - id: BUS-POS-001
+    signal: Healthy knowledge distribution
+    evidence_indicators:
+    - Multiple contributors to all critical systems
+    - Any team member can handle common incidents
+    - Documentation enables independent work
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: risk_assessor
+  steps:
+  - id: '1'
+    name: Analyze Code Ownership
+    description: |
+      Run git analysis tools to identify:
+      - Commit concentration by author
+      - Files with single contributors
+      - Areas with declining contributor count
+    duration_estimate: 45 min
+    commands:
+    - purpose: Get commit counts by author
+      command: git log --format='%an' | sort | uniq -c | sort -rn | head -20
+    - purpose: Find files changed by only one person recently
+      command: git log --since='6 months ago' --format='%an' --name-only
+    expected_findings:
+    - Commit distribution across contributors
+    - List of single-contributor files
+  - id: '2'
+    name: Map Critical Systems
+    description: |
+      Identify which systems are most critical and
+      therefore have highest bus factor risk impact.
+    duration_estimate: 30 min
+    questions:
+    - Which systems would cause business impact if unmaintainable?
+    - Which systems are escalated to in incidents?
+    - What is the criticality tier of each system?
+    expected_findings:
+    - Prioritized list of systems for bus factor analysis
+  - id: '3'
+    name: Interview Knowledge Holders
+    description: |
+      Conduct interviews to identify tacit knowledge:
+      - What do you know that isn't written down?
+      - Who would struggle if you were unavailable?
+      - What questions do people always ask you?
+    duration_estimate: 1.5 hours
+    questions:
+    - What undocumented knowledge do key people hold?
+    - What would happen if key people left tomorrow?
+    - Are there active knowledge transfer efforts?
+    expected_findings:
+    - Map of tacit knowledge concentrations
+  - id: '4'
+    name: Review Operational Patterns
+    description: |
+      Analyze on-call data, incident history, and
+      escalation patterns for dependency indicators.
+    duration_estimate: 45 min
+    questions:
+    - Who gets paged or escalated to most often?
+    - Are certain people always required for resolution?
+    - What happens when those people are unavailable?
+    expected_findings:
+    - Operational single points of failure
+  - id: '5'
+    name: Calculate Bus Factor Scores
+    description: |
+      For each critical system, calculate:
+      - Number of people who can maintain it
+      - Number who can troubleshoot it
+      - Number who can make architectural decisions
+    duration_estimate: 30 min
+    expected_findings:
+    - Bus factor score per critical system
+    - Overall organizational bus factor assessment
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: bus_factor_map
+    format: tabular
+    sections:
+    - System Bus Factor Scores
+    - Key Personnel Dependencies
+    - Risk Heat Map
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Critical Risks
+    - Mitigation Recommendations
+  confidence_guidance:
+    high: Code analysis combined with interview validation
+    medium: Based on code analysis or interviews alone
+    low: Estimated based on limited data or assumptions
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: bus-factor-wiki
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires comprehensive analysis and interviews
+    full:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: bus-001
+  item: Critical systems identified
+  level: CRITICAL
+  verification: manual
+  verification_notes: List of critical systems documented
+  expected: Confirmed by reviewer
+- id: bus-002
+  item: Code ownership analysis completed
+  level: BLOCKING
+  verification: manual
+  verification_notes: Git analysis run on all critical repos
+  expected: Confirmed by reviewer
+- id: bus-003
+  item: Key interviews conducted
+  level: BLOCKING
+  verification: manual
+  verification_notes: Managers and key contributors interviewed
+  expected: Confirmed by reviewer
+- id: bus-004
+  item: Bus factor scores calculated
+  level: CRITICAL
+  verification: manual
+  verification_notes: Each critical system has bus factor rating
+  expected: Confirmed by reviewer
+- id: bus-005
+  item: Mitigation plan for critical risks
+  level: WARNING
+  verification: manual
+  verification_notes: Action items for bus factor of 1 or 2 systems
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.2
+  - framework: ISO 27001
+    controls:
+    - A.7.1
+relationships:
+  commonly_combined:
+  - human-organizational.team-structure.skill-coverage
+  - human-organizational.knowledge-management.tribal-knowledge-risk
+  - human-organizational.documentation.runbook-completeness

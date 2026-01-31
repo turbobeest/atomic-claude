@@ -1,0 +1,304 @@
+audit:
+  id: usability-interaction.forms-input.autofill-compatibility
+  name: Autofill Compatibility Assessment
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: usability-interaction
+  category_number: 14
+  subcategory: forms-input
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates whether forms are properly configured to support
+    browser autofill functionality. It examines the use of autocomplete
+    attributes, input types, name attributes, and form structure to ensure
+    browsers can accurately autofill user information.
+  why_it_matters: |
+    Browser autofill significantly reduces form completion time and errors.
+    Users have come to expect autofill support, and forms that don't work
+    with autofill frustrate users and slow down conversion. Proper autofill
+    also helps users with motor disabilities who find typing difficult.
+  when_to_run:
+  - When designing or building new forms
+  - When users report autofill not working
+  - During checkout optimization
+  - During accessibility audits
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Form component source code
+  - type: running_application
+    description: Access to test autofill behavior
+  access_requirements:
+  - Access to form component source files
+  - Browser with autofill data for testing
+discovery:
+  code_patterns:
+  - pattern: autocomplete=["']
+    type: regex
+    scope: source
+    purpose: Find autocomplete attribute usage
+  - pattern: autocomplete=["']off["']
+    type: regex
+    scope: source
+    purpose: Find disabled autofill
+  - pattern: name=["'](email|name|address|phone|tel|zip|postal)
+    type: regex
+    scope: source
+    purpose: Find inputs that should support autofill
+  file_patterns:
+  - glob: '**/*form*'
+    purpose: Find form components
+  - glob: '**/*checkout*'
+    purpose: Find checkout forms
+  - glob: '**/*address*'
+    purpose: Find address forms
+knowledge_sources:
+  specifications:
+  - id: html-autocomplete
+    name: HTML Autocomplete Attribute
+    url: https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#autofilling-form-controls:-the-autocomplete-attribute
+    offline_cache: true
+    priority: required
+  - id: wcag-autocomplete
+    name: WCAG 2.2 - Identify Input Purpose (1.3.5)
+    url: https://www.w3.org/WAI/WCAG22/Understanding/identify-input-purpose
+    offline_cache: true
+    priority: required
+  guides:
+  - id: web-dev-autofill
+    name: web.dev - Autofill
+    url: https://web.dev/learn/forms/autofill
+    offline_cache: true
+  - id: chrome-autofill
+    name: Chrome Autofill Documentation
+    url: https://developer.chrome.com/docs/web-platform/autofill
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: axe-core
+    purpose: Check for WCAG 1.3.5 compliance
+    offline_capable: true
+  scripts:
+  - id: autofill-analyzer
+    language: bash
+    purpose: Analyze autofill attribute usage
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Autocomplete Attributes ==="
+      grep -rn "autocomplete=" --include="*.jsx" --include="*.tsx" --include="*.html" | head -20
+
+      echo "=== Inputs Without Autocomplete ==="
+      grep -rn "<input\\|<Input" --include="*.jsx" --include="*.tsx" | \
+        grep -v "autocomplete" | head -20
+
+      echo "=== Autofill Disabled ==="
+      grep -rn "autocomplete=[\"']off[\"']\\|autocomplete=[\"']new-password[\"']" \
+        --include="*.jsx" --include="*.tsx" --include="*.html" | head -10
+signals:
+  critical:
+  - id: AUTOFILL-CRIT-001
+    signal: Personal data inputs missing autocomplete attributes
+    evidence_pattern: Name, email, address inputs without autocomplete attribute
+    explanation: |
+      WCAG 2.1 Level AA (1.3.5) requires inputs collecting user information
+      to have appropriate autocomplete attributes for accessibility.
+    remediation: Add appropriate autocomplete values (name, email, tel, street-address, etc.)
+  high:
+  - id: AUTOFILL-HIGH-001
+    signal: Autofill disabled without valid reason
+    evidence_pattern: autocomplete='off' on address or payment fields
+    explanation: |
+      Disabling autofill forces manual entry, frustrating users and
+      slowing conversion. Modern browsers often ignore autocomplete='off'.
+    remediation: Remove autocomplete='off' unless there's a valid security or UX reason
+  - id: AUTOFILL-HIGH-002
+    signal: Incorrect autocomplete values used
+    evidence_indicators:
+    - autocomplete='name' instead of 'given-name' or 'family-name'
+    - Non-standard autocomplete values
+    - Mismatched field purpose and autocomplete value
+    explanation: |
+      Incorrect values prevent browsers from autofilling correctly,
+      sometimes filling wrong data.
+    remediation: Use correct HTML standard autocomplete values for each field type
+  - id: AUTOFILL-HIGH-003
+    signal: Address fields not using address autofill tokens
+    evidence_pattern: Address fields without autocomplete='address-line1' etc.
+    explanation: |
+      Address autofill is one of the highest-value autofill features.
+      Missing attributes prevent this time-saving functionality.
+    remediation: Add shipping/billing prefixes and address-line1, address-line2, etc.
+  medium:
+  - id: AUTOFILL-MED-001
+    signal: Phone number field not configured for autofill
+    evidence_pattern: Phone input without autocomplete='tel'
+    remediation: Add autocomplete='tel' or 'tel-national' to phone fields
+  - id: AUTOFILL-MED-002
+    signal: Credit card fields missing autocomplete values
+    evidence_pattern: Payment fields without cc-name, cc-number, cc-exp, cc-csc
+    remediation: Add appropriate cc-* autocomplete values to payment fields
+  - id: AUTOFILL-MED-003
+    signal: Form not distinguishing shipping from billing
+    evidence_pattern: Address fields without 'shipping' or 'billing' prefix
+    remediation: Use 'shipping' or 'billing' prefix in autocomplete values
+  low:
+  - id: AUTOFILL-LOW-001
+    signal: Input names don't follow conventional patterns
+    evidence_indicators:
+    - Non-standard field names like 'cust_addr_1' instead of 'address'
+    - Abbreviated names that browsers may not recognize
+    remediation: Use recognizable field names alongside autocomplete attributes
+  - id: AUTOFILL-LOW-002
+    signal: Organization fields missing autocomplete
+    remediation: Add autocomplete='organization' to company name fields
+  positive:
+  - id: AUTOFILL-POS-001
+    signal: All personal data fields have correct autocomplete values
+  - id: AUTOFILL-POS-002
+    signal: Shipping and billing address properly distinguished
+  - id: AUTOFILL-POS-003
+    signal: Payment form fields fully configured for autofill
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Scan for Autocomplete Attributes
+    description: |
+      Search the codebase to identify current autocomplete attribute
+      usage patterns.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find autocomplete usage
+      command: grep -rn 'autocomplete=' --include='*.jsx' --include='*.tsx' --include='*.html' src/
+    - purpose: Find inputs that might need autocomplete
+      command: grep -rn 'name=["'\"']\(email\|name\|address\|phone\)' --include='*.jsx' --include='*.tsx'
+        src/
+    expected_findings:
+    - Current autocomplete usage
+    - Fields likely needing autocomplete
+  - id: '2'
+    name: Identify Missing Attributes
+    description: |
+      Compare personal data inputs against required autocomplete
+      values to identify gaps.
+    duration_estimate: 20 min
+    questions:
+    - Do all name fields have autocomplete='given-name' or 'family-name'?
+    - Do email fields have autocomplete='email'?
+    - Do address fields have appropriate autocomplete values?
+    - Are shipping and billing addresses distinguished?
+    expected_findings:
+    - Fields missing autocomplete attributes
+    - Fields with incorrect values
+  - id: '3'
+    name: Test Autofill Functionality
+    description: |
+      Test forms in a browser to verify autofill works correctly
+      for common use cases.
+    duration_estimate: 25 min
+    questions:
+    - Does browser autofill populate name fields correctly?
+    - Does address autofill work for full address?
+    - Does payment autofill work (if applicable)?
+    - Are there any fields autofill can't populate?
+    expected_findings:
+    - Autofill functionality verification
+    - Fields not working with autofill
+  - id: '4'
+    name: Review Disabled Autofill
+    description: |
+      Examine any instances of disabled autofill to determine
+      if the disabling is justified.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find disabled autofill
+      command: grep -rn 'autocomplete=["'\"']off' --include='*.jsx' --include='*.tsx' src/
+    questions:
+    - Is there a valid reason for disabling autofill?
+    - Could the reason be addressed without disabling autofill?
+    expected_findings:
+    - Justified vs unjustified autofill disabling
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Autocomplete Attribute Audit
+    - Functional Testing Results
+    - WCAG Compliance Status
+    - Recommendations
+  confidence_guidance:
+    high: Issues verified through code review and browser testing
+    medium: Issues identified through code review only
+    low: Potential issues based on pattern matching
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: html-autocomplete
+      priority: required
+    - source_id: wcag-autocomplete
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires browser testing for full assessment
+    full:
+      included: true
+      priority: 3
+closeout_checklist:
+- id: autofill-001
+  item: Personal data fields have autocomplete attributes
+  level: CRITICAL
+  verification: grep -rn 'autocomplete=' --include='*.jsx' --include='*.tsx' src/ | wc -l
+  expected: Count matches expected personal data inputs
+- id: autofill-002
+  item: Autofill tested and functional
+  level: BLOCKING
+  verification: manual
+  verification_notes: Test autofill in Chrome and Safari for key forms
+  expected: Confirmed by reviewer
+- id: autofill-003
+  item: No unjustified autocomplete='off' usage
+  level: WARNING
+  verification: manual
+  expected: No results or documented justification for each
+  verification_notes: 'Command has syntax issues - review: grep -rn ''autocomplete=["'']off'' --include=''*.jsx''
+    --include=''*.tsx'' src/'
+governance:
+  applicable_to:
+    archetypes:
+    - web-application
+    - mobile-application
+    - saas
+    - e-commerce
+  compliance_frameworks:
+  - framework: WCAG
+    controls:
+    - 1.3.5
+relationships:
+  commonly_combined:
+  - usability-interaction.forms-input.input-type-appropriateness
+  - usability-interaction.forms-input.form-length-complexity
+  - usability-interaction.mobile-touch.responsive-behavior

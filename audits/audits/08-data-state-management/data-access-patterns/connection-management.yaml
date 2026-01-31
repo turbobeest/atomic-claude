@@ -1,0 +1,396 @@
+# ============================================================
+# AUDIT: Connection Management
+# ============================================================
+
+audit:
+  id: "data-state-management.data-access-patterns.connection-management"
+  name: "Connection Management Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "data-state-management"
+  category_number: 8
+  subcategory: "data-access-patterns"
+
+  tier: "expert"
+  estimated_duration: "90 minutes"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "critical"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates database connection management including connection pooling,
+    connection lifecycle, leak prevention, timeout configuration, and
+    health checking. Analyzes whether connections are properly acquired,
+    used, and released.
+
+  why_it_matters: |
+    Database connections are expensive resources. Poor connection management
+    leads to connection leaks (exhausting the pool), connection storms (overloading
+    the database), and stale connections (causing errors). Proper pooling and
+    lifecycle management is essential for production stability.
+
+  when_to_run:
+    - "Production readiness reviews"
+    - "After connection-related incidents"
+    - "Scaling assessments"
+    - "Performance optimization"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application code with database connections"
+    - type: "configuration"
+      description: "Database connection configuration"
+
+  access_requirements:
+    - "Read access to application source code"
+    - "Access to database connection configuration"
+
+discovery:
+  code_patterns:
+    - pattern: "createPool|pool|Pool|connectionPool"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect connection pooling"
+
+    - pattern: "getConnection|acquire|borrow|checkout"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect connection acquisition"
+
+    - pattern: "release|close|end|destroy|return"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect connection release"
+
+    - pattern: "max.*connections|pool.*size|min.*idle"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect pool configuration"
+
+  file_patterns:
+    - glob: "**/database/**"
+      purpose: "Database configuration"
+    - glob: "**/*pool*.ts"
+      purpose: "Pool implementations"
+    - glob: "**/config/**db*"
+      purpose: "Database config files"
+
+knowledge_sources:
+  guides:
+    - id: "hikari-config"
+      name: "HikariCP Connection Pool Configuration"
+      url: "https://github.com/brettwooldridge/HikariCP/wiki/About-Pool-Sizing"
+      offline_cache: true
+
+    - id: "pg-pool"
+      name: "Node-postgres Pool Configuration"
+      url: "https://node-postgres.com/features/pooling"
+      offline_cache: true
+
+  learning_resources:
+    - id: "connection-pooling"
+      title: "Database Connection Pooling"
+      type: "article"
+      reference: "PostgreSQL Documentation"
+
+tooling:
+  static_analysis:
+    - tool: "resource-leak-detector"
+      purpose: "Detect unreleased connections"
+      offline_capable: true
+
+  infrastructure_tools:
+    - tool: "pg_stat_activity"
+      purpose: "Monitor PostgreSQL connections"
+      command: "SELECT * FROM pg_stat_activity"
+
+  scripts:
+    - id: "connection-management-scan"
+      language: "bash"
+      purpose: "Analyze connection management patterns"
+      source: "inline"
+      code: |
+        echo "=== Connection Management Analysis ==="
+        echo "--- Connection pool configuration ---"
+        grep -rn "pool\|Pool\|max.*connections\|min.*idle" \
+          --include="*.ts" --include="*.json" --include="*.yaml" --include="*.java" . 2>/dev/null | \
+          grep -v node_modules | head -30
+
+        echo "--- Connection acquisition ---"
+        grep -rn "getConnection\|acquire\|connect(" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+
+        echo "--- Connection release ---"
+        grep -rn "release\|close\|end\|finally.*connection" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+
+signals:
+  critical:
+    - id: "CM-CRIT-001"
+      signal: "Connections acquired but never released"
+      evidence_pattern: "getConnection without corresponding release in finally block"
+      explanation: |
+        Unreleased connections leak from the pool. Eventually the pool is
+        exhausted and new requests block waiting for connections, causing
+        application-wide failures.
+      remediation: "Always release connections in finally blocks or use try-with-resources"
+
+    - id: "CM-CRIT-002"
+      signal: "No connection pooling"
+      evidence_pattern: "Creating new connection for each request"
+      explanation: |
+        Creating connections is expensive (TCP handshake, authentication,
+        SSL negotiation). Without pooling, each request pays this cost.
+        Under load, connection creation can't keep up.
+      remediation: "Implement connection pooling with appropriate pool size"
+
+  high:
+    - id: "CM-HIGH-001"
+      signal: "Pool size not configured (using defaults)"
+      evidence_pattern: "Pool created without size configuration"
+      explanation: |
+        Default pool sizes are often too small or too large for the workload.
+        Too small causes queueing; too large wastes database resources and
+        can exceed database connection limits.
+      remediation: "Configure pool size based on workload analysis"
+
+    - id: "CM-HIGH-002"
+      signal: "No connection timeout configuration"
+      evidence_pattern: "Missing connectionTimeout or acquireTimeout"
+      explanation: |
+        Without timeout, threads waiting for connections block indefinitely.
+        A connection leak or overload causes cascading failures across
+        all application threads.
+      remediation: "Configure acquisition timeout with appropriate error handling"
+
+    - id: "CM-HIGH-003"
+      signal: "No connection health checking"
+      evidence_pattern: "No validation query or keepalive configuration"
+      explanation: |
+        Idle connections can become stale (firewalls close them, server
+        restarts). Using stale connections causes request failures.
+        Health checks evict bad connections before use.
+      remediation: "Configure connection validation and keepalive settings"
+
+  medium:
+    - id: "CM-MED-001"
+      signal: "Pool size larger than database max connections"
+      evidence_pattern: "App pool size 100 but PostgreSQL max_connections 50"
+      remediation: "Ensure sum of all pools doesn't exceed database limits"
+
+    - id: "CM-MED-002"
+      signal: "No connection leak detection"
+      evidence_pattern: "Missing leakDetectionThreshold or similar"
+      remediation: "Enable leak detection in development and staging"
+
+    - id: "CM-MED-003"
+      signal: "Long connection lifetimes without recycling"
+      evidence_pattern: "No maxLifetime configuration"
+      remediation: "Configure connection recycling to prevent stale connections"
+
+  low:
+    - id: "CM-LOW-001"
+      signal: "Connection pool metrics not exposed"
+      evidence_pattern: "No metrics for pool utilization"
+      remediation: "Expose pool metrics (active, idle, waiting) to monitoring"
+
+    - id: "CM-LOW-002"
+      signal: "Pool configuration not documented"
+      evidence_pattern: "No documentation of pool size rationale"
+      remediation: "Document pool sizing decisions and calculations"
+
+  positive:
+    - id: "CM-POS-001"
+      signal: "Properly configured connection pool"
+      evidence_pattern: "Pool with size, timeout, and health check configured"
+
+    - id: "CM-POS-002"
+      signal: "Connection metrics monitored"
+      evidence_pattern: "Pool metrics in monitoring dashboard"
+
+    - id: "CM-POS-003"
+      signal: "Leak detection enabled"
+      evidence_pattern: "Leak detection configured with appropriate threshold"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Review Pool Configuration"
+      description: |
+        Examine connection pool settings.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find pool configuration"
+          command: |
+            grep -rn "pool\|Pool\|createPool\|poolConfig" \
+              --include="*.ts" --include="*.json" --include="*.yaml" --include="*.java" . 2>/dev/null | \
+              grep -v node_modules | head -40
+        - purpose: "Find pool size settings"
+          command: |
+            grep -rn "max\|min\|size\|connections" \
+              --include="*.json" --include="*.yaml" --include="*.properties" . 2>/dev/null | \
+              grep -i "pool\|connection\|db" | head -20
+
+      expected_findings:
+        - "Pool configuration details"
+        - "Size and timeout settings"
+
+    - id: "2"
+      name: "Analyze Connection Lifecycle"
+      description: |
+        Check how connections are acquired and released.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find connection acquisition"
+          command: |
+            grep -rn "getConnection\|acquire\|client\s*=\s*await.*pool" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+        - purpose: "Find connection release patterns"
+          command: |
+            grep -rn "release\|close\|finally\|using\|try-with-resources" \
+              --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+              grep -v node_modules | head -30
+
+      expected_findings:
+        - "Acquisition patterns"
+        - "Release patterns"
+
+    - id: "3"
+      name: "Check Timeout Configuration"
+      description: |
+        Review timeout settings for connections.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find timeout settings"
+          command: |
+            grep -rn "timeout\|Timeout\|idle\|wait" \
+              --include="*.json" --include="*.yaml" --include="*.ts" . 2>/dev/null | \
+              grep -i "connection\|pool\|db" | head -30
+
+      expected_findings:
+        - "Timeout configuration"
+        - "Idle connection handling"
+
+    - id: "4"
+      name: "Review Health Checking"
+      description: |
+        Examine connection validation settings.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find health check configuration"
+          command: |
+            grep -rn "validation\|healthCheck\|keepalive\|ping\|SELECT 1" \
+              --include="*.ts" --include="*.java" --include="*.yaml" --include="*.json" . 2>/dev/null | \
+              grep -v node_modules | head -20
+
+      expected_findings:
+        - "Health check configuration"
+        - "Keepalive settings"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "pool_configuration"
+        - "lifecycle_analysis"
+        - "timeout_settings"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Pool Configuration"
+        - "Lifecycle Management"
+        - "Health and Monitoring"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear missing pool or unreleased connections"
+    medium: "Configuration exists but may be suboptimal"
+    low: "Requires load testing to confirm issues"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "hikari-config"
+        priority: "required"
+      - source_id: "pg-pool"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "cm-001"
+    item: "Connection pooling is enabled"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "pool\|Pool\|createPool" --include="*.ts" --include="*.java" --include="*.json" . 2>/dev/null | \
+        grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "cm-002"
+    item: "Pool size explicitly configured"
+    level: "CRITICAL"
+    verification: |
+      grep -rn "max.*=\|size.*=\|poolSize" --include="*.json" --include="*.yaml" --include="*.ts" . 2>/dev/null | \
+        grep -i "pool\|connection" | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "cm-003"
+    item: "Connection timeout configured"
+    level: "BLOCKING"
+    verification: |
+      grep -rn "timeout\|Timeout" --include="*.json" --include="*.yaml" . 2>/dev/null | \
+        grep -i "connection\|acquire\|pool" | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Reliability", "Performance Efficiency"]
+
+relationships:
+  commonly_combined:
+    - "data-state-management.data-access-patterns.repository-pattern"
+    - "reliability-resilience.resource-management.connection-pooling"
+    - "observability-instrumentation.metrics.database-metrics"

@@ -1,0 +1,334 @@
+# ============================================================
+# AUDIT FILE: Environment Parity
+# ============================================================
+# Evaluates consistency and parity between development, staging,
+# and production environments to minimize "works on my machine" issues.
+# ============================================================
+
+audit:
+  id: "devops-ci-cd.environment-management.environment-parity"
+  name: "Environment Parity Assessment"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "environment-management"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines the degree of parity between development, staging,
+    and production environments. It evaluates infrastructure configuration,
+    service versions, data schemas, feature flags, and environment variables
+    to identify drift that could cause deployment failures or unexpected
+    behavior in production.
+
+  why_it_matters: |
+    Environment drift is a leading cause of deployment failures and production
+    incidents. When development and staging environments differ significantly
+    from production, bugs that pass testing may manifest only in production.
+    Maintaining parity reduces deployment risk, improves developer confidence,
+    and accelerates incident diagnosis.
+
+  when_to_run:
+    - "Before major releases"
+    - "After infrastructure changes"
+    - "Following production incidents caused by environment differences"
+    - "Quarterly environment health checks"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure_config"
+      description: "IaC definitions (Terraform, CloudFormation, Pulumi)"
+    - type: "deployment_manifests"
+      description: "Kubernetes manifests, Docker Compose files, or equivalent"
+
+  access_requirements:
+    - "Read access to all environment configurations"
+    - "Access to infrastructure state files"
+    - "Permission to query environment metadata"
+
+discovery:
+  file_patterns:
+    - glob: "**/terraform/**/*.tf"
+      purpose: "Terraform infrastructure definitions"
+    - glob: "**/cloudformation/**/*.yaml"
+      purpose: "CloudFormation templates"
+    - glob: "**/k8s/**/*.yaml"
+      purpose: "Kubernetes manifests"
+    - glob: "**/docker-compose*.yaml"
+      purpose: "Docker Compose configurations"
+    - glob: "**/.env*"
+      purpose: "Environment variable files"
+
+  code_patterns:
+    - pattern: "(dev|staging|prod|production)"
+      type: "keyword"
+      scope: "config"
+      purpose: "Environment-specific configuration blocks"
+    - pattern: "image:\\s*[^:]+:(latest|\\d+\\.\\d+)"
+      type: "regex"
+      scope: "config"
+      purpose: "Container image version specifications"
+
+knowledge_sources:
+  guides:
+    - id: "twelve-factor"
+      name: "The Twelve-Factor App - Dev/Prod Parity"
+      url: "https://12factor.net/dev-prod-parity"
+      offline_cache: true
+    - id: "gitops-principles"
+      name: "GitOps Principles"
+      url: "https://opengitops.dev/"
+      offline_cache: true
+
+  specifications:
+    - id: "cncf-gitops"
+      name: "CNCF GitOps Working Group Principles"
+      url: "https://github.com/open-gitops/documents"
+      offline_cache: true
+      priority: "recommended"
+
+tooling:
+  infrastructure_tools:
+    - tool: "terraform"
+      purpose: "Compare Terraform state across environments"
+      command: "terraform state list"
+    - tool: "kubectl"
+      purpose: "Compare Kubernetes resources across clusters"
+      command: "kubectl get all -o yaml"
+    - tool: "diff"
+      purpose: "Compare configuration files"
+      command: "diff -r env/staging env/production"
+
+  scripts:
+    - id: "env-parity-check"
+      language: "bash"
+      purpose: "Compare environment configurations"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Compare key configurations between environments
+        for env in staging production; do
+          echo "=== Checking $env environment ==="
+          if [ -f "env/$env/versions.yaml" ]; then
+            cat "env/$env/versions.yaml"
+          fi
+        done
+
+signals:
+  critical:
+    - id: "ENVPAR-CRIT-001"
+      signal: "Database schema version mismatch between staging and production"
+      evidence_pattern: "migration.*version|schema.*version"
+      explanation: |
+        Database schema differences between environments can cause data
+        corruption, application crashes, or silent data loss when code
+        that expects one schema encounters another.
+      remediation: "Synchronize database migrations across all environments before deployment"
+
+    - id: "ENVPAR-CRIT-002"
+      signal: "Critical service version differs by major version between environments"
+      evidence_pattern: "image:.*:(\\d+)\\."
+      explanation: |
+        Major version differences in critical services indicate breaking API
+        changes that have not been tested in the deployment pipeline.
+      remediation: "Align service versions across environments; implement version pinning"
+
+  high:
+    - id: "ENVPAR-HIGH-001"
+      signal: "Infrastructure resource specifications significantly differ"
+      evidence_pattern: "cpu|memory|replicas|instance_type"
+      explanation: |
+        Significant resource differences can mask performance issues and
+        capacity problems until production deployment.
+      remediation: "Use proportional resource scaling or identical specifications"
+
+    - id: "ENVPAR-HIGH-002"
+      signal: "Environment variables present in production but missing in staging"
+      evidence_pattern: "env:\\s*-.*name:"
+      explanation: |
+        Missing environment variables in lower environments prevent proper
+        testing of configuration-dependent behavior.
+      remediation: "Maintain environment variable parity with placeholder or test values"
+
+  medium:
+    - id: "ENVPAR-MED-001"
+      signal: "Container image tags use 'latest' in any environment"
+      evidence_pattern: "image:.*:latest"
+      remediation: "Pin all container images to specific versions or SHA digests"
+
+    - id: "ENVPAR-MED-002"
+      signal: "Different cloud regions used without documented justification"
+      evidence_pattern: "region.*=|availability_zone"
+      remediation: "Document region selection rationale; consider multi-region parity"
+
+  low:
+    - id: "ENVPAR-LOW-001"
+      signal: "Minor version differences in non-critical dependencies"
+
+  positive:
+    - id: "ENVPAR-POS-001"
+      signal: "All environments use identical IaC modules with environment-specific variables only"
+    - id: "ENVPAR-POS-002"
+      signal: "Automated drift detection configured and alerting"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory environment configurations"
+      description: |
+        Collect and catalog all configuration sources for each environment
+        including IaC, manifests, environment variables, and feature flags.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find all Terraform configurations"
+          command: "find . -name '*.tf' -type f | head -50"
+        - purpose: "Find all Kubernetes manifests"
+          command: "find . -name '*.yaml' -path '*k8s*' | head -50"
+      expected_findings:
+        - "Complete list of configuration files per environment"
+        - "Identification of configuration management approach"
+
+    - id: "2"
+      name: "Compare infrastructure definitions"
+      description: |
+        Systematically compare infrastructure definitions between environments
+        identifying resource specification differences.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Compare Terraform modules between environments"
+          command: "diff -r terraform/staging terraform/production 2>/dev/null || echo 'Directories differ or not found'"
+      expected_findings:
+        - "List of infrastructure resource differences"
+        - "Identification of intentional vs accidental drift"
+
+    - id: "3"
+      name: "Analyze service version alignment"
+      description: |
+        Compare deployed service versions across environments to identify
+        version drift and pinning practices.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Extract image versions from Kubernetes manifests"
+          command: "grep -rh 'image:' k8s/ 2>/dev/null | sort -u || echo 'No k8s directory'"
+      expected_findings:
+        - "Service version comparison table"
+        - "Identification of unpinned versions"
+
+    - id: "4"
+      name: "Review environment variable parity"
+      description: |
+        Compare environment variables between environments identifying
+        missing, extra, or significantly different values.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "List environment variable files"
+          command: "find . -name '.env*' -o -name 'env*.yaml' 2>/dev/null | head -20"
+      expected_findings:
+        - "Environment variable comparison across environments"
+        - "Identification of secrets management approach"
+
+    - id: "5"
+      name: "Document drift and remediation plan"
+      description: |
+        Compile findings into actionable report with prioritized
+        remediation recommendations.
+      duration_estimate: "45 min"
+      expected_findings:
+        - "Prioritized drift inventory"
+        - "Remediation roadmap with effort estimates"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Environment Comparison Matrix"
+        - "Critical Drift Items"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct comparison of configuration files with verified deployment state"
+    medium: "Configuration file analysis without runtime verification"
+    low: "Inference from partial configuration access"
+
+offline:
+  capability: "partial"
+  cache_manifest:
+    knowledge:
+      - source_id: "twelve-factor"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires comprehensive environment comparison"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "envpar-001"
+    item: "All environments use version-pinned container images"
+    level: "CRITICAL"
+    verification: "grep -rE 'image:.*:latest' k8s/ 2>/dev/null && echo 'FAIL' || echo 'PASS'"
+    expected: "PASS"
+
+  - id: "envpar-002"
+    item: "Infrastructure modules are shared across environments"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify IaC uses modules with environment-specific variables"
+    expected: "Confirmed by reviewer"
+
+  - id: "envpar-003"
+    item: "Environment variable sets are consistent"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Compare env var names across environment config files"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC2"
+      controls: ["CC7.1", "CC8.1"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.environment-management.environment-provisioning"
+    - "devops-ci-cd.environment-management.environment-documentation"

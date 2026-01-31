@@ -1,0 +1,322 @@
+# ============================================================
+# AUDIT: Resource Modeling Assessment
+# ============================================================
+# Evaluates API resource design, relationships, and naming
+# ============================================================
+
+audit:
+  id: "api-integration.api-design.resource-modeling"
+
+  name: "Resource Modeling Assessment"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "api-integration"
+  category_number: 9
+  subcategory: "api-design"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates how API resources are modeled, named, and related. Examines
+    resource granularity, collection vs singleton patterns, sub-resource
+    hierarchies, relationship modeling (embedding vs linking), and
+    consistency of resource representations across endpoints.
+
+  why_it_matters: |
+    Poor resource modeling leads to chatty APIs (too many calls), over-fetching
+    (wasted bandwidth), tight coupling between client and server, and confusion
+    for API consumers. Well-modeled resources enable intuitive APIs, efficient
+    data transfer, and independent evolution of client and server.
+
+  when_to_run:
+    - "During API design phase"
+    - "Before major API releases"
+    - "When adding new resource types"
+    - "During API consolidation efforts"
+
+prerequisites:
+  required_artifacts:
+    - type: "api-source"
+      description: "API route definitions and resource schemas"
+    - type: "data-models"
+      description: "Entity/domain model definitions"
+
+  access_requirements:
+    - "Read access to API source code"
+    - "Access to data model definitions"
+
+discovery:
+  code_patterns:
+    - pattern: "class.*Resource|.*DTO|.*Response|.*Request"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify resource/DTO classes"
+    - pattern: "@Entity|@Document|@Table"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify domain entities"
+    - pattern: "components:\\s*schemas:|definitions:"
+      type: "regex"
+      scope: "config"
+      purpose: "OpenAPI schema definitions"
+
+  file_patterns:
+    - glob: "**/models/**/*.{java,ts,py}"
+      purpose: "Domain models"
+    - glob: "**/dto/**/*.{java,ts,py}"
+      purpose: "Data transfer objects"
+    - glob: "**/resources/**/*.{java,ts,py}"
+      purpose: "API resource definitions"
+    - glob: "**/*openapi*.{yaml,yml,json}"
+      purpose: "OpenAPI specifications"
+
+knowledge_sources:
+  specifications:
+    - id: "json-api"
+      name: "JSON:API Specification"
+      url: "https://jsonapi.org/format/"
+      offline_cache: true
+      priority: "recommended"
+    - id: "openapi-spec"
+      name: "OpenAPI Specification"
+      url: "https://spec.openapis.org/oas/latest.html"
+      offline_cache: true
+      priority: "recommended"
+    - id: "owasp-api-security"
+      name: "OWASP API Security Top 10"
+      url: "https://owasp.org/API-Security/"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "api-design-patterns"
+      name: "API Design Patterns"
+      url: "https://www.manning.com/books/api-design-patterns"
+      offline_cache: false
+    - id: "rest-cookbook"
+      name: "RESTful Web Services Cookbook"
+      url: "https://www.oreilly.com/library/view/restful-web-services/9780596809140/"
+      offline_cache: false
+
+tooling:
+  static_analysis:
+    - tool: "spectral"
+      purpose: "Lint OpenAPI for resource patterns"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "RES-CRIT-001"
+      signal: "Resources exposing internal database IDs directly"
+      evidence_pattern: "_id|primaryKey|pk_|auto_increment"
+      explanation: |
+        Exposing internal database identifiers couples clients to database
+        implementation, prevents database changes, and may leak information
+        about data volume or creation order.
+      remediation: "Use UUIDs or opaque identifiers for external resource IDs"
+
+    - id: "RES-CRIT-002"
+      signal: "Single god resource returning entire object graph"
+      evidence_pattern: "include=all|expand=\\*|depth=unlimited"
+      explanation: |
+        Resources that return deeply nested complete object graphs create
+        performance issues, prevent caching, and tightly couple clients to
+        the entire data model structure.
+      remediation: "Design focused resources with explicit relationship expansion"
+
+  high:
+    - id: "RES-HIGH-001"
+      signal: "Inconsistent resource naming (singular/plural mixing)"
+      evidence_pattern: "/user/|/users/.*and.*/order/|/orders/"
+      explanation: |
+        Mixing singular and plural resource names creates confusion and makes
+        the API harder to use. Clients cannot predict endpoint patterns.
+      remediation: "Standardize on plural nouns for collections (/users, /orders)"
+
+    - id: "RES-HIGH-002"
+      signal: "Deeply nested sub-resource paths (>3 levels)"
+      evidence_pattern: "/[^/]+/[^/]+/[^/]+/[^/]+/[^/]+/"
+      explanation: |
+        Deeply nested URLs are hard to read, understand, and cache. They also
+        create tight coupling between resource hierarchies.
+      remediation: "Flatten to max 2-3 levels: /users/{id}/orders instead of /orgs/{id}/users/{id}/orders/{id}/items"
+
+  medium:
+    - id: "RES-MED-001"
+      signal: "Resources lacking pagination for collections"
+      evidence_pattern: "return.*findAll|getAll.*return"
+      remediation: "Implement cursor or offset pagination for all collection endpoints"
+
+    - id: "RES-MED-002"
+      signal: "No resource filtering or sparse fieldsets"
+      evidence_indicators:
+        - "No fields parameter support"
+        - "No filter query parameters"
+      remediation: "Support field selection (fields=name,email) and filtering"
+
+  low:
+    - id: "RES-LOW-001"
+      signal: "Missing resource metadata (createdAt, updatedAt)"
+      remediation: "Include standard metadata fields for auditing and caching"
+
+  positive:
+    - id: "RES-POS-001"
+      signal: "Consistent resource naming and structure across API"
+    - id: "RES-POS-002"
+      signal: "Well-documented resource relationships with links"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Catalog Resource Types"
+      description: |
+        Identify all resource types defined in the API by examining
+        DTOs, response objects, and OpenAPI schemas.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find DTO/Response classes"
+          command: "grep -rn 'class.*\\(DTO\\|Response\\|Resource\\)' --include='*.java' --include='*.ts' --include='*.py' ."
+        - purpose: "Find OpenAPI schema definitions"
+          command: "grep -rn 'schemas:\\|definitions:' -A50 --include='*.yaml' --include='*.yml' ."
+      expected_findings:
+        - "List of all resource types"
+        - "Resource field definitions"
+
+    - id: "2"
+      name: "Analyze Resource Naming"
+      description: |
+        Check for consistent naming conventions across resources.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Extract endpoint paths"
+          command: "grep -rEo '\"/(api/)?[a-zA-Z]+(/[{:][a-zA-Z]+[}]?)*\"' --include='*.java' --include='*.ts' --include='*.py' . | sort -u"
+        - purpose: "Check for naming inconsistencies"
+          command: "grep -rEo '/[a-z]+s?/' --include='*.java' --include='*.ts' . | sort | uniq -c | sort -rn | head -20"
+      expected_findings:
+        - "Naming convention patterns"
+        - "Singular/plural inconsistencies"
+
+    - id: "3"
+      name: "Evaluate Relationship Modeling"
+      description: |
+        Examine how resources relate to each other and how relationships
+        are represented in responses.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find nested resource patterns"
+          command: "grep -rn '/[a-z]+/\\{.*\\}/[a-z]+' --include='*.java' --include='*.ts' --include='*.py' ."
+        - purpose: "Find embedded relationships"
+          command: "grep -rn 'embed\\|include\\|expand\\|_embedded' --include='*.java' --include='*.ts' --include='*.py' ."
+      expected_findings:
+        - "Sub-resource hierarchy depth"
+        - "Embedding vs linking patterns"
+
+    - id: "4"
+      name: "Check Collection Patterns"
+      description: |
+        Verify that collection resources support pagination and filtering.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find pagination implementation"
+          command: "grep -rn 'page\\|limit\\|offset\\|cursor\\|Pageable' --include='*.java' --include='*.ts' --include='*.py' ."
+        - purpose: "Find filter parameter handling"
+          command: "grep -rn 'filter\\|query\\|search\\|where' --include='*.java' --include='*.ts' --include='*.py' . | grep -i param"
+      expected_findings:
+        - "Pagination implementation approach"
+        - "Filtering capabilities"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Resource Catalog"
+        - "Key Findings"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear patterns in code and OpenAPI specs"
+    medium: "Patterns visible but incomplete coverage"
+    low: "Limited resource definitions found"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "json-api"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires thorough resource analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "resource-001"
+    item: "Resources use opaque external identifiers"
+    level: "CRITICAL"
+    verification: |
+      if grep -rq 'auto_increment\|primaryKey.*exposed\|pk_.*return' --include='*.java' --include='*.ts' --include='*.py' . 2>/dev/null; then echo "FAIL"; else echo "PASS"; fi
+    expected: "PASS"
+
+  - id: "resource-002"
+    item: "Consistent resource naming convention"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms consistent plural/singular naming"
+    expected: "Confirmed by reviewer"
+
+  - id: "resource-003"
+    item: "Collection endpoints support pagination"
+    level: "BLOCKING"
+    verification: |
+      if grep -rq 'findAll\|getAll' --include='*.java' --include='*.ts' --include='*.py' . 2>/dev/null && ! grep -rq 'page\|limit\|Pageable\|cursor' --include='*.java' --include='*.ts' --include='*.py' . 2>/dev/null; then echo "FAIL"; else echo "PASS"; fi
+    expected: "PASS"
+
+  - id: "resource-004"
+    item: "Sub-resource nesting depth <= 3"
+    level: "WARNING"
+    verification: |
+      if grep -rEq '/[^/]+/[^/]+/[^/]+/[^/]+/[^/]+/[^/]+/' --include='*.java' --include='*.ts' --include='*.py' . 2>/dev/null; then echo "FAIL"; else echo "PASS"; fi
+    expected: "PASS"
+
+governance:
+  applicable_to:
+    archetypes: ["api-service", "microservice", "backend"]
+
+relationships:
+  commonly_combined:
+    - "api-integration.api-design.url-design"
+    - "api-integration.api-design.rest-maturity-level"
+    - "api-integration.api-contracts.request-response-schema"

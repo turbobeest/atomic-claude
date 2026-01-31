@@ -1,0 +1,385 @@
+# ============================================================
+# AUDIT: Read-Your-Writes Consistency Audit
+# ============================================================
+# Evaluates read-your-writes consistency guarantees to ensure
+# users see their own updates immediately.
+# ============================================================
+
+# ============================================================
+# SECTION 1: IDENTITY & METADATA
+# ============================================================
+
+audit:
+  id: "reliability-resilience.data-consistency.read-your-writes-consistency"
+
+  name: "Read-Your-Writes Consistency Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "data-consistency"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+# ============================================================
+# SECTION 2: EXECUTION CLASSIFICATION
+# ============================================================
+
+execution:
+  automatable: "partial"
+
+  severity: "high"
+
+  scope: "architecture"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+# ============================================================
+# SECTION 3: DESCRIPTION & RATIONALE
+# ============================================================
+
+description:
+  what: |
+    Evaluates read-your-writes (RYW) consistency guarantees across
+    the system. Assesses whether users can always read back data
+    they have written, even in distributed systems with replication
+    lag or caching.
+
+  why_it_matters: |
+    Users expect to see their changes immediately after making them.
+    A user who submits a form and then sees their old data thinks
+    the operation failed. RYW violations cause confusion, duplicate
+    submissions, and erode trust in the system.
+
+  when_to_run:
+    - "When designing read/write architectures"
+    - "After user complaints about missing updates"
+    - "When adding caching or read replicas"
+    - "During UX-focused reviews"
+
+# ============================================================
+# SECTION 4: PREREQUISITES
+# ============================================================
+
+prerequisites:
+  required_artifacts:
+    - type: "architecture_docs"
+      description: "System architecture showing read/write paths"
+    - type: "application_code"
+      description: "Data access layer code"
+    - type: "infrastructure_config"
+      description: "Caching and replication configurations"
+
+  access_requirements:
+    - "Architecture documentation access"
+    - "Application code repository access"
+    - "Cache and database configuration access"
+
+# ============================================================
+# SECTION 5: DISCOVERY SPECIFICATION
+# ============================================================
+
+discovery:
+  code_patterns:
+    - pattern: "read.replica|ReadReplica|secondary"
+      type: "regex"
+      scope: "source"
+      purpose: "Find read replica usage"
+    - pattern: "cache\\.|Cache\\.|redis\\.|Redis\\."
+      type: "regex"
+      scope: "source"
+      purpose: "Find caching implementations"
+    - pattern: "stickysession|sticky.session|session.affinity"
+      type: "regex"
+      scope: "source"
+      purpose: "Find session affinity configurations"
+
+  file_patterns:
+    - glob: "**/database/**/*.yaml"
+      purpose: "Database routing configurations"
+    - glob: "**/cache/**/*.py"
+      purpose: "Cache implementation"
+
+  interviews:
+    - role: "Backend Engineers"
+      questions:
+        - "Are read replicas used? How is read routing determined?"
+        - "What caching layer exists between writes and reads?"
+        - "Have users reported seeing stale data after updates?"
+      purpose: "Understand read/write architecture"
+
+# ============================================================
+# SECTION 6: EXTERNAL KNOWLEDGE SOURCES
+# ============================================================
+
+knowledge_sources:
+  papers:
+    - id: "session-guarantees"
+      title: "Session Guarantees for Weakly Consistent Replicated Data"
+      url: "https://www.cs.utexas.edu/~dahlin/Classes/GradOS/papers/SessionGuarantees.pdf"
+
+  guides:
+    - id: "aws-rds-routing"
+      name: "AWS RDS Proxy Connection Routing"
+      url: "https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/rds-proxy.html"
+      offline_cache: true
+
+# ============================================================
+# SECTION 7: TOOLING & AUTOMATION
+# ============================================================
+
+tooling:
+  infrastructure_tools:
+    - tool: "AWS CLI"
+      purpose: "Check RDS replica lag"
+      command: "aws cloudwatch get-metric-statistics --namespace AWS/RDS --metric-name ReplicaLag"
+    - tool: "Redis CLI"
+      purpose: "Check cache TTL"
+      command: "redis-cli TTL key"
+
+  scripts:
+    - id: "test-ryw"
+      language: "python"
+      purpose: "Test read-your-writes consistency"
+      source: "inline"
+      code: |
+        # Write data then immediately read back
+        # Verify written data is returned
+        pass
+
+# ============================================================
+# SECTION 8: SIGNALS & FINDINGS TAXONOMY
+# ============================================================
+
+signals:
+  critical:
+    - id: "RYW-CRIT-001"
+      signal: "Writes go to primary but reads from stale replica"
+      evidence_indicators:
+        - "Write to primary, read from replica"
+        - "No mechanism to route reads after writes"
+      explanation: |
+        When writes go to primary and subsequent reads go to
+        replicas with lag, users see stale data causing confusion
+        and potential duplicate actions.
+      remediation: "Implement sticky sessions or route reads after writes to primary"
+
+    - id: "RYW-CRIT-002"
+      signal: "Cache not invalidated on write"
+      evidence_indicators:
+        - "Write to database without cache invalidation"
+        - "TTL-only cache expiration for mutable data"
+      explanation: |
+        Cached stale data returned after write causes users to
+        see old values despite successful updates.
+      remediation: "Invalidate or update cache on write"
+
+  high:
+    - id: "RYW-HIGH-001"
+      signal: "Session affinity not maintained across write-read sequence"
+      explanation: "Load balancer may route read to different replica than write"
+      remediation: "Implement session affinity or read-after-write routing"
+
+    - id: "RYW-HIGH-002"
+      signal: "CDN caching user-specific mutable content"
+      explanation: "CDN may serve stale version to user who just updated"
+      remediation: "Exclude mutable user content from CDN or use cache invalidation"
+
+  medium:
+    - id: "RYW-MED-001"
+      signal: "Replication lag not monitored"
+      remediation: "Implement replication lag monitoring and alerting"
+
+    - id: "RYW-MED-002"
+      signal: "No fallback when RYW cannot be guaranteed"
+      remediation: "Implement UI indication when data may be stale"
+
+  low:
+    - id: "RYW-LOW-001"
+      signal: "RYW guarantees not documented for API consumers"
+
+  positive:
+    - id: "RYW-POS-001"
+      signal: "Reads after writes consistently return updated data"
+    - id: "RYW-POS-002"
+      signal: "Cache invalidation on all write paths"
+
+# ============================================================
+# SECTION 9: EXECUTION PROCEDURE
+# ============================================================
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map Read/Write Paths"
+      description: |
+        Document all paths data takes for reads and writes
+        including replicas, caches, and CDNs.
+      duration_estimate: "45 min"
+      questions:
+        - "Where do writes go (primary, queue, etc.)?"
+        - "Where do reads come from (primary, replica, cache)?"
+        - "What is the replication/cache lag?"
+      expected_findings:
+        - "Read/write path documentation"
+        - "Potential RYW violation points"
+
+    - id: "2"
+      name: "Identify RYW Risk Areas"
+      description: |
+        Identify user flows where RYW violations would be
+        most problematic.
+      duration_estimate: "30 min"
+      questions:
+        - "What actions do users take and immediately verify?"
+        - "Where would stale data cause user confusion?"
+      expected_findings:
+        - "High-risk user flows"
+        - "Severity assessment"
+
+    - id: "3"
+      name: "Review Read Routing Logic"
+      description: |
+        Analyze how read routing decisions are made especially
+        after writes.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find read routing logic"
+          command: "grep -r 'replica\\|secondary\\|read.only\\|ReadOnly' --include='*.py' --include='*.java' --include='*.yaml'"
+      expected_findings:
+        - "Read routing patterns"
+        - "Post-write routing behavior"
+
+    - id: "4"
+      name: "Evaluate Cache Invalidation"
+      description: |
+        Review cache invalidation patterns to ensure caches
+        are updated or invalidated on writes.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find cache invalidation"
+          command: "grep -r 'invalidate\\|delete.*cache\\|cache.delete\\|cache.remove' --include='*.py' --include='*.java'"
+      expected_findings:
+        - "Cache invalidation coverage"
+        - "Missing invalidations"
+
+# ============================================================
+# SECTION 10: OUTPUT SPECIFICATION
+# ============================================================
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "data_flow_diagram"
+      format: "diagram"
+      description: "Read/write path visualization"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Read/Write Path Analysis"
+        - "RYW Risk Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Paths analyzed and RYW tested with write-then-read"
+    medium: "Code reviewed without runtime testing"
+    low: "Based on architecture documentation only"
+
+# ============================================================
+# SECTION 11: OFFLINE SUPPORT
+# ============================================================
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "session-guarantees"
+        priority: "recommended"
+
+# ============================================================
+# SECTION 12: PROFILES
+# ============================================================
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "RYW analysis requires thorough architecture review"
+    full:
+      included: true
+      priority: 1
+
+# ============================================================
+# SECTION 13: DETERMINISTIC VERIFICATION
+# ============================================================
+
+closeout_checklist:
+  - id: "ryw-001"
+    item: "Reads after writes return updated data in critical flows"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Test write-then-read in user-facing flows"
+    expected: "Confirmed by reviewer"
+
+  - id: "ryw-002"
+    item: "Cache invalidated or updated on write paths"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review write paths for cache handling"
+    expected: "Confirmed by reviewer"
+
+  - id: "ryw-003"
+    item: "Read routing considers recent writes"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review read routing logic for write awareness"
+    expected: "Confirmed by reviewer"
+
+  - id: "ryw-004"
+    item: "Replication lag monitored with alerting"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Check for ReplicaLag monitoring"
+    expected: "Confirmed by reviewer"
+
+# ============================================================
+# SECTION 14: GOVERNANCE
+# ============================================================
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["CC6.1"]
+
+# ============================================================
+# SECTION 15: RELATIONSHIPS
+# ============================================================
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.data-consistency.eventual-consistency"
+    - "reliability-resilience.data-durability.data-replication"

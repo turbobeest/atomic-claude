@@ -1,0 +1,341 @@
+audit:
+  id: observability-instrumentation.debug-troubleshooting.debug-logging
+  name: Debug Logging Audit
+  version: 1.0.0
+  last_updated: '2025-01-18'
+  status: active
+  category: observability-instrumentation
+  category_number: 5
+  subcategory: debug-troubleshooting
+  tier: expert
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Assesses debug logging implementation including log levels,
+    dynamic level adjustment, contextual information, structured
+    logging practices, and the ability to enable enhanced logging
+    during troubleshooting without redeployment. Evaluates whether
+    debug logging supports effective production debugging.
+  why_it_matters: |
+    Inadequate debug logging causes:
+    - Extended incident resolution times
+    - Inability to diagnose issues without reproduction
+    - Need for risky redeployments to add logging
+    - Log noise when debug is always enabled
+    - Lost debugging context in distributed systems
+    - Difficulty correlating events across services
+  when_to_run:
+  - After incidents requiring additional logging
+  - During observability maturity assessments
+  - When introducing new services
+  - After log infrastructure changes
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Access to application source code
+  - type: logging_configuration
+    description: Log configuration files and settings
+  optional_artifacts:
+  - type: log_examples
+    description: Sample log output at various levels
+  - type: logging_standards
+    description: Documented logging guidelines
+  access_requirements:
+  - Source code repository access
+  - Log aggregation system access
+  - Application configuration access
+discovery:
+  code_patterns:
+  - pattern: log\.(debug|trace|verbose)
+    type: regex
+    scope: source
+    purpose: Identify debug logging usage
+  - pattern: (DEBUG|TRACE|VERBOSE).*level
+    type: regex
+    scope: config
+    purpose: Find log level configurations
+  - pattern: setLevel|setLogLevel|LogLevel
+    type: regex
+    scope: source
+    purpose: Find dynamic level adjustment
+  file_patterns:
+  - glob: '**/log*.{yaml,yml,json,xml,properties}'
+    purpose: Locate logging configuration files
+  - glob: '**/logback*.xml'
+    purpose: Java logging configuration
+  - glob: '**/*logging*.py'
+    purpose: Python logging setup
+knowledge_sources:
+  guides:
+  - id: 12factor-logs
+    name: 12 Factor App - Logs
+    url: https://12factor.net/logs
+    offline_cache: true
+    priority: required
+  - id: structured-logging
+    name: Structured Logging Best Practices
+    url: https://www.honeycomb.io/blog/how-to-debug-any-system-with-structured-logging
+    offline_cache: true
+    priority: required
+  learning_resources:
+  - id: logging-best-practices
+    title: Logging Best Practices for Distributed Systems
+    type: article
+    reference: https://www.loggly.com/ultimate-guide/logging-best-practices/
+tooling:
+  static_analysis:
+  - tool: grep/ripgrep
+    purpose: Search for logging patterns in code
+    offline_capable: true
+  scripts:
+  - id: debug-logging-checker
+    language: bash
+    purpose: Analyze debug logging patterns
+    source: inline
+    code: |
+      #!/bin/bash
+      # Check debug logging implementation
+
+      SRC_DIR=${1:-.}
+
+      echo "=== Debug Logging Analysis ==="
+
+      echo ""
+      echo "Debug/Trace log statements:"
+      rg -c '\.(debug|trace|verbose)\s*\(' "$SRC_DIR" --type-add 'code:*.{java,py,js,ts,go,rb}' -t code 2>/dev/null | sort -t: -k2 -rn | head -20
+
+      echo ""
+      echo "Log level configuration patterns:"
+      rg -l '(DEBUG|TRACE|log.*level|setLevel)' "$SRC_DIR" --type-add 'config:*.{yaml,yml,json,xml,properties,toml}' -t config 2>/dev/null
+
+      echo ""
+      echo "Dynamic level adjustment capability:"
+      rg -l '(setLevel|LogLevel\.set|change.*level|runtime.*log)' "$SRC_DIR" 2>/dev/null
+
+      echo ""
+      echo "Structured logging fields:"
+      rg -o '\{[^}]*\}' "$SRC_DIR" --type-add 'code:*.{java,py,js,ts,go}' -t code 2>/dev/null | head -20
+signals:
+  critical:
+  - id: DEBUGLOG-CRIT-001
+    signal: No debug logging in production code
+    evidence_pattern: No debug/trace log statements found
+    explanation: |
+      Without debug logging, troubleshooting production issues
+      requires code changes and redeployment, significantly
+      extending incident resolution time.
+    remediation: |
+      Add debug-level logging for:
+      - Method entry/exit points in critical paths
+      - Decision branch conditions
+      - External service interactions
+      - Data transformations
+  - id: DEBUGLOG-CRIT-002
+    signal: Cannot change log levels without restart
+    evidence_indicators:
+    - Static log level configuration
+    - No runtime level adjustment capability
+    explanation: |
+      Requiring restarts to enable debug logging means losing
+      the ability to capture the exact conditions causing issues.
+    remediation: |
+      Implement dynamic log level adjustment via:
+      - Management endpoints (Spring Actuator, etc.)
+      - Environment variable hot reload
+      - Configuration service integration
+      - Feature flags for debug mode
+  high:
+  - id: DEBUGLOG-HIGH-001
+    signal: Debug logs lack correlation IDs
+    explanation: |
+      Without correlation IDs, tracing a request through
+      distributed services is impossible.
+    remediation: |
+      Include request/trace ID in all log statements.
+      Use MDC/context propagation patterns.
+  - id: DEBUGLOG-HIGH-002
+    signal: Debug output not structured
+    explanation: |
+      Unstructured debug logs are difficult to query and
+      correlate in log aggregation systems.
+    remediation: |
+      Use structured logging (JSON) for debug output.
+      Include consistent fields: timestamp, level, service,
+      trace_id, span_id, message, context.
+  medium:
+  - id: DEBUGLOG-MED-001
+    signal: Debug logs contain sensitive data
+    remediation: |
+      Implement log scrubbing for PII, credentials, and
+      other sensitive data even in debug logs.
+  - id: DEBUGLOG-MED-002
+    signal: Inconsistent debug logging across services
+    remediation: |
+      Establish and enforce debug logging standards.
+      Use shared logging libraries.
+  - id: DEBUGLOG-MED-003
+    signal: Debug logging impacts performance when enabled
+    remediation: |
+      Use lazy evaluation for expensive debug operations.
+      Guard debug statements with level checks.
+  low:
+  - id: DEBUGLOG-LOW-001
+    signal: Debug log messages lack context
+    remediation: |
+      Include relevant context (user, tenant, operation) in
+      debug messages for easier troubleshooting.
+  positive:
+  - id: DEBUGLOG-POS-001
+    signal: Dynamic log level adjustment implemented
+  - id: DEBUGLOG-POS-002
+    signal: Structured debug logging with correlation IDs
+  - id: DEBUGLOG-POS-003
+    signal: Comprehensive debug coverage in critical paths
+procedure:
+  context:
+    cognitive_mode: evaluative
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Debug Log Coverage Assessment
+    description: |
+      Analyze codebase to assess debug logging coverage.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Count debug log statements by file
+      command: 'rg -c ''\.(debug|trace)\('' --type-add ''code:*.{java,py,js,ts,go}'' -t code | sort -t:
+        -k2 -rn'
+    - purpose: Identify code areas without debug logging
+      command: find . -name '*.java' -o -name '*.py' | xargs wc -l | sort -rn | head -20
+    expected_findings:
+    - Debug log coverage distribution
+    - Files lacking debug logging
+  - id: '2'
+    name: Dynamic Level Adjustment Review
+    description: |
+      Verify ability to change log levels at runtime.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find dynamic level patterns
+      command: rg '(setLevel|actuator|LogLevel|runtime.*log)' --type-add 'code:*.{java,py,js,ts,go}' -t
+        code
+    expected_findings:
+    - Dynamic level adjustment capability
+    - Missing runtime configuration
+  - id: '3'
+    name: Structured Logging Assessment
+    description: |
+      Evaluate whether debug logs are structured and queryable.
+    duration_estimate: 30 min
+    questions:
+    - Are debug logs in JSON or structured format?
+    - Do logs include correlation IDs?
+    - Are standard fields consistently used?
+    expected_findings:
+    - Structured logging adoption
+    - Field consistency
+  - id: '4'
+    name: Debug Log Quality Review
+    description: |
+      Assess quality and usefulness of debug log content.
+    duration_estimate: 30 min
+    questions:
+    - Do debug messages provide actionable context?
+    - Are sensitive data properly handled?
+    - Is performance impact considered?
+    expected_findings:
+    - Log quality issues
+    - Sensitive data exposure risks
+output:
+  deliverables:
+  - type: debug_logging_assessment
+    format: structured
+    description: Analysis of debug logging capabilities
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Coverage Analysis
+    - Dynamic Adjustment Capability
+    - Structured Logging Status
+    - Recommendations
+  confidence_guidance:
+    high: Direct code analysis and runtime testing
+    medium: Static code analysis
+    low: Configuration file review only
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: 12factor-logs
+      priority: required
+    - source_id: structured-logging
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires codebase analysis
+    full:
+      included: true
+      priority: 12
+    production:
+      included: true
+      priority: 10
+closeout_checklist:
+- id: debuglog-001
+  item: Debug logging present in critical code paths
+  level: CRITICAL
+  verification: |
+    rg -c '\.(debug|trace)\(' --type-add 'code:*.{java,py,js,ts,go}' -t code | wc -l
+  expected: '> 0'
+- id: debuglog-002
+  item: Dynamic log level adjustment available
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify runtime log level can be changed without restart
+  expected: Confirmed by reviewer
+- id: debuglog-003
+  item: Correlation IDs included in log output
+  level: BLOCKING
+  verification: manual
+  verification_notes: Check log output for trace_id/correlation_id fields
+  expected: Confirmed by reviewer
+- id: debuglog-004
+  item: Debug logs use structured format
+  level: WARNING
+  verification: manual
+  verification_notes: Verify JSON or structured log format
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - microservices
+    - monolith
+    - serverless
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC7.2
+  - framework: Internal Standards
+    controls:
+    - Logging Standards
+relationships:
+  commonly_combined:
+  - observability-instrumentation.logging.structured-logging
+  - observability-instrumentation.logging.log-correlation
+  - observability-instrumentation.distributed-tracing.trace-context

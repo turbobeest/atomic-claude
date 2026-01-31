@@ -1,0 +1,350 @@
+# ============================================================
+# AUDIT: Feature Flag Integration
+# ============================================================
+# Evaluates feature flag usage in deployment pipelines
+
+audit:
+  id: "devops-ci-cd.deployment-pipeline.feature-flag-integration"
+  name: "Feature Flag Integration"
+  version: "1.0.0"
+  last_updated: "2026-01-19"
+  status: "active"
+
+  category: "devops-ci-cd"
+  category_number: 11
+  subcategory: "deployment-pipeline"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "deployment"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Examines how feature flags are integrated with the deployment
+    pipeline including flag lifecycle management, deployment coupling,
+    testing strategies, flag cleanup, and operational controls. Assesses
+    whether feature flags enable safe deployment of incomplete features.
+
+  why_it_matters: |
+    Feature flags decouple deployment from release, enabling trunk-based
+    development and reducing merge conflicts. They provide instant
+    rollback without deployment, gradual rollouts, and A/B testing
+    capability. However, poorly managed flags create technical debt,
+    testing complexity, and production incidents from flag conflicts.
+
+  when_to_run:
+    - "Initial deployment capability audit"
+    - "When implementing feature flags"
+    - "After flag-related incidents"
+    - "Quarterly technical debt review"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application code with feature flag usage"
+    - type: "flag_configuration"
+      description: "Feature flag service configuration"
+
+  access_requirements:
+    - "Feature flag management system"
+    - "Source code repository"
+    - "Deployment configuration"
+
+discovery:
+  code_patterns:
+    - pattern: "isEnabled|isFeatureEnabled|feature_enabled|flagsmith|launchdarkly|unleash"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify feature flag usage patterns"
+
+    - pattern: "getFeatureFlag|evaluateFlag|checkFlag"
+      type: "regex"
+      scope: "source"
+      purpose: "Feature flag evaluation calls"
+
+  file_patterns:
+    - glob: "**/featureFlags*"
+      purpose: "Feature flag configuration files"
+
+    - glob: "**/flags/**"
+      purpose: "Flag definition directories"
+
+    - glob: "**/.launchdarkly/**"
+      purpose: "LaunchDarkly configuration"
+
+knowledge_sources:
+  guides:
+    - id: "launchdarkly"
+      name: "LaunchDarkly Feature Flag Best Practices"
+      url: "https://docs.launchdarkly.com/guides/best-practices"
+      offline_cache: true
+
+    - id: "feature-flags-book"
+      name: "Feature Flag Best Practices"
+      url: "https://featureflags.io/"
+      offline_cache: true
+
+  learning_resources:
+    - id: "ff-book"
+      title: "Feature Management with LaunchDarkly"
+      type: "book"
+      reference: "O'Reilly Media"
+
+tooling:
+  static_analysis:
+    - tool: "custom-flag-scanner"
+      purpose: "Identify feature flag usage in codebase"
+      offline_capable: true
+
+  scripts:
+    - id: "find-feature-flags"
+      language: "bash"
+      purpose: "Locate feature flag usage in code"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find common feature flag patterns
+        grep -rn 'isEnabled\|isFeatureEnabled\|featureFlag\|getFlag' \
+          --include='*.ts' --include='*.js' --include='*.py' --include='*.go' \
+          src/ app/ 2>/dev/null | head -30
+
+signals:
+  critical:
+    - id: "CICD-FLAGS-CRIT-001"
+      signal: "Feature flags hardcoded without remote management"
+      evidence_pattern: "Flags defined as constants requiring deployment to change"
+      explanation: |
+        Hardcoded flags require deployment to toggle, negating the
+        primary benefit of feature flags. Instant rollback is impossible
+        without a flag management system.
+      remediation: "Implement remote feature flag management (LaunchDarkly, Unleash, etc.)"
+
+    - id: "CICD-FLAGS-CRIT-002"
+      signal: "No flag default fallback in case of service failure"
+      evidence_pattern: "Feature flag evaluation without error handling"
+      explanation: |
+        If the flag service is unavailable and no fallback exists,
+        the application may crash or behave unpredictably. Flag
+        evaluation must have safe defaults.
+      remediation: "Implement fallback defaults for all feature flag evaluations"
+
+  high:
+    - id: "CICD-FLAGS-HIGH-001"
+      signal: "Long-lived feature flags not cleaned up"
+      evidence_pattern: "Flags older than 90 days still in codebase"
+      explanation: |
+        Stale flags accumulate technical debt, create testing complexity,
+        and may cause unexpected behavior if accidentally toggled.
+      remediation: "Implement flag lifecycle management with expiration"
+
+    - id: "CICD-FLAGS-HIGH-002"
+      signal: "Feature flags not tested in both states"
+      evidence_pattern: "Tests only cover flag enabled state"
+      explanation: |
+        If only one flag state is tested, bugs in the other state
+        may go undetected until the flag is toggled in production.
+      remediation: "Test all code paths for both flag states"
+
+  medium:
+    - id: "CICD-FLAGS-MED-001"
+      signal: "No flag ownership or documentation"
+      evidence_pattern: "Flags without documented purpose or owner"
+      remediation: "Document flag purpose, owner, and expected lifecycle"
+
+    - id: "CICD-FLAGS-MED-002"
+      signal: "Nested or conflicting feature flags"
+      evidence_pattern: "Flag evaluation depends on another flag's state"
+      remediation: "Avoid flag dependencies; flatten flag structure"
+
+  low:
+    - id: "CICD-FLAGS-LOW-001"
+      signal: "No metrics on flag evaluation performance"
+
+    - id: "CICD-FLAGS-LOW-002"
+      signal: "Flag naming convention not consistent"
+
+  positive:
+    - id: "CICD-FLAGS-POS-001"
+      signal: "Remote flag management with instant toggle capability"
+
+    - id: "CICD-FLAGS-POS-002"
+      signal: "All flags tested in both enabled and disabled states"
+
+    - id: "CICD-FLAGS-POS-003"
+      signal: "Flag lifecycle management with automatic cleanup reminders"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory feature flag usage"
+      description: |
+        Identify all feature flags in the codebase and their
+        management system.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Find feature flag patterns in code"
+          command: |
+            grep -rn 'isEnabled\|featureFlag\|isFeatureEnabled' src/ app/ --include='*.ts' --include='*.js' --include='*.py' 2>/dev/null | head -30
+
+        - purpose: "Find flag configuration files"
+          command: |
+            find . -name '*flag*' -o -name '*feature*' 2>/dev/null | grep -v node_modules | head -20
+
+      expected_findings:
+        - "Complete inventory of feature flag usage"
+
+    - id: "2"
+      name: "Assess flag management system"
+      description: |
+        Evaluate the feature flag management infrastructure
+        including remote configuration, fallbacks, and monitoring.
+      duration_estimate: "20 min"
+
+      commands:
+        - purpose: "Check for flag service configuration"
+          command: |
+            grep -rE 'launchdarkly|unleash|flagsmith|split\.io' . --include='*.json' --include='*.yaml' --include='*.env*' 2>/dev/null | head -10
+
+      expected_findings:
+        - "Flag management system assessment"
+
+    - id: "3"
+      name: "Review flag lifecycle management"
+      description: |
+        Determine if there's a process for flag creation,
+        documentation, and cleanup.
+      duration_estimate: "20 min"
+
+      questions:
+        - "Is there a flag registry or inventory?"
+        - "How are stale flags identified and removed?"
+        - "Who owns each flag and its cleanup?"
+
+      expected_findings:
+        - "Flag lifecycle process assessment"
+
+    - id: "4"
+      name: "Analyze flag testing coverage"
+      description: |
+        Check if tests cover both enabled and disabled states
+        for feature flags.
+      duration_estimate: "25 min"
+
+      commands:
+        - purpose: "Find flag-related tests"
+          command: |
+            grep -rn 'isEnabled\|featureFlag' tests/ test/ __tests__ spec/ --include='*.ts' --include='*.js' --include='*.py' 2>/dev/null | head -20
+
+      expected_findings:
+        - "Flag testing coverage assessment"
+
+    - id: "5"
+      name: "Check error handling and fallbacks"
+      description: |
+        Verify that flag evaluation includes error handling
+        and safe defaults.
+      duration_estimate: "15 min"
+
+      commands:
+        - purpose: "Look for flag error handling"
+          command: |
+            grep -rB 2 -A 5 'isEnabled\|getFlag' src/ --include='*.ts' --include='*.js' 2>/dev/null | head -40
+
+      expected_findings:
+        - "Error handling and fallback assessment"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Feature Flag Inventory"
+        - "Lifecycle Management Assessment"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Full codebase scan with flag service review"
+    medium: "Code patterns reviewed without flag service access"
+    low: "Based on configuration review only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "feature-flags-book"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed code analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "feature-flag-integration-001"
+    item: "Remote flag management configured"
+    level: "CRITICAL"
+    verification: |
+      grep -rE 'launchdarkly|unleash|flagsmith|split' . --include='*.json' --include='*.yaml' 2>/dev/null && echo "PASS" || echo "FAIL"
+    expected: "PASS"
+
+  - id: "feature-flag-integration-002"
+    item: "Flag evaluation has error handling and defaults"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Verify flag evaluations have try/catch and default values"
+    expected: "Confirmed by reviewer"
+
+  - id: "feature-flag-integration-003"
+    item: "Flags tested in both states"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify test suite covers enabled and disabled flag states"
+    expected: "Confirmed by reviewer"
+
+  - id: "feature-flag-integration-004"
+    item: "Flag cleanup process documented"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Verify process exists for removing stale flags"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "DORA"
+      controls: ["Deployment Frequency", "Change Failure Rate"]
+
+relationships:
+  commonly_combined:
+    - "devops-ci-cd.deployment-pipeline.canary-deployment"
+    - "devops-ci-cd.deployment-pipeline.deployment-automation"

@@ -1,0 +1,306 @@
+# ============================================================
+# AUDIT: Burst Capacity Audit
+# Category: Scalability & Capacity > Vertical Scaling
+# ============================================================
+
+audit:
+  id: "scalability-capacity.vertical-scaling.burst-capacity"
+  name: "Burst Capacity Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "vertical-scaling"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates burst capacity mechanisms and their ability to handle temporary
+    load spikes. Reviews burstable instance CPU credits, EBS burst balance,
+    network burst capacity, Kubernetes resource burstable QoS, and the
+    sustainability of burst under realistic load patterns.
+
+  why_it_matters: |
+    Burst capacity provides cost-effective handling of temporary spikes but
+    exhausts under sustained load. Relying on burst without understanding
+    credit accumulation and depletion leads to sudden performance degradation.
+    Proper burst management balances cost savings with reliable performance.
+
+  when_to_run:
+    - "When using burstable instances"
+    - "After performance degradation incidents"
+    - "During cost optimization reviews"
+    - "When traffic patterns change"
+
+prerequisites:
+  required_artifacts:
+    - type: "infrastructure_config"
+      description: "Instance and storage configuration"
+    - type: "metrics_data"
+      description: "CPU credit and performance metrics"
+
+  access_requirements:
+    - "Cloud monitoring access (CloudWatch, etc.)"
+    - "Instance and volume metrics access"
+
+discovery:
+  code_patterns:
+    - pattern: "(t3|t4|burstable)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect burstable instance types"
+
+    - pattern: "(gp2|gp3.*baseline)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect burstable storage types"
+
+    - pattern: "(Burstable|BestEffort)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect Kubernetes burstable QoS"
+
+  file_patterns:
+    - glob: "**/terraform/**/*.tf"
+      purpose: "Terraform instance configuration"
+    - glob: "**/k8s/**/*.yaml"
+      purpose: "Kubernetes deployment files"
+
+knowledge_sources:
+  guides:
+    - id: "aws-burstable"
+      name: "AWS Burstable Performance Instances"
+      url: "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/burstable-performance-instances.html"
+      offline_cache: true
+
+    - id: "ebs-burst"
+      name: "AWS EBS Burst Balance"
+      url: "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ebs-gp2-performance.html"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "aws-cli"
+      purpose: "Check CPU credit balance"
+      command: "aws cloudwatch get-metric-statistics --namespace AWS/EC2 --metric-name CPUCreditBalance"
+
+  monitoring_queries:
+    - system: "CloudWatch"
+      query: "CPUCreditBalance, CPUCreditUsage"
+      purpose: "Monitor CPU credit accumulation and usage"
+      threshold: "Credits should not consistently approach zero"
+
+    - system: "CloudWatch"
+      query: "BurstBalance (for gp2 volumes)"
+      purpose: "Monitor EBS burst credit balance"
+      threshold: "Should not consistently drop below 20%"
+
+  scripts:
+    - id: "burst-analyzer"
+      language: "bash"
+      purpose: "Analyze burst capacity status"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Burstable Instances ==="
+        aws ec2 describe-instances --filters "Name=instance-type,Values=t3.*,t4.*" \
+          --query 'Reservations[*].Instances[*].[InstanceId,InstanceType]' --output table
+        echo "=== CPU Credit Balance ==="
+        aws cloudwatch get-metric-statistics \
+          --namespace AWS/EC2 \
+          --metric-name CPUCreditBalance \
+          --dimensions Name=InstanceId,Value=$INSTANCE_ID \
+          --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ) \
+          --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
+          --period 300 \
+          --statistics Average
+
+signals:
+  critical:
+    - id: "BURST-CRIT-001"
+      signal: "CPU credits consistently near zero"
+      evidence_threshold: "cpu_credit_balance < 10% of max for > 1 hour"
+      explanation: |
+        Exhausted CPU credits cause severe throttling on burstable instances.
+        The instance effectively becomes much smaller than provisioned.
+      remediation: "Enable unlimited mode, upsize instance, or migrate to dedicated compute"
+
+    - id: "BURST-CRIT-002"
+      signal: "Burst reliance for sustained production workload"
+      evidence_indicators:
+        - "Burstable instances for always-on services"
+        - "Regular credit depletion patterns"
+      explanation: |
+        Production workloads should not depend on burst capacity that can
+        be exhausted, leading to degraded performance at critical times.
+      remediation: "Use dedicated instances for production workloads"
+
+  high:
+    - id: "BURST-HIGH-001"
+      signal: "EBS burst balance depleting regularly"
+      evidence_threshold: "burst_balance < 30% during peak hours"
+      explanation: |
+        Depleted EBS burst balance causes I/O throttling, leading to
+        increased latency for storage operations.
+      remediation: "Migrate to gp3 with provisioned IOPS or upgrade to io1/io2"
+
+    - id: "BURST-HIGH-002"
+      signal: "No monitoring for burst credit exhaustion"
+      evidence_indicators:
+        - "No CloudWatch alarms on credit balance"
+        - "No alerts for burst depletion"
+      explanation: |
+        Without monitoring, burst exhaustion goes unnoticed until
+        performance degrades and users are impacted.
+      remediation: "Configure alerts for credit balance below 20% of maximum"
+
+  medium:
+    - id: "BURST-MED-001"
+      signal: "Unlimited mode not enabled on production burstable instances"
+      evidence_pattern: "t3\\.(?!unlimited)|CreditSpecification.*standard"
+      remediation: "Enable unlimited mode or migrate to dedicated instances"
+
+  positive:
+    - id: "BURST-POS-001"
+      signal: "Burst capacity matched to workload patterns"
+      evidence_threshold: "credits_used < credits_earned over 24h average"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify burst-dependent resources"
+      description: |
+        Inventory all resources that rely on burst capacity including
+        burstable instances and baseline IOPS storage.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find burstable instances"
+          command: "rg '(t2|t3|t4)\\.' --type tf"
+        - purpose: "Find gp2 volumes"
+          command: "rg 'gp2' --type tf"
+      expected_findings:
+        - "List of burstable resources"
+        - "Burst capacity specifications"
+
+    - id: "2"
+      name: "Analyze burst credit patterns"
+      description: |
+        Review credit accumulation and depletion patterns to understand
+        burst sustainability.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "CPU credit metrics"
+          command: "aws cloudwatch get-metric-statistics --namespace AWS/EC2 --metric-name CPUCreditBalance --period 3600 --statistics Average --start-time <24h-ago>"
+      expected_findings:
+        - "Credit balance trends"
+        - "Depletion frequency and duration"
+
+    - id: "3"
+      name: "Assess burst adequacy"
+      description: |
+        Determine whether burst capacity is sufficient for actual
+        workload patterns.
+      duration_estimate: "30 min"
+      questions:
+        - "Do credits accumulate faster than they're consumed?"
+        - "Are there periods of credit exhaustion?"
+        - "Is burst relied upon for normal operation or only spikes?"
+      expected_findings:
+        - "Burst capacity adequacy assessment"
+        - "Recommendations for burst-dependent workloads"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Burst Resource Inventory"
+        - "Credit Pattern Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Analysis based on >7 days of credit metrics"
+    medium: "Analysis based on <7 days of metrics"
+    low: "Configuration review without credit data"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "aws-burstable"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires metrics analysis"
+    full:
+      included: true
+      priority: 3
+    production:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "burst-001"
+    item: "Burst credits not regularly exhausted"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review CloudWatch CPUCreditBalance metrics"
+    expected: "Credits > 20% of max sustained"
+
+  - id: "burst-002"
+    item: "Monitoring configured for burst exhaustion"
+    level: "BLOCKING"
+    verification: "aws cloudwatch describe-alarms --alarm-name-prefix CPUCredit"
+    expected: "Alarms configured"
+
+  - id: "burst-003"
+    item: "Production workloads not solely dependent on burst"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify production services don't rely on sustained burst"
+    expected: "Burst only for occasional spikes"
+
+governance:
+  applicable_to:
+    archetypes: ["web-service", "api-service", "batch-processing"]
+
+  compliance_frameworks:
+    - framework: "AWS Well-Architected"
+      controls: ["PERF-1", "REL-1", "COST-3"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.vertical-scaling.instance-size-optimization"
+    - "scalability-capacity.vertical-scaling.oversizing-rightsizing"

@@ -1,0 +1,297 @@
+# ============================================================
+# AUDIT: Scale-In Behavior Audit
+# Category: Scalability & Capacity > Horizontal Scaling
+# ============================================================
+
+audit:
+  id: "scalability-capacity.horizontal-scaling.scale-in-behavior"
+  name: "Scale-In Behavior Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "scalability-capacity"
+  category_number: 4
+  subcategory: "horizontal-scaling"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates how the system behaves when scaling in (reducing instances).
+    Reviews graceful shutdown handling, connection draining, in-flight request
+    completion, termination grace periods, and scale-in policies. Ensures
+    instances can be removed without disrupting active users.
+
+  why_it_matters: |
+    Aggressive or poorly implemented scale-in causes dropped connections,
+    failed requests, and data loss. Users experience errors when their requests
+    are abruptly terminated. Proper scale-in ensures cost savings without
+    sacrificing reliability.
+
+  when_to_run:
+    - "Before enabling auto-scaling"
+    - "After implementing graceful shutdown"
+    - "Following scale-in-related incidents"
+    - "During reliability reviews"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application code with shutdown handlers"
+    - type: "infrastructure_config"
+      description: "Kubernetes/cloud scaling configuration"
+
+  access_requirements:
+    - "Source code repository access"
+    - "Infrastructure configuration access"
+    - "Ability to observe scale-in events"
+
+discovery:
+  code_patterns:
+    - pattern: "(SIGTERM|SIGINT|shutdown.*hook|graceful.*shutdown)"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect shutdown signal handling"
+
+    - pattern: "(preStop|terminationGracePeriodSeconds)"
+      type: "regex"
+      scope: "config"
+      purpose: "Detect Kubernetes termination configuration"
+
+    - pattern: "(draining|connection.*drain|deregister)"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect connection draining implementation"
+
+  file_patterns:
+    - glob: "**/k8s/**/*.yaml"
+      purpose: "Kubernetes deployment files"
+    - glob: "**/src/**/shutdown*.java"
+      purpose: "Java shutdown handlers"
+    - glob: "**/src/**/signal*.py"
+      purpose: "Python signal handlers"
+
+knowledge_sources:
+  guides:
+    - id: "k8s-termination"
+      name: "Kubernetes Pod Termination"
+      url: "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination"
+      offline_cache: true
+
+    - id: "graceful-shutdown"
+      name: "Graceful Shutdown Patterns"
+      url: "https://cloud.google.com/blog/products/containers-kubernetes/kubernetes-best-practices-terminating-with-grace"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Observe pod termination behavior"
+      command: "kubectl delete pod <pod> --grace-period=60"
+
+  scripts:
+    - id: "scale-in-tester"
+      language: "bash"
+      purpose: "Test scale-in behavior"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        DEPLOY=$1
+        NAMESPACE=$2
+        # Start continuous requests
+        while true; do curl -s http://service/health; sleep 0.1; done &
+        CURL_PID=$!
+        # Trigger scale-in
+        kubectl scale deployment/$DEPLOY --replicas=-1 -n $NAMESPACE
+        sleep 60
+        kill $CURL_PID
+        # Check for errors in logs
+        kubectl logs -l app=$DEPLOY -n $NAMESPACE --since=2m | grep -i error
+
+signals:
+  critical:
+    - id: "SCALEIN-CRIT-001"
+      signal: "No SIGTERM handler implemented"
+      evidence_indicators:
+        - "Application exits immediately on SIGTERM"
+        - "No shutdown hooks registered"
+        - "In-flight requests terminated abruptly"
+      explanation: |
+        Without SIGTERM handling, Kubernetes will force-kill pods after
+        grace period, dropping in-flight requests and causing errors.
+      remediation: "Implement SIGTERM handler that completes in-flight requests before exit"
+
+    - id: "SCALEIN-CRIT-002"
+      signal: "terminationGracePeriodSeconds too short"
+      evidence_pattern: "terminationGracePeriodSeconds.*[0-9]$|terminationGracePeriodSeconds.*[12][0-9]$"
+      explanation: |
+        Short grace period (under 30s) may not allow time for in-flight
+        requests to complete, causing request failures.
+      remediation: "Set terminationGracePeriodSeconds to match longest expected request duration"
+
+  high:
+    - id: "SCALEIN-HIGH-001"
+      signal: "No preStop hook for deregistration"
+      evidence_indicators:
+        - "Pod receives traffic after SIGTERM"
+        - "No preStop hook in pod spec"
+      explanation: |
+        Without preStop hooks, pods may receive new requests after termination
+        begins, which will then be dropped.
+      remediation: "Add preStop hook to deregister from load balancer before shutdown"
+
+    - id: "SCALEIN-HIGH-002"
+      signal: "No connection draining configured"
+      evidence_pattern: "connection.*drain|deregister.*delay"
+      explanation: |
+        Without connection draining, active connections are terminated
+        when pods are removed, causing client errors.
+      remediation: "Configure connection draining in load balancer and application"
+
+  medium:
+    - id: "SCALEIN-MED-001"
+      signal: "Scale-in cooldown not configured"
+      evidence_pattern: "scale_in_cooldown|scaleDown.*stabilizationWindowSeconds"
+      remediation: "Configure scale-in cooldown to prevent rapid oscillation"
+
+  positive:
+    - id: "SCALEIN-POS-001"
+      signal: "Proper graceful shutdown with connection draining"
+      evidence_pattern: "preStop.*sleep|SIGTERM.*drain|graceful.*shutdown.*complete"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Review shutdown signal handling"
+      description: |
+        Verify that the application properly handles SIGTERM and implements
+        graceful shutdown.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find SIGTERM handlers"
+          command: "rg '(SIGTERM|shutdown.*hook|addShutdownHook)' --type java --type py --type go"
+        - purpose: "Find graceful shutdown config"
+          command: "rg 'graceful|shutdown' --type yaml --type properties"
+      expected_findings:
+        - "SIGTERM handling implementation"
+        - "Shutdown timeout configuration"
+
+    - id: "2"
+      name: "Analyze Kubernetes termination configuration"
+      description: |
+        Review pod termination settings including grace period and preStop hooks.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Check termination grace period"
+          command: "rg 'terminationGracePeriodSeconds' --type yaml"
+        - purpose: "Check preStop hooks"
+          command: "rg 'preStop' --type yaml -A 5"
+      expected_findings:
+        - "Termination grace period values"
+        - "PreStop hook configuration"
+
+    - id: "3"
+      name: "Test scale-in behavior"
+      description: |
+        Trigger scale-in events and observe behavior, checking for
+        dropped requests and error rates.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Scale down and observe"
+          command: "kubectl scale deployment/<name> --replicas=-1"
+      expected_findings:
+        - "Request success rate during scale-in"
+        - "Time to complete graceful shutdown"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Shutdown Handling Analysis"
+        - "Scale-In Behavior Observations"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct observation of scale-in behavior"
+    medium: "Configuration analysis without runtime testing"
+    low: "Code patterns found without context verification"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "k8s-termination"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime testing"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "scale-in-001"
+    item: "SIGTERM handler implemented"
+    level: "CRITICAL"
+    verification: "rg '(SIGTERM|ShutdownHook)' --type java --type py --type go | wc -l"
+    expected: "> 0"
+
+  - id: "scale-in-002"
+    item: "terminationGracePeriodSeconds >= 30"
+    level: "CRITICAL"
+    verification: "rg 'terminationGracePeriodSeconds' --type yaml"
+    expected: "Values >= 30"
+
+  - id: "scale-in-003"
+    item: "Zero dropped requests during scale-in"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Test scale-in with active traffic and verify no errors"
+    expected: "0 errors during scale-in"
+
+governance:
+  applicable_to:
+    archetypes: ["web-service", "api-service", "microservice"]
+
+  compliance_frameworks:
+    - framework: "AWS Well-Architected"
+      controls: ["REL-7", "REL-9"]
+
+relationships:
+  commonly_combined:
+    - "scalability-capacity.horizontal-scaling.auto-scaling-policy"
+    - "scalability-capacity.horizontal-scaling.scale-out-speed"

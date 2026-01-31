@@ -1,0 +1,400 @@
+# ============================================================
+# AUDIT: Layer Separation
+# ============================================================
+
+audit:
+  id: "architecture-design.boundaries-modularity.layer-separation"
+  name: "Layer Separation Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "architecture-design"
+  category_number: 7
+  subcategory: "boundaries-modularity"
+
+  tier: "expert"
+  estimated_duration: "75 minutes"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates whether the codebase properly separates concerns into distinct
+    architectural layers (presentation, business logic, data access) and
+    whether layer dependencies flow in the correct direction. This includes
+    checking for layer violations such as UI code accessing the database
+    directly or domain logic depending on infrastructure.
+
+  why_it_matters: |
+    Layer separation enables testability, maintainability, and technology
+    independence. When layers are mixed, changes ripple unexpectedly,
+    business logic becomes untestable without infrastructure, and it
+    becomes impossible to swap technologies (e.g., database, UI framework).
+
+  when_to_run:
+    - "Architecture reviews"
+    - "Before major refactoring"
+    - "Technical debt assessments"
+    - "Framework migration planning"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Application source code"
+
+  access_requirements:
+    - "Read access to source code repository"
+
+discovery:
+  code_patterns:
+    - pattern: "import.*database|import.*db|from.*repository"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect data access imports"
+
+    - pattern: "import.*controller|import.*router|from.*handler"
+      type: "regex"
+      scope: "source"
+      purpose: "Detect presentation layer imports"
+
+    - pattern: "SELECT.*FROM|INSERT INTO|query\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Detect raw SQL in non-data layers"
+
+  file_patterns:
+    - glob: "**/controllers/**"
+      purpose: "Controller/presentation layer"
+    - glob: "**/services/**"
+      purpose: "Service/business logic layer"
+    - glob: "**/repositories/**"
+      purpose: "Repository/data access layer"
+    - glob: "**/domain/**"
+      purpose: "Domain/core layer"
+    - glob: "**/infrastructure/**"
+      purpose: "Infrastructure layer"
+
+knowledge_sources:
+  learning_resources:
+    - id: "clean-architecture"
+      title: "Clean Architecture"
+      type: "book"
+      reference: "Robert C. Martin, ISBN: 978-0134494166"
+
+    - id: "hexagonal-architecture"
+      title: "Hexagonal Architecture"
+      type: "article"
+      reference: "Alistair Cockburn - https://alistair.cockburn.us/hexagonal-architecture/"
+
+    - id: "ddd-blue"
+      title: "Domain-Driven Design"
+      type: "book"
+      reference: "Eric Evans, ISBN: 978-0321125217"
+
+  guides:
+    - id: "clean-arch-guide"
+      name: "The Clean Architecture"
+      url: "https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html"
+      offline_cache: true
+
+    - id: "ddd-evans"
+      name: "Domain-Driven Design Reference"
+      url: "https://www.domainlanguage.com/ddd/reference/"
+      offline_cache: true
+
+    - id: "pragmatic-programmer"
+      name: "Pragmatic Programmer Tips"
+      url: "https://pragprog.com/tips/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "dependency-cruiser"
+      purpose: "Layer dependency rule enforcement"
+      offline_capable: true
+
+    - tool: "madge"
+      purpose: "Module dependency visualization"
+      offline_capable: true
+
+    - tool: "eslint-plugin-import"
+      purpose: "Import path rules"
+      offline_capable: true
+
+  scripts:
+    - id: "layer-scan"
+      language: "bash"
+      purpose: "Analyze layer structure and violations"
+      source: "inline"
+      code: |
+        echo "=== Layer Separation Analysis ==="
+        echo "--- Layer directory structure ---"
+        find . -type d \( -name "controllers" -o -name "services" -o -name "repositories" \
+          -o -name "domain" -o -name "infrastructure" -o -name "presentation" \) \
+          -not -path "*/node_modules/*" 2>/dev/null
+
+        echo "--- SQL in non-repository files ---"
+        grep -rn "SELECT\|INSERT\|UPDATE\|DELETE" \
+          --include="*.js" --include="*.ts" --include="*.py" . 2>/dev/null | \
+          grep -v "repository\|dao\|model\|migration" | grep -v node_modules | head -20
+
+        echo "--- HTTP/Express in domain/service ---"
+        grep -rn "req\.|res\.\|Request\|Response" \
+          --include="*.js" --include="*.ts" . 2>/dev/null | \
+          grep -E "service|domain" | grep -v node_modules | head -20
+
+signals:
+  critical:
+    - id: "LAYER-CRIT-001"
+      signal: "Domain/business logic directly accessing database"
+      evidence_pattern: "domain/.*\\.query|service/.*SELECT|core/.*db\\."
+      explanation: |
+        Domain logic with direct database access cannot be tested without
+        a database and is tightly coupled to storage technology.
+      remediation: "Use repository pattern, inject data access through interfaces"
+
+    - id: "LAYER-CRIT-002"
+      signal: "Presentation layer bypassing business logic"
+      evidence_pattern: "controller.*\\.save|handler.*db\\.query|route.*repository"
+      explanation: |
+        Controllers directly accessing data layer bypasses business rules,
+        validation, and authorization that should be in the service layer.
+      remediation: "Route all data access through service/business logic layer"
+
+  high:
+    - id: "LAYER-HIGH-001"
+      signal: "Infrastructure concerns in domain layer"
+      evidence_pattern: "domain/.*import.*http|core/.*import.*kafka|entity/.*import.*redis"
+      explanation: |
+        Domain code depending on infrastructure (HTTP, messaging, caching)
+        cannot be tested or reused independently.
+      remediation: "Use ports/adapters pattern, inject infrastructure dependencies"
+
+    - id: "LAYER-HIGH-002"
+      signal: "HTTP request/response in service layer"
+      evidence_pattern: "service/.*req\\.|service/.*res\\.|service/.*Request"
+      explanation: |
+        Services depending on HTTP concepts cannot be reused for CLI, events,
+        or other entry points. Business logic becomes tied to web framework.
+      remediation: "Accept plain DTOs/objects, return domain objects"
+
+    - id: "LAYER-HIGH-003"
+      signal: "UI/presentation code in domain layer"
+      evidence_pattern: "domain/.*render|entity/.*template|model/.*html"
+      explanation: |
+        Presentation concerns in domain make business logic untestable
+        and tie domain to specific UI technology.
+      remediation: "Keep domain pure, move presentation to dedicated layer"
+
+  medium:
+    - id: "LAYER-MED-001"
+      signal: "Inconsistent layer naming/organization"
+      evidence_pattern: "Mix of /services, /business, /logic directories"
+      remediation: "Standardize on consistent layer naming convention"
+
+    - id: "LAYER-MED-002"
+      signal: "Cross-cutting concerns in wrong layer"
+      evidence_pattern: "Logging, metrics in domain logic"
+      remediation: "Use aspect-oriented approach or move to infrastructure"
+
+    - id: "LAYER-MED-003"
+      signal: "Framework annotations in domain"
+      evidence_pattern: "@Entity|@Controller|@Service annotations in domain"
+      remediation: "Keep domain POJOs/POCOs, use mapping at boundaries"
+
+  low:
+    - id: "LAYER-LOW-001"
+      signal: "Missing layer separation documentation"
+      evidence_pattern: "No architecture documentation"
+      remediation: "Document layer responsibilities and dependency rules"
+
+    - id: "LAYER-LOW-002"
+      signal: "Utility code not clearly layered"
+      evidence_pattern: "utils/ with mixed concerns"
+      remediation: "Split utilities by layer (domain utils, infra utils)"
+
+  positive:
+    - id: "LAYER-POS-001"
+      signal: "Clear layer directory structure"
+      evidence_pattern: "Consistent /domain, /application, /infrastructure"
+
+    - id: "LAYER-POS-002"
+      signal: "Domain layer has no external dependencies"
+      evidence_pattern: "Domain imports only language/stdlib"
+
+    - id: "LAYER-POS-003"
+      signal: "Dependency rules enforced by tooling"
+      evidence_pattern: "dependency-cruiser or eslint-plugin-import configured"
+
+procedure:
+  context:
+    cognitive_mode: "architectural"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify Layer Structure"
+      description: |
+        Map the layered architecture of the codebase.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find layer directories"
+          command: |
+            find . -type d \( -name "controllers" -o -name "services" -o -name "repositories" \
+              -o -name "domain" -o -name "infrastructure" -o -name "handlers" -o -name "adapters" \) \
+              -not -path "*/node_modules/*" 2>/dev/null
+        - purpose: "Analyze directory structure"
+          command: |
+            ls -la src/ 2>/dev/null || ls -la app/ 2>/dev/null || ls -la . 2>/dev/null | head -20
+
+      expected_findings:
+        - "Layer structure identification"
+        - "Architecture pattern used"
+
+    - id: "2"
+      name: "Analyze Domain Layer Purity"
+      description: |
+        Check that domain layer has no infrastructure dependencies.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Check domain imports"
+          command: |
+            find . -path "*/domain/*" -name "*.ts" -o -path "*/domain/*" -name "*.js" | \
+              xargs grep -h "^import" 2>/dev/null | sort -u | head -30
+        - purpose: "Find infrastructure in domain"
+          command: |
+            grep -rn "import.*http\|import.*express\|import.*mongoose\|import.*sequelize" \
+              --include="*.js" --include="*.ts" . 2>/dev/null | \
+              grep -E "domain|entity|model" | grep -v node_modules | head -20
+
+      expected_findings:
+        - "Domain layer dependencies"
+        - "Infrastructure leakage"
+
+    - id: "3"
+      name: "Check Layer Violations"
+      description: |
+        Search for code that violates layer separation.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find SQL in non-repository files"
+          command: |
+            grep -rn "SELECT\s\+\*\|INSERT\s\+INTO\|UPDATE\s\+\w\+\s\+SET" \
+              --include="*.js" --include="*.ts" --include="*.py" . 2>/dev/null | \
+              grep -v "repository\|dao\|query\|migration" | grep -v node_modules | head -30
+        - purpose: "Find HTTP in services"
+          command: |
+            grep -rn "req\.\|res\.\|request\.\|response\." \
+              --include="*.js" --include="*.ts" . 2>/dev/null | \
+              grep -i "service" | grep -v node_modules | head -20
+
+      expected_findings:
+        - "Layer violation inventory"
+        - "Violation severity"
+
+    - id: "4"
+      name: "Review Dependency Direction"
+      description: |
+        Verify dependencies point inward toward domain.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Run dependency-cruiser"
+          command: |
+            npx dependency-cruiser --validate . 2>/dev/null || echo "dependency-cruiser not configured"
+        - purpose: "Visualize with madge"
+          command: |
+            npx madge --image graph.svg src/ 2>/dev/null && echo "Graph saved to graph.svg" || echo "madge not available"
+
+      expected_findings:
+        - "Dependency direction analysis"
+        - "Violation locations"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+      content:
+        - "layer_structure"
+        - "layer_violations"
+        - "dependency_direction"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Architecture Assessment"
+        - "Layer Violations"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Clear layer violation detected"
+    medium: "Pattern suggests potential violation"
+    low: "Requires architectural context"
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "clean-architecture"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires thorough analysis"
+    full:
+      included: true
+      priority: 1
+    architecture:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "layer-001"
+    item: "Domain layer is infrastructure-free"
+    level: "CRITICAL"
+    verification: "Domain has no HTTP, DB, or framework imports"
+    expected: "Pure domain layer"
+
+  - id: "layer-002"
+    item: "No direct database access from controllers"
+    level: "HIGH"
+    verification: "Controllers only call services"
+    expected: "Proper layering"
+
+  - id: "layer-003"
+    item: "Layer rules documented and enforced"
+    level: "WARNING"
+    verification: "dependency-cruiser or equivalent configured"
+    expected: "Automated enforcement"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Modularity", "Maintainability", "Testability"]
+
+relationships:
+  commonly_combined:
+    - "architecture-design.boundaries-modularity.dependency-direction"
+    - "architecture-design.boundaries-modularity.module-boundary"
+    - "architecture-design.patterns.clean-architecture"

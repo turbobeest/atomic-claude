@@ -48,6 +48,7 @@ task_406_closeout() {
         echo -e "  ${RED}[CRIT]${NC} ${RED}✗${NC} No OpenSpecs created"
         checklist+=("OpenSpecs created:FAIL")
         all_passed=false
+    fi
 
     # Check TDD subtasks
     local tasks_with_tdd=$(jq '[.tasks[] | select(.subtasks | length >= 4)] | length' "$tasks_file" 2>/dev/null || echo 0)
@@ -61,6 +62,7 @@ task_406_closeout() {
         echo -e "  ${RED}[CRIT]${NC} ${RED}✗${NC} No TDD subtasks"
         checklist+=("TDD subtasks:FAIL")
         all_passed=false
+    fi
 
     # Check audit
     if [[ -f "$audit_file" ]]; then
@@ -91,6 +93,7 @@ task_406_closeout() {
     else
         echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Audit not completed"
         checklist+=("Audit:SKIP")
+    fi
 
     # Check spec quality (at least have test strategies)
     local specs_with_tests=$(find "$specs_dir" -name "spec-*.json" -exec jq -e '.test_strategy.unit_tests | length > 0' {} \; 2>/dev/null | grep -c true || echo 0)
@@ -100,6 +103,7 @@ task_406_closeout() {
     else
         echo -e "  ${YELLOW}[BLCK]${NC} ${YELLOW}!${NC} Some specs lack test strategies"
         checklist+=("Test strategies:WARN")
+    fi
 
     # TDD chain integrity
     local valid_chains=$(jq '[.tasks[] | select(.subtasks | length >= 4) | select(.subtasks[1].dependencies == [1]) | select(.subtasks[2].dependencies == [2]) | select(.subtasks[3].dependencies == [3])] | length' "$tasks_file" 2>/dev/null || echo 0)
@@ -109,6 +113,7 @@ task_406_closeout() {
     else
         echo -e "  ${YELLOW}[PASS]${NC} ${YELLOW}!${NC} Some TDD chains may be invalid"
         checklist+=("TDD chains:WARN")
+    fi
 
     echo -e "  ${GREEN}[PASS]${NC} ${GREEN}✓${NC} Ready for TDD Implementation"
     echo ""
@@ -123,6 +128,7 @@ task_406_closeout() {
     if [[ "$all_passed" == false ]]; then
         echo -e "  ${YELLOW}Some critical items need attention before closeout.${NC}"
         echo ""
+    fi
 
     echo -e "  ${CYAN}Closeout options:${NC}"
     echo ""

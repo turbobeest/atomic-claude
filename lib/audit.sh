@@ -109,7 +109,15 @@ _audit_load_config() {
     # Get audits repository path
     _AUDIT_REPO_PATH=$(jq -r '.repositories.audits.repository // ""' "$config")
 
-    # Fallback: check sibling 'audits' directory
+    # Fallback 1: check embedded 'audits' directory (monorepo deployment)
+    if [[ -z "$_AUDIT_REPO_PATH" || ! -d "$_AUDIT_REPO_PATH" ]]; then
+        local embedded_repo="$ATOMIC_ROOT/audits"
+        if [[ -d "$embedded_repo" && -f "$embedded_repo/AUDIT-INVENTORY.csv" ]]; then
+            _AUDIT_REPO_PATH=$(cd "$embedded_repo" && pwd)
+        fi
+    fi
+
+    # Fallback 2: check sibling 'audits' directory
     if [[ -z "$_AUDIT_REPO_PATH" || ! -d "$_AUDIT_REPO_PATH" ]]; then
         local sibling_repo="$ATOMIC_ROOT/../audits"
         if [[ -d "$sibling_repo" && -f "$sibling_repo/AUDIT-INVENTORY.csv" ]]; then
@@ -145,6 +153,13 @@ _audit_fetch_inventory_csv() {
     # Try configured local path first
     if [[ -n "$_AUDIT_INVENTORY_PATH" && -f "$_AUDIT_INVENTORY_PATH" ]]; then
         cat "$_AUDIT_INVENTORY_PATH"
+        return 0
+    fi
+
+    # Try embedded directory (monorepo deployment)
+    local embedded_path="$ATOMIC_ROOT/audits/AUDIT-INVENTORY.csv"
+    if [[ -f "$embedded_path" ]]; then
+        cat "$embedded_path"
         return 0
     fi
 

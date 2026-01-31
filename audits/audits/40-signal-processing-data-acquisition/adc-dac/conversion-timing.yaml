@@ -1,0 +1,304 @@
+audit:
+  id: signal-processing-data-acquisition.adc-dac.conversion-timing
+  name: Conversion Timing Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: adc-dac
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: hardware-software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates ADC and DAC conversion timing characteristics
+    that affect acquisition rate and data throughput. It examines:
+    - ADC conversion time and throughput rate
+    - ADC aperture time and aperture jitter
+    - DAC settling time and update rate
+    - Pipeline delay and latency
+    - Trigger-to-conversion delay
+    - Multi-channel acquisition timing
+  why_it_matters: |
+    Conversion timing affects system performance:
+    - Conversion time limits maximum sampling rate
+    - Aperture jitter affects effective resolution at high frequencies
+    - DAC settling limits output update rate
+    - Pipeline delay affects real-time control loops
+    - Proper timing is essential for deterministic behavior
+    - IEEE 1057 and 1241 specify timing parameters
+
+    Incorrect timing assumptions lead to missed samples, aliasing,
+    inaccurate outputs, or control loop instability.
+  when_to_run:
+  - Data acquisition system design
+  - Real-time control system design
+  - High-speed signal processing
+  - Multi-channel system timing
+  - System latency analysis
+prerequisites:
+  required_artifacts:
+  - type: adc_dac_datasheet
+    description: Converter timing specifications
+  - type: timing_requirements
+    description: System timing requirements
+  - type: source_code
+    description: Converter control code
+  access_requirements:
+  - Access to converter specifications
+  - Test equipment for timing measurement
+  - System timing documentation
+discovery:
+  code_patterns:
+  - pattern: (conversion|conv)_(time|delay|rate)
+    type: regex
+    scope: source
+    purpose: Detect conversion timing
+  - pattern: (aperture|settle|settling)_(time|delay)
+    type: regex
+    scope: source
+    purpose: Detect aperture/settling timing
+  - pattern: (throughput|sample)_(rate|freq)
+    type: regex
+    scope: source
+    purpose: Detect throughput configuration
+  - pattern: (pipeline|latency)_(delay|cycles)
+    type: regex
+    scope: source
+    purpose: Detect pipeline delay
+  file_patterns:
+  - glob: '**/adc*.{c,h,cpp,py}'
+    purpose: ADC driver files
+  - glob: '**/dac*.{c,h,cpp,py}'
+    purpose: DAC driver files
+  - glob: '**/timing*.{c,h,cpp}'
+    purpose: Timing configuration
+knowledge_sources:
+  specifications:
+  - id: ieee-1057-timing
+    name: IEEE 1057 - Timing Parameters
+    url: https://standards.ieee.org/standard/1057-2017.html
+    offline_cache: true
+    priority: required
+  guides:
+  - id: ti-adc-throughput
+    name: Texas Instruments ADC Throughput Guide
+    url: https://www.ti.com/lit/an/sbaa004/sbaa004.pdf
+    offline_cache: true
+signals:
+  critical:
+  - id: TIM-CRIT-001
+    signal: Sample rate exceeds ADC maximum throughput
+    evidence_indicators:
+    - Configured sample rate > ADC maximum rate
+    - Conversion time > sample period
+    - Missed or overlapping conversions
+    explanation: |
+      Attempting to sample faster than the ADC can convert causes
+      missed samples, corrupted data, or undefined behavior. The
+      sample rate must be less than the ADC's maximum throughput.
+    remediation: |
+      - Reduce sample rate to within ADC capability
+      - Select faster ADC if higher rate is required
+      - Verify timing with margin for reliability
+      - Add conversion complete checking
+    cwe: CWE-682
+  - id: TIM-CRIT-002
+    signal: Pipeline delay not accounted for in control loop
+    evidence_indicators:
+    - ADC pipeline delay not in latency calculation
+    - Control loop assumes zero conversion delay
+    - Phase margin degraded by uncompensated delay
+    explanation: |
+      Pipeline ADCs have significant delay between start of conversion
+      and data availability. This delay must be included in control
+      loop analysis to ensure stability.
+    remediation: |
+      - Measure and document pipeline delay
+      - Include delay in control loop model
+      - Adjust controller phase margin for delay
+      - Consider SAR ADC if delay is critical
+    cwe: CWE-362
+  high:
+  - id: TIM-HIGH-001
+    signal: Aperture jitter limits effective resolution
+    evidence_indicators:
+    - Aperture jitter > 1/(2^N * 2*pi*fmax)
+    - ENOB reduced at high input frequencies
+    - SNR degrades with input frequency
+    explanation: |
+      Aperture jitter causes sampling time uncertainty that degrades
+      effective resolution at high frequencies. At 10MHz with 100ps
+      jitter, ENOB is limited to about 8 bits regardless of ADC specs.
+    remediation: |
+      - Select ADC with adequate aperture jitter
+      - Use external sample-and-hold for critical applications
+      - Reduce signal frequency if possible
+      - Account for jitter in ENOB calculations
+  - id: TIM-HIGH-002
+    signal: DAC settling not verified for update rate
+    evidence_indicators:
+    - DAC settling time > update period
+    - Output not fully settled before next code
+    - Staircase or glitch artifacts in output
+    explanation: |
+      DAC output must settle to specified accuracy before the next
+      update for predictable output. Insufficient settling causes
+      inter-sample interference and distortion.
+    remediation: |
+      - Verify settling time vs. update period
+      - Add delay between DAC updates if needed
+      - Select faster-settling DAC for high speed
+      - Reduce update rate if settling is marginal
+  medium:
+  - id: TIM-MED-001
+    signal: Trigger-to-conversion delay not characterized
+    evidence_indicators:
+    - Delay from trigger to first sample unknown
+    - Event capture timing is inconsistent
+    - No specification for trigger latency
+    explanation: |
+      For triggered acquisition, the delay from trigger to first
+      sample must be known and consistent for proper event capture.
+      Unknown delay makes event timing ambiguous.
+    remediation: |
+      - Measure trigger-to-conversion delay
+      - Document delay in system specification
+      - Compensate for delay in timestamp calculation
+      - Verify delay consistency
+  - id: TIM-MED-002
+    signal: Multi-channel conversion not properly sequenced
+    evidence_indicators:
+    - Channel acquisition overlaps
+    - Settling time between channels insufficient
+    - Crosstalk between channels
+    explanation: |
+      Multiplexed ADC systems need settling time between channels
+      to avoid crosstalk. Fast channel switching without settling
+      causes measurement errors from previous channel.
+    remediation: |
+      - Allow adequate settling time between channels
+      - Verify acquisition rate accounts for settling
+      - Consider simultaneous sample-and-hold
+      - Characterize and compensate for crosstalk
+  low:
+  - id: TIM-LOW-001
+    signal: Timing parameters not documented
+    evidence_indicators:
+    - Conversion timing not in specifications
+    - Latency not documented
+    - Timing assumptions not recorded
+    explanation: |
+      Undocumented timing makes system behavior unpredictable and
+      difficult to maintain. Changes may inadvertently violate
+      timing requirements.
+    remediation: |
+      - Document all timing parameters
+      - Include conversion time, latency, settling time
+      - Record timing margins
+      - Add timing to verification procedures
+  positive:
+  - id: TIM-POS-001
+    signal: Well-characterized conversion timing
+    evidence_indicators:
+    - All timing parameters documented
+    - Timing verified with margin
+    - Latency accounted for in system design
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: timing-engineer
+  steps:
+  - id: '1'
+    name: Timing Configuration Review
+    description: |
+      Review converter timing configuration.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find timing configuration
+      command: |
+        grep -rniE "(conversion|aperture|settle|throughput)_(time|rate|delay)" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -20
+    expected_findings:
+    - Conversion timing
+    - Sample rate configuration
+    - Settling time allocation
+  - id: '2'
+    name: Timing Verification
+    description: |
+      Verify timing meets requirements.
+    duration_estimate: 30 min
+    manual_verification: true
+    expected_findings:
+    - Throughput verification
+    - Latency measurement
+    - Timing margin analysis
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Timing Analysis
+    - Latency Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 3
+    signal-processing:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: tim-001
+  item: Sample rate within ADC capability
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify sample rate < ADC max throughput
+  expected: Confirmed by reviewer
+- id: tim-002
+  item: Pipeline delay accounted for
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify latency included in system timing
+  expected: Confirmed by reviewer
+- id: tim-003
+  item: DAC settling adequate for update rate
+  level: WARNING
+  verification: manual
+  verification_notes: Verify settling time < update period
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - embedded-systems
+    - industrial-control
+    - data-acquisition
+    - signal-generators
+relationships:
+  commonly_combined:
+  - signal-processing.adc-dac.adc-resolution-adequacy
+  - signal-processing.sampling.sampling-synchronization
+  - signal-processing.sampling.clock-accuracy
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"

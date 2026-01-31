@@ -1,0 +1,343 @@
+# ============================================================
+# CRITICAL RENDERING PATH AUDIT
+# ============================================================
+# Analyzes the sequence of steps browsers take to render content,
+# identifying blockers and optimization opportunities.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.frontend-performance.critical-rendering-path"
+  name: "Critical Rendering Path Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "frontend-performance"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    Examines the critical rendering path - the sequence of steps the browser
+    takes to convert HTML, CSS, and JavaScript into pixels on screen.
+    Identifies render-blocking resources, parser-blocking scripts, and
+    opportunities to optimize first paint and contentful paint.
+
+  why_it_matters: |
+    The critical rendering path determines how fast content appears to users.
+    Render-blocking resources delay first paint. Parser-blocking JavaScript
+    stops HTML parsing until scripts execute. Optimizing this path directly
+    improves LCP and perceived performance.
+
+  when_to_run:
+    - "When First Contentful Paint is slow"
+    - "After adding new CSS or JavaScript files"
+    - "During initial performance optimization"
+    - "When changing resource loading strategies"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "HTML, CSS, and JavaScript source files"
+    - type: "deployed_application"
+      description: "Running application for testing"
+
+  access_requirements:
+    - "Read access to source code"
+    - "Access to Chrome DevTools"
+
+discovery:
+  code_patterns:
+    - pattern: "<script(?!.*defer|async)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find parser-blocking scripts"
+
+    - pattern: "<link.*rel=\"stylesheet\"(?!.*media=)"
+      type: "regex"
+      scope: "source"
+      purpose: "Find render-blocking stylesheets"
+
+    - pattern: "@import\\s+url"
+      type: "regex"
+      scope: "source"
+      purpose: "Find CSS imports that delay rendering"
+
+    - pattern: "<link.*rel=\"preload\""
+      type: "regex"
+      scope: "source"
+      purpose: "Find preloaded resources"
+
+  file_patterns:
+    - glob: "**/*.html"
+      purpose: "HTML documents"
+    - glob: "**/index.html"
+      purpose: "Entry HTML"
+    - glob: "**/*.css"
+      purpose: "Stylesheets"
+
+knowledge_sources:
+  specifications:
+    - id: "crp-guide"
+      name: "Critical Rendering Path"
+      url: "https://developers.google.com/web/fundamentals/performance/critical-rendering-path"
+      offline_cache: true
+      priority: "required"
+
+    - id: "resource-hints"
+      name: "Resource Hints"
+      url: "https://web.dev/preload-critical-assets/"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "render-blocking"
+      name: "Eliminate Render-Blocking Resources"
+      url: "https://web.dev/render-blocking-resources/"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "Lighthouse"
+      purpose: "Identify render-blocking resources"
+      offline_capable: false
+
+    - tool: "WebPageTest"
+      purpose: "Waterfall analysis"
+      offline_capable: false
+
+  scripts:
+    - id: "find-blocking-resources"
+      language: "bash"
+      purpose: "Find render-blocking resources in HTML"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        # Find scripts without async/defer
+        grep -rn '<script.*src=' --include='*.html' . | grep -v 'async\|defer'
+        # Find stylesheets in head
+        grep -rn '<link.*stylesheet' --include='*.html' .
+
+signals:
+  critical:
+    - id: "CRP-CRIT-001"
+      signal: "Large render-blocking CSS in document head"
+      evidence_pattern: "<link.*stylesheet.*href=\"(?!.*critical|inline).*\\.css\""
+      explanation: |
+        External CSS blocks rendering until downloaded and parsed. Large
+        stylesheets delay first paint significantly, especially on slow
+        networks. The browser cannot render until CSSOM is complete.
+      remediation: "Inline critical CSS, load non-critical CSS asynchronously, use media queries"
+
+    - id: "CRP-CRIT-002"
+      signal: "Parser-blocking JavaScript in document head"
+      evidence_pattern: "<head>[^]*<script(?!.*defer|async)[^>]*src="
+      explanation: |
+        Scripts without async or defer block HTML parsing. The browser stops
+        parsing, fetches the script, and executes it before continuing.
+        This significantly delays rendering.
+      remediation: "Add defer or async attribute, move scripts to end of body, or inline critical scripts"
+
+  high:
+    - id: "CRP-HIGH-001"
+      signal: "CSS @import statements"
+      evidence_pattern: "@import\\s+url\\(|@import\\s+['\"]"
+      explanation: |
+        CSS @import creates waterfall requests - the browser must download
+        the first CSS, parse it, then discover and download imported CSS.
+        This serializes what could be parallel requests.
+      remediation: "Replace @import with multiple <link> tags or concatenate CSS"
+
+    - id: "CRP-HIGH-002"
+      signal: "document.write() usage"
+      evidence_pattern: "document\\.write\\("
+      explanation: |
+        document.write() forces synchronous parsing and can significantly
+        delay rendering. Modern browsers may block it entirely on slow
+        connections.
+      remediation: "Use DOM APIs (appendChild, insertBefore) instead"
+
+    - id: "CRP-HIGH-003"
+      signal: "No resource hints for critical resources"
+      evidence_pattern: "(?!.*preload|preconnect|prefetch)"
+      explanation: |
+        Without resource hints, the browser discovers critical resources
+        late in the parsing process, delaying their download.
+      remediation: "Add preload for critical resources, preconnect to required origins"
+
+  medium:
+    - id: "CRP-MED-001"
+      signal: "Large number of render-blocking resources"
+      evidence_threshold: "> 5 blocking resources"
+      remediation: "Reduce number of blocking resources, inline critical portions"
+
+    - id: "CRP-MED-002"
+      signal: "Web fonts blocking text rendering"
+      evidence_pattern: "@font-face(?!.*font-display)"
+      remediation: "Add font-display: swap to show text while fonts load"
+
+  low:
+    - id: "CRP-LOW-001"
+      signal: "Unused CSS in critical path"
+      evidence_pattern: "large CSS file with low coverage"
+      remediation: "Extract and inline only used CSS for above-fold content"
+
+  positive:
+    - id: "CRP-POS-001"
+      signal: "Critical CSS inlined"
+      evidence_pattern: "<style>.*critical|inline"
+
+    - id: "CRP-POS-002"
+      signal: "Proper use of preload hints"
+      evidence_pattern: "<link.*rel=\"preload\""
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Identify render-blocking resources"
+      description: |
+        Find all CSS and JavaScript that blocks rendering.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find blocking scripts"
+          command: "grep -rn '<script.*src=' --include='*.html' . | grep -v 'async\\|defer'"
+        - purpose: "Find blocking stylesheets"
+          command: "grep -rn '<link.*stylesheet' --include='*.html' ."
+      expected_findings:
+        - "List of blocking resources"
+        - "Total blocking time estimate"
+
+    - id: "2"
+      name: "Analyze resource loading waterfall"
+      description: |
+        Use DevTools Network panel to visualize resource loading sequence.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Run Lighthouse render-blocking audit"
+          command: "lighthouse URL --only-audits=render-blocking-resources --output=json"
+      expected_findings:
+        - "Waterfall visualization"
+        - "Blocking time per resource"
+
+    - id: "3"
+      name: "Check resource hints"
+      description: |
+        Verify preload, preconnect, and prefetch hints are properly used.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find resource hints"
+          command: "grep -rn 'rel=\"preload\"\\|rel=\"preconnect\"\\|rel=\"prefetch\"' --include='*.html' ."
+      expected_findings:
+        - "Current resource hints"
+        - "Missing hints for critical resources"
+
+    - id: "4"
+      name: "Evaluate CSS delivery"
+      description: |
+        Check if critical CSS is inlined and non-critical is deferred.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find inline styles"
+          command: "grep -rn '<style>' --include='*.html' . | wc -l"
+        - purpose: "Find CSS imports"
+          command: "grep -rn '@import' --include='*.css' ."
+      expected_findings:
+        - "CSS delivery strategy"
+        - "Optimization opportunities"
+
+    - id: "5"
+      name: "Measure First Paint metrics"
+      description: |
+        Measure actual FCP and LCP to validate optimizations.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Measure paint metrics"
+          command: "lighthouse URL --only-categories=performance --output=json | jq '.audits[\"first-contentful-paint\"]'"
+      expected_findings:
+        - "FCP and LCP times"
+        - "Comparison to targets"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Render-Blocking Resources"
+        - "Resource Loading Analysis"
+        - "Optimization Recommendations"
+
+  confidence_guidance:
+    high: "DevTools/Lighthouse clearly shows blocking resources"
+    medium: "Code patterns indicate potential blocking"
+    low: "Requires runtime testing to confirm impact"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "crp-guide"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 2
+    full:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "crp-001"
+    item: "No parser-blocking scripts in document head"
+    level: "CRITICAL"
+    verification: "grep -rn '<head>' -A50 --include='*.html' . | grep '<script' | grep -cv 'defer\\|async'"
+    expected: "0"
+
+  - id: "crp-002"
+    item: "Critical CSS inlined or preloaded"
+    level: "BLOCKING"
+    verification: "grep -rn '<style>\\|preload.*css' --include='*.html' . | wc -l"
+    expected: "> 0"
+
+  - id: "crp-003"
+    item: "No CSS @import statements"
+    level: "WARNING"
+    verification: "grep -rn '@import' --include='*.css' . | wc -l"
+    expected: "0"
+
+governance:
+  applicable_to:
+    archetypes: ["webapp", "marketing-site"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.frontend-performance.core-web-vitals"
+    - "performance-efficiency.frontend-performance.font-loading"

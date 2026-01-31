@@ -1,0 +1,385 @@
+audit:
+  id: security-trust.authorization.authorization-cache
+  name: Authorization Cache Consistency Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: authorization
+  tier: phd
+  estimated_duration: 1.5 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Examines caching mechanisms for authorization decisions, tokens, and
+    permission data to ensure consistency and prevent security vulnerabilities.
+    Analyzes cache invalidation strategies, TTL configurations, race conditions,
+    and staleness handling to prevent unauthorized access through cached
+    stale permissions.
+  why_it_matters: |
+    Cached authorization data that becomes stale can allow revoked access
+    to persist, enable session replay attacks, or cause race conditions
+    where permission changes don't take effect. Real-world issues include
+    Keycloak race conditions in authorization caching and MSAL.js token
+    cache race conditions. CWE-613 (Insufficient Session Expiration)
+    directly relates to cached authentication state.
+  when_to_run:
+  - After implementing authorization caching
+  - During performance optimization review
+  - After security incidents involving revoked access
+  - During distributed system review
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application with cached authorization
+  - type: configuration
+    description: Cache configuration files
+  access_requirements:
+  - Read access to source code repository
+  - Access to caching configuration
+discovery:
+  code_patterns:
+  - pattern: cache\.(get|set|put|has).*(auth|token|permission|role|session)
+    type: regex
+    scope: source
+    purpose: Find authorization-related caching
+  - pattern: (redis|memcache|ehcache).*(auth|permission|role)
+    type: regex
+    scope: source
+    purpose: Locate cache store for auth data
+  - pattern: (ttl|TTL|expire|timeout).*(auth|token|permission|session)
+    type: regex
+    scope: source
+    purpose: Find TTL configurations
+  - pattern: (invalidate|clear|evict|flush).*(cache|auth|permission)
+    type: regex
+    scope: source
+    purpose: Locate cache invalidation logic
+  - pattern: '@Cacheable|@CacheEvict|@CachePut'
+    type: regex
+    scope: source
+    purpose: Find cache annotations
+  file_patterns:
+  - glob: '**/cache/**'
+    purpose: Cache implementation files
+  - glob: '**/redis/**'
+    purpose: Redis configuration
+  - glob: '**/session/**'
+    purpose: Session management
+  - glob: '**/config/*cache*'
+    purpose: Cache configuration files
+knowledge_sources:
+  specifications:
+  - id: cwe-613
+    name: 'CWE-613: Insufficient Session Expiration'
+    url: https://cwe.mitre.org/data/definitions/613.html
+    offline_cache: true
+    priority: required
+  - id: cwe-525
+    name: 'CWE-525: Use of Web Browser Cache Containing Sensitive Information'
+    url: https://cwe.mitre.org/data/definitions/525.html
+    offline_cache: true
+    priority: required
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: NIST SP 800-207 Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-session
+    name: OWASP Session Management Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect cache patterns without invalidation
+    offline_capable: true
+  scripts:
+  - id: cache-pattern-search
+    language: bash
+    purpose: Find authorization cache patterns
+    source: inline
+    code: |
+      # Search for auth-related caching
+      grep -rn --include="*.{js,ts,py,java,go,rb,cs}" \
+        -E "cache.*(auth|permission|role|token)" .
+signals:
+  critical:
+  - id: CACHE-CRIT-001
+    signal: Permission cache without invalidation on revocation
+    evidence_pattern: cache\.set.*permission(?!.*invalidat|.*on.*revoke)
+    cwe: CWE-613
+    explanation: |
+      Permissions are cached but not invalidated when revoked,
+      allowing users to retain access after permission removal.
+      Revoked users could continue accessing resources until
+      cache expires.
+    remediation: Implement immediate cache invalidation on permission revocation
+  - id: CACHE-CRIT-002
+    signal: No TTL on authorization cache
+    evidence_pattern: cache\.set.*auth.*(?!ttl|expire|timeout)
+    cwe: CWE-613
+    explanation: |
+      Authorization data is cached indefinitely without TTL,
+      meaning stale permissions persist forever unless explicitly
+      cleared.
+    remediation: Set appropriate TTL on all authorization caches (e.g., 5-15 minutes)
+  - id: CACHE-CRIT-003
+    signal: Session/token cached in browser storage insecurely
+    evidence_pattern: localStorage\.(set|get)Item.*(token|session|auth)
+    cwe: CWE-525
+    explanation: |
+      Authentication tokens stored in localStorage are vulnerable
+      to XSS attacks and persist beyond browser session.
+    remediation: Use httpOnly cookies or sessionStorage with appropriate expiration
+  high:
+  - id: CACHE-HIGH-001
+    signal: Race condition in cache initialization
+    evidence_pattern: if.*!cache.*\{.*cache.*set|getOrCreate.*cache
+    cwe: CWE-362
+    explanation: |
+      Cache initialization has race conditions where multiple
+      requests could see inconsistent authorization state.
+    remediation: Use atomic cache operations or distributed locks
+  - id: CACHE-HIGH-002
+    signal: Inconsistent cache invalidation across nodes
+    evidence_pattern: cache\.invalidate(?!.*broadcast|.*pub.*sub|.*distributed)
+    cwe: CWE-613
+    explanation: |
+      In distributed systems, cache invalidation only affects
+      local node, leaving stale permissions on other nodes.
+    remediation: Use distributed cache invalidation (pub/sub, cache events)
+  - id: CACHE-HIGH-003
+    signal: Token refresh not updating cache
+    evidence_pattern: refresh.*token(?!.*cache.*update|.*invalidate)
+    cwe: CWE-613
+    explanation: |
+      Token refresh doesn't update cached authorization data,
+      leaving stale permissions associated with old tokens.
+    remediation: Update or invalidate auth cache on token refresh
+  medium:
+  - id: CACHE-MED-001
+    signal: Excessive TTL for permission cache
+    evidence_pattern: (ttl|expire).*['"]?(36000|86400|[1-9]\d{5,})
+    cwe: CWE-613
+    remediation: Reduce TTL to 5-15 minutes for sensitive authorization data
+  - id: CACHE-MED-002
+    signal: Cache key doesn't include version/timestamp
+    evidence_pattern: cache.*key.*=.*(user|permission)(?!.*version|timestamp)
+    cwe: CWE-613
+    remediation: Include version or timestamp in cache keys for invalidation
+  low:
+  - id: CACHE-LOW-001
+    signal: Missing cache monitoring/logging
+    evidence_pattern: cache.*(hit|miss|evict)(?!.*log|.*metric)
+    remediation: Add monitoring for cache hit/miss rates and evictions
+  positive:
+  - id: CACHE-POS-001
+    signal: Distributed cache invalidation implemented
+    evidence_pattern: (publish|broadcast|notify).*(invalidat|clear).*cache
+  - id: CACHE-POS-002
+    signal: Appropriate TTL configured
+    evidence_pattern: (ttl|expire).*['"]?(300|600|900)['"]?
+  - id: CACHE-POS-003
+    signal: Cache invalidation on logout
+    evidence_pattern: logout.*(invalidate|clear|delete).*cache
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Identify Authorization Caching
+    description: |
+      Map all locations where authorization data (permissions,
+      roles, tokens, sessions) is cached.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find auth-related caching
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "cache.*(auth|permission|role|token|session)" .
+    - purpose: Find cache annotations
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "@Cacheable|@CacheEvict|@memoize|@cache" .
+    expected_findings:
+    - Authorization caching locations
+    - Cache storage mechanisms
+  - id: '2'
+    name: Analyze Cache TTL Configuration
+    description: |
+      Verify that cached authorization data has appropriate
+      time-to-live settings.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find TTL configurations
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(ttl|TTL|expire|timeout).*(auth|permission|session)" .
+    - purpose: Check for missing TTL
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "cache\\.set.*auth" . | grep -v "ttl\|expire\|timeout"
+    expected_findings:
+    - Appropriate TTL (5-15 minutes)
+    - No indefinite caching of auth data
+  - id: '3'
+    name: Verify Cache Invalidation
+    description: |
+      Ensure cache is properly invalidated on permission
+      changes, logout, and token revocation.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find cache invalidation
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(invalidate|clear|evict|delete).*(cache|auth|permission)" .
+    - purpose: Check logout invalidation
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -B5 -A5 \
+          "logout|signOut" . | grep -E "(cache|invalidate|clear)"
+    expected_findings:
+    - Invalidation on permission changes
+    - Invalidation on logout
+  - id: '4'
+    name: Check Distributed Cache Consistency
+    description: |
+      For distributed systems, verify cache invalidation
+      propagates across all nodes.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find distributed cache patterns
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(redis|memcache|hazelcast|ehcache).*distributed" .
+    - purpose: Check for pub/sub invalidation
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(publish|subscribe|broadcast).*(invalidat|cache)" .
+    expected_findings:
+    - Distributed invalidation mechanism
+    - Cross-node consistency
+  - id: '5'
+    name: Review Browser Cache Security
+    description: |
+      Verify tokens and sensitive auth data aren't insecurely
+      cached in browser storage.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find browser storage of auth data
+      command: |
+        grep -rn --include="*.{js,ts,tsx,jsx}" -E \
+          "localStorage.*(token|auth|session|key)" .
+    - purpose: Check for secure alternatives
+      command: |
+        grep -rn --include="*.{js,ts,tsx,jsx}" -E \
+          "sessionStorage|httpOnly|secure.*cookie" .
+    expected_findings:
+    - Secure storage mechanisms
+    - No sensitive data in localStorage
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Cache Architecture Analysis
+    - Invalidation Coverage
+    - Recommendations
+  confidence_guidance:
+    high: Complete cache invalidation with appropriate TTL
+    medium: Caching present with partial invalidation
+    low: Cache patterns found but invalidation unclear
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: cwe-613
+      priority: required
+    - source_id: owasp-session
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Cache audit requires thorough analysis
+    full:
+      included: true
+      priority: 2
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: cache-001
+  item: Authorization cache has TTL
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "cache.*auth.*ttl\|expire.*auth" . | wc -l
+  expected: Greater than 0 if caching used
+- id: cache-002
+  item: Cache invalidated on permission revocation
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "(revoke|remove).*permission.*invalidat" . | wc -l
+  expected: Greater than 0 if permission caching used
+- id: cache-003
+  item: Cache cleared on logout
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" "logout.*cache\|signOut.*invalidat" . | wc -l
+  expected: Greater than 0
+- id: cache-004
+  item: No auth tokens in localStorage
+  level: WARNING
+  verification: |
+    grep -rn --include="*.{js,ts,tsx,jsx}" "localStorage.*(token\|auth)" . | wc -l
+  expected: '0'
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: CWE
+    controls:
+    - CWE-613
+    - CWE-525
+    - CWE-362
+  - framework: OWASP
+    controls:
+    - Session Management
+relationships:
+  commonly_combined:
+  - security-trust.authorization.rbac-implementation
+  - security-trust.authentication.session-management
+  - security-trust.authentication.token-security

@@ -1,0 +1,279 @@
+audit:
+  id: code-quality.dead-code.todo-fixme
+  name: TODO/FIXME Comment Detection Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: code-quality
+  category_number: 6
+  subcategory: dead-code
+  tier: expert
+  estimated_duration: 25 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: full
+  severity: medium
+  scope: codebase
+  default_profiles:
+  - full
+  - quality
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Identifies TODO, FIXME, HACK, XXX, BUG, and similar annotations in code
+    comments. Tracks their age, author, and context to identify stale technical
+    debt markers that should be addressed or removed.
+  why_it_matters: |
+    TODO comments represent acknowledged technical debt that accumulates over
+    time. Stale TODOs indicate work that was planned but never completed,
+    often becoming irrelevant or misleading. They can mask bugs (FIXME), security
+    issues (SECURITY), or performance problems (PERF) that never get addressed.
+  when_to_run:
+  - During sprint planning
+  - Before major releases
+  - Technical debt assessments
+  - Code quality reviews
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Application source code
+  access_requirements:
+  - Read access to source code repository
+discovery:
+  code_patterns:
+  - pattern: \bTODO\b
+    type: regex
+    scope: source
+    purpose: Identify TODO markers
+  - pattern: \bFIXME\b
+    type: regex
+    scope: source
+    purpose: Identify FIXME markers
+  - pattern: \bHACK\b
+    type: regex
+    scope: source
+    purpose: Identify HACK markers
+  - pattern: \bXXX\b
+    type: regex
+    scope: source
+    purpose: Identify XXX markers
+  - pattern: \bBUG\b
+    type: regex
+    scope: source
+    purpose: Identify BUG markers
+  - pattern: \bWARNING\b
+    type: regex
+    scope: source
+    purpose: Identify WARNING markers
+  file_patterns:
+  - glob: '**/*.{js,ts,py,java,go,rb,cs,cpp,c,rs}'
+    purpose: Source code files
+knowledge_sources:
+  guides:
+  - id: eslint-no-warning
+    name: ESLint no-warning-comments Rule
+    url: https://eslint.org/docs/latest/rules/no-warning-comments
+    offline_cache: true
+  - id: google-style-todos
+    name: Google Style Guide - TODO Comments
+    url: https://google.github.io/styleguide/cppguide.html#TODO_Comments
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: eslint
+    purpose: JavaScript/TypeScript TODO detection
+    offline_capable: true
+  - tool: rg
+    purpose: Fast regex search across files
+    offline_capable: true
+  - tool: todo-tree
+    purpose: VS Code extension for TODO tracking
+    offline_capable: true
+  scripts:
+  - id: todo-scan
+    language: bash
+    purpose: Detect TODO/FIXME comments
+    source: inline
+    code: |
+      # Find all TODO variants
+      grep -rn --include="*.{js,ts,py,java,go}" -E "\b(TODO|FIXME|HACK|XXX|BUG)\b" . 2>/dev/null
+signals:
+  critical:
+  - id: DC-TODO-CRIT-001
+    signal: SECURITY or VULN markers in code
+    evidence_pattern: \b(SECURITY|VULN|VULNERABILITY)\b
+    explanation: |
+      Security-related TODO markers indicate known security issues that
+      have not been addressed. These represent active vulnerabilities.
+    remediation: Address security issues immediately or create tracked tickets
+  - id: DC-TODO-CRIT-002
+    signal: BUG or FIXME older than 6 months
+    evidence_pattern: FIXME|BUG.*6\+.*months
+    explanation: |
+      Long-standing bug markers indicate known issues that have been
+      ignored, potentially affecting users.
+    remediation: Fix the bug or document why it cannot be fixed
+  high:
+  - id: DC-TODO-HIGH-001
+    signal: More than 100 TODO/FIXME comments in codebase
+    evidence_pattern: todo_count > 100
+    explanation: |
+      High volume of TODO comments indicates significant accumulated
+      technical debt that may overwhelm the team.
+    remediation: Triage and create tracked work items for TODOs
+  - id: DC-TODO-HIGH-002
+    signal: HACK markers in production code
+    evidence_pattern: \bHACK\b.*(?!test)
+    explanation: |
+      HACK markers indicate acknowledged shortcuts that may cause
+      problems and should be properly fixed.
+    remediation: Replace hacks with proper implementations
+  medium:
+  - id: DC-TODO-MED-001
+    signal: TODO comments without owner or ticket reference
+    evidence_pattern: TODO(?!.*(@|#|ticket|issue))
+    remediation: Add owner or ticket reference to TODO comments
+  - id: DC-TODO-MED-002
+    signal: Stale TODO comments (>3 months old)
+    evidence_pattern: TODO.*created.*3\+.*months
+    remediation: Review and either address or remove
+  low:
+  - id: DC-TODO-LOW-001
+    signal: TODO comments in test files
+    evidence_pattern: test.*TODO
+    remediation: Address or document test TODOs
+  positive:
+  - id: DC-TODO-POS-001
+    signal: TODOs include ticket references
+    evidence_pattern: TODO.*#\d+|TODO.*[A-Z]+-\d+
+  - id: DC-TODO-POS-002
+    signal: TODO count stable or decreasing over time
+    evidence_pattern: todo_trend <= 0
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Scan for TODO Markers
+    description: |
+      Search the codebase for all TODO, FIXME, HACK, and related
+      markers to create a comprehensive inventory.
+    duration_estimate: 5 min
+    commands:
+    - purpose: Find all TODO variants
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rs,c,cpp}" -E "\b(TODO|FIXME|HACK|XXX|BUG)\b" . 2>/dev/null | head -200
+    - purpose: Count by type
+      command: |
+        for marker in TODO FIXME HACK XXX BUG; do echo -n "$marker: "; grep -r --include="*.{js,ts,py}" -c "\b$marker\b" . 2>/dev/null | awk -F: '{sum+=$2}END{print sum}'; done
+    expected_findings:
+    - Complete list of TODO markers
+    - Count by marker type
+  - id: '2'
+    name: Analyze Marker Age
+    description: |
+      Use git blame to determine the age of each TODO marker
+      and identify stale items.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find TODO ages via git
+      command: |
+        grep -rln --include="*.{js,ts}" "\bTODO\b" . 2>/dev/null | head -10 | xargs -I{} git blame {} 2>/dev/null | grep -i TODO | head -20
+    expected_findings:
+    - TODO ages
+    - Authors of TODOs
+  - id: '3'
+    name: Identify Priority Items
+    description: |
+      Classify TODOs by urgency based on marker type and keywords
+      (SECURITY, BUG, CRITICAL, etc.).
+    duration_estimate: 5 min
+    commands:
+    - purpose: Find security-related TODOs
+      command: |
+        grep -rn --include="*.{js,ts,py}" -iE "(TODO|FIXME).*(security|auth|vuln|cve)" . 2>/dev/null
+    expected_findings:
+    - Security-related TODOs
+    - Priority classification
+  - id: '4'
+    name: Generate Report
+    description: |
+      Create summary report with statistics and prioritized action items.
+    duration_estimate: 5 min
+    expected_findings:
+    - Total count by type
+    - Age distribution
+    - Priority list
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - todo_locations
+    - marker_type
+    - age
+    - priority
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - TODO Inventory
+    - Age Analysis
+    - Priority Recommendations
+  confidence_guidance:
+    high: Marker clearly identified with context
+    medium: Marker found, context unclear
+    low: Ambiguous marker (may be false positive)
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: eslint-no-warning
+      priority: recommended
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 3
+    full:
+      included: true
+      priority: 1
+    quality:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: todo-001
+  item: TODO/FIXME scan completed
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java}" -E "\b(TODO|FIXME)\b" . 2>/dev/null | wc -l
+  expected: Count documented
+- id: todo-002
+  item: No SECURITY or VULN markers unaddressed
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py}" -iE "\b(SECURITY|VULN)\b" . 2>/dev/null | wc -l
+  expected: '0'
+- id: todo-003
+  item: FIXME/BUG markers documented
+  level: WARNING
+  verification: |
+    grep -rn --include="*.{js,ts,py}" -E "\b(FIXME|BUG)\b" . 2>/dev/null | wc -l
+  expected: All documented
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Maintainability
+relationships:
+  commonly_combined:
+  - code-quality.dead-code.commented-out-code
+  - code-quality.technical-debt.debt-assessment
+  - code-quality.documentation.code-documentation

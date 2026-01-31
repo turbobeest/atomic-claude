@@ -1,0 +1,344 @@
+audit:
+  id: api-integration.integration-patterns.retry-pattern
+  name: Retry Pattern Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: api-integration
+  category_number: 9
+  subcategory: integration-patterns
+  tier: phd
+  estimated_duration: 75 minutes
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: codebase
+  default_profiles:
+  - full
+  - reliability
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Evaluates retry implementation for API calls and integrations
+    including retry strategy, exponential backoff, jitter, retry
+    limits, retryable error classification, and idempotency handling.
+    Analyzes whether retries improve reliability without causing harm.
+  why_it_matters: |
+    Proper retries handle transient failures gracefully, improving
+    system reliability. But incorrect retries can amplify failures,
+    cause thundering herds, overwhelm recovering services, or
+    create duplicate operations. Retries must be carefully designed.
+  when_to_run:
+  - Reliability assessments
+  - After integration failures
+  - Performance optimization
+  - Circuit breaker design
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: HTTP client and integration code
+  - type: configuration
+    description: Retry configuration
+  access_requirements:
+  - Read access to integration code
+  - Access to configuration files
+discovery:
+  code_patterns:
+  - pattern: retry|Retry|RETRY
+    type: regex
+    scope: source
+    purpose: Detect retry logic
+  - pattern: backoff|exponential|jitter
+    type: regex
+    scope: source
+    purpose: Detect backoff patterns
+  - pattern: idempotent|idempotency|retry-after
+    type: regex
+    scope: source
+    purpose: Detect idempotency handling
+  file_patterns:
+  - glob: '**/clients/**'
+    purpose: HTTP clients
+  - glob: '**/retry/**'
+    purpose: Retry implementations
+  - glob: '**/utils/**'
+    purpose: Utility functions
+knowledge_sources:
+  specifications:
+  - id: building-microservices
+    name: Sam Newman - Building Microservices
+    url: https://www.oreilly.com/library/view/building-microservices-2nd/9781492034018/
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: retry-pattern
+    name: Retry Pattern
+    url: https://docs.microsoft.com/en-us/azure/architecture/patterns/retry
+    offline_cache: true
+  - id: exponential-backoff
+    name: Exponential Backoff
+    url: https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
+    offline_cache: true
+  learning_resources:
+  - id: resilience-patterns
+    title: Resilience Patterns
+    type: article
+    reference: Netflix Tech Blog
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect retry patterns
+    offline_capable: true
+  scripts:
+  - id: retry-scan
+    language: bash
+    purpose: Analyze retry implementation
+    source: inline
+    code: |
+      echo "=== Retry Pattern Analysis ==="
+      echo "--- Retry configuration ---"
+      grep -rn "retry\|Retry" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -30
+
+      echo "--- Backoff configuration ---"
+      grep -rn "backoff\|exponential\|delay\|sleep" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+
+      echo "--- Idempotency handling ---"
+      grep -rn "idempotent\|idempotency\|retry-after\|Idempotency-Key" \
+        --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+        grep -v node_modules | head -20
+signals:
+  critical:
+  - id: RP-CRIT-001
+    signal: Retries on non-idempotent operations
+    evidence_pattern: POST/PUT/DELETE retried without idempotency key
+    explanation: |
+      Retrying non-idempotent operations creates duplicates. A retried
+      payment could charge twice. A retried order could create
+      duplicate orders. Operations must be idempotent before retrying.
+    remediation: Use idempotency keys for all non-GET operations being retried
+  - id: RP-CRIT-002
+    signal: Retry without backoff
+    evidence_pattern: Immediate retry in tight loop
+    explanation: |
+      Retrying immediately hammers the failing service, preventing
+      recovery. Tight retry loops cause thundering herds that
+      amplify the original failure.
+    remediation: Implement exponential backoff with jitter
+  high:
+  - id: RP-HIGH-001
+    signal: No maximum retry limit
+    evidence_pattern: Retry continues indefinitely
+    explanation: |
+      Without retry limits, a permanently failing service causes
+      infinite retry loops. Resources are consumed retrying forever
+      instead of failing fast.
+    remediation: Set maximum retry count (typically 3-5 attempts)
+  - id: RP-HIGH-002
+    signal: Retrying non-retryable errors
+    evidence_pattern: 400/401/403/404 errors being retried
+    explanation: |
+      Client errors (4xx) are deterministic and won't succeed on
+      retry. Retrying them wastes resources and delays failure
+      reporting. Only transient errors should be retried.
+    remediation: Only retry 5xx and network errors; fail fast on 4xx
+  - id: RP-HIGH-003
+    signal: No jitter in backoff
+    evidence_pattern: Fixed exponential delay without randomization
+    explanation: |
+      Without jitter, all clients retry at the same time after
+      failures, causing synchronized thundering herds. Adding
+      random jitter spreads retries over time.
+    remediation: Add random jitter to exponential backoff
+  medium:
+  - id: RP-MED-001
+    signal: Retry-After header ignored
+    evidence_pattern: 429 responses retried without respecting Retry-After
+    remediation: Respect Retry-After header in retry logic
+  - id: RP-MED-002
+    signal: No circuit breaker with retries
+    evidence_pattern: Retries continue even when service is down
+    remediation: Combine retries with circuit breaker pattern
+  - id: RP-MED-003
+    signal: Retry logging insufficient
+    evidence_pattern: Retries not logged or monitored
+    remediation: Log and alert on retry patterns
+  low:
+  - id: RP-LOW-001
+    signal: Retry configuration not documented
+    evidence_pattern: No documentation of retry behavior
+    remediation: Document retry policies and configuration
+  positive:
+  - id: RP-POS-001
+    signal: Exponential backoff with jitter
+    evidence_pattern: Randomized exponential delay between retries
+  - id: RP-POS-002
+    signal: Idempotency keys used
+    evidence_pattern: Unique key sent with each retry-eligible request
+  - id: RP-POS-003
+    signal: Retryable errors classified
+    evidence_pattern: Clear distinction of retryable vs non-retryable
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Find Retry Implementations
+    description: |
+      Identify all retry logic in the codebase.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find retry code
+      command: |
+        grep -rn "retry\|Retry\|RETRY" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -40
+    - purpose: Find retry libraries
+      command: |
+        grep -rn "axios-retry\|retry\|resilience4j\|tenacity" \
+          --include="package.json" --include="pom.xml" --include="requirements.txt" . 2>/dev/null | \
+          head -10
+    expected_findings:
+    - Retry implementations
+    - Libraries used
+  - id: '2'
+    name: Analyze Backoff Strategy
+    description: |
+      Check backoff configuration and jitter.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find backoff configuration
+      command: |
+        grep -rn "backoff\|exponential\|jitter\|delay" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Backoff strategy
+    - Jitter implementation
+  - id: '3'
+    name: Check Error Classification
+    description: |
+      Verify retryable vs non-retryable error handling.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find error handling
+      command: |
+        grep -rn "isRetryable\|shouldRetry\|4[0-9][0-9]\|5[0-9][0-9]" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -30
+    expected_findings:
+    - Error classification
+    - Retry conditions
+  - id: '4'
+    name: Review Idempotency Handling
+    description: |
+      Check if idempotency is ensured for retries.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find idempotency handling
+      command: |
+        grep -rn "idempotent\|idempotency\|Idempotency-Key" \
+          --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    expected_findings:
+    - Idempotency mechanism
+    - Key generation
+  - id: '5'
+    name: Check Retry Limits
+    description: |
+      Verify maximum retry counts are configured.
+    duration_estimate: 10 min
+    commands:
+    - purpose: Find retry limits
+      command: |
+        grep -rn "maxRetries\|retry.*count\|MAX_RETRY\|retries:" \
+          --include="*.ts" --include="*.java" --include="*.py" --include="*.yaml" . 2>/dev/null | \
+          grep -v node_modules | head -20
+    expected_findings:
+    - Retry limits
+    - Limit values
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+    content:
+    - retry_inventory
+    - strategy_assessment
+    - idempotency_status
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Retry Strategy Analysis
+    - Risk Assessment
+    - Recommendations
+  confidence_guidance:
+    high: Clear missing backoff or retry on non-idempotent
+    medium: Retry exists but strategy may be suboptimal
+    low: Requires failure testing to confirm behavior
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: retry-pattern
+      priority: required
+    - source_id: exponential-backoff
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed analysis
+    full:
+      included: true
+      priority: 1
+    reliability:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: rp-001
+  item: Retries use exponential backoff
+  level: CRITICAL
+  verification: |
+    grep -rn "exponential\|backoff\|delay.*\*" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: rp-002
+  item: Retry limits configured
+  level: CRITICAL
+  verification: |
+    grep -rn "maxRetries\|MAX_RETRY\|retries:" \
+      --include="*.ts" --include="*.java" --include="*.py" --include="*.yaml" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: rp-003
+  item: Idempotency keys used for mutations
+  level: WARNING
+  verification: |
+    grep -rn "idempotent\|idempotency\|Idempotency-Key" \
+      --include="*.ts" --include="*.java" --include="*.py" . 2>/dev/null | \
+      grep -v node_modules | wc -l | xargs -I {} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: ISO 25010
+    controls:
+    - Reliability
+    - Fault Tolerance
+relationships:
+  commonly_combined:
+  - api-integration.integration-patterns.integration-timeout
+  - reliability-resilience.circuit-breaker.circuit-implementation
+  - reliability-resilience.error-handling.transient-fault-handling

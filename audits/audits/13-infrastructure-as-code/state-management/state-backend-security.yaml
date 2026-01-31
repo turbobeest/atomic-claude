@@ -1,0 +1,435 @@
+audit:
+  id: infrastructure-as-code.state-management.state-backend-security
+  name: IaC State Backend Security
+  version: 1.0.0
+  last_updated: '2026-01-19'
+  status: active
+  category: infrastructure-as-code
+  category_number: 13
+  subcategory: state-management
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: infrastructure
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the security configuration of Infrastructure as Code
+    state backends. It evaluates access controls, encryption settings,
+    network security, and compliance with security best practices for
+    state storage.
+
+    Key areas examined:
+    - Backend type selection and security implications
+    - Encryption at rest and in transit
+    - Access control policies and IAM configuration
+    - Network isolation and endpoint security
+    - Audit logging and monitoring
+    - State file sensitive data protection
+  why_it_matters: |
+    Terraform state files contain extremely sensitive information:
+    - Resource IDs and configurations
+    - Credentials and secrets (unless properly managed)
+    - Infrastructure topology that aids attack planning
+    - Provider credentials used for management
+
+    Compromised state backends can lead to:
+    - Complete infrastructure takeover
+    - Data breaches through exposed secrets
+    - Service disruptions via malicious modifications
+    - Compliance violations and audit failures
+  when_to_run:
+  - During initial IaC setup and architecture review
+  - After security incidents involving infrastructure
+  - During compliance audits (SOC 2, PCI-DSS)
+  - Before production deployment of new state backends
+prerequisites:
+  required_artifacts:
+  - type: iac_repository
+    description: Access to infrastructure code with backend configurations
+  - type: cloud_access
+    description: Read access to cloud provider IAM and storage configurations
+  access_requirements:
+  - Read access to IaC repositories
+  - Read access to state backend storage (S3, GCS, Azure Blob)
+  - Access to IAM policies related to state access
+  - Cloud provider security configuration access
+discovery:
+  code_patterns:
+  - pattern: backend\s+"(s3|gcs|azurerm|remote|http|consul)"
+    type: regex
+    scope: config
+    purpose: Identify backend type configurations
+  - pattern: encrypt\s*=\s*(true|false)
+    type: regex
+    scope: config
+    purpose: Check encryption configuration
+  - pattern: kms_key_id|kms_key_arn
+    type: regex
+    scope: config
+    purpose: Identify KMS encryption usage
+  - pattern: dynamodb_table
+    type: regex
+    scope: config
+    purpose: Check for state locking configuration
+  file_patterns:
+  - glob: '**/backend.tf'
+    purpose: Backend configuration files
+  - glob: '**/providers.tf'
+    purpose: Provider configurations with backend
+  - glob: '**/terraform.tf'
+    purpose: Terraform configuration blocks
+  - glob: '**/terragrunt.hcl'
+    purpose: Terragrunt remote state configuration
+knowledge_sources:
+  specifications:
+  - id: terraform-backends
+    name: Terraform Backend Configuration
+    url: https://developer.hashicorp.com/terraform/language/settings/backends
+    offline_cache: true
+    priority: required
+  - id: terraform-s3-backend
+    name: Terraform S3 Backend
+    url: https://developer.hashicorp.com/terraform/language/settings/backends/s3
+    offline_cache: true
+    priority: required
+  guides:
+  - id: aws-s3-security
+    name: AWS S3 Security Best Practices
+    url: https://docs.aws.amazon.com/AmazonS3/latest/userguide/security-best-practices.html
+    offline_cache: true
+  - id: terraform-cloud-security
+    name: Terraform Cloud Security
+    url: https://developer.hashicorp.com/terraform/cloud-docs/architectural-details/security-model
+    offline_cache: true
+  - id: cis-aws-foundations
+    name: CIS AWS Foundations Benchmark
+    url: https://www.cisecurity.org/benchmark/amazon_web_services
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: checkov
+    purpose: Scan for state backend security misconfigurations
+    offline_capable: true
+  - tool: tfsec
+    purpose: Security scanner for Terraform configurations
+    offline_capable: true
+  - tool: terrascan
+    purpose: Detect compliance and security violations
+    offline_capable: true
+  infrastructure_tools:
+  - tool: aws s3api
+    purpose: Inspect S3 bucket security configuration
+    command: aws s3api get-bucket-encryption --bucket BUCKET_NAME
+  - tool: aws s3api
+    purpose: Check bucket public access settings
+    command: aws s3api get-public-access-block --bucket BUCKET_NAME
+signals:
+  critical:
+  - id: IAC-STATE-CRIT-001
+    signal: State backend not encrypted at rest
+    evidence_pattern: encrypt\s*=\s*false
+    explanation: |
+      Unencrypted state files expose all infrastructure secrets and
+      configuration details to anyone with storage access. This is
+      a severe security vulnerability.
+    remediation: Enable server-side encryption with encrypt = true and customer-managed KMS keys
+  - id: IAC-STATE-CRIT-002
+    signal: State bucket has public access
+    evidence_indicators:
+    - S3 bucket without public access block
+    - Bucket policy allowing public read
+    - ACLs granting public access
+    explanation: |
+      Public state file access exposes complete infrastructure details,
+      credentials, and attack vectors to the internet.
+    remediation: Enable S3 Block Public Access and verify bucket policies deny public access
+  - id: IAC-STATE-CRIT-003
+    signal: State backend using local storage in production
+    evidence_pattern: backend\s+"local"
+    explanation: |
+      Local state backends are single points of failure with no
+      access control, encryption, or locking capabilities.
+    remediation: Use remote backends (S3, GCS, Azure Blob, Terraform Cloud) for all environments
+  - id: IAC-STATE-CRIT-004
+    signal: Overly permissive state backend access
+    evidence_indicators:
+    - IAM policies with s3:* on state bucket
+    - Wildcard principals in bucket policy
+    - No condition keys restricting access
+    explanation: |
+      Broad state access permissions allow any compromised credential
+      to modify or exfiltrate infrastructure state.
+    remediation: Implement least-privilege IAM with specific actions and resource constraints
+  high:
+  - id: IAC-STATE-HIGH-001
+    signal: No KMS customer-managed key for state encryption
+    evidence_indicators:
+    - Using default S3 encryption (SSE-S3)
+    - No kms_key_id specified
+    explanation: |
+      Default encryption keys don't provide audit trails or access
+      controls separate from the storage service.
+    remediation: Use customer-managed KMS keys with key policies for audit and access control
+  - id: IAC-STATE-HIGH-002
+    signal: State backend without versioning
+    evidence_indicators:
+    - S3 bucket versioning disabled
+    - No state file version history
+    explanation: |
+      Without versioning, accidental or malicious state corruption
+      cannot be recovered, potentially causing service outages.
+    remediation: Enable bucket versioning and configure lifecycle policies for retention
+  - id: IAC-STATE-HIGH-003
+    signal: No audit logging for state access
+    evidence_indicators:
+    - S3 server access logging disabled
+    - No CloudTrail data events for state bucket
+    explanation: |
+      Without logging, unauthorized state access or modifications
+      cannot be detected or investigated.
+    remediation: Enable S3 access logging and CloudTrail data events for the state bucket
+  - id: IAC-STATE-HIGH-004
+    signal: State backend accessible from internet
+    evidence_indicators:
+    - No VPC endpoint configuration
+    - Public endpoint used for state access
+    explanation: |
+      Internet-accessible state backends are exposed to network-level
+      attacks and credential stuffing.
+    remediation: Use VPC endpoints or private endpoints for state backend access
+  medium:
+  - id: IAC-STATE-MED-001
+    signal: State backend in same account as workloads
+    evidence_indicators:
+    - Single AWS account for all resources
+    - No dedicated management account
+    remediation: Use a dedicated management/security account for state storage
+  - id: IAC-STATE-MED-002
+    signal: No MFA delete requirement for state bucket
+    evidence_indicators:
+    - S3 MFA delete not enabled
+    remediation: Enable MFA delete to prevent accidental or malicious state deletion
+  - id: IAC-STATE-MED-003
+    signal: Cross-region state access without restrictions
+    evidence_indicators:
+    - No region restrictions in IAM policies
+    - State accessible from any region
+    remediation: Add region conditions to IAM policies to restrict state access geography
+  low:
+  - id: IAC-STATE-LOW-001
+    signal: State bucket without descriptive naming
+    evidence_indicators:
+    - Generic bucket names like 'terraform-state'
+    - No organization or environment in name
+    remediation: 'Use descriptive naming: org-env-terraform-state-region'
+  positive:
+  - id: IAC-STATE-POS-001
+    signal: Comprehensive state security configuration
+    evidence_indicators:
+    - Customer-managed KMS encryption
+    - Public access blocked
+    - Versioning enabled
+    - Audit logging configured
+  - id: IAC-STATE-POS-002
+    signal: State backend in dedicated security account
+    evidence_indicators:
+    - Cross-account state access with assume role
+    - Dedicated infrastructure management account
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Backend Configuration Analysis
+    description: |
+      Identify and analyze all backend configurations in the
+      infrastructure codebase.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Find all backend configurations
+      command: grep -rA20 'backend\s*"' --include='*.tf' | head -100
+    - purpose: Check encryption settings
+      command: grep -rn 'encrypt\s*=' --include='*.tf'
+    - purpose: Find KMS key references
+      command: grep -rn 'kms_key' --include='*.tf'
+    - purpose: Check Terragrunt remote state
+      command: grep -rA20 'remote_state' --include='terragrunt.hcl' 2>/dev/null | head -50
+    expected_findings:
+    - Backend types in use
+    - Encryption configuration
+    - KMS key usage
+  - id: '2'
+    name: Access Control Review
+    description: |
+      Evaluate IAM policies and access controls for state
+      backend storage.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find state bucket names
+      command: grep -rn 'bucket\s*=' --include='*.tf' | grep -i state
+    - purpose: Look for IAM policies related to state
+      command: grep -rA20 'aws_iam_policy' --include='*.tf' | grep -iA20 's3\|state'
+    - purpose: Check for assume role configurations
+      command: grep -rn 'assume_role' --include='*.tf'
+    expected_findings:
+    - State bucket identifiers
+    - IAM policy configurations
+    - Cross-account access patterns
+  - id: '3'
+    name: Encryption Verification
+    description: |
+      Verify encryption settings for state storage including
+      at-rest and in-transit encryption.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Check for encryption configuration
+      command: grep -rA30 'backend\s*"s3"' --include='*.tf' | grep -E 'encrypt|kms'
+    - purpose: Verify TLS/SSL requirements
+      command: grep -rn 'skip_metadata_api_check\|skip_credentials_validation' --include='*.tf'
+    - purpose: Check for insecure configurations
+      command: grep -rn 'insecure\|skip_ssl' --include='*.tf'
+    expected_findings:
+    - Encryption at rest configuration
+    - TLS configuration
+    - Insecure settings
+  - id: '4'
+    name: Network Security Assessment
+    description: |
+      Evaluate network-level security for state backend access
+      including VPC endpoints and network restrictions.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find VPC endpoint configurations
+      command: grep -rn 'aws_vpc_endpoint' --include='*.tf' | grep -i s3
+    - purpose: Check for endpoint configuration in backend
+      command: grep -rn 'endpoint\|use_path_style' --include='*.tf'
+    - purpose: Look for bucket policies
+      command: grep -rA30 'aws_s3_bucket_policy' --include='*.tf'
+    expected_findings:
+    - VPC endpoint usage
+    - Endpoint configuration
+    - Network restrictions in bucket policies
+  - id: '5'
+    name: Audit and Monitoring Review
+    description: |
+      Verify logging and monitoring configuration for state
+      access audit trails.
+    duration_estimate: 20 min
+    commands:
+    - purpose: Check for S3 logging configuration
+      command: grep -rA10 'aws_s3_bucket_logging' --include='*.tf'
+    - purpose: Find CloudTrail configurations
+      command: grep -rA20 'aws_cloudtrail' --include='*.tf' | head -50
+    - purpose: Check for monitoring alarms
+      command: grep -rn 'aws_cloudwatch_metric_alarm' --include='*.tf' | grep -i s3
+    expected_findings:
+    - S3 access logging
+    - CloudTrail configuration
+    - Monitoring and alerting
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Security Posture Assessment
+    - Critical Vulnerabilities
+    - Access Control Analysis
+    - Recommendations
+    - Compliance Mapping
+  confidence_guidance:
+    high: Direct configuration analysis with verifiable settings
+    medium: Configuration inference requiring cloud console verification
+    low: Inferred from incomplete configurations
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: terraform-backends
+      priority: required
+    - source_id: aws-s3-security
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Security review requires thorough analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+      reason: Critical security control for IaC
+closeout_checklist:
+- id: state-sec-001
+  item: State encryption at rest enabled
+  level: CRITICAL
+  verification: grep -r 'encrypt\s*=\s*true' --include='*.tf' $(grep -rl 'backend\s*"s3"' --include='*.tf')
+    2>/dev/null | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: state-sec-002
+  item: No local backend in production configurations
+  level: CRITICAL
+  verification: grep -rn 'backend\s*"local"' --include='*.tf' $(find . -type d -name 'prod*') 2>/dev/null
+    | wc -l | xargs -I{} test {} -eq 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: state-sec-003
+  item: Customer-managed KMS keys configured
+  level: BLOCKING
+  verification: grep -r 'kms_key' --include='*.tf' $(grep -rl 'backend\s*"s3"' --include='*.tf') 2>/dev/null
+    | wc -l | xargs -I{} test {} -gt 0 && echo PASS || echo FAIL
+  expected: PASS
+- id: state-sec-004
+  item: State bucket versioning enabled
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify S3 bucket versioning is enabled via AWS console or CLI
+  expected: Confirmed by reviewer
+- id: state-sec-005
+  item: Access logging configured for state bucket
+  level: WARNING
+  verification: manual
+  verification_notes: Verify S3 access logging or CloudTrail data events are enabled
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC6.6
+    - CC6.7
+    - CC7.2
+  - framework: PCI-DSS
+    controls:
+    - '3.4'
+    - '3.5'
+    - '10.1'
+    - '10.2'
+  - framework: CIS AWS Foundations
+    controls:
+    - 2.1.1
+    - 2.1.2
+    - '3.1'
+    - '3.2'
+relationships:
+  commonly_combined:
+  - infrastructure-as-code.state-management.state-encryption
+  - infrastructure-as-code.state-management.state-locking
+  - infrastructure-as-code.security-compliance.least-privilege

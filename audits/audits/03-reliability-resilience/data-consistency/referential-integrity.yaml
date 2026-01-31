@@ -1,0 +1,386 @@
+# ============================================================
+# AUDIT: Referential Integrity Audit
+# ============================================================
+# Evaluates referential integrity enforcement across databases
+# and application layers.
+# ============================================================
+
+# ============================================================
+# SECTION 1: IDENTITY & METADATA
+# ============================================================
+
+audit:
+  id: "reliability-resilience.data-consistency.referential-integrity"
+
+  name: "Referential Integrity Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "data-consistency"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+# ============================================================
+# SECTION 2: EXECUTION CLASSIFICATION
+# ============================================================
+
+execution:
+  automatable: "partial"
+
+  severity: "high"
+
+  scope: "data"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+# ============================================================
+# SECTION 3: DESCRIPTION & RATIONALE
+# ============================================================
+
+description:
+  what: |
+    Evaluates referential integrity enforcement including foreign
+    key constraints, cascade behaviors, and application-level
+    integrity checks. Assesses whether relationships between
+    entities are properly maintained.
+
+  why_it_matters: |
+    Referential integrity ensures data relationships remain valid.
+    Without proper enforcement, orphaned records accumulate,
+    application errors occur when following broken references,
+    and data quality degrades over time. Fixing referential
+    integrity issues is expensive and error-prone.
+
+  when_to_run:
+    - "During database schema reviews"
+    - "After data integrity issues"
+    - "When migrating databases"
+    - "Before major schema changes"
+
+# ============================================================
+# SECTION 4: PREREQUISITES
+# ============================================================
+
+prerequisites:
+  required_artifacts:
+    - type: "database_schema"
+      description: "Database schema definitions"
+    - type: "application_code"
+      description: "Data access layer code"
+    - type: "data_model"
+      description: "Entity relationship documentation"
+
+  access_requirements:
+    - "Database schema access"
+    - "Application code repository access"
+    - "Query execution capability"
+
+# ============================================================
+# SECTION 5: DISCOVERY SPECIFICATION
+# ============================================================
+
+discovery:
+  code_patterns:
+    - pattern: "FOREIGN KEY|REFERENCES|ForeignKey|foreign_key"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify foreign key definitions"
+    - pattern: "CASCADE|SET NULL|RESTRICT|NO ACTION"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify referential actions"
+
+  file_patterns:
+    - glob: "**/migrations/**/*.sql"
+      purpose: "Database migration files"
+    - glob: "**/schema/**/*.py"
+      purpose: "ORM model definitions"
+    - glob: "**/models/**/*.java"
+      purpose: "Entity definitions"
+
+  metrics_queries:
+    - system: "Database"
+      query: "SELECT COUNT(*) FROM child WHERE parent_id NOT IN (SELECT id FROM parent)"
+      purpose: "Find orphaned records"
+      threshold: "0"
+
+# ============================================================
+# SECTION 6: EXTERNAL KNOWLEDGE SOURCES
+# ============================================================
+
+knowledge_sources:
+  guides:
+    - id: "postgresql-fk"
+      name: "PostgreSQL Foreign Keys"
+      url: "https://www.postgresql.org/docs/current/ddl-constraints.html#DDL-CONSTRAINTS-FK"
+      offline_cache: true
+    - id: "mysql-fk"
+      name: "MySQL Foreign Key Constraints"
+      url: "https://dev.mysql.com/doc/refman/8.0/en/create-table-foreign-keys.html"
+      offline_cache: true
+
+# ============================================================
+# SECTION 7: TOOLING & AUTOMATION
+# ============================================================
+
+tooling:
+  infrastructure_tools:
+    - tool: "psql"
+      purpose: "Query foreign key constraints"
+      command: "psql -c \"SELECT conname, conrelid::regclass, confrelid::regclass FROM pg_constraint WHERE contype = 'f';\""
+    - tool: "mysql"
+      purpose: "Query foreign key constraints"
+      command: "mysql -e \"SELECT CONSTRAINT_NAME, TABLE_NAME, REFERENCED_TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL;\""
+
+  scripts:
+    - id: "find-orphans"
+      language: "sql"
+      purpose: "Find orphaned records"
+      source: "inline"
+      code: |
+        -- Example for finding orphaned orders
+        SELECT o.id
+        FROM orders o
+        LEFT JOIN customers c ON o.customer_id = c.id
+        WHERE c.id IS NULL;
+
+# ============================================================
+# SECTION 8: SIGNALS & FINDINGS TAXONOMY
+# ============================================================
+
+signals:
+  critical:
+    - id: "RI-CRIT-001"
+      signal: "Foreign key relationships not enforced at database level"
+      evidence_pattern: "No FOREIGN KEY constraints in schema"
+      evidence_indicators:
+        - "Related tables without FK constraints"
+        - "Integrity enforced only in application code"
+      explanation: |
+        Application-only integrity enforcement can be bypassed by
+        direct database access, batch operations, or application bugs,
+        leading to data corruption.
+      remediation: "Add foreign key constraints at database level"
+
+    - id: "RI-CRIT-002"
+      signal: "Orphaned records exist in database"
+      evidence_threshold: "Orphan count > 0"
+      explanation: |
+        Orphaned records indicate past integrity failures and may
+        cause application errors or incorrect behavior.
+      remediation: "Clean up orphaned records and add constraints to prevent future issues"
+
+  high:
+    - id: "RI-HIGH-001"
+      signal: "CASCADE DELETE on sensitive data without soft delete"
+      explanation: "Cascade deletes can cause unintended mass data loss"
+      remediation: "Use soft delete or require explicit deletion for sensitive data"
+
+    - id: "RI-HIGH-002"
+      signal: "SET NULL on required relationships"
+      explanation: "Nullifying required relationships causes data inconsistency"
+      remediation: "Use RESTRICT or CASCADE based on business requirements"
+
+  medium:
+    - id: "RI-MED-001"
+      signal: "Foreign keys disabled for performance in production"
+      remediation: "Re-enable FK checks or implement compensating validation"
+
+    - id: "RI-MED-002"
+      signal: "Cross-database relationships without integrity checks"
+      remediation: "Implement application-level integrity validation"
+
+  low:
+    - id: "RI-LOW-001"
+      signal: "Referential integrity not documented"
+
+  positive:
+    - id: "RI-POS-001"
+      signal: "Comprehensive FK constraints with appropriate referential actions"
+    - id: "RI-POS-002"
+      signal: "Zero orphaned records across all relationships"
+
+# ============================================================
+# SECTION 9: EXECUTION PROCEDURE
+# ============================================================
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map Entity Relationships"
+      description: |
+        Document all entity relationships and their cardinality
+        from schema and code.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "List foreign keys in PostgreSQL"
+          command: "psql -c \"SELECT conname, conrelid::regclass as child, confrelid::regclass as parent FROM pg_constraint WHERE contype = 'f';\""
+      expected_findings:
+        - "Entity relationship map"
+        - "Current constraint coverage"
+
+    - id: "2"
+      name: "Identify Missing Constraints"
+      description: |
+        Compare documented relationships against actual database
+        constraints to find gaps.
+      duration_estimate: "30 min"
+      questions:
+        - "Which relationships lack FK constraints?"
+        - "Why are constraints missing (design choice or oversight)?"
+      expected_findings:
+        - "Missing constraint list"
+        - "Gap justifications"
+
+    - id: "3"
+      name: "Check for Orphaned Records"
+      description: |
+        Query database for records that reference non-existent
+        parent records.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find orphaned records example"
+          command: "psql -c \"SELECT t1.id FROM child_table t1 LEFT JOIN parent_table t2 ON t1.parent_id = t2.id WHERE t2.id IS NULL;\""
+      expected_findings:
+        - "Orphan counts by relationship"
+        - "Severity assessment"
+
+    - id: "4"
+      name: "Review Referential Actions"
+      description: |
+        Evaluate CASCADE, SET NULL, and RESTRICT settings for
+        appropriateness.
+      duration_estimate: "30 min"
+      questions:
+        - "What happens when a parent is deleted?"
+        - "Are cascade behaviors appropriate for the data sensitivity?"
+      expected_findings:
+        - "Referential action assessment"
+        - "Risk identification"
+
+# ============================================================
+# SECTION 10: OUTPUT SPECIFICATION
+# ============================================================
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "relationship_matrix"
+      format: "table"
+      columns:
+        - "Parent Table"
+        - "Child Table"
+        - "FK Constraint"
+        - "Referential Action"
+        - "Orphan Count"
+        - "Status"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Constraint Coverage"
+        - "Orphan Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Schema reviewed and queries run for orphan detection"
+    medium: "Schema reviewed without orphan queries"
+    low: "Based on code review only"
+
+# ============================================================
+# SECTION 11: OFFLINE SUPPORT
+# ============================================================
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "postgresql-fk"
+        priority: "recommended"
+
+# ============================================================
+# SECTION 12: PROFILES
+# ============================================================
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Referential integrity requires database access"
+    full:
+      included: true
+      priority: 1
+
+# ============================================================
+# SECTION 13: DETERMINISTIC VERIFICATION
+# ============================================================
+
+closeout_checklist:
+  - id: "ri-001"
+    item: "Foreign key constraints exist for all documented relationships"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Compare relationship documentation to actual constraints"
+    expected: "Confirmed by reviewer"
+
+  - id: "ri-002"
+    item: "No orphaned records in database"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Run orphan detection queries for all relationships"
+    expected: "Confirmed by reviewer"
+
+  - id: "ri-003"
+    item: "Referential actions appropriate for data sensitivity"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Review CASCADE settings for sensitive tables"
+    expected: "Confirmed by reviewer"
+
+  - id: "ri-004"
+    item: "Foreign key checks not disabled in production"
+    level: "WARNING"
+    verification: "psql -c 'SHOW session_replication_role;' | grep -v 'replica' && echo PASS || echo FAIL"
+    expected: "PASS"
+
+# ============================================================
+# SECTION 14: GOVERNANCE
+# ============================================================
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["CC6.1"]
+
+# ============================================================
+# SECTION 15: RELATIONSHIPS
+# ============================================================
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.data-consistency.acid-compliance"
+    - "reliability-resilience.data-consistency.transaction-boundary"

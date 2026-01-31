@@ -1,0 +1,370 @@
+# ============================================================
+# AUDIT: Interface Segregation Principle (ISP) Compliance
+# ============================================================
+# Evaluates whether interfaces are client-specific rather than
+# monolithic, following the I in SOLID.
+# ============================================================
+
+audit:
+  id: "architecture-design.design-principles.interface-segregation"
+  name: "Interface Segregation Principle Compliance"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "architecture-design"
+  category_number: 7
+  subcategory: "design-principles"
+
+  tier: "expert"
+  estimated_duration: "2-3 hours"  # median: 2h
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "architecture"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit evaluates compliance with the Interface Segregation Principle,
+    which states that clients should not be forced to depend on interfaces
+    they do not use. It identifies fat interfaces, classes implementing
+    unused methods, and opportunities to split interfaces by client need.
+
+  why_it_matters: |
+    ISP violations cause:
+    - Classes forced to implement methods they don't need
+    - Unnecessary recompilation when unrelated methods change
+    - Coupling to behaviors clients don't care about
+    - Testing difficulty due to unused dependencies
+    - Confusion about what an interface truly represents
+    ISP enables focused, client-specific contracts.
+
+  when_to_run:
+    - "When interfaces grow beyond their original scope"
+    - "During API design reviews"
+    - "When implementations have many no-op methods"
+    - "When refactoring for better abstraction"
+
+prerequisites:
+  required_artifacts:
+    - type: "source_code"
+      description: "Complete source code"
+
+  access_requirements:
+    - "Read access to source code"
+
+discovery:
+  code_patterns:
+    - pattern: "interface\\s+[A-Z]\\w+\\s*\\{"
+      type: "regex"
+      scope: "source"
+      purpose: "Find interface definitions"
+
+    - pattern: "implements\\s+[A-Z]\\w+"
+      type: "regex"
+      scope: "source"
+      purpose: "Find interface implementations"
+
+    - pattern: "@Override.*throw.*UnsupportedOperationException"
+      type: "regex"
+      scope: "source"
+      purpose: "Find unimplemented interface methods"
+
+  file_patterns:
+    - glob: "**/*Interface.{java,ts}"
+      purpose: "Explicit interface files"
+    - glob: "**/interfaces/**"
+      purpose: "Interface directories"
+
+knowledge_sources:
+  specifications:
+    - id: "isp-original"
+      name: "Interface Segregation Principle"
+      url: "https://en.wikipedia.org/wiki/Interface_segregation_principle"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "isp-uncle-bob"
+      name: "The Interface Segregation Principle"
+      url: "https://blog.cleancoder.com/uncle-bob/2020/10/18/Solid-Relevance.html"
+      offline_cache: true
+
+    - id: "clean-architecture"
+      name: "Clean Architecture"
+      url: "https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html"
+      offline_cache: true
+
+    - id: "clean-code"
+      name: "Clean Code Summary"
+      url: "https://gist.github.com/wojteklu/73c6914cc446146b8b533c0988cf8d29"
+      offline_cache: true
+
+  learning_resources:
+    - id: "agile-ppp"
+      title: "Agile Software Development: Principles, Patterns, and Practices"
+      type: "book"
+      reference: "Robert C. Martin - Chapter 12"
+
+tooling:
+  static_analysis:
+    - tool: "SonarQube"
+      purpose: "Detect large interfaces and unused implementations"
+      offline_capable: false
+
+    - tool: "NDepend"
+      purpose: "Analyze interface metrics for .NET"
+      offline_capable: true
+
+  scripts:
+    - id: "isp-analyzer"
+      language: "bash"
+      purpose: "Analyze interface sizes"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "=== Interface Method Counts ==="
+        for f in $(find . -name "*.java" -exec grep -l "^public interface" {} \;); do
+          count=$(grep -c ";\s*$" "$f" 2>/dev/null)
+          if [ "$count" -gt 5 ]; then
+            echo "$f: $count methods"
+          fi
+        done | sort -t: -k2 -rn | head -20
+
+signals:
+  critical:
+    - id: "ISP-CRIT-001"
+      signal: "Fat interface with >10 methods"
+      evidence_pattern: "Interface has more than 10 abstract methods"
+      explanation: |
+        Large interfaces force all implementers to address many methods,
+        even if they only need a subset. This creates unnecessary coupling
+        and implementation burden.
+      remediation: "Split into role-specific interfaces (e.g., Readable, Writable)"
+
+    - id: "ISP-CRIT-002"
+      signal: "Implementation with multiple UnsupportedOperationException methods"
+      evidence_pattern: "Class implements interface but throws for several methods"
+      explanation: |
+        When implementations throw UnsupportedOperationException for
+        multiple methods, the interface is forcing them to lie about
+        their capabilities.
+      remediation: "Split interface; class should only implement relevant sub-interface"
+
+  high:
+    - id: "ISP-HIGH-001"
+      signal: "Interface combines unrelated behaviors"
+      evidence_pattern: "Interface has methods for persistence, validation, and formatting"
+      explanation: |
+        Interfaces mixing unrelated concerns force clients to depend
+        on capabilities they don't need, creating false coupling.
+      remediation: "Decompose into cohesive, single-purpose interfaces"
+
+    - id: "ISP-HIGH-002"
+      signal: "Interface used by clients who need only subset"
+      evidence_pattern: "Most clients call only 2-3 of 10 interface methods"
+      explanation: |
+        When clients consistently use a small subset, the interface
+        is too broad and creates unnecessary dependencies.
+      remediation: "Create focused interface for common use case"
+
+  medium:
+    - id: "ISP-MED-001"
+      signal: "Default methods used to satisfy interface requirements"
+      evidence_pattern: "Many default no-op implementations in interface"
+      remediation: "May indicate interface should be split"
+
+    - id: "ISP-MED-002"
+      signal: "Adapter classes that implement only some methods"
+      evidence_pattern: "Abstract adapter implementing interface with empty methods"
+      remediation: "Consider if interface segregation would eliminate adapter need"
+
+  low:
+    - id: "ISP-LOW-001"
+      signal: "Interface with mix of common and rare methods"
+      remediation: "Consider base interface + extension interface pattern"
+
+  positive:
+    - id: "ISP-POS-001"
+      signal: "Small, focused interfaces (< 5 methods)"
+    - id: "ISP-POS-002"
+      signal: "Interface composition for complex needs"
+    - id: "ISP-POS-003"
+      signal: "Clear separation of read and write interfaces"
+
+procedure:
+  context:
+    cognitive_mode: "evaluative"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory interfaces and sizes"
+      description: |
+        Catalog all interfaces and count their methods to
+        identify potentially fat interfaces.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find interfaces"
+          command: "grep -rn 'interface [A-Z]\\|protocol [A-Z]' --include='*.java' --include='*.swift' --include='*.ts' | head -40"
+        - purpose: "Count methods per interface"
+          command: "for f in $(find . -name '*.java' -exec grep -l '^public interface' {} \\;); do count=$(grep -c ';$' $f 2>/dev/null); echo \"$f: $count\"; done | sort -t: -k2 -rn | head -20"
+      expected_findings:
+        - "Interface inventory"
+        - "Method count distribution"
+
+    - id: "2"
+      name: "Identify fat interfaces"
+      description: |
+        Find interfaces with many methods that may violate ISP.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find large interfaces"
+          command: "find . -name '*.java' -exec grep -l 'interface [A-Z]' {} \\; | while read f; do count=$(grep -c ';$' $f 2>/dev/null); [ $count -gt 7 ] && echo \"$f: $count methods\"; done | head -15"
+      expected_findings:
+        - "Interfaces exceeding size threshold"
+        - "Candidates for splitting"
+
+    - id: "3"
+      name: "Find partial implementations"
+      description: |
+        Identify classes that implement interfaces but throw
+        for some methods, indicating ISP violation.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Find UnsupportedOperation in implementations"
+          command: "grep -rn 'implements.*Interface' -A50 --include='*.java' | grep -B5 'UnsupportedOperationException' | head -30"
+        - purpose: "Find empty implementations"
+          command: "grep -rn '@Override' -A2 --include='*.java' | grep -B1 '{\\s*}' | head -20"
+      expected_findings:
+        - "Partial implementations"
+        - "No-op override patterns"
+
+    - id: "4"
+      name: "Analyze interface usage patterns"
+      description: |
+        Review how clients use interfaces to identify if they
+        need all methods or just a subset.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Find interface references"
+          command: "grep -rn 'Interface\\s\\+\\w\\+\\s*[=;)]' --include='*.java' | head -30"
+        - purpose: "Sample method calls on interfaces"
+          command: "grep -rn '\\.[a-z]\\+(' --include='*.java' | head -30"
+      expected_findings:
+        - "Interface usage patterns"
+        - "Commonly used method subsets"
+
+    - id: "5"
+      name: "Develop segregation recommendations"
+      description: |
+        For fat interfaces, propose how to split them into
+        focused, client-specific interfaces.
+      duration_estimate: "20 min"
+      questions:
+        - "What distinct client roles use this interface?"
+        - "What method groups serve each client role?"
+        - "Can we identify natural interface splits?"
+      expected_findings:
+        - "Proposed interface decompositions"
+        - "Naming for split interfaces"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "interface_catalog"
+      format: "tabular"
+      sections:
+        - "Interface Name"
+        - "Method Count"
+        - "Implementation Count"
+        - "Partial Implementation Count"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "ISP Violations"
+        - "Segregation Recommendations"
+
+  confidence_guidance:
+    high: "Interface size metrics clearly indicate violation"
+    medium: "Partial implementations suggest issue"
+    low: "Potential concern based on naming"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "isp-original"
+        priority: "required"
+      - source_id: "isp-uncle-bob"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires interface analysis"
+    full:
+      included: true
+      priority: 2
+    architecture:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "isp-001"
+    item: "No interfaces with >10 methods"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "All interfaces reviewed for size"
+    expected: "Confirmed by reviewer"
+
+  - id: "isp-002"
+    item: "No implementations with UnsupportedOperationException for interface methods"
+    level: "CRITICAL"
+    verification: "grep -rn 'UnsupportedOperationException' --include='*.java' | grep -v Test | wc -l"
+    expected: "0 or documented justification"
+
+  - id: "isp-003"
+    item: "Fat interfaces have segregation plan"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Large interfaces have documented split plan"
+    expected: "Confirmed by reviewer"
+
+  - id: "isp-004"
+    item: "Interface naming reflects focused purpose"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Interface names describe single capability"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "ISO 25010"
+      controls: ["Maintainability", "Modularity"]
+
+relationships:
+  commonly_combined:
+    - "architecture-design.coupling.interface-coupling"
+    - "architecture-design.design-principles.single-responsibility"
+    - "architecture-design.design-principles.dependency-inversion"

@@ -1,0 +1,486 @@
+audit:
+  id: security-trust.data-protection.pii-handling
+  name: PII Handling Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: data-protection
+  tier: phd
+  estimated_duration: 2-4 hours  # median: 3h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines how personally identifiable information (PII) is detected,
+    classified, and protected throughout the codebase and data systems. It evaluates:
+    - PII detection patterns and data discovery mechanisms
+    - Data inventories and asset classification
+    - Access controls for PII data stores
+    - Encryption at rest and in transit for PII
+    - Logging and monitoring of PII access
+    - Data minimization practices
+  why_it_matters: |
+    Improper handling of PII can lead to:
+    - Regulatory violations (GDPR fines up to 4% of global revenue, CCPA penalties)
+    - Data breaches exposing sensitive customer information
+    - Identity theft and fraud affecting individuals
+    - Reputational damage and loss of customer trust
+    - Legal liability and class action lawsuits
+
+    NIST SP 800-122 establishes that organizations must implement appropriate
+    safeguards based on the PII confidentiality impact level (low, moderate, high).
+  when_to_run:
+  - Initial security assessment
+  - Before handling new categories of personal data
+  - After data breach incidents
+  - During compliance audits (GDPR, CCPA, HIPAA)
+  - When onboarding new data processors or third parties
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: Full source code access including configuration files
+  - type: database_schemas
+    description: Database schema definitions and data dictionaries
+  - type: data_flow_diagrams
+    description: Documentation of data flows through the system
+  access_requirements:
+  - Read access to all source code repositories
+  - Access to database schema documentation
+  - Access to data processing agreements and privacy policies
+  - Access to encryption key management documentation
+discovery:
+  code_patterns:
+  - pattern: (email|e-mail|mail)(_?address)?\s*[=:]
+    type: regex
+    scope: source
+    purpose: Detect email address handling
+  - pattern: (ssn|social_?security|tax_?id|national_?id)\s*[=:]
+    type: regex
+    scope: source
+    purpose: Detect government ID handling
+  - pattern: (phone|mobile|cell|telephone)(_?number)?\s*[=:]
+    type: regex
+    scope: source
+    purpose: Detect phone number handling
+  - pattern: (date_?of_?birth|dob|birth_?date|birthday)\s*[=:]
+    type: regex
+    scope: source
+    purpose: Detect date of birth handling
+  - pattern: (credit_?card|card_?number|ccn|pan)\s*[=:]
+    type: regex
+    scope: source
+    purpose: Detect payment card data
+  - pattern: (password|passwd|secret|api_?key|token)\s*[=:]
+    type: regex
+    scope: source
+    purpose: Detect credential handling
+  - pattern: (address|street|city|zip|postal)\s*[=:]
+    type: regex
+    scope: source
+    purpose: Detect physical address handling
+  - pattern: (first_?name|last_?name|full_?name|surname)\s*[=:]
+    type: regex
+    scope: source
+    purpose: Detect name handling
+  - pattern: log(ger)?\.(info|debug|warn|error).*\b(email|ssn|password|credit)
+    type: regex
+    scope: source
+    purpose: Detect PII potentially logged
+  - pattern: console\.(log|warn|error).*\b(email|ssn|password|credit)
+    type: regex
+    scope: source
+    purpose: Detect PII in console output
+  - pattern: print\(.*\b(email|ssn|password|credit)
+    type: regex
+    scope: source
+    purpose: Detect PII in print statements
+  file_patterns:
+  - glob: '**/models/**/*.{py,rb,java,ts,js}'
+    purpose: Data model definitions likely containing PII fields
+  - glob: '**/schemas/**/*.{sql,prisma,graphql}'
+    purpose: Database schemas with PII columns
+  - glob: '**/migrations/**/*.{sql,py,rb}'
+    purpose: Database migrations that may add PII fields
+  - glob: '**/*.env*'
+    purpose: Environment files potentially containing PII-related configs
+  - glob: '**/privacy*.{md,txt,json,yaml}'
+    purpose: Privacy policy and configuration files
+knowledge_sources:
+  specifications:
+  - id: nist-800-122
+    name: 'NIST SP 800-122: Guide to Protecting the Confidentiality of PII'
+    url: https://csrc.nist.gov/pubs/sp/800/122/final
+    offline_cache: true
+    priority: required
+  - id: gdpr
+    name: General Data Protection Regulation (GDPR)
+    url: https://gdpr-info.eu/
+    offline_cache: true
+    priority: required
+  - id: ccpa
+    name: California Consumer Privacy Act (CCPA)
+    url: https://oag.ca.gov/privacy/ccpa
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-pii
+    name: OWASP Data Protection Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/User_Privacy_Protection_Cheat_Sheet.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect PII handling patterns and vulnerabilities
+    offline_capable: true
+  - tool: trufflehog
+    purpose: Detect secrets and PII in code history
+    offline_capable: true
+  - tool: detect-secrets
+    purpose: Pre-commit hook for detecting PII and secrets
+    offline_capable: true
+  scripts:
+  - id: pii-field-scanner
+    language: bash
+    purpose: Scan for common PII field names in codebase
+    source: inline
+    code: |
+      #!/bin/bash
+      # Scan for PII field patterns
+      echo "=== PII Field Detection Scan ==="
+      grep -rniE "(email|ssn|social_security|phone|birth_date|credit_card|password)" \
+        --include="*.py" --include="*.js" --include="*.ts" --include="*.java" \
+        --include="*.rb" --include="*.go" --include="*.sql" \
+        . 2>/dev/null | head -100
+signals:
+  critical:
+  - id: PII-CRIT-001
+    signal: PII logged in plaintext
+    evidence_pattern: log(ger)?\.(info|debug|warn|error).*\b(ssn|social_security|credit_card|password)
+    explanation: |
+      Logging PII in plaintext creates significant exposure risk. Log files are often
+      less protected than production databases, may be shared with third-party log
+      aggregators, and can persist indefinitely. This violates GDPR Article 5
+      (data minimization) and NIST 800-122 recommendations.
+    remediation: |
+      - Remove PII from log statements entirely
+      - If logging is necessary, use tokenization or masking
+      - Implement log scrubbing before shipping to aggregators
+      - Review log retention policies
+    cwe: CWE-532
+  - id: PII-CRIT-002
+    signal: Unencrypted PII storage detected
+    evidence_pattern: VARCHAR|TEXT|STRING.*\b(ssn|social_security|credit_card)
+    explanation: |
+      Storing sensitive PII like SSN or credit card numbers without encryption
+      violates PCI-DSS requirements and exposes the organization to significant
+      breach liability. NIST 800-122 requires encryption for high-impact PII.
+    remediation: |
+      - Implement column-level encryption for sensitive fields
+      - Use application-level encryption with proper key management
+      - Consider tokenization for payment card data
+      - Evaluate if the data needs to be stored at all (data minimization)
+    cwe: CWE-311
+  - id: PII-CRIT-003
+    signal: PII transmitted without encryption
+    evidence_pattern: http://.*\?(.*=.*(email|ssn|phone|password))
+    explanation: |
+      Transmitting PII over unencrypted HTTP connections exposes data to
+      interception. This violates GDPR Article 32 (security of processing)
+      and creates significant breach risk.
+    remediation: |
+      - Enforce HTTPS for all endpoints handling PII
+      - Implement HSTS headers
+      - Use TLS 1.2+ for all data transmission
+      - Avoid passing PII in URL query parameters even over HTTPS
+    cwe: CWE-319
+  high:
+  - id: PII-HIGH-001
+    signal: Missing PII access controls
+    evidence_pattern: SELECT \* FROM.*(users|customers|employees|profiles)
+    explanation: |
+      Queries that select all columns from tables containing PII may expose
+      more data than necessary. This violates the principle of least privilege
+      and data minimization requirements under GDPR.
+    remediation: |
+      - Explicitly select only required columns
+      - Implement row-level security where applicable
+      - Use database views to limit PII exposure
+      - Add audit logging for PII access
+    cwe: CWE-284
+  - id: PII-HIGH-002
+    signal: PII in error messages or exceptions
+    evidence_pattern: raise|throw|Exception.*\b(email|user|customer)
+    explanation: |
+      Including PII in error messages can lead to exposure through error logs,
+      stack traces, or error reporting systems. Error details should be
+      sanitized before logging or display.
+    remediation: |
+      - Sanitize error messages before logging
+      - Use error codes instead of detailed messages for users
+      - Implement centralized error handling with PII filtering
+    cwe: CWE-209
+  - id: PII-HIGH-003
+    signal: No data retention policy for PII
+    evidence_indicators:
+    - No automated data deletion mechanisms
+    - No retention period definitions in schema or documentation
+    - No purge jobs or data lifecycle management
+    explanation: |
+      GDPR Article 5(1)(e) requires storage limitation - data should not be kept
+      longer than necessary. Absence of retention policies creates compliance risk
+      and increases breach exposure.
+    remediation: |
+      - Define retention periods for all PII categories
+      - Implement automated deletion or anonymization
+      - Document retention policies in privacy documentation
+      - Create audit trails for data deletion
+  medium:
+  - id: PII-MED-001
+    signal: PII fields lack input validation
+    evidence_pattern: def\s+\w+.*\b(email|phone|ssn).*:\s*$
+    explanation: |
+      PII fields without proper validation may accept malformed data,
+      making it harder to apply consistent protection policies and
+      potentially enabling injection attacks.
+    remediation: |
+      - Implement format validation for all PII fields
+      - Use established libraries for email, phone validation
+      - Sanitize inputs before storage
+      - Reject clearly invalid PII formats
+    cwe: CWE-20
+  - id: PII-MED-002
+    signal: No PII inventory or data mapping
+    evidence_indicators:
+    - No data dictionary documentation
+    - No GDPR Article 30 records of processing
+    - PII fields inconsistently named across services
+    explanation: |
+      Without a complete inventory of PII, organizations cannot ensure
+      consistent protection or respond effectively to data subject requests.
+      GDPR Article 30 requires maintaining records of processing activities.
+    remediation: |
+      - Create comprehensive data inventory
+      - Document all PII fields and their purposes
+      - Maintain processing activity records
+      - Implement data lineage tracking
+  - id: PII-MED-003
+    signal: PII exposed in API responses without masking
+    evidence_pattern: 'return.*\{.*[''"]?(email|phone|ssn|address)[''"]?:'
+    explanation: |
+      API responses that include full PII values may expose data unnecessarily,
+      especially if the consuming application only needs partial information.
+    remediation: |
+      - Mask PII in API responses where full value not needed
+      - Use response filtering based on client permissions
+      - Implement field-level access controls in APIs
+  low:
+  - id: PII-LOW-001
+    signal: Inconsistent PII field naming conventions
+    evidence_indicators:
+    - email vs email_address vs emailAddress across files
+    - phone vs phone_number vs phoneNum
+    explanation: |
+      Inconsistent naming makes it harder to apply automated protection
+      policies and increases the risk of missing PII in security scans.
+    remediation: |
+      - Establish consistent naming conventions
+      - Use schema validation to enforce conventions
+      - Refactor existing inconsistent field names
+  positive:
+  - id: PII-POS-001
+    signal: PII encryption properly implemented
+    evidence_indicators:
+    - Column-level encryption for sensitive fields
+    - Application-level encryption with key rotation
+    - Encrypted at rest configuration enabled
+  - id: PII-POS-002
+    signal: Comprehensive PII audit logging
+    evidence_indicators:
+    - Access logging for all PII operations
+    - Audit trails for data modifications
+    - Log integrity protection mechanisms
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: PII Discovery
+    description: |
+      Identify all locations where PII is collected, processed, or stored.
+      Scan codebase for PII field patterns and database schemas.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find potential PII fields in source code
+      command: |
+        grep -rniE "(email|ssn|phone|birth|credit_card|password|address)" \
+          --include="*.py" --include="*.js" --include="*.ts" \
+          --include="*.java" --include="*.rb" --include="*.go" . | head -200
+    - purpose: Find database schema files
+      command: |
+        find . -type f \( -name "*.sql" -o -name "*.prisma" \
+          -o -name "schema.*" -o -name "*migration*" \) 2>/dev/null
+    expected_findings:
+    - List of files containing PII field references
+    - Database schemas with PII columns
+    - API endpoints handling PII
+  - id: '2'
+    name: PII Protection Assessment
+    description: |
+      Evaluate encryption, access controls, and data minimization
+      for identified PII locations.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Check for encryption configurations
+      command: |
+        grep -rniE "(encrypt|cipher|aes|kms|vault)" \
+          --include="*.py" --include="*.js" --include="*.yaml" \
+          --include="*.json" --include="*.tf" . | head -100
+    - purpose: Detect potential PII in logs
+      command: |
+        grep -rniE "log(ger)?\\.(info|debug|warn|error|log).*email|ssn|password" \
+          --include="*.py" --include="*.js" --include="*.ts" . | head -50
+    expected_findings:
+    - Encryption implementation status
+    - Potential PII logging violations
+    - Access control mechanisms in place
+  - id: '3'
+    name: Data Flow Analysis
+    description: |
+      Trace PII through the system from collection to deletion,
+      identifying all processing steps and third-party transfers.
+    duration_estimate: 45 min
+    questions:
+    - Where is PII first collected (forms, APIs, imports)?
+    - How is PII transmitted between services?
+    - Which third parties receive PII?
+    - How and when is PII deleted?
+    expected_findings:
+    - Complete data flow map for PII
+    - Third-party data sharing inventory
+    - Data retention and deletion mechanisms
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - PII Inventory
+    - Protection Assessment
+    - Compliance Gaps
+    - Recommendations
+  - type: data_map
+    format: diagram
+    description: Visual representation of PII flows
+  confidence_guidance:
+    high: PII field directly observed with encryption/protection status verified
+    medium: PII handling inferred from patterns, protection status unclear
+    low: Potential PII based on naming conventions only
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: nist-800-122
+      priority: required
+    - source_id: gdpr
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: PII audit requires thorough analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: pii-001
+  item: No unencrypted PII in database schemas
+  level: CRITICAL
+  verification: |
+    grep -rniE "(ssn|social_security|credit_card).*VARCHAR|TEXT" \
+      --include="*.sql" --include="*.prisma" . 2>/dev/null | \
+      grep -v encrypt | wc -l | xargs -I{} test {} -eq 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: pii-002
+  item: No PII logged in plaintext
+  level: CRITICAL
+  verification: |
+    grep -rniE "log(ger)?\\.(info|debug|error).*\\b(ssn|password|credit)" \
+      --include="*.py" --include="*.js" --include="*.ts" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -eq 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: pii-003
+  item: Encryption configuration exists for PII storage
+  level: BLOCKING
+  verification: |
+    find . -type f \( -name "*.yaml" -o -name "*.json" -o -name "*.tf" \) \
+      -exec grep -l -iE "encrypt|kms|vault" {} \; 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: pii-004
+  item: Access controls defined for PII endpoints
+  level: BLOCKING
+  verification: |
+    grep -rniE "@(auth|protected|require|permission)" \
+      --include="*.py" --include="*.js" --include="*.ts" . 2>/dev/null | \
+      wc -l | xargs -I{} test {} -gt 0 && echo "PASS" || echo "FAIL"
+  expected: PASS
+- id: pii-005
+  item: Data retention policy documented
+  level: WARNING
+  verification: manual
+  verification_notes: Verify retention policy exists in privacy documentation
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: GDPR
+    controls:
+    - Article 5
+    - Article 25
+    - Article 30
+    - Article 32
+  - framework: CCPA
+    controls:
+    - '1798.100'
+    - '1798.105'
+    - '1798.110'
+  - framework: NIST 800-122
+    controls:
+    - Section 4
+    - Section 5
+  - framework: ISO 27001
+    controls:
+    - A.8.2
+    - A.8.3
+    - A.18.1.4
+  - framework: PCI-DSS
+    controls:
+    - '3.4'
+    - '3.5'
+    - '4.1'
+relationships:
+  commonly_combined:
+  - security-trust.data-protection.data-classification
+  - security-trust.data-protection.data-masking
+  - security-trust.data-protection.data-retention
+  - security-trust.secrets-management.secrets-detection

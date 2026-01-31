@@ -1,0 +1,274 @@
+audit:
+  id: scalability-capacity.database-scalability.sharding-strategy
+  name: Sharding Strategy Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: scalability-capacity
+  category_number: 4
+  subcategory: database-scalability
+  tier: expert
+  estimated_duration: 4-6 hours  # median: 5h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit examines the database sharding strategy including shard key
+    selection, data distribution algorithms, shard placement, rebalancing
+    mechanisms, and cross-shard coordination. It evaluates whether the
+    sharding approach supports current and projected data volumes while
+    maintaining acceptable query performance and operational complexity.
+  why_it_matters: |
+    Poor sharding strategy leads to hot spots, uneven data distribution,
+    expensive cross-shard queries, and operational nightmares during
+    rebalancing. A single-shard bottleneck can bring down the entire
+    application despite horizontal architecture. Changing shard keys
+    after production deployment is extremely costly and risky.
+  when_to_run:
+  - Before implementing horizontal database scaling
+  - When experiencing uneven load distribution across shards
+  - Before major data model changes
+  - When planning capacity for 10x growth
+  - After observing hot shard patterns
+prerequisites:
+  required_artifacts:
+  - type: architecture-documentation
+    description: Database architecture and sharding design documents
+  - type: data-model
+    description: Entity relationship diagrams and access patterns
+  - type: query-logs
+    description: Production query patterns and frequency analysis
+  access_requirements:
+  - Database cluster configuration access
+  - Monitoring dashboards for shard metrics
+  - Query analyzer and execution plan access
+  - Historical growth data and projections
+discovery:
+  code_patterns:
+  - pattern: shard[_-]?key|sharding|partition[_-]?key
+    type: regex
+    scope: source
+    purpose: Identify shard key definitions and routing logic
+  - pattern: consistent[_-]?hash|hash[_-]?ring|mod[_-]?shard
+    type: regex
+    scope: source
+    purpose: Detect sharding algorithms in use
+  - pattern: cross[_-]?shard|scatter[_-]?gather|fan[_-]?out
+    type: regex
+    scope: source
+    purpose: Find cross-shard query patterns
+  file_patterns:
+  - glob: '**/shard*.{yaml,yml,json,conf}'
+    purpose: Sharding configuration files
+  - glob: '**/database/**/routing*.{py,java,go,ts}'
+    purpose: Shard routing implementation
+  metrics_queries:
+  - system: Database Monitoring
+    query: shard_data_size_bytes by shard_id
+    purpose: Assess data distribution across shards
+    threshold: Max deviation < 20% from mean
+  - system: Database Monitoring
+    query: queries_per_second by shard_id
+    purpose: Identify hot shards
+    threshold: No shard > 2x mean QPS
+knowledge_sources:
+  specifications:
+  - id: vitess-sharding
+    name: Vitess Sharding Documentation
+    url: https://vitess.io/docs/concepts/shard/
+    offline_cache: true
+    priority: recommended
+  guides:
+  - id: aws-sharding
+    name: AWS Database Sharding Best Practices
+    url: https://aws.amazon.com/blogs/database/sharding-with-amazon-relational-database-service/
+    offline_cache: true
+  - id: mongodb-sharding
+    name: MongoDB Sharding Guide
+    url: https://www.mongodb.com/docs/manual/sharding/
+    offline_cache: true
+  papers:
+  - id: consistent-hashing
+    title: Consistent Hashing and Random Trees
+    url: https://www.cs.princeton.edu/courses/archive/fall09/cos518/papers/chash.pdf
+  - id: spanner-sharding
+    title: 'Spanner: Google''s Globally Distributed Database'
+    url: https://research.google/pubs/pub39966/
+tooling:
+  infrastructure_tools:
+  - tool: Database CLI
+    purpose: Query shard metadata and distribution
+    command: SHOW SHARDS; SELECT shard_id, COUNT(*) FROM table GROUP BY shard_id
+  - tool: pt-table-checksum
+    purpose: Verify data consistency across shards
+    command: pt-table-checksum --replicate --databases=app_db
+  monitoring_queries:
+  - system: Prometheus/Grafana
+    query: histogram_quantile(0.99, rate(shard_query_duration_seconds_bucket[5m]))
+    purpose: P99 latency per shard
+  - system: Prometheus/Grafana
+    query: sum(shard_rows_total) by (shard_id)
+    purpose: Row count distribution
+  scripts:
+  - id: shard-balance-analyzer
+    language: python
+    purpose: Analyze shard balance and predict hot spots
+    source: inline
+    code: |
+      #!/usr/bin/env python3
+      """Analyze shard data distribution and identify imbalances."""
+      import statistics
+
+      def analyze_shard_distribution(shard_sizes: dict) -> dict:
+          sizes = list(shard_sizes.values())
+          mean = statistics.mean(sizes)
+          stdev = statistics.stdev(sizes) if len(sizes) > 1 else 0
+
+          return {
+              'mean_size': mean,
+              'std_deviation': stdev,
+              'coefficient_of_variation': stdev / mean if mean > 0 else 0,
+              'hot_shards': [k for k, v in shard_sizes.items() if v > mean * 1.5],
+              'cold_shards': [k for k, v in shard_sizes.items() if v < mean * 0.5],
+              'balance_score': 1 - (stdev / mean) if mean > 0 else 1
+          }
+signals:
+  critical:
+  - id: SHARD-CRIT-001
+    signal: Single shard contains >50% of total data
+    evidence_threshold: max(shard_size) / sum(shard_size) > 0.5
+    explanation: |
+      Extreme data skew defeats the purpose of sharding. One shard becomes
+      the bottleneck, negating horizontal scaling benefits. This typically
+      indicates a poor shard key choice that correlates with data hotspots.
+    remediation: Re-evaluate shard key selection; consider composite keys or resharding
+  - id: SHARD-CRIT-002
+    signal: Shard key allows unbounded growth within single shard
+    evidence_indicators:
+    - Shard key based on customer_id with large enterprise customers
+    - Sequential IDs as shard keys
+    - No compound key for time-series data
+    explanation: |
+      Some entities grow without bound (enterprise customers, popular content).
+      Using such entities as sole shard key creates inevitable hot shards.
+    remediation: Use compound shard keys combining entity ID with time or hash component
+  high:
+  - id: SHARD-HIGH-001
+    signal: No automated rebalancing mechanism
+    explanation: Manual rebalancing is error-prone and creates operational burden
+    remediation: Implement automated shard rebalancing with consistent hashing
+  - id: SHARD-HIGH-002
+    signal: Cross-shard transactions without proper coordination
+    explanation: Distributed transactions without 2PC or saga patterns cause inconsistency
+    remediation: Implement saga pattern or design to avoid cross-shard transactions
+  medium:
+  - id: SHARD-MED-001
+    signal: Shard key not included in majority of queries
+    remediation: Redesign queries to include shard key or reconsider sharding approach
+  - id: SHARD-MED-002
+    signal: No shard pruning in query execution
+    remediation: Implement query analyzer that routes to specific shards when possible
+  low:
+  - id: SHARD-LOW-001
+    signal: Shard naming convention inconsistent
+  positive:
+  - id: SHARD-POS-001
+    signal: Consistent hash ring with virtual nodes implemented
+  - id: SHARD-POS-002
+    signal: Shard key analysis shows even distribution over 12+ months
+procedure:
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - Sharding Architecture Overview
+    - Data Distribution Analysis
+    - Shard Key Effectiveness
+    - Risk Assessment
+    - Recommendations
+  - type: metrics_report
+    format: tabular
+    contents:
+    - Shard size distribution
+    - Query routing efficiency
+    - Hot spot analysis
+  confidence_guidance:
+    high: Direct measurement of shard metrics and query analysis
+    medium: Analysis based on configuration and limited production data
+    low: Inference from design documents without production validation
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: vitess-sharding
+      priority: recommended
+    - source_id: consistent-hashing
+      priority: recommended
+  limitations:
+  - Cannot access live shard metrics without runtime connection
+  - Query pattern analysis requires production logs
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires detailed analysis of production data distribution
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: sharding-strategy-001
+  item: Shard key is documented and justified
+  level: CRITICAL
+  verification: manual
+  verification_notes: Confirm shard key selection rationale exists in architecture docs
+  expected: Confirmed by reviewer
+- id: sharding-strategy-002
+  item: Data distribution variance within acceptable range
+  level: CRITICAL
+  verification: manual
+  expected: PASS
+  verification_notes: 'SQL query - run in database: SELECT MAX(size)/AVG(size) < 2.0 FROM shard_metrics'
+- id: sharding-strategy-003
+  item: Rebalancing procedure exists and is tested
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify runbook exists and has been executed in staging
+  expected: Confirmed by reviewer
+- id: sharding-strategy-004
+  item: Cross-shard query patterns identified and optimized
+  level: WARNING
+  verification: grep -c 'scatter\|fanout\|all_shards' query_log | test $(cat) -lt 100
+  expected: PASS
+governance:
+  applicable_to:
+    archetypes:
+    - high-scale-saas
+    - data-platform
+    - enterprise
+  compliance_frameworks:
+  - framework: SOC 2
+    controls:
+    - CC6.1
+    - CC7.2
+relationships:
+  commonly_combined:
+  - scalability-capacity.database-scalability.partition-strategy
+  - scalability-capacity.database-scalability.cross-shard-query
+  - scalability-capacity.database-scalability.data-volume-projection

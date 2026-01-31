@@ -1,0 +1,347 @@
+# ============================================================
+# Missing Index Audit
+# ============================================================
+# Identifies missing indexes that would significantly improve
+# query performance based on workload analysis.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.database-performance.missing-index"
+  name: "Missing Index Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "database-performance"
+
+  tier: "expert"
+  estimated_duration: "2.5 hours"
+
+  completeness: "requires_discovery"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "data"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit identifies missing indexes by analyzing query patterns,
+    execution plans, and database recommendations. It examines frequently
+    executed queries that perform sequential scans, foreign keys without
+    indexes, and columns used in WHERE, JOIN, and ORDER BY clauses that
+    lack supporting indexes.
+
+  why_it_matters: |
+    Missing indexes force the database to perform full table scans, which
+    become exponentially more expensive as data grows. A query that takes
+    10ms with an index might take 10 seconds without one. Identifying and
+    adding critical missing indexes can provide order-of-magnitude
+    performance improvements.
+
+  when_to_run:
+    - "After data volume growth"
+    - "When new query patterns are introduced"
+    - "During performance optimization efforts"
+    - "After analyzing slow query logs"
+
+prerequisites:
+  required_artifacts:
+    - type: "database-access"
+      description: "Access to database statistics and EXPLAIN"
+    - type: "query-logs"
+      description: "Access to slow query logs or query statistics"
+
+  access_requirements:
+    - "EXPLAIN privileges"
+    - "Access to pg_stat_statements or equivalent"
+    - "Access to system tables for index recommendations"
+
+discovery:
+  metrics_queries:
+    - system: "PostgreSQL"
+      query: |
+        SELECT relname, seq_scan, seq_tup_read, idx_scan
+        FROM pg_stat_user_tables
+        WHERE seq_scan > 100 AND seq_tup_read > seq_scan * 1000
+        ORDER BY seq_tup_read DESC
+      purpose: "Tables with high sequential scan volume"
+      threshold: "High seq_scan with many tuples indicates missing index"
+    - system: "SQL Server"
+      query: |
+        SELECT * FROM sys.dm_db_missing_index_details
+        CROSS APPLY sys.dm_db_missing_index_columns(index_handle)
+      purpose: "SQL Server missing index recommendations"
+      threshold: "Review all recommendations"
+    - system: "MySQL"
+      query: |
+        SELECT * FROM sys.statements_with_full_table_scans
+        ORDER BY total_latency DESC
+      purpose: "Statements causing full table scans"
+      threshold: "Should be minimal for indexed tables"
+
+  code_patterns:
+    - pattern: "WHERE\\s+\\w+\\s*=|JOIN\\s+\\w+\\s+ON"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify columns used in filtering and joins"
+    - pattern: "ORDER BY|GROUP BY"
+      type: "regex"
+      scope: "source"
+      purpose: "Columns used in sorting and grouping"
+
+knowledge_sources:
+  specifications:
+    - id: "postgres-indexes"
+      name: "PostgreSQL Index Types"
+      url: "https://www.postgresql.org/docs/current/indexes-types.html"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "index-design"
+      name: "Index Design Guidelines"
+      url: "https://use-the-index-luke.com/sql/preface"
+      offline_cache: true
+    - id: "postgres-hypothetical"
+      name: "Hypothetical Indexes (HypoPG)"
+      url: "https://hypopg.readthedocs.io/"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "psql"
+      purpose: "Analyze sequential scan patterns"
+      command: "psql -c 'SELECT relname, seq_scan, seq_tup_read FROM pg_stat_user_tables WHERE seq_scan > 0 ORDER BY seq_tup_read DESC'"
+    - tool: "hypopg"
+      purpose: "Test hypothetical indexes"
+      command: "SELECT * FROM hypopg_create_index('CREATE INDEX ON table(column)')"
+
+  monitoring_queries:
+    - system: "PostgreSQL"
+      query: |
+        SELECT schemaname, relname, attname
+        FROM pg_stats
+        WHERE n_distinct > 100 AND most_common_vals IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM pg_indexes WHERE tablename = relname
+          AND indexdef LIKE '%' || attname || '%'
+        )
+      purpose: "High-cardinality columns without indexes"
+
+signals:
+  critical:
+    - id: "MIDX-CRIT-001"
+      signal: "Foreign keys without supporting indexes"
+      evidence_pattern: "FK constraint exists but no index on FK column"
+      explanation: |
+        Foreign keys without indexes cause full table scans on JOINs and
+        ON DELETE CASCADE operations. This is especially severe for parent
+        table deletions which must scan the entire child table.
+      remediation: "Create index on foreign key columns"
+
+    - id: "MIDX-CRIT-002"
+      signal: "High-frequency queries causing sequential scans"
+      evidence_threshold: "calls > 1000 AND seq_scan AND table_size > 10000 rows"
+      explanation: |
+        Frequently executed queries that perform sequential scans on large
+        tables cause cumulative performance degradation. The impact compounds
+        with each execution.
+      remediation: "Add index on filtered/joined columns"
+
+  high:
+    - id: "MIDX-HIGH-001"
+      signal: "Tables with seq_scan >> idx_scan ratio"
+      evidence_threshold: "seq_scan > 10x idx_scan for table > 10k rows"
+      explanation: |
+        A high sequential scan ratio indicates the table's index coverage
+        doesn't match the query workload. The database is repeatedly scanning
+        the entire table instead of using indexed lookups.
+      remediation: "Analyze query patterns and add indexes for common filters"
+
+    - id: "MIDX-HIGH-002"
+      signal: "Sort operations not supported by indexes"
+      evidence_pattern: "ORDER BY columns not in any index"
+      explanation: |
+        Without index support, ORDER BY requires reading all matching rows
+        into memory for sorting. This is slow and memory-intensive, especially
+        with LIMIT which could otherwise use an index scan.
+      remediation: "Create index including ORDER BY columns"
+
+  medium:
+    - id: "MIDX-MED-001"
+      signal: "GROUP BY columns without index support"
+      evidence_pattern: "GROUP BY on unindexed columns"
+      remediation: "Consider index on frequently grouped columns"
+
+    - id: "MIDX-MED-002"
+      signal: "Range queries on unindexed columns"
+      evidence_pattern: "BETWEEN, >, < on unindexed columns"
+      remediation: "Add B-tree index for range query support"
+
+  low:
+    - id: "MIDX-LOW-001"
+      signal: "Potential for partial index not utilized"
+
+  positive:
+    - id: "MIDX-POS-001"
+      signal: "Good index coverage for common query patterns"
+    - id: "MIDX-POS-002"
+      signal: "All foreign keys have supporting indexes"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Analyze sequential scan patterns"
+      description: |
+        Identify tables with high sequential scan activity that may
+        benefit from additional indexes.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Tables with high sequential scan volume"
+          command: |
+            psql -c "SELECT relname, seq_scan, seq_tup_read, idx_scan, n_live_tup FROM pg_stat_user_tables WHERE seq_scan > 100 ORDER BY seq_tup_read DESC LIMIT 20"
+        - purpose: "Sequential scan ratio by table"
+          command: |
+            psql -c "SELECT relname, CASE WHEN seq_scan + idx_scan > 0 THEN round(100.0 * seq_scan / (seq_scan + idx_scan)) END as seq_pct FROM pg_stat_user_tables WHERE n_live_tup > 1000 ORDER BY seq_pct DESC NULLS LAST"
+      expected_findings:
+        - "Tables with excessive sequential scans"
+        - "Candidates for index addition"
+
+    - id: "2"
+      name: "Check foreign key indexes"
+      description: |
+        Identify foreign key constraints that lack supporting indexes,
+        which cause performance issues on JOINs and cascading operations.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Foreign keys without indexes"
+          command: |
+            psql -c "SELECT conrelid::regclass AS table_name, conname AS fk_name, a.attname AS column_name FROM pg_constraint c JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey) WHERE c.contype = 'f' AND NOT EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid = c.conrelid AND a.attnum = ANY(i.indkey))"
+      expected_findings:
+        - "Foreign keys without indexes"
+        - "Potential cascade performance issues"
+
+    - id: "3"
+      name: "Analyze slow query patterns"
+      description: |
+        Examine slow queries to identify columns used in WHERE, JOIN,
+        and ORDER BY clauses that lack index support.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Slow queries for analysis"
+          command: |
+            psql -c "SELECT query, calls, mean_exec_time FROM pg_stat_statements WHERE mean_exec_time > 100 ORDER BY total_exec_time DESC LIMIT 10"
+        - purpose: "EXPLAIN ANALYZE for slow query"
+          command: |
+            psql -c "EXPLAIN (ANALYZE, BUFFERS) <slow_query>"
+      expected_findings:
+        - "Filter columns without indexes"
+        - "Join columns without indexes"
+
+    - id: "4"
+      name: "Test hypothetical indexes"
+      description: |
+        Use hypothetical index tools to predict the impact of proposed
+        indexes without actually creating them.
+      duration_estimate: "30 min"
+      commands:
+        - purpose: "Create hypothetical index (HypoPG)"
+          command: |
+            psql -c "SELECT * FROM hypopg_create_index('CREATE INDEX ON tablename(column)')"
+        - purpose: "Test query with hypothetical index"
+          command: |
+            psql -c "EXPLAIN SELECT * FROM tablename WHERE column = 'value'"
+        - purpose: "Remove hypothetical index"
+          command: |
+            psql -c "SELECT hypopg_drop_index(indexrelid) FROM hypopg_list_indexes()"
+      expected_findings:
+        - "Expected improvement from proposed indexes"
+        - "Index recommendations with impact estimates"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Missing Index Candidates"
+        - "Foreign Key Index Gaps"
+        - "Query Pattern Analysis"
+        - "Recommendations with Priority"
+
+  confidence_guidance:
+    high: "EXPLAIN ANALYZE showing significant improvement"
+    medium: "Statistics suggest benefit but not verified"
+    low: "Based on query pattern analysis only"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "postgres-indexes"
+        priority: "required"
+      - source_id: "index-design"
+        priority: "recommended"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires detailed query analysis"
+    full:
+      included: true
+      priority: 1
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "midx-001"
+    item: "All foreign keys have supporting indexes"
+    level: "CRITICAL"
+    verification: |
+      psql -c "SELECT count(*) FROM pg_constraint c JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey) WHERE c.contype = 'f' AND NOT EXISTS (SELECT 1 FROM pg_index i WHERE i.indrelid = c.conrelid AND a.attnum = ANY(i.indkey))" -t | grep -q "^0$"
+    expected: "true"
+
+  - id: "midx-002"
+    item: "No high-frequency queries with sequential scans"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify top 10 queries by execution count use indexes"
+    expected: "Confirmed by reviewer"
+
+  - id: "midx-003"
+    item: "Sequential scan ratio < 10% for tables > 10k rows"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Check seq_scan ratio for large tables"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.database-performance.index-usage"
+    - "performance-efficiency.database-performance.query-optimization"

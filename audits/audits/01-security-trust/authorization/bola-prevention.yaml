@@ -1,0 +1,392 @@
+audit:
+  id: security-trust.authorization.bola-prevention
+  name: Broken Object Level Authorization (BOLA) Prevention Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: security-trust
+  category_number: 1
+  subcategory: authorization
+  tier: phd
+  estimated_duration: 2 hours
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: critical
+  scope: codebase
+  default_profiles:
+  - full
+  - security
+  blocks_phase: true
+  parallelizable: true
+description:
+  what: |
+    Examines API endpoints and data access patterns to detect Broken Object Level
+    Authorization (BOLA) vulnerabilities, also known as Insecure Direct Object
+    Reference (IDOR). Verifies that every access to an object includes authorization
+    checks to confirm the requesting user has permission to access that specific
+    object instance.
+  why_it_matters: |
+    BOLA is ranked #1 in the OWASP API Security Top 10 (2023). Attackers exploit
+    BOLA by manipulating object identifiers (IDs, GUIDs, tokens) to access resources
+    belonging to other users. High-profile breaches at Uber (2016), Facebook (2018),
+    and Parler (2021) resulted from BOLA vulnerabilities. This weakness directly
+    maps to CWE-639.
+  when_to_run:
+  - Initial API security assessment
+  - Before releasing new API endpoints
+  - After changes to data access patterns
+  - During penetration testing preparation
+prerequisites:
+  required_artifacts:
+  - type: source_code
+    description: API controllers and data access layer
+  - type: api_specification
+    description: OpenAPI/Swagger or API documentation
+  access_requirements:
+  - Read access to source code repository
+  - Access to API route definitions
+  - Understanding of object ownership model
+discovery:
+  code_patterns:
+  - pattern: \/(users?|accounts?|orders?|profiles?)\/:?id
+    type: regex
+    scope: source
+    purpose: Identify resource endpoints with object IDs
+  - pattern: params\.(id|userId|orderId|accountId)
+    type: regex
+    scope: source
+    purpose: Find parameter-based object access
+  - pattern: findById|getById|findOne.*id|where.*id\s*=
+    type: regex
+    scope: source
+    purpose: Locate direct database queries by ID
+  - pattern: req\.(params|query|body)\.(id|[a-z]+Id)
+    type: regex
+    scope: source
+    purpose: Find user-controlled ID parameters
+  - pattern: \/api\/v[0-9]+\/[a-z]+\/:[a-z]*id
+    type: regex
+    scope: source
+    purpose: Identify RESTful resource routes
+  file_patterns:
+  - glob: '**/controllers/**'
+    purpose: API controller files
+  - glob: '**/routes/**'
+    purpose: Route definition files
+  - glob: '**/handlers/**'
+    purpose: Request handler files
+  - glob: '**/api/**'
+    purpose: API implementation files
+  - glob: '**/repositories/**'
+    purpose: Data access repositories
+knowledge_sources:
+  specifications:
+  - id: owasp-api-top10-2023
+    name: OWASP API Security Top 10 2023 - API1:2023 BOLA
+    url: https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/
+    offline_cache: true
+    priority: required
+  - id: nist-800-53
+    name: NIST SP 800-53 Security and Privacy Controls
+    url: https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    offline_cache: true
+    priority: required
+  - id: nist-800-207
+    name: NIST SP 800-207 Zero Trust Architecture
+    url: https://csrc.nist.gov/publications/detail/sp/800-207/final
+    offline_cache: true
+    priority: required
+  - id: nsa-zero-trust
+    name: NSA Embracing a Zero Trust Security Model
+    url: https://media.defense.gov/2021/Feb/25/2002588479/-1/-1/0/CSI_EMBRACING_ZT_SECURITY_MODEL_UOO115131-21.PDF
+    offline_cache: true
+    priority: required
+  - id: owasp-asvs
+    name: OWASP Application Security Verification Standard
+    url: https://owasp.org/www-project-application-security-verification-standard/
+    offline_cache: true
+    priority: required
+  guides:
+  - id: owasp-testing-bola
+    name: OWASP Testing Guide - API BOLA
+    url: https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/12-API_Testing/02-API_Broken_Object_Level_Authorization
+    offline_cache: true
+  - id: owasp-authz
+    name: OWASP Authorization Cheat Sheet
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html
+    offline_cache: true
+tooling:
+  static_analysis:
+  - tool: semgrep
+    purpose: Detect missing ownership checks on object access
+    offline_capable: true
+  - tool: OWASP ZAP
+    purpose: Dynamic testing for BOLA in runtime
+    offline_capable: false
+  scripts:
+  - id: bola-pattern-search
+    language: bash
+    purpose: Find potential BOLA patterns
+    source: inline
+    code: |
+      # Find endpoints with ID parameters lacking ownership check
+      grep -rn --include="*.{js,ts,py,java,go}" \
+        -E "(findById|getById|params\.id)" . | \
+        grep -v "owner|user.*id|currentUser"
+signals:
+  critical:
+  - id: BOLA-CRIT-001
+    signal: Direct object access without ownership verification
+    evidence_pattern: findById\(.*params\.id\)(?!.*owner|userId|currentUser)
+    cwe: CWE-639
+    explanation: |
+      Objects are retrieved using user-supplied IDs without verifying that
+      the requesting user owns or has permission to access the object.
+      Attackers can enumerate and access any object by modifying IDs.
+    remediation: 'Add ownership check: findById(id).where(''userId'', currentUser.id)'
+  - id: BOLA-CRIT-002
+    signal: Sequential/predictable object identifiers exposed
+    evidence_pattern: id.*=.*AUTO_INCREMENT|id.*serial|nextval\(
+    cwe: CWE-639
+    explanation: |
+      Sequential integer IDs make BOLA exploitation trivial through
+      enumeration. Attackers can iterate through IDs to find valid objects.
+    remediation: Use UUIDs or other non-sequential, non-guessable identifiers
+  - id: BOLA-CRIT-003
+    signal: Bulk object retrieval without per-object authorization
+    evidence_pattern: findAll|find\(\{\}\)|getMany(?!.*where.*user)
+    cwe: CWE-639
+    explanation: |
+      Bulk retrieval operations return all objects without filtering by
+      user authorization, potentially exposing other users' data.
+    remediation: 'Always scope bulk queries to authorized objects: find({userId: currentUser.id})'
+  high:
+  - id: BOLA-HIGH-001
+    signal: Object modification without ownership check
+    evidence_pattern: update.*params\.id(?!.*owner|where.*userId)
+    cwe: CWE-639
+    explanation: |
+      Update operations accept user-supplied IDs without verifying ownership,
+      allowing attackers to modify other users' resources.
+    remediation: 'Include ownership in update: update({id, userId: currentUser.id})'
+  - id: BOLA-HIGH-002
+    signal: Object deletion without authorization
+    evidence_pattern: delete.*params\.id(?!.*owner|where.*userId)
+    cwe: CWE-639
+    explanation: |
+      Delete operations lack ownership verification, allowing unauthorized
+      deletion of other users' resources.
+    remediation: Add ownership check before deletion
+  - id: BOLA-HIGH-003
+    signal: ID parameter passed to nested resource without validation
+    evidence_pattern: \/[a-z]+\/:parentId\/[a-z]+\/:childId(?!.*checkAccess)
+    cwe: CWE-639
+    explanation: |
+      Nested resource endpoints accept parent and child IDs without
+      verifying the relationship or user authorization.
+    remediation: Verify parent-child relationship AND user access to parent
+  medium:
+  - id: BOLA-MED-001
+    signal: ID exposed in URL but also in response body
+    evidence_pattern: res\.json\(.*\{.*id.*:.*\}\)
+    cwe: CWE-200
+    remediation: Consider if IDs need to be exposed; use opaque tokens if possible
+  - id: BOLA-MED-002
+    signal: Missing rate limiting on object access endpoints
+    evidence_pattern: '@(Get|Post).*\/:[a-z]*id(?!.*rateLimit|throttle)'
+    cwe: CWE-799
+    remediation: Implement rate limiting to prevent enumeration attacks
+  low:
+  - id: BOLA-LOW-001
+    signal: Inconsistent ID parameter naming
+    evidence_pattern: (userId|user_id|userID|uid|UserId)
+    remediation: Standardize ID parameter naming conventions
+  positive:
+  - id: BOLA-POS-001
+    signal: Ownership check middleware present
+    evidence_pattern: (checkOwnership|verifyOwner|authorize.*resource)
+  - id: BOLA-POS-002
+    signal: UUID identifiers used
+    evidence_pattern: uuid|UUID|guid|GUID
+  - id: BOLA-POS-003
+    signal: Policy-based object access control
+    evidence_pattern: (canAccess|can.*read|permission.*check).*resource
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Map Object Access Endpoints
+    description: |
+      Identify all API endpoints that accept object identifiers
+      as parameters and access specific resources.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find endpoints with ID parameters
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(GET|POST|PUT|PATCH|DELETE).*/:.*[iI]d|@(Get|Post|Put|Delete).*\{.*id" .
+    - purpose: Find route definitions with object IDs
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(route|router|path).*/:?(user|account|order|resource)?[iI]d" .
+    expected_findings:
+    - Complete list of resource endpoints
+    - Identification of all ID parameters
+  - id: '2'
+    name: Analyze Object Retrieval Patterns
+    description: |
+      Examine how objects are retrieved from the database and
+      whether ownership/authorization checks are present.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find database lookups by ID
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(findById|getById|findOne|findUnique|get)\\(.*id" .
+    - purpose: Check for ownership filters
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -B2 -A5 \
+          "(findById|getById)" . | grep -E "(userId|owner|currentUser|req\.user)"
+    expected_findings:
+    - Ownership checks on object retrieval
+    - User scoping in database queries
+  - id: '3'
+    name: Verify Object Modification Authorization
+    description: |
+      Check that update and delete operations verify ownership
+      before modifying objects.
+    duration_estimate: 25 min
+    commands:
+    - purpose: Find update operations
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(update|patch|put).*id" . | head -30
+    - purpose: Find delete operations
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(delete|remove|destroy).*id" . | head -30
+    expected_findings:
+    - Ownership verification on updates
+    - Authorization check before deletion
+  - id: '4'
+    name: Assess Identifier Security
+    description: |
+      Evaluate whether object identifiers are predictable or
+      easily enumerable.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find ID type definitions
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,sql}" -E \
+          "(id|ID).*:?.*(int|serial|AUTO_INCREMENT|uuid|UUID)" .
+    - purpose: Check for UUID usage
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(uuid|UUID|guid|GUID|nanoid|ulid)" .
+    expected_findings:
+    - Non-sequential identifier usage
+    - UUID or similar secure identifiers
+  - id: '5'
+    name: Check Bulk Operation Security
+    description: |
+      Verify that bulk operations are properly scoped to
+      authorized objects.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Find bulk retrieval patterns
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -E \
+          "(findAll|findMany|getAll|list|getMany)" . | head -30
+    - purpose: Check for user scoping in bulk queries
+      command: |
+        grep -rn --include="*.{js,ts,py,java,go,rb,cs}" -B2 -A5 \
+          "findAll|findMany" . | grep -E "(where|filter).*user"
+    expected_findings:
+    - User scoping on bulk operations
+    - Per-object authorization or pre-filtering
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - BOLA Vulnerability Analysis
+    - Critical Endpoints
+    - Remediation Priorities
+  confidence_guidance:
+    high: Clear ownership checks present on all object access
+    medium: Some ownership checks found but not consistently applied
+    low: Object access patterns found but authorization unclear
+offline:
+  capability: full
+  cache_manifest:
+    knowledge:
+    - source_id: owasp-api-top10-2023
+      priority: required
+    - source_id: owasp-testing-bola
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: BOLA requires thorough endpoint analysis
+    full:
+      included: true
+      priority: 1
+    security:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: bola-001
+  item: All object access includes ownership verification
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" -E "findById.*params" . | wc -l && \
+    grep -rn --include="*.{js,ts,py,java,go}" -E "findById.*params.*userId|owner" . | wc -l
+  expected: Counts should match or be close
+- id: bola-002
+  item: Non-sequential identifiers used
+  level: CRITICAL
+  verification: |
+    grep -rn --include="*.{sql,prisma,ts,js}" -E "(uuid|UUID|guid)" . | wc -l
+  expected: Greater than 0 for user-facing IDs
+- id: bola-003
+  item: Bulk operations are user-scoped
+  level: BLOCKING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" -E "findAll|findMany" . | wc -l && \
+    grep -rn --include="*.{js,ts,py,java,go}" -E "(findAll|findMany).*where.*user" . | wc -l
+  expected: Counts should match or bulk operations should be admin-only
+- id: bola-004
+  item: Rate limiting on object access endpoints
+  level: WARNING
+  verification: |
+    grep -rn --include="*.{js,ts,py,java,go}" -E "(rateLimit|throttle)" . | wc -l
+  expected: Greater than 0
+governance:
+  applicable_to:
+    archetypes:
+    - all
+  compliance_frameworks:
+  - framework: OWASP API Security Top 10 2023
+    controls:
+    - API1:2023
+  - framework: CWE
+    controls:
+    - CWE-639
+    - CWE-284
+  - framework: OWASP Top 10 2021
+    controls:
+    - A01:2021
+relationships:
+  commonly_combined:
+  - security-trust.authorization.rbac-implementation
+  - security-trust.authorization.resource-permission
+  - security-trust.input-validation.sql-injection

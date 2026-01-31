@@ -1,0 +1,302 @@
+audit:
+  id: reliability-resilience.error-handling.dead-letter-queue
+  name: Dead Letter Queue Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: reliability-resilience
+  category_number: 3
+  subcategory: error-handling
+  tier: phd
+  estimated_duration: 2-3 hours  # median: 2h
+  completeness: requires_discovery
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: partial
+  severity: high
+  scope: infrastructure
+  default_profiles:
+  - full
+  - production
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    Examines dead letter queue (DLQ) implementation and operations for
+    message-based systems. Reviews DLQ configuration for all queues,
+    monitoring and alerting on DLQ depth, reprocessing mechanisms,
+    message retention policies, and operational procedures for DLQ
+    investigation and remediation.
+  why_it_matters: |
+    Messages that fail processing repeatedly indicate bugs, data issues,
+    or infrastructure problems. Without proper DLQ handling, these messages
+    are lost forever, causing data inconsistency and missed business events.
+    Unmonitored DLQs can grow silently until data loss is discovered much
+    later, often after retention periods expire.
+  when_to_run:
+  - Before deploying message-based systems
+  - During operational readiness reviews
+  - After incidents involving message loss
+  - Quarterly operational health checks
+prerequisites:
+  required_artifacts:
+  - type: infrastructure_config
+    description: Message queue infrastructure configuration
+  - type: source_code
+    description: Message consumer implementations
+  access_requirements:
+  - Access to message queue configuration (SQS, RabbitMQ, Kafka, etc.)
+  - Access to monitoring dashboards
+  - Read access to consumer code
+discovery:
+  code_patterns:
+  - pattern: deadLetter|dead_letter|dlq|DLQ
+    type: keyword
+    scope: source
+    purpose: Find DLQ configurations and references
+  - pattern: maxReceiveCount|max_receive_count|maxDeliveryCount
+    type: regex
+    scope: source
+    purpose: Find retry-before-DLQ configurations
+  - pattern: RedrivePolicy|redrive
+    type: keyword
+    scope: config
+    purpose: Find AWS SQS redrive policies
+  file_patterns:
+  - glob: '**/terraform/**/*.tf'
+    purpose: Terraform infrastructure definitions
+  - glob: '**/cloudformation/**/*.{yaml,json}'
+    purpose: CloudFormation templates
+  - glob: '**/queue/**/*.{java,ts,go,py}'
+    purpose: Queue consumer implementations
+  - glob: '**/messaging/**/*.{java,ts,go,py}'
+    purpose: Messaging configuration
+  metrics_queries:
+  - system: CloudWatch
+    query: ApproximateNumberOfMessagesVisible for DLQ queues
+    purpose: Monitor DLQ depth
+    threshold: Should be 0 or trending toward 0
+  - system: Prometheus
+    query: rabbitmq_queue_messages{queue=~".*dlq.*|.*dead.*letter.*"}
+    purpose: RabbitMQ DLQ monitoring
+    threshold: Should be 0 or actively being processed
+knowledge_sources:
+  guides:
+  - id: aws-dlq
+    name: AWS SQS Dead-Letter Queues
+    url: https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html
+    offline_cache: true
+  - id: rabbitmq-dlx
+    name: RabbitMQ Dead Letter Exchanges
+    url: https://www.rabbitmq.com/dlx.html
+    offline_cache: true
+  - id: release-it
+    name: Michael Nygard - Release It!
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+    offline_cache: true
+  learning_resources:
+  - id: enterprise-integration
+    title: Enterprise Integration Patterns
+    type: book
+    reference: 'ISBN: 978-0321200686'
+tooling:
+  infrastructure_tools:
+  - tool: aws sqs
+    purpose: Inspect SQS queue configurations
+    command: aws sqs get-queue-attributes --queue-url $QUEUE_URL --attribute-names All
+  - tool: rabbitmqctl
+    purpose: Inspect RabbitMQ queue configurations
+    command: rabbitmqctl list_queues name messages arguments
+  monitoring_queries:
+  - system: CloudWatch
+    query: SELECT AVG(ApproximateNumberOfMessagesVisible) FROM SCHEMA("AWS/SQS", QueueName) WHERE QueueName
+      LIKE '%dlq%'
+    purpose: Monitor DLQ message counts
+  scripts:
+  - id: check-dlq-config
+    language: bash
+    purpose: Verify DLQ configuration exists for all queues
+    source: inline
+    code: |
+      #!/bin/bash
+      echo "=== Checking for DLQ Configurations ==="
+      grep -rn "deadLetter\|dead_letter\|dlq\|DLQ\|RedrivePolicy" --include="*.tf" --include="*.yaml" --include="*.json" --include="*.java" --include="*.ts" . 2>/dev/null | head -30
+      echo ""
+      echo "=== Queues Without DLQ References ==="
+      # This would need customization based on specific IaC patterns
+      grep -rn "Queue\|queue" --include="*.tf" --include="*.yaml" . 2>/dev/null | grep -iv "dlq\|dead" | head -20
+signals:
+  critical:
+  - id: DLQ-CRIT-001
+    signal: Production queues without dead letter queue configured
+    evidence_pattern: Queue.*(?!.*[Dd]ead[Ll]etter|.*[Dd]lq)
+    explanation: |
+      Queues without DLQ configuration will lose messages that cannot
+      be processed, leading to silent data loss and inconsistency.
+    remediation: Configure DLQ for all production queues with appropriate max receive count
+  - id: DLQ-CRIT-002
+    signal: No monitoring or alerting on DLQ depth
+    evidence_indicators:
+    - No CloudWatch alarms on DLQ metrics
+    - No Prometheus alerts for DLQ queues
+    - No DLQ dashboards in monitoring system
+    explanation: |
+      Unmonitored DLQs can accumulate messages silently until
+      retention periods expire, causing permanent data loss.
+    remediation: Implement alerting when DLQ depth exceeds threshold (typically > 0)
+  high:
+  - id: DLQ-HIGH-001
+    signal: No DLQ message reprocessing mechanism
+    explanation: |
+      Without a way to reprocess DLQ messages after fixing issues,
+      messages accumulate indefinitely or expire.
+    remediation: Implement DLQ reprocessing tooling or automation
+  - id: DLQ-HIGH-002
+    signal: DLQ retention period shorter than investigation SLA
+    explanation: |
+      If DLQ retention is too short, messages may expire before
+      teams can investigate and fix the underlying issues.
+    remediation: Set DLQ retention to at least 14 days or match your SLA for investigation
+  medium:
+  - id: DLQ-MED-001
+    signal: No runbook for DLQ investigation
+    remediation: Create runbook documenting DLQ investigation and reprocessing procedures
+  - id: DLQ-MED-002
+    signal: maxReceiveCount too low (< 3)
+    remediation: Set maxReceiveCount to at least 3-5 to handle transient failures
+  low:
+  - id: DLQ-LOW-001
+    signal: DLQ naming convention inconsistent
+  positive:
+  - id: DLQ-POS-001
+    signal: All queues have DLQ configured with monitoring
+  - id: DLQ-POS-002
+    signal: Automated DLQ reprocessing mechanism exists
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Inventory message queues
+    description: |
+      Identify all message queues in the system and their purpose.
+      Map primary queues to their DLQ counterparts.
+    duration_estimate: 30 min
+    commands:
+    - purpose: List queue definitions
+      command: grep -rn 'Queue\|queue' --include='*.tf' --include='*.yaml' --include='*.json' . 2>/dev/null
+        | grep -i 'resource\|type'
+    expected_findings:
+    - Complete list of queues
+    - Queue-to-DLQ mapping
+  - id: '2'
+    name: Verify DLQ configuration
+    description: |
+      Check that each primary queue has a DLQ configured with
+      appropriate redrive policies.
+    duration_estimate: 45 min
+    commands:
+    - purpose: Find redrive/DLQ configurations
+      command: grep -rn 'RedrivePolicy\|dead_letter\|deadLetter\|maxReceiveCount' --include='*.tf' --include='*.yaml'
+        --include='*.json' . 2>/dev/null
+    expected_findings:
+    - DLQ configuration status for each queue
+    - maxReceiveCount settings
+  - id: '3'
+    name: Check DLQ monitoring
+    description: |
+      Verify that DLQ depth is monitored and alerting is configured
+      for when messages appear in DLQs.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find DLQ alarms/alerts
+      command: grep -rn 'alarm\|alert' --include='*.tf' --include='*.yaml' . 2>/dev/null | grep -i 'dlq\|dead'
+    expected_findings:
+    - DLQ monitoring configuration
+    - Alert thresholds
+  - id: '4'
+    name: Review DLQ operations
+    description: |
+      Check for reprocessing mechanisms, runbooks, and operational
+      procedures for handling DLQ messages.
+    duration_estimate: 30 min
+    questions:
+    - How are DLQ messages investigated?
+    - What is the process for reprocessing DLQ messages?
+    - What is the DLQ retention period?
+    expected_findings:
+    - Reprocessing capabilities
+    - Operational procedures
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - DLQ Coverage Analysis
+    - Monitoring Gaps
+    - Recommendations
+  confidence_guidance:
+    high: Direct evidence from infrastructure configuration
+    medium: Configuration suggests potential gaps
+    low: Requires runtime verification of monitoring effectiveness
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: aws-dlq
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: Requires infrastructure access and analysis
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: dead-letter-queue-001
+  item: All production queues have DLQ configured
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify each queue in infrastructure config has DLQ or redrive policy
+  expected: Confirmed by reviewer
+- id: dead-letter-queue-002
+  item: DLQ depth monitoring configured
+  level: CRITICAL
+  verification: grep -rni 'alarm\|alert' --include='*.tf' --include='*.yaml' . 2>/dev/null | grep -i 'dlq\|dead.*letter'
+    | wc -l | xargs -I{} sh -c 'if [ {} -gt 0 ]; then echo PASS; else echo FAIL; fi'
+  expected: PASS
+- id: dead-letter-queue-003
+  item: DLQ reprocessing mechanism exists
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify tooling or process exists to reprocess DLQ messages
+  expected: Confirmed by reviewer
+- id: dead-letter-queue-004
+  item: DLQ retention period is adequate (>= 7 days)
+  level: WARNING
+  verification: manual
+  verification_notes: Check DLQ message retention configuration
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - message-driven
+    - event-sourced
+    - microservices
+  compliance_frameworks:
+  - framework: SOC2
+    controls:
+    - CC7.4
+relationships:
+  commonly_combined:
+  - reliability-resilience.error-handling.retry-logic
+  - reliability-resilience.error-handling.error-rate-monitoring

@@ -1,0 +1,388 @@
+# ============================================================
+# AUDIT: Transaction Boundary Audit
+# ============================================================
+# Evaluates transaction boundaries for correctness, ensuring
+# related operations are properly grouped.
+# ============================================================
+
+# ============================================================
+# SECTION 1: IDENTITY & METADATA
+# ============================================================
+
+audit:
+  id: "reliability-resilience.data-consistency.transaction-boundary"
+
+  name: "Transaction Boundary Audit"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "reliability-resilience"
+  category_number: 3
+  subcategory: "data-consistency"
+
+  tier: "expert"
+  estimated_duration: "3 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+# ============================================================
+# SECTION 2: EXECUTION CLASSIFICATION
+# ============================================================
+
+execution:
+  automatable: "partial"
+
+  severity: "high"
+
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+
+  blocks_phase: false
+  parallelizable: true
+
+# ============================================================
+# SECTION 3: DESCRIPTION & RATIONALE
+# ============================================================
+
+description:
+  what: |
+    Evaluates transaction boundaries in application code to ensure
+    related database operations are properly grouped within transactions.
+    Assesses whether business operations maintain atomicity and
+    identifies potential partial update scenarios.
+
+  why_it_matters: |
+    Incorrect transaction boundaries can leave data in inconsistent
+    states when operations partially fail. Related operations must
+    succeed or fail together to maintain data integrity. Poor
+    transaction design leads to data corruption, orphaned records,
+    and difficult-to-diagnose bugs.
+
+  when_to_run:
+    - "During code reviews of data operations"
+    - "After data consistency issues"
+    - "When refactoring data access layers"
+    - "During architecture reviews"
+
+# ============================================================
+# SECTION 4: PREREQUISITES
+# ============================================================
+
+prerequisites:
+  required_artifacts:
+    - type: "application_code"
+      description: "Code performing database operations"
+    - type: "data_model"
+      description: "Database schema and entity relationships"
+    - type: "business_rules"
+      description: "Documentation of business operation requirements"
+
+  access_requirements:
+    - "Application code repository access"
+    - "Database schema access"
+    - "Business logic documentation"
+
+# ============================================================
+# SECTION 5: DISCOVERY SPECIFICATION
+# ============================================================
+
+discovery:
+  code_patterns:
+    - pattern: "@Transactional|transaction|BEGIN|COMMIT"
+      type: "regex"
+      scope: "source"
+      purpose: "Identify transaction demarcation"
+    - pattern: "save\\(|insert\\(|update\\(|delete\\("
+      type: "regex"
+      scope: "source"
+      purpose: "Identify data modification operations"
+
+  file_patterns:
+    - glob: "**/repository/**/*.java"
+      purpose: "Repository layer code"
+    - glob: "**/service/**/*.py"
+      purpose: "Service layer code"
+    - glob: "**/models/**/*.js"
+      purpose: "Data model operations"
+
+  interviews:
+    - role: "Backend Engineers"
+      questions:
+        - "How are transactions managed in the application?"
+        - "What operations need to be atomic?"
+        - "Have there been partial update issues?"
+      purpose: "Understand transaction management approach"
+
+# ============================================================
+# SECTION 6: EXTERNAL KNOWLEDGE SOURCES
+# ============================================================
+
+knowledge_sources:
+  guides:
+    - id: "spring-transactions"
+      name: "Spring Transaction Management"
+      url: "https://docs.spring.io/spring-framework/docs/current/reference/html/data-access.html#transaction"
+      offline_cache: true
+    - id: "django-transactions"
+      name: "Django Database Transactions"
+      url: "https://docs.djangoproject.com/en/stable/topics/db/transactions/"
+      offline_cache: true
+
+# ============================================================
+# SECTION 7: TOOLING & AUTOMATION
+# ============================================================
+
+tooling:
+  static_analysis:
+    - tool: "Custom pattern matching"
+      purpose: "Find transaction boundary issues"
+      offline_capable: true
+
+  scripts:
+    - id: "find-transaction-patterns"
+      language: "bash"
+      purpose: "Identify transaction usage patterns"
+      source: "inline"
+      code: |
+        #!/bin/bash
+        echo "Finding transaction patterns..."
+        grep -r "@Transactional\|with transaction\|BEGIN TRANSACTION" --include="*.java" --include="*.py" --include="*.js"
+
+# ============================================================
+# SECTION 8: SIGNALS & FINDINGS TAXONOMY
+# ============================================================
+
+signals:
+  critical:
+    - id: "TB-CRIT-001"
+      signal: "Related operations not wrapped in single transaction"
+      evidence_pattern: "multiple save/insert calls without transaction"
+      evidence_indicators:
+        - "Parent and child records saved separately"
+        - "Multi-table updates without transaction wrapper"
+      explanation: |
+        When related operations are not in a single transaction, partial
+        failures leave data inconsistent with orphaned or incomplete records.
+      remediation: "Wrap related operations in explicit transaction boundaries"
+
+    - id: "TB-CRIT-002"
+      signal: "Transaction committed before all related operations complete"
+      evidence_indicators:
+        - "Commit in middle of business operation"
+        - "Async operations after commit"
+      explanation: |
+        Premature commit means subsequent failures cannot roll back
+        the already-committed changes, causing inconsistency.
+      remediation: "Ensure all related operations complete before commit"
+
+  high:
+    - id: "TB-HIGH-001"
+      signal: "Nested transactions not properly configured"
+      explanation: "Incorrect nesting can cause unexpected commit/rollback behavior"
+      remediation: "Configure appropriate propagation levels for nested transactions"
+
+    - id: "TB-HIGH-002"
+      signal: "Exception handling bypasses transaction rollback"
+      explanation: "Caught exceptions may prevent automatic rollback"
+      remediation: "Ensure rollback occurs on all business logic failures"
+
+  medium:
+    - id: "TB-MED-001"
+      signal: "Transaction scope too broad causing lock contention"
+      remediation: "Minimize transaction scope to reduce lock duration"
+
+    - id: "TB-MED-002"
+      signal: "Read-only operations unnecessarily in write transactions"
+      remediation: "Separate read-only operations or use read-only transactions"
+
+  low:
+    - id: "TB-LOW-001"
+      signal: "Transaction boundaries not documented"
+
+  positive:
+    - id: "TB-POS-001"
+      signal: "Well-defined transaction boundaries with clear business operation mapping"
+    - id: "TB-POS-002"
+      signal: "Proper rollback handling for all failure scenarios"
+
+# ============================================================
+# SECTION 9: EXECUTION PROCEDURE
+# ============================================================
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Map Business Operations to Data Operations"
+      description: |
+        Identify business operations and map them to their
+        constituent database operations.
+      duration_estimate: "45 min"
+      questions:
+        - "What are the key business operations?"
+        - "What data modifications does each operation involve?"
+        - "Which modifications must be atomic?"
+      expected_findings:
+        - "Business operation to data operation mapping"
+        - "Atomicity requirements"
+
+    - id: "2"
+      name: "Review Transaction Demarcation"
+      description: |
+        Analyze how transactions are demarcated in the code
+        including annotations, explicit begin/commit, and ORM settings.
+      duration_estimate: "45 min"
+      commands:
+        - purpose: "Find transaction annotations"
+          command: "grep -r '@Transactional\\|atomic\\|transaction' --include='*.java' --include='*.py'"
+      expected_findings:
+        - "Transaction demarcation patterns"
+        - "Transaction scope"
+
+    - id: "3"
+      name: "Identify Boundary Issues"
+      description: |
+        Look for operations that should be transactional but
+        are not, or have incorrect boundaries.
+      duration_estimate: "60 min"
+      questions:
+        - "Are related saves/updates in the same transaction?"
+        - "Do any operations span multiple transactions incorrectly?"
+        - "Are there async operations after commit?"
+      expected_findings:
+        - "Boundary issues identified"
+        - "Risk assessment for each issue"
+
+    - id: "4"
+      name: "Review Error Handling"
+      description: |
+        Assess how errors within transactions are handled
+        and whether rollback occurs appropriately.
+      duration_estimate: "30 min"
+      questions:
+        - "What triggers transaction rollback?"
+        - "Are exceptions properly propagated?"
+        - "Are there manual rollback calls?"
+      expected_findings:
+        - "Rollback behavior assessment"
+        - "Exception handling patterns"
+
+# ============================================================
+# SECTION 10: OUTPUT SPECIFICATION
+# ============================================================
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "transaction_map"
+      format: "table"
+      columns:
+        - "Business Operation"
+        - "Data Operations"
+        - "Transaction Scope"
+        - "Rollback Behavior"
+        - "Status"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Transaction Mapping"
+        - "Boundary Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Code reviewed with business operation mapping"
+    medium: "Code reviewed without full business context"
+    low: "Based on pattern matching only"
+
+# ============================================================
+# SECTION 11: OFFLINE SUPPORT
+# ============================================================
+
+offline:
+  capability: "full"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "spring-transactions"
+        priority: "recommended"
+
+# ============================================================
+# SECTION 12: PROFILES
+# ============================================================
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Transaction boundary review requires thorough analysis"
+    full:
+      included: true
+      priority: 1
+
+# ============================================================
+# SECTION 13: DETERMINISTIC VERIFICATION
+# ============================================================
+
+closeout_checklist:
+  - id: "tb-001"
+    item: "Related data operations wrapped in single transaction"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review business operations for transaction coverage"
+    expected: "Confirmed by reviewer"
+
+  - id: "tb-002"
+    item: "Exceptions properly trigger transaction rollback"
+    level: "CRITICAL"
+    verification: "manual"
+    verification_notes: "Review exception handling in transaction scopes"
+    expected: "Confirmed by reviewer"
+
+  - id: "tb-003"
+    item: "No async operations after transaction commit for same data"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Check for async calls that depend on transaction results"
+    expected: "Confirmed by reviewer"
+
+  - id: "tb-004"
+    item: "Transaction scope appropriately sized"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Assess transaction duration and scope"
+    expected: "Confirmed by reviewer"
+
+# ============================================================
+# SECTION 14: GOVERNANCE
+# ============================================================
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+  compliance_frameworks:
+    - framework: "SOC 2"
+      controls: ["CC6.1"]
+
+# ============================================================
+# SECTION 15: RELATIONSHIPS
+# ============================================================
+
+relationships:
+  commonly_combined:
+    - "reliability-resilience.data-consistency.acid-compliance"
+    - "reliability-resilience.data-consistency.distributed-transaction"
+    - "reliability-resilience.data-consistency.referential-integrity"

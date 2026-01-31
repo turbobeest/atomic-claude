@@ -1,0 +1,332 @@
+# ============================================================
+# AUDIT: RPC Interface Design Assessment
+# ============================================================
+# Evaluates gRPC, Thrift, and other RPC interface design quality
+# ============================================================
+
+audit:
+  id: "api-integration.api-design.rpc-interface-design"
+
+  name: "RPC Interface Design Assessment"
+
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "api-integration"
+  category_number: 9
+  subcategory: "api-design"
+
+  tier: "expert"
+  estimated_duration: "2 hours"
+
+  completeness: "complete"
+  requires_runtime: false
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "codebase"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  parallelizable: true
+
+description:
+  what: |
+    Evaluates RPC interface definitions (gRPC/Protocol Buffers, Thrift, Avro)
+    for design quality, backward compatibility, field numbering conventions,
+    message design, service organization, and streaming patterns.
+
+  why_it_matters: |
+    RPC interfaces form contracts between services in distributed systems.
+    Poor design leads to backward compatibility breaks, serialization issues,
+    inefficient wire formats, and tight coupling between services. Well-designed
+    RPC interfaces enable independent service evolution and efficient communication.
+
+  when_to_run:
+    - "Before releasing new RPC service versions"
+    - "During microservice architecture reviews"
+    - "When adding new RPC methods"
+    - "Before proto/thrift schema deployments"
+
+prerequisites:
+  required_artifacts:
+    - type: "proto-files"
+      description: "Protocol Buffer definitions (.proto)"
+    - type: "thrift-files"
+      description: "Thrift IDL definitions (.thrift)"
+
+  access_requirements:
+    - "Read access to interface definition files"
+    - "Read access to service implementations"
+
+discovery:
+  code_patterns:
+    - pattern: "syntax\\s*=\\s*\"proto[23]\""
+      type: "regex"
+      scope: "config"
+      purpose: "Protocol Buffer files"
+    - pattern: "service\\s+\\w+\\s*\\{"
+      type: "regex"
+      scope: "config"
+      purpose: "Service definitions"
+    - pattern: "rpc\\s+\\w+\\s*\\("
+      type: "regex"
+      scope: "config"
+      purpose: "RPC method definitions"
+    - pattern: "message\\s+\\w+\\s*\\{"
+      type: "regex"
+      scope: "config"
+      purpose: "Message type definitions"
+
+  file_patterns:
+    - glob: "**/*.proto"
+      purpose: "Protocol Buffer definitions"
+    - glob: "**/*.thrift"
+      purpose: "Thrift IDL files"
+    - glob: "**/*.avsc"
+      purpose: "Avro schema files"
+
+knowledge_sources:
+  specifications:
+    - id: "protobuf-style"
+      name: "Protocol Buffers Style Guide"
+      url: "https://protobuf.dev/programming-guides/style/"
+      offline_cache: true
+      priority: "required"
+    - id: "grpc-concepts"
+      name: "gRPC Core Concepts"
+      url: "https://grpc.io/docs/what-is-grpc/core-concepts/"
+      offline_cache: true
+      priority: "required"
+    - id: "openapi-spec"
+      name: "OpenAPI Specification"
+      url: "https://spec.openapis.org/oas/latest.html"
+      offline_cache: true
+      priority: "recommended"
+    - id: "owasp-api-security"
+      name: "OWASP API Security Top 10"
+      url: "https://owasp.org/API-Security/"
+      offline_cache: true
+      priority: "recommended"
+
+  guides:
+    - id: "api-design-google"
+      name: "Google API Design Guide"
+      url: "https://cloud.google.com/apis/design"
+      offline_cache: true
+
+tooling:
+  static_analysis:
+    - tool: "buf"
+      purpose: "Protocol Buffer linting and breaking change detection"
+      offline_capable: true
+    - tool: "protolint"
+      purpose: "Lint Protocol Buffer files"
+      offline_capable: true
+
+signals:
+  critical:
+    - id: "RPC-CRIT-001"
+      signal: "Field numbers reused or changed for existing fields"
+      evidence_pattern: "\\s+=\\s*\\d+.*//.*was|reserved\\s+\\d+"
+      explanation: |
+        Changing field numbers breaks wire compatibility. Existing clients
+        will deserialize data incorrectly, causing data corruption and
+        silent failures in production.
+      remediation: "Never change field numbers; add new fields with new numbers"
+
+    - id: "RPC-CRIT-002"
+      signal: "Required fields without defaults (proto2) or missing optional markers"
+      evidence_pattern: "required\\s+\\w+\\s+\\w+"
+      explanation: |
+        Required fields cannot be removed without breaking compatibility.
+        They prevent schema evolution and cause deserialization failures
+        when fields are missing.
+      remediation: "Use optional fields with sensible defaults; avoid required"
+
+  high:
+    - id: "RPC-HIGH-001"
+      signal: "Large messages without streaming"
+      evidence_pattern: "repeated\\s+\\w+\\s+\\w+.*//.*large|bytes\\s+\\w+.*payload"
+      explanation: |
+        Large messages sent as unary calls consume excessive memory and
+        can cause timeouts. Repeated fields with unbounded cardinality
+        are especially problematic.
+      remediation: "Use streaming RPCs for large data transfers"
+
+    - id: "RPC-HIGH-002"
+      signal: "Missing field reservations for removed fields"
+      evidence_pattern: "//\\s*(removed|deprecated|deleted).*=\\s*\\d+"
+      explanation: |
+        When fields are removed without reserving their numbers, those
+        numbers may be reused, causing compatibility issues with old clients.
+      remediation: "Use reserved keyword for removed field numbers and names"
+
+  medium:
+    - id: "RPC-MED-001"
+      signal: "Inconsistent naming conventions"
+      evidence_pattern: "message\\s+[a-z]|\\s+[A-Z][a-z]+_"
+      remediation: "Use PascalCase for messages, snake_case for fields"
+
+    - id: "RPC-MED-002"
+      signal: "Missing field documentation"
+      evidence_indicators:
+        - "Fields without comments"
+        - "No description of field purpose"
+      remediation: "Add comments documenting field purpose and constraints"
+
+  low:
+    - id: "RPC-LOW-001"
+      signal: "Non-sequential field numbering"
+      remediation: "Use sequential numbering for readability (1, 2, 3...)"
+
+  positive:
+    - id: "RPC-POS-001"
+      signal: "Proper use of reserved for removed fields"
+    - id: "RPC-POS-002"
+      signal: "Streaming used for large data transfers"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Inventory Interface Definitions"
+      description: |
+        Catalog all RPC interface files and their services.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find Protocol Buffer files"
+          command: "find . -name '*.proto' -type f 2>/dev/null | head -50"
+        - purpose: "Find Thrift files"
+          command: "find . -name '*.thrift' -type f 2>/dev/null | head -50"
+        - purpose: "Extract service definitions"
+          command: "grep -rn 'service\\s\\+\\w\\+\\s*{' --include='*.proto' --include='*.thrift' ."
+      expected_findings:
+        - "List of interface definition files"
+        - "Service definitions"
+
+    - id: "2"
+      name: "Analyze Field Numbering"
+      description: |
+        Check field numbering for compatibility issues.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find field definitions"
+          command: "grep -rn '^\\s*\\(optional\\|repeated\\|required\\)\\?\\s*\\w\\+\\s\\+\\w\\+\\s*=\\s*\\d\\+' --include='*.proto' ."
+        - purpose: "Find reserved declarations"
+          command: "grep -rn 'reserved\\s\\+' --include='*.proto' ."
+        - purpose: "Find potential reused numbers"
+          command: "grep -rn '=\\s*\\d\\+' --include='*.proto' . | awk -F'=' '{print $2}' | sort | uniq -d"
+      expected_findings:
+        - "Field numbering patterns"
+        - "Reserved field usage"
+
+    - id: "3"
+      name: "Check Message Design"
+      description: |
+        Evaluate message structure and field design.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "Find required fields (proto2)"
+          command: "grep -rn '^\\s*required\\s\\+' --include='*.proto' ."
+        - purpose: "Find large repeated fields"
+          command: "grep -rn '^\\s*repeated\\s\\+' --include='*.proto' ."
+        - purpose: "Find bytes/string fields"
+          command: "grep -rn '\\(bytes\\|string\\)\\s\\+\\w\\+' --include='*.proto' ."
+      expected_findings:
+        - "Required field usage"
+        - "Potentially large fields"
+
+    - id: "4"
+      name: "Evaluate Streaming Usage"
+      description: |
+        Check for appropriate use of streaming RPCs.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find streaming RPCs"
+          command: "grep -rn 'stream\\s\\+\\w\\+' --include='*.proto' ."
+        - purpose: "Find unary RPCs"
+          command: "grep -rn 'rpc\\s\\+\\w\\+\\s*(\\w\\+)\\s*returns\\s*(\\w\\+)' --include='*.proto' ."
+      expected_findings:
+        - "Streaming vs unary RPC distribution"
+        - "Large message handling"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Interface Inventory"
+        - "Compatibility Analysis"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Interface definitions fully analyzed"
+    medium: "Partial interface coverage"
+    low: "Limited interface files found"
+
+offline:
+  capability: "full"
+  cache_manifest:
+    knowledge:
+      - source_id: "protobuf-style"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires thorough interface analysis"
+    full:
+      included: true
+      priority: 2
+
+closeout_checklist:
+  - id: "rpc-001"
+    item: "No field number reuse detected"
+    level: "CRITICAL"
+    verification: |
+      if grep -rh '=\s*[0-9]\+' --include='*.proto' . 2>/dev/null | grep -oE '[0-9]+' | sort | uniq -d | grep -q .; then echo "FAIL"; else echo "PASS"; fi
+    expected: "PASS"
+
+  - id: "rpc-002"
+    item: "No required fields in proto3 or proto2"
+    level: "CRITICAL"
+    verification: |
+      if grep -rq '^\s*required\s\+' --include='*.proto' . 2>/dev/null; then echo "FAIL"; else echo "PASS"; fi
+    expected: "PASS"
+
+  - id: "rpc-003"
+    item: "Reserved used for removed fields"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms removed fields have reserved declarations"
+    expected: "Confirmed by reviewer"
+
+  - id: "rpc-004"
+    item: "Streaming used for large data transfers"
+    level: "WARNING"
+    verification: "manual"
+    verification_notes: "Reviewer confirms large payloads use streaming RPCs"
+    expected: "Confirmed by reviewer"
+
+governance:
+  applicable_to:
+    archetypes: ["microservice", "grpc-service", "distributed-system"]
+
+relationships:
+  commonly_combined:
+    - "api-integration.api-contracts.schema-validation"
+    - "api-integration.versioning.versioning-strategy"
+    - "api-integration.api-contracts.breaking-change-detection"

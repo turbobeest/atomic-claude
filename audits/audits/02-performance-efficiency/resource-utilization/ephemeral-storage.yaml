@@ -1,0 +1,331 @@
+# ============================================================
+# Ephemeral Storage Audit
+# ============================================================
+# Evaluates ephemeral storage utilization, limits, and eviction
+# risks in containerized environments.
+# ============================================================
+
+audit:
+  id: "performance-efficiency.resource-utilization.ephemeral-storage"
+  name: "Ephemeral Storage Audit"
+  version: "1.0.0"
+  last_updated: "2026-01-18"
+  status: "active"
+
+  category: "performance-efficiency"
+  category_number: 2
+  subcategory: "resource-utilization"
+
+  tier: "expert"
+  estimated_duration: "1.5 hours"
+
+  completeness: "complete"
+  requires_runtime: true
+  destructive: false
+
+execution:
+  automatable: "partial"
+  severity: "high"
+  scope: "infrastructure"
+
+  default_profiles:
+    - "full"
+    - "production"
+
+  blocks_phase: false
+  parallelizable: true
+
+description:
+  what: |
+    This audit examines ephemeral storage utilization in Kubernetes pods,
+    including container writable layers, emptyDir volumes, and log storage.
+    It identifies pods at risk of eviction due to ephemeral storage pressure
+    and evaluates limit configurations.
+
+  why_it_matters: |
+    Ephemeral storage exhaustion causes pod eviction, which can be surprising
+    because it's less commonly monitored than CPU or memory. Large container
+    images, verbose logging, temporary file creation, and unbounded emptyDir
+    usage can quickly fill node disk space. Evicted pods lose their state
+    and may cause service disruption.
+
+  when_to_run:
+    - "After deploying applications with heavy logging or temp files"
+    - "When investigating unexpected pod evictions"
+    - "During node capacity planning"
+    - "After adding emptyDir volumes to workloads"
+
+prerequisites:
+  required_artifacts:
+    - type: "kubernetes-cluster"
+      description: "Access to Kubernetes cluster"
+    - type: "metrics-system"
+      description: "Access to node and container storage metrics"
+
+  access_requirements:
+    - "Read access to Kubernetes API"
+    - "Access to node disk metrics"
+    - "Access to container filesystem metrics"
+
+discovery:
+  metrics_queries:
+    - system: "Prometheus"
+      query: "container_fs_usage_bytes{container!=''}"
+      purpose: "Container filesystem usage"
+      threshold: "Below ephemeral storage limits"
+    - system: "Prometheus"
+      query: "kubelet_volume_stats_used_bytes{persistentvolumeclaim=''}"
+      purpose: "EmptyDir volume usage"
+      threshold: "Within expected bounds"
+    - system: "Prometheus"
+      query: "node_filesystem_avail_bytes{mountpoint='/'}"
+      purpose: "Node root filesystem available"
+      threshold: "> 15% available"
+    - system: "Kubernetes"
+      query: "kube_pod_container_resource_limits{resource='ephemeral_storage'}"
+      purpose: "Ephemeral storage limits per pod"
+      threshold: "Should be configured for production pods"
+
+  file_patterns:
+    - glob: "**/deployment*.yaml"
+      purpose: "Kubernetes deployments with ephemeral storage config"
+    - glob: "**/pod*.yaml"
+      purpose: "Pod specifications with volume mounts"
+
+knowledge_sources:
+  specifications:
+    - id: "k8s-ephemeral-storage"
+      name: "Kubernetes Ephemeral Storage"
+      url: "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#local-ephemeral-storage"
+      offline_cache: true
+      priority: "required"
+
+  guides:
+    - id: "k8s-eviction"
+      name: "Kubernetes Pod Eviction"
+      url: "https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/"
+      offline_cache: true
+    - id: "k8s-emptydir"
+      name: "EmptyDir Volumes"
+      url: "https://kubernetes.io/docs/concepts/storage/volumes/#emptydir"
+      offline_cache: true
+
+tooling:
+  infrastructure_tools:
+    - tool: "kubectl"
+      purpose: "Check pod ephemeral storage usage"
+      command: "kubectl get pods -A -o json | jq '.items[].spec.containers[].resources.limits.ephemeral-storage // \"no limit\"'"
+    - tool: "df"
+      purpose: "Check node disk usage"
+      command: "df -h /"
+
+  monitoring_queries:
+    - system: "Prometheus"
+      query: |
+        sum(container_fs_usage_bytes{container!='POD',container!=''}) by (pod, namespace)
+        / sum(kube_pod_container_resource_limits{resource='ephemeral_storage'}) by (pod, namespace) * 100
+      purpose: "Ephemeral storage utilization percentage"
+
+signals:
+  critical:
+    - id: "EPHEMERAL-CRIT-001"
+      signal: "Node disk pressure causing pod evictions"
+      evidence_threshold: "DiskPressure condition True on node"
+      explanation: |
+        Node disk pressure indicates the kubelet has started evicting pods
+        to reclaim disk space. This can cause cascading evictions and
+        service disruption, especially if many pods share the affected node.
+      remediation: "Clean up disk, add storage, or implement ephemeral storage limits"
+
+    - id: "EPHEMERAL-CRIT-002"
+      signal: "Pod ephemeral storage exceeding limits"
+      evidence_threshold: "container_fs_usage_bytes > ephemeral_storage_limit"
+      explanation: |
+        Pods exceeding their ephemeral storage limits will be evicted by
+        kubelet. Unlike CPU/memory which throttle, storage violations result
+        in immediate pod termination.
+      remediation: "Increase limits, reduce storage usage, or move to persistent storage"
+
+  high:
+    - id: "EPHEMERAL-HIGH-001"
+      signal: "No ephemeral storage limits on heavy log producers"
+      evidence_pattern: "Pods with verbose logging but no ephemeral-storage limit"
+      explanation: |
+        Applications that produce heavy logs can quickly fill node storage
+        without ephemeral storage limits. This affects all pods on the node,
+        not just the offending one.
+      remediation: "Configure ephemeral storage limits and implement log rotation"
+
+    - id: "EPHEMERAL-HIGH-002"
+      signal: "EmptyDir volumes without size limits"
+      evidence_pattern: "emptyDir: {} without sizeLimit"
+      explanation: |
+        Unbounded emptyDir volumes can grow to fill the entire node disk.
+        This is particularly dangerous for use cases like caching or
+        temporary file processing.
+      remediation: "Set sizeLimit on all emptyDir volumes"
+
+  medium:
+    - id: "EPHEMERAL-MED-001"
+      signal: "Node root filesystem below 20% available"
+      evidence_threshold: "node_filesystem_avail_bytes / node_filesystem_size_bytes < 0.2"
+      remediation: "Investigate storage consumers, clean up unused images"
+
+    - id: "EPHEMERAL-MED-002"
+      signal: "Container image layers consuming excessive space"
+      evidence_threshold: "Large container images on disk"
+      remediation: "Implement image pruning policy, optimize image sizes"
+
+  low:
+    - id: "EPHEMERAL-LOW-001"
+      signal: "Ephemeral storage metrics not collected"
+
+  positive:
+    - id: "EPHEMERAL-POS-001"
+      signal: "Ephemeral storage limits configured for all production pods"
+    - id: "EPHEMERAL-POS-002"
+      signal: "Healthy node disk headroom (>30% available)"
+
+procedure:
+  context:
+    cognitive_mode: "critical"
+    ensemble_role: "auditor"
+
+  steps:
+    - id: "1"
+      name: "Check node disk conditions"
+      description: |
+        Examine node conditions for disk pressure and evaluate overall
+        node storage health.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Check node disk conditions"
+          command: |
+            kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.conditions[?(@.type=="DiskPressure")].status}{"\n"}{end}'
+        - purpose: "Node filesystem usage"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=100-(node_filesystem_avail_bytes{mountpoint="/"}/node_filesystem_size_bytes{mountpoint="/"}*100)' | jq '.data.result'
+      expected_findings:
+        - "Node disk pressure status"
+        - "Node filesystem utilization"
+
+    - id: "2"
+      name: "Inventory ephemeral storage configurations"
+      description: |
+        Collect ephemeral storage requests and limits from all workloads
+        to understand configuration coverage.
+      duration_estimate: "20 min"
+      commands:
+        - purpose: "List pods with ephemeral storage limits"
+          command: |
+            kubectl get pods -A -o json | jq -r '.items[] | "\(.metadata.namespace)/\(.metadata.name): \(.spec.containers[0].resources.limits["ephemeral-storage"] // "no limit")"'
+        - purpose: "Find pods without ephemeral storage limits"
+          command: |
+            kubectl get pods -A -o json | jq -r '.items[] | select(.spec.containers[].resources.limits["ephemeral-storage"] == null) | "\(.metadata.namespace)/\(.metadata.name)"'
+      expected_findings:
+        - "Ephemeral storage configuration inventory"
+        - "Pods without limits"
+
+    - id: "3"
+      name: "Analyze container storage usage"
+      description: |
+        Examine actual ephemeral storage consumption per container and
+        compare against limits.
+      duration_estimate: "25 min"
+      commands:
+        - purpose: "Container filesystem usage"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=topk(20,sum(container_fs_usage_bytes{container!="POD",container!=""})by(pod,namespace))' | jq '.data.result'
+        - purpose: "EmptyDir volume usage"
+          command: |
+            curl -s 'http://prometheus:9090/api/v1/query?query=kubelet_volume_stats_used_bytes' | jq '.data.result'
+      expected_findings:
+        - "Storage usage by pod"
+        - "EmptyDir volume consumption"
+
+    - id: "4"
+      name: "Review emptyDir configurations"
+      description: |
+        Examine emptyDir volume configurations for size limits and
+        appropriate usage patterns.
+      duration_estimate: "15 min"
+      commands:
+        - purpose: "Find emptyDir volumes without sizeLimit"
+          command: |
+            kubectl get pods -A -o json | jq -r '.items[] | select(.spec.volumes[]?.emptyDir != null) | select(.spec.volumes[].emptyDir.sizeLimit == null) | "\(.metadata.namespace)/\(.metadata.name)"'
+        - purpose: "List all emptyDir configurations"
+          command: |
+            kubectl get pods -A -o json | jq '.items[] | select(.spec.volumes[]?.emptyDir) | {name: .metadata.name, namespace: .metadata.namespace, emptyDirs: [.spec.volumes[] | select(.emptyDir)]}'
+      expected_findings:
+        - "EmptyDir volume inventory"
+        - "Unbounded emptyDir volumes"
+
+output:
+  deliverables:
+    - type: "finding_list"
+      format: "structured"
+
+    - type: "summary"
+      format: "prose"
+      sections:
+        - "Executive Summary"
+        - "Node Disk Assessment"
+        - "Pod Ephemeral Storage Analysis"
+        - "EmptyDir Volume Review"
+        - "Recommendations"
+
+  confidence_guidance:
+    high: "Direct metrics observation with configuration review"
+    medium: "Point-in-time observation"
+    low: "Configuration review without runtime verification"
+
+offline:
+  capability: "partial"
+
+  cache_manifest:
+    knowledge:
+      - source_id: "k8s-ephemeral-storage"
+        priority: "required"
+
+profiles:
+  membership:
+    quick:
+      included: false
+      reason: "Requires runtime storage metrics"
+    full:
+      included: true
+      priority: 2
+    production:
+      included: true
+      priority: 1
+
+closeout_checklist:
+  - id: "ephemeral-001"
+    item: "No nodes under disk pressure"
+    level: "CRITICAL"
+    verification: |
+      kubectl get nodes -o json | jq '[.items[].status.conditions[] | select(.type == "DiskPressure" and .status == "True")] | length == 0'
+    expected: "true"
+
+  - id: "ephemeral-002"
+    item: "Ephemeral storage limits configured for production pods"
+    level: "BLOCKING"
+    verification: "manual"
+    verification_notes: "Verify all production pods have ephemeral-storage limits"
+    expected: "Confirmed by reviewer"
+
+  - id: "ephemeral-003"
+    item: "All emptyDir volumes have sizeLimit"
+    level: "WARNING"
+    verification: |
+      kubectl get pods -A -o json | jq '[.items[].spec.volumes[]? | select(.emptyDir != null and .emptyDir.sizeLimit == null)] | length == 0'
+    expected: "true"
+
+governance:
+  applicable_to:
+    archetypes: ["all"]
+
+relationships:
+  commonly_combined:
+    - "performance-efficiency.resource-utilization.disk-io"
+    - "performance-efficiency.resource-utilization.container-resource-limits"

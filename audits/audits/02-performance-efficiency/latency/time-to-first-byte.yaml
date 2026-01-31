@@ -1,0 +1,287 @@
+audit:
+  id: performance-efficiency.latency.time-to-first-byte
+  name: Time to First Byte (TTFB) Audit
+  version: 1.0.0
+  last_updated: '2026-01-18'
+  status: active
+  category: performance-efficiency
+  category_number: 2
+  subcategory: latency
+  tier: expert
+  estimated_duration: 1 hour
+  completeness: complete
+  requires_runtime: true
+  destructive: false
+execution:
+  automatable: 'yes'
+  severity: high
+  scope: metrics
+  default_profiles:
+  - full
+  - quick
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit measures Time to First Byte (TTFB) - the time from when
+    a client sends a request to when it receives the first byte of the
+    response. TTFB includes DNS lookup, TCP connection, TLS handshake,
+    and server processing time. It is a key metric for perceived
+    performance and is a Core Web Vital affecting SEO rankings.
+  why_it_matters: |
+    TTFB directly impacts user perception of speed. Users perceive a
+    site as fast or slow based on how quickly the first content appears.
+    Google uses TTFB as a ranking factor, with <200ms considered good,
+    200-500ms needing improvement, and >500ms being poor. Slow TTFB
+    delays all subsequent resource loading.
+  when_to_run:
+  - When optimizing Core Web Vitals
+  - After server or CDN configuration changes
+  - When investigating perceived slowness
+  - As part of SEO performance audits
+prerequisites:
+  required_artifacts:
+  - type: endpoint_access
+    description: Network access to test endpoints
+  - type: rum_data
+    description: Real User Monitoring data (optional but recommended)
+  access_requirements:
+  - Network access to production URLs
+  - Access to performance monitoring dashboards
+discovery:
+  metrics_queries:
+  - system: Web Vitals
+    query: TTFB percentiles from CrUX or RUM
+    purpose: Real user TTFB measurements
+    threshold: < 200ms (good), < 500ms (acceptable)
+  - system: Prometheus
+    query: |
+      histogram_quantile(0.75,
+        sum(rate(http_request_duration_seconds_bucket[5m])) by (le)
+      )
+    purpose: Server-side request duration (proxy for TTFB)
+    threshold: < 200ms
+  file_patterns:
+  - glob: '**/*.md'
+    purpose: Documentation files
+  - glob: '**/*.yaml'
+    purpose: Configuration files
+  - glob: '**/*.json'
+    purpose: JSON configuration
+knowledge_sources:
+  guides:
+  - id: web-dev-ttfb
+    name: web.dev TTFB Guide
+    url: https://web.dev/ttfb/
+    offline_cache: true
+  - id: google-core-web-vitals
+    name: Google Core Web Vitals
+    url: https://web.dev/vitals/
+    offline_cache: true
+  specifications:
+  - id: navigation-timing
+    name: Navigation Timing API
+    url: https://www.w3.org/TR/navigation-timing-2/
+    offline_cache: true
+    priority: recommended
+tooling:
+  infrastructure_tools:
+  - tool: curl
+    purpose: Measure TTFB
+    command: |
+      curl -w "TTFB: %{time_starttransfer}s\n" -o /dev/null -s https://www.example.com/
+  - tool: hey
+    purpose: Load test with TTFB reporting
+    command: hey -n 100 -c 10 https://www.example.com/
+  - tool: lighthouse
+    purpose: Full performance audit including TTFB
+    command: lighthouse https://www.example.com --only-categories=performance --output=json
+  - tool: webpagetest
+    purpose: Detailed timing breakdown
+    command: webpagetest test https://www.example.com --runs 3
+  monitoring_queries:
+  - system: BigQuery (CrUX)
+    query: |
+      SELECT
+        origin,
+        p75_ttfb
+      FROM `chrome-ux-report.all.202401`
+      WHERE origin = 'https://www.example.com'
+    purpose: Chrome UX Report TTFB data
+signals:
+  critical:
+  - id: TTFB-CRIT-001
+    signal: TTFB exceeds 2 seconds for main page
+    evidence_threshold: TTFB P75 > 2s
+    explanation: |
+      TTFB this high makes the site feel broken. Users will abandon
+      before seeing any content. This indicates severe server-side
+      issues or network problems.
+    remediation: Investigate server performance; enable caching; optimize database queries
+  - id: TTFB-CRIT-002
+    signal: TTFB varies by more than 10x between requests
+    evidence_threshold: P99/P50 > 10
+    explanation: |
+      Highly variable TTFB indicates intermittent performance issues,
+      often caused by cache misses, cold starts, or resource
+      contention. User experience is unpredictable.
+    remediation: Implement cache warming; investigate resource contention; add connection pooling
+  high:
+  - id: TTFB-HIGH-001
+    signal: TTFB exceeds 500ms for most requests
+    evidence_threshold: TTFB P75 > 500ms
+    explanation: |
+      Google considers TTFB >500ms as "poor" and it negatively
+      impacts Core Web Vitals scores. Users perceive the site as
+      slow even before content starts rendering.
+    remediation: Enable server-side caching; use CDN for HTML; optimize server processing
+  - id: TTFB-HIGH-002
+    signal: TTFB for API calls exceeds 300ms
+    evidence_threshold: API TTFB P75 > 300ms
+    explanation: |
+      Slow API TTFB delays all client-side rendering that depends
+      on API data. This compounds when multiple API calls are needed.
+    remediation: Optimize API response generation; implement edge caching for API responses
+  medium:
+  - id: TTFB-MED-001
+    signal: No TTFB monitoring configured
+    remediation: Implement RUM or synthetic TTFB monitoring
+  - id: TTFB-MED-002
+    signal: Server-side caching not implemented for HTML pages
+    remediation: Implement page caching or CDN HTML caching
+  low:
+  - id: TTFB-LOW-001
+    signal: TTFB metrics not broken down by page type
+  positive:
+  - id: TTFB-POS-001
+    signal: TTFB consistently under 200ms
+  - id: TTFB-POS-002
+    signal: Core Web Vitals passing for TTFB
+procedure:
+  context:
+    cognitive_mode: critical
+    ensemble_role: auditor
+  steps:
+  - id: '1'
+    name: Measure Current TTFB
+    description: |
+      Measure TTFB for key pages and endpoints using synthetic testing.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Measure homepage TTFB
+      command: |
+        for i in {1..10}; do
+          curl -w "%{time_starttransfer}\n" -o /dev/null -s https://www.example.com/
+        done | awk '{sum+=$1}END{print "Avg TTFB:", sum/NR, "s"}'
+    - purpose: Detailed timing breakdown
+      command: |
+        curl -w "DNS: %{time_namelookup}s\nConnect: %{time_connect}s\nTLS: %{time_appconnect}s\nTTFB: %{time_starttransfer}s\nTotal: %{time_total}s\n" \
+          -o /dev/null -s https://www.example.com/
+    expected_findings:
+    - Average TTFB
+    - Timing breakdown by phase
+  - id: '2'
+    name: Analyze TTFB Components
+    description: |
+      Break down TTFB into DNS, TCP, TLS, and server processing time
+      to identify optimization opportunities.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Calculate server processing time
+      command: |
+        curl -w "Server time: %{time_starttransfer}s - %{time_appconnect}s\n" \
+          -o /dev/null -s https://www.example.com/
+    expected_findings:
+    - Contribution of each phase
+    - Primary bottleneck
+  - id: '3'
+    name: Review RUM Data
+    description: |
+      Analyze Real User Monitoring data to understand TTFB in real-world
+      conditions across different users and networks.
+    duration_estimate: 15 min
+    commands:
+    - purpose: Query CrUX data if available
+      command: |
+        curl -s "https://chromeuxreport.googleapis.com/v1/records:queryRecord?key=API_KEY" \
+          -d '{"url":"https://www.example.com/","metrics":["time_to_first_byte"]}'
+    expected_findings:
+    - P75 TTFB from real users
+    - Distribution of TTFB
+  - id: '4'
+    name: Compare Against Thresholds
+    description: |
+      Evaluate TTFB against Google Core Web Vitals thresholds and
+      competitive benchmarks.
+    duration_estimate: 15 min
+    questions:
+    - Is TTFB under 200ms (good threshold)?
+    - How does TTFB compare to competitors?
+    - What is the error budget for TTFB?
+    expected_findings:
+    - Core Web Vitals compliance status
+    - Competitive positioning
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Executive Summary
+    - TTFB Measurements
+    - Component Analysis
+    - Core Web Vitals Impact
+    - Recommendations
+  confidence_guidance:
+    high: RUM data with >1000 samples
+    medium: Synthetic testing with >50 samples
+    low: Single-point measurements
+offline:
+  capability: partial
+  cache_manifest:
+    knowledge:
+    - source_id: web-dev-ttfb
+      priority: required
+profiles:
+  membership:
+    quick:
+      included: true
+      priority: 1
+    full:
+      included: true
+      priority: 1
+closeout_checklist:
+- id: ttfb-001
+  item: TTFB under 500ms for P75
+  level: CRITICAL
+  verification: |
+    for i in {1..20}; do curl -w "%{time_starttransfer}\n" -o /dev/null -s https://www.example.com/; done | \
+      sort -n | awk 'NR==15{print ($1 < 0.5) ? "PASS" : "FAIL"}'
+  expected: PASS
+- id: ttfb-002
+  item: TTFB under 200ms for P75 (Core Web Vitals good)
+  level: BLOCKING
+  verification: |
+    for i in {1..20}; do curl -w "%{time_starttransfer}\n" -o /dev/null -s https://www.example.com/; done | \
+      sort -n | awk 'NR==15{print ($1 < 0.2) ? "PASS" : "FAIL"}'
+  expected: PASS
+- id: ttfb-003
+  item: TTFB monitoring configured
+  level: WARNING
+  verification: manual
+  verification_notes: Confirm RUM or synthetic TTFB monitoring is active
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - web-application
+    - user-facing
+  compliance_frameworks:
+  - framework: Core Web Vitals
+    controls:
+    - TTFB
+relationships:
+  commonly_combined:
+  - performance-efficiency.latency.end-to-end-latency
+  - performance-efficiency.frontend-performance.largest-contentful-paint

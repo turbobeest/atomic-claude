@@ -1,0 +1,268 @@
+audit:
+  id: signal-processing-data-acquisition.filtering.group-delay
+  name: Group Delay Audit
+  version: 1.0.0
+  last_updated: '2026-01-22'
+  status: active
+  category: signal-processing-data-acquisition
+  category_number: 40
+  subcategory: filtering
+  tier: expert
+  estimated_duration: 1-2 hours  # median: 1h
+  completeness: complete
+  requires_runtime: false
+  destructive: false
+execution:
+  automatable: partial
+  severity: medium
+  scope: software
+  default_profiles:
+  - full
+  - signal-processing
+  blocks_phase: false
+  parallelizable: true
+description:
+  what: |
+    This audit evaluates filter group delay and its impact on signal
+    timing. It examines:
+    - Absolute group delay and system latency
+    - Group delay flatness across passband
+    - Group delay compensation for real-time systems
+    - Multi-filter cascade delay accumulation
+    - Group delay in control loop feedback
+  why_it_matters: |
+    Group delay affects system timing and latency:
+    - Group delay = -d(phase)/d(omega) represents signal delay
+    - FIR filters have constant (flat) group delay = (N-1)/2 samples
+    - IIR filters have frequency-dependent group delay
+    - Control systems must account for loop delay for stability
+    - Real-time systems have latency constraints
+
+    Ignoring group delay leads to timing errors, control instability,
+    or latency violations in real-time applications.
+  when_to_run:
+  - Real-time system filter design
+  - Control loop filter selection
+  - Latency-sensitive applications
+  - Cascaded filter systems
+  - System timing analysis
+prerequisites:
+  required_artifacts:
+  - type: filter_specification
+    description: Filter coefficients and structure
+  - type: latency_requirements
+    description: System latency budget
+  - type: source_code
+    description: Filter implementation
+  access_requirements:
+  - Access to filter specifications
+  - System latency requirements
+  - Group delay analysis tools
+discovery:
+  code_patterns:
+  - pattern: (group_delay|grpdelay|latency)
+    type: regex
+    scope: source
+    purpose: Detect delay considerations
+  - pattern: (delay|samples|latency).*filter
+    type: regex
+    scope: source
+    purpose: Detect delay calculations
+  - pattern: (compensate|offset).*delay
+    type: regex
+    scope: source
+    purpose: Detect delay compensation
+  file_patterns:
+  - glob: '**/filter*.{c,h,cpp,py}'
+    purpose: Filter files
+  - glob: '**/latency*.{c,h,cpp,py}'
+    purpose: Latency handling files
+knowledge_sources:
+  specifications:
+  - id: oppenheim-group-delay
+    name: Discrete-Time Signal Processing - Group Delay
+    url: https://www.pearson.com/store/p/discrete-time-signal-processing/P100000298298
+    offline_cache: true
+    priority: required
+signals:
+  critical:
+  - id: GD-CRIT-001
+    signal: Group delay exceeds real-time latency budget
+    evidence_indicators:
+    - Filter delay > latency requirement
+    - Real-time deadlines missed
+    - No consideration of filter delay in timing
+    explanation: |
+      Filter group delay adds directly to system latency. High-order
+      FIR filters can have significant delay ((N-1)/2 samples).
+      Real-time systems must include this in latency analysis.
+    remediation: |
+      - Reduce filter order to reduce delay
+      - Use minimum-phase IIR for lower latency
+      - Include filter delay in latency budget
+      - Consider non-causal filtering if offline
+    cwe: CWE-362
+  - id: GD-CRIT-002
+    signal: Control loop unstable due to filter delay
+    evidence_indicators:
+    - Filter in feedback loop adds phase lag
+    - Phase margin reduced by filter delay
+    - Control oscillation or instability
+    explanation: |
+      Filter delay in control loops adds phase lag that reduces
+      phase margin and can cause instability. Every sample of
+      delay adds significant phase shift at high frequencies.
+    remediation: |
+      - Minimize filter delay in feedback path
+      - Include filter delay in control design
+      - Reduce controller bandwidth for delay compensation
+      - Use Smith predictor for long delays
+  high:
+  - id: GD-HIGH-001
+    signal: Group delay variation causing timing jitter
+    evidence_indicators:
+    - Group delay varies across signal bandwidth
+    - Edge timing varies with frequency content
+    - IIR filter in timing-critical path
+    explanation: |
+      Non-flat group delay causes frequency-dependent timing.
+      For signals with varying frequency content, this creates
+      timing jitter that varies with signal characteristics.
+    remediation: |
+      - Use flat group delay filter (Bessel IIR or FIR)
+      - Add group delay equalizer
+      - Limit bandwidth to flat delay region
+      - Document timing variation
+  medium:
+  - id: GD-MED-001
+    signal: Cascaded filter delay not calculated
+    evidence_indicators:
+    - Multiple filters in series
+    - Total delay not documented
+    - Delay effects not considered
+    explanation: |
+      Cascaded filters have cumulative delay. The total must be
+      calculated and verified against requirements. Overlooking
+      cascaded delay leads to unexpected latency.
+    remediation: |
+      - Calculate total delay through cascade
+      - Document delay of each filter stage
+      - Verify total meets latency requirements
+      - Consider parallel structures for reduced delay
+  - id: GD-MED-002
+    signal: Group delay not accounted in timestamp alignment
+    evidence_indicators:
+    - Timestamps not compensated for filter delay
+    - Data alignment assumes zero delay
+    - Time correlation errors
+    explanation: |
+      Filter delay shifts the effective sampling time. Timestamps
+      should be adjusted to reflect actual signal timing for
+      accurate time correlation.
+    remediation: |
+      - Adjust timestamps for filter delay
+      - Document delay compensation
+      - Verify time alignment accuracy
+      - Include delay in synchronization
+  low:
+  - id: GD-LOW-001
+    signal: Group delay not documented
+    evidence_indicators:
+    - Filter delay not in specifications
+    - Latency contribution unknown
+    - Delay assumptions not recorded
+    explanation: |
+      Undocumented delay makes system timing unpredictable.
+      Changes to filters may alter delay without awareness
+      of timing impacts.
+    remediation: |
+      - Document group delay for all filters
+      - Include in system latency budget
+      - Record delay assumptions
+      - Add delay to specifications
+  positive:
+  - id: GD-POS-001
+    signal: Well-managed group delay with documentation
+    evidence_indicators:
+    - Group delay calculated and documented
+    - Included in latency budget
+    - Timestamps compensated appropriately
+procedure:
+  context:
+    cognitive_mode: analytical
+    ensemble_role: dsp-engineer
+  steps:
+  - id: '1'
+    name: Group Delay Analysis
+    description: |
+      Calculate and review group delay for filters.
+    duration_estimate: 30 min
+    commands:
+    - purpose: Find filter configurations
+      command: |
+        grep -rniE "(filter|fir|iir).*order|taps|coeff" \
+          --include="*.c" --include="*.h" --include="*.py" . 2>/dev/null | head -20
+    expected_findings:
+    - Filter order/length
+    - Group delay calculation
+    - Latency considerations
+  - id: '2'
+    name: Latency Budget Verification
+    description: |
+      Verify group delay within system latency budget.
+    duration_estimate: 30 min
+    manual_verification: true
+    expected_findings:
+    - Total system latency
+    - Filter contribution
+    - Margin analysis
+output:
+  deliverables:
+  - type: finding_list
+    format: structured
+  - type: summary
+    format: prose
+    sections:
+    - Group Delay Analysis
+    - Latency Assessment
+    - Recommendations
+profiles:
+  membership:
+    quick:
+      included: false
+    full:
+      included: true
+      priority: 3
+    signal-processing:
+      included: true
+      priority: 2
+closeout_checklist:
+- id: gd-001
+  item: Group delay within latency budget
+  level: CRITICAL
+  verification: manual
+  verification_notes: Verify filter delay meets latency requirements
+  expected: Confirmed by reviewer
+- id: gd-002
+  item: Control loop stability accounts for delay
+  level: BLOCKING
+  verification: manual
+  verification_notes: Verify phase margin adequate with filter delay
+  expected: Confirmed by reviewer
+governance:
+  applicable_to:
+    archetypes:
+    - real-time-systems
+    - control-systems
+    - embedded-systems
+relationships:
+  commonly_combined:
+  - signal-processing.filtering.phase-distortion
+  - signal-processing.filtering.filter-design
+  - signal-processing.data-integrity.timestamp-accuracy
+
+# Glossary of domain-specific terms:
+glossary:
+  "mu (step size)": "Learning rate parameter in adaptive filters, controls convergence speed vs stability"
+  "LMS": "Least Mean Squares - adaptive filter algorithm that minimizes mean squared error"
+  "FFT": "Fast Fourier Transform - efficient algorithm to compute discrete Fourier transform"
