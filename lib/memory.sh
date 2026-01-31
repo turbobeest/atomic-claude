@@ -94,11 +94,12 @@ EOF
 }
 
 _memory_check_connection() {
-    # Quick auth check via whoAmI
+    # Quick connection check via search (no whoAmI available)
     local result
-    result=$(mcp-cli call supermemory/whoAmI '{}' 2>/dev/null)
-    if [[ $? -eq 0 ]] && [[ -n "$result" ]]; then
-        echo "[memory] Supermemory connected" >> "${ATOMIC_ROOT:-.}/.logs/memory.log" 2>/dev/null
+    result=$(mcp-cli call "${SUPERMEMORY_MCP_SERVER:-supermemory}/searchSupermemory" '{"informationToGet": "connection test"}' 2>/dev/null)
+    if [[ $? -eq 0 ]]; then
+        mkdir -p "${ATOMIC_ROOT:-.}/.logs"
+        echo "[$(date -Iseconds)] Supermemory connected" >> "${ATOMIC_ROOT:-.}/.logs/memory.log"
     fi
 }
 
@@ -147,72 +148,76 @@ memory_should_persist() {
 }
 
 # ============================================================================
-# SUPERMEMORY API WRAPPERS
+# SUPERMEMORY MCP TOOL WRAPPERS
 # ============================================================================
+#
+# Tool names from supermemory-mcp server:
+#   - addToSupermemory: {thingToRemember: string}
+#   - searchSupermemory: {informationToGet: string}
+#
+# Note: The MCP server name may vary based on configuration.
+# Common names: "supermemory", "supermemory-mcp"
+#
+
+SUPERMEMORY_MCP_SERVER="${SUPERMEMORY_MCP_SERVER:-supermemory}"
 
 # Save content to Supermemory
-# Usage: _sm_memory "content to save" ["containerTag"]
+# Usage: _sm_memory "content to save"
 _sm_memory() {
     local content="$1"
-    local container_tag="${2:-$(_memory_get_container_tag)}"
 
     if [[ -z "$SUPERMEMORY_API_KEY" ]]; then
         return 1
     fi
 
-    local payload
-    payload=$(jq -n \
-        --arg content "$content" \
-        --arg action "save" \
-        --arg containerTag "$container_tag" \
-        '{content: $content, action: $action, containerTag: $containerTag}')
+    # Include project context in the memory
+    local project_id
+    project_id=$(_memory_get_project_id)
+    local enriched_content="[Project: $project_id] $content"
 
-    mcp-cli call supermemory/memory "$payload" 2>/dev/null
+    local payload
+    payload=$(jq -n --arg content "$enriched_content" '{thingToRemember: $content}')
+
+    mcp-cli call "${SUPERMEMORY_MCP_SERVER}/addToSupermemory" "$payload" 2>/dev/null
     return $?
 }
 
-# Forget content from Supermemory
-# Usage: _sm_forget "query to forget" ["containerTag"]
-_sm_forget() {
-    local content="$1"
-    local container_tag="${2:-$(_memory_get_container_tag)}"
-
-    if [[ -z "$SUPERMEMORY_API_KEY" ]]; then
-        return 1
-    fi
-
-    local payload
-    payload=$(jq -n \
-        --arg content "$content" \
-        --arg action "forget" \
-        --arg containerTag "$container_tag" \
-        '{content: $content, action: $action, containerTag: $containerTag}')
-
-    mcp-cli call supermemory/memory "$payload" 2>/dev/null
-    return $?
-}
-
-# Recall memories from Supermemory
-# Usage: _sm_recall "query" [includeProfile] ["containerTag"]
+# Search/recall memories from Supermemory
+# Usage: _sm_recall "query"
 _sm_recall() {
     local query="$1"
-    local include_profile="${2:-true}"
-    local container_tag="${3:-$(_memory_get_container_tag)}"
 
     if [[ -z "$SUPERMEMORY_API_KEY" ]]; then
         echo ""
         return 1
     fi
 
-    local payload
-    payload=$(jq -n \
-        --arg query "$query" \
-        --argjson includeProfile "$include_profile" \
-        --arg containerTag "$container_tag" \
-        '{query: $query, includeProfile: $includeProfile, containerTag: $containerTag}')
+    # Include project context in the search
+    local project_id
+    project_id=$(_memory_get_project_id)
+    local enriched_query="[Project: $project_id] $query"
 
-    mcp-cli call supermemory/recall "$payload" 2>/dev/null
+    local payload
+    payload=$(jq -n --arg query "$enriched_query" '{informationToGet: $query}')
+
+    mcp-cli call "${SUPERMEMORY_MCP_SERVER}/searchSupermemory" "$payload" 2>/dev/null
     return $?
+}
+
+# Forget/invalidate memories (local tracking only - MCP doesn't support delete)
+# Usage: _sm_forget "description of what to forget"
+# Note: This marks memories as invalidated locally but cannot delete from Supermemory
+_sm_forget() {
+    local content="$1"
+
+    # Log the forget request locally
+    local log_dir="${ATOMIC_ROOT:-.}/.logs"
+    mkdir -p "$log_dir"
+    echo "[$(date -Iseconds)] FORGET: $content" >> "$log_dir/memory-invalidations.log"
+
+    # Note: Supermemory MCP doesn't have a delete/forget tool
+    # The memory persists but we track invalidations locally
+    return 0
 }
 
 # ============================================================================

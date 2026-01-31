@@ -403,16 +403,16 @@ _004_validate_supermemory() {
     echo -e "    ${DIM}Testing Supermemory connection...${NC}"
 
     # Export key temporarily for MCP call
+    # Use searchSupermemory as a connection test (no whoAmI available)
     local result
-    result=$(SUPERMEMORY_API_KEY="$key" mcp-cli call supermemory/whoAmI '{}' 2>/dev/null)
+    result=$(SUPERMEMORY_API_KEY="$key" mcp-cli call supermemory/searchSupermemory '{"informationToGet": "connection test"}' 2>/dev/null)
 
-    if [[ $? -eq 0 ]] && [[ -n "$result" ]]; then
-        local username
-        username=$(echo "$result" | jq -r '.username // .name // "connected"' 2>/dev/null)
-        echo -e "    ${GREEN}✓${NC} Connected as: $username"
+    if [[ $? -eq 0 ]]; then
+        echo -e "    ${GREEN}✓${NC} Supermemory connected"
         return 0
     else
         atomic_error "Could not connect to Supermemory"
+        echo -e "    ${DIM}Make sure the Supermemory MCP server is configured in Claude Code${NC}"
         return 1
     fi
 }
