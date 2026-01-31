@@ -1213,8 +1213,14 @@ _atomic_build_invoke_cmd() {
     local escaped_wrapper_path
     escaped_wrapper_path=$(printf '%s' "$wrapper_path" | sed "s/'/'\\\\''/g")
 
+    # Escape ATOMIC_ROOT for shell (Claude CLI working directory)
+    local escaped_atomic_root
+    escaped_atomic_root=$(printf '%s' "$ATOMIC_ROOT" | sed "s/'/'\\\\''/g")
+
     # Build command with proper quoting
-    local cmd="cd '${escaped_wrapper_path}' && python -m local_launcher"
+    # CRITICAL: Use PYTHONPATH to find local_launcher, but keep CWD as ATOMIC_ROOT
+    # so Claude CLI sees the correct project context (not the wrapper's directory)
+    local cmd="cd '${escaped_atomic_root}' && PYTHONPATH='${escaped_wrapper_path}:\${PYTHONPATH}' python -m local_launcher"
     cmd="${cmd} --provider '${provider}'"
     cmd="${cmd} --model '${model}'"
     cmd="${cmd} --no-banner"
