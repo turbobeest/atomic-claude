@@ -94,9 +94,14 @@ EOF
 }
 
 _memory_check_connection() {
+    # Check if mcp-cli is available
+    if ! command -v mcp-cli &>/dev/null; then
+        return 1
+    fi
+
     # Quick connection check via search (no whoAmI available)
     local result
-    result=$(mcp-cli call "${SUPERMEMORY_MCP_SERVER:-supermemory}/searchSupermemory" '{"informationToGet": "connection test"}' 2>/dev/null)
+    result=$(mcp-cli call "${SUPERMEMORY_MCP_SERVER:-supermemory}/searchSupermemory" '{"informationToGet": "connection test"}' 2>/dev/null) || return 1
     if [[ $? -eq 0 ]]; then
         mkdir -p "${ATOMIC_ROOT:-.}/.logs"
         echo "[$(date -Iseconds)] Supermemory connected" >> "${ATOMIC_ROOT:-.}/.logs/memory.log"
@@ -174,6 +179,11 @@ _sm_memory() {
         return 1
     fi
 
+    # Check if mcp-cli is available
+    if ! command -v mcp-cli &>/dev/null; then
+        return 1
+    fi
+
     # Include project context in the memory
     local project_id
     project_id=$(_memory_get_project_id)
@@ -182,7 +192,7 @@ _sm_memory() {
     local payload
     payload=$(jq -n --arg content "$enriched_content" '{thingToRemember: $content}')
 
-    mcp-cli call "${SUPERMEMORY_MCP_SERVER}/addToSupermemory" "$payload" 2>/dev/null
+    mcp-cli call "${SUPERMEMORY_MCP_SERVER}/addToSupermemory" "$payload" 2>/dev/null || return 1
     return $?
 }
 
@@ -196,6 +206,12 @@ _sm_recall() {
         return 1
     fi
 
+    # Check if mcp-cli is available
+    if ! command -v mcp-cli &>/dev/null; then
+        echo ""
+        return 1
+    fi
+
     # Include project context in the search
     local project_id
     project_id=$(_memory_get_project_id)
@@ -204,8 +220,7 @@ _sm_recall() {
     local payload
     payload=$(jq -n --arg query "$enriched_query" '{informationToGet: $query}')
 
-    mcp-cli call "${SUPERMEMORY_MCP_SERVER}/searchSupermemory" "$payload" 2>/dev/null
-    return $?
+    mcp-cli call "${SUPERMEMORY_MCP_SERVER}/searchSupermemory" "$payload" 2>/dev/null || true
 }
 
 # Forget/invalidate memories (local tracking only - MCP doesn't support delete)
