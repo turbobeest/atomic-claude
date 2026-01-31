@@ -298,6 +298,16 @@ EOF
     atomic_context_decision "Phase 6 closeout completed: $critical_fixed/$critical_found critical, $major_fixed/$major_found major fixed" "closeout"
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # MEMORY CHECKPOINT
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    # Build summary for memory persistence
+    local memory_summary="Phase 6 Code Review complete. $critical_fixed/$critical_found critical issues fixed, $major_fixed/$major_found major issues fixed. Tests passing: $tests_passing. Ready for integration testing."
+
+    # Prompt user to save to long-term memory (if enabled)
+    memory_prompt_save 6 "Code Review" "$memory_summary"
+
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # SESSION END
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 

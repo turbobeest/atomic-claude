@@ -288,6 +288,16 @@ EOF
     atomic_context_decision "Phase 3 closeout completed: $task_count tasks, $package_count packages" "closeout"
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # MEMORY CHECKPOINT
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    # Build summary for memory persistence
+    local memory_summary="Phase 3 Tasking complete. $task_count tasks decomposed from PRD, $high_priority high priority. $package_count work packages created. Dependencies mapped and validated."
+
+    # Prompt user to save to long-term memory (if enabled)
+    memory_prompt_save 3 "Tasking" "$memory_summary"
+
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # SESSION END
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 

@@ -320,6 +320,16 @@ EOF
     atomic_context_decision "Phase 5 closeout completed: $completed_tasks/$total_tasks tasks, ${unit_coverage}% coverage" "closeout"
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # MEMORY CHECKPOINT
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    # Build summary for memory persistence
+    local memory_summary="Phase 5 TDD Implementation complete. $completed_tasks/$total_tasks tasks done. $passing_tests tests passing with ${unit_coverage}% coverage. $critical_issues critical security issues. Ready for code review."
+
+    # Prompt user to save to long-term memory (if enabled)
+    memory_prompt_save 5 "TDD Implementation" "$memory_summary"
+
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # SESSION END
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 

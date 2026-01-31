@@ -308,6 +308,16 @@ EOF
     atomic_context_decision "Phase 7 closeout completed: $e2e_passed/$e2e_total E2E, $criteria_passed/$criteria_total acceptance" "closeout"
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # MEMORY CHECKPOINT
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    # Build summary for memory persistence
+    local memory_summary="Phase 7 Integration complete. $e2e_passed/$e2e_total E2E tests passing. $criteria_passed/$criteria_total acceptance criteria met. Integration approved: $approval_status. Ready for deployment prep."
+
+    # Prompt user to save to long-term memory (if enabled)
+    memory_prompt_save 7 "Integration" "$memory_summary"
+
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # SESSION END
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 

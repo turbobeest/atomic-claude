@@ -16,6 +16,7 @@ set -euo pipefail
 PHASE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$PHASE_LIB_DIR/atomic.sh"
 source "$PHASE_LIB_DIR/task-state.sh"
+source "$PHASE_LIB_DIR/memory.sh"
 
 # ============================================================================
 # PHASE STATE
@@ -256,6 +257,17 @@ phase_start() {
     if ! atomic_validate_deps; then
         echo "ERROR: Cannot start phase - missing dependencies" >&2
         return 1
+    fi
+
+    # Get phase number from id (e.g., "0-setup" -> "0")
+    local phase_num="${phase_id%%-*}"
+
+    # Check for memory backtrack (starting a phase <= current head)
+    if memory_check_backtrack "$phase_num"; then
+        if ! memory_handle_backtrack "$phase_num"; then
+            echo "Backtrack cancelled by user" >&2
+            return 1
+        fi
     fi
 
     # Create snapshot before starting (for rollback capability)

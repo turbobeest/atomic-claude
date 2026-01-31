@@ -257,6 +257,16 @@ EOF
     atomic_context_decision "Phase 1 closeout completed: $corpus_count materials, approach=$approach_name" "closeout"
 
     # ═══════════════════════════════════════════════════════════════════════════
+    # MEMORY CHECKPOINT
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    # Build summary for memory persistence
+    local memory_summary="Phase 1 Discovery complete. $corpus_count materials collected. Selected approach: $approach_name. Direction confirmed and locked for PRD phase."
+
+    # Prompt user to save to long-term memory (if enabled)
+    memory_prompt_save 1 "Discovery" "$memory_summary"
+
+    # ═══════════════════════════════════════════════════════════════════════════
     # SESSION END
     # ═══════════════════════════════════════════════════════════════════════════
 

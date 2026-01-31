@@ -268,6 +268,16 @@ EOF
     atomic_context_decision "Phase 8 closeout completed: v$version packaged" "closeout"
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # MEMORY CHECKPOINT
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    # Build summary for memory persistence
+    local memory_summary="Phase 8 Deployment Prep complete. Version $version packaged. Changelog generated, documentation complete, installation guide created. Deployment approved: $approval_status. Ready for release."
+
+    # Prompt user to save to long-term memory (if enabled)
+    memory_prompt_save 8 "Deployment Prep" "$memory_summary"
+
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # SESSION END
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 

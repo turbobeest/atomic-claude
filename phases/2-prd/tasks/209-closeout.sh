@@ -267,6 +267,16 @@ EOF
     atomic_context_decision "Phase 2 closeout completed: $prd_sections PRD sections" "closeout"
 
     # ═══════════════════════════════════════════════════════════════════════════
+    # MEMORY CHECKPOINT
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    # Build summary for memory persistence
+    local memory_summary="Phase 2 PRD complete. $prd_sections sections, $prd_lines lines. Product requirements documented and approved. Ready for tasking phase."
+
+    # Prompt user to save to long-term memory (if enabled)
+    memory_prompt_save 2 "PRD" "$memory_summary"
+
+    # ═══════════════════════════════════════════════════════════════════════════
     # SESSION END
     # ═══════════════════════════════════════════════════════════════════════════
 

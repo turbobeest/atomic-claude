@@ -282,6 +282,16 @@ EOF
     atomic_context_decision "Phase 4 closeout completed: $spec_count specs, $tasks_with_tdd tasks with TDD" "closeout"
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # MEMORY CHECKPOINT
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    # Build summary for memory persistence
+    local memory_summary="Phase 4 Specification complete. $spec_count OpenSpecs created. $tasks_with_tdd tasks with TDD subtasks (RED/GREEN/REFACTOR/VERIFY). Ready for implementation."
+
+    # Prompt user to save to long-term memory (if enabled)
+    memory_prompt_save 4 "Specification" "$memory_summary"
+
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # SESSION END
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 

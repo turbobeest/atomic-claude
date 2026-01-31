@@ -8,6 +8,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$ROOT_DIR/lib/atomic.sh"
+source "$ROOT_DIR/lib/memory.sh"
 
 # ============================================================================
 # USAGE
@@ -116,6 +117,9 @@ cmd_status() {
 cmd_run() {
     local phase_input="$1"
     local phase_dir=""
+
+    # Initialize memory layer (loads context from previous sessions)
+    memory_session_start
 
     # Support both "0" and "0-setup" formats
     if [[ "$phase_input" =~ ^[0-9]$ ]]; then
