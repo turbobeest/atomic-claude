@@ -53,13 +53,13 @@ task_004_api_keys() {
     echo -e "  ${CYAN}4.${NC} Ollama (local/LAN models)"
     echo ""
     echo -e "  ${BOLD}Optional Enhancements:${NC}"
-    echo -e "  ${CYAN}5.${NC} Supermemory (cross-session memory persistence)"
+    echo -e "  ${CYAN}5.${NC} Local Memory (persistent context across tasks)"
     echo ""
-    echo -e "  ${DIM}Enter numbers separated by spaces (e.g., \"1 4 5\" for Max + Ollama + Supermemory)${NC}"
+    echo -e "  ${DIM}Enter numbers separated by spaces (e.g., \"1 4 5\" for Max + Ollama + Memory)${NC}"
     # Drain stdin before prompt
     while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
-    read -e -p "  Configure [1 4]: " provider_choices || true
-    provider_choices=${provider_choices:-"1 4"}
+    read -e -p "  Configure [1 4 5]: " provider_choices || true
+    provider_choices=${provider_choices:-"1 4 5"}
 
     for choice in $provider_choices; do
         echo ""
@@ -68,7 +68,7 @@ task_004_api_keys() {
             2) _004_collect_anthropic "$secrets_file" ;;
             3) _004_collect_bedrock "$secrets_file" ;;
             4) _004_collect_ollama "$secrets_file" ;;
-            5) _004_collect_supermemory "$secrets_file" ;;
+            5) _004_collect_memory "$secrets_file" ;;
         esac
     done
 
@@ -340,100 +340,26 @@ _004_collect_bedrock() {
     atomic_success "AWS Bedrock configured"
 }
 
-# Supermemory API key collection (for cross-session memory)
-_004_collect_supermemory() {
+# Local Memory configuration (persistent context across tasks)
+_004_collect_memory() {
     local secrets_file="$1"
-    local key_name="supermemory_api_key"
 
-    echo -e "  ${CYAN}Supermemory${NC}"
-    echo -e "  ${DIM}Enables persistent memory across Claude Code sessions${NC}"
-    echo -e "  ${DIM}Get your API key at: https://supermemory.ai${NC}"
+    echo -e "  ${CYAN}Local Memory${NC}"
+    echo -e "  ${DIM}Enables persistent context across ATOMIC-CLAUDE tasks${NC}"
+    echo -e "  ${DIM}Memory is stored locally in .state/memory/${NC}"
     echo ""
 
-    # Check environment variable first
-    if [[ -n "${SUPERMEMORY_API_KEY:-}" ]]; then
-        local masked=$(_004_mask_key "$SUPERMEMORY_API_KEY")
-        echo -e "  ${GREEN}✓${NC} Found in environment: ${DIM}$masked${NC}"
-        read -e -p "    Use this key? [Y/n]: " use_env || true
-        if [[ ! "$use_env" =~ ^[Nn] ]]; then
-            local tmp=$(atomic_mktemp)
-            jq --arg key "$key_name" --arg val "$SUPERMEMORY_API_KEY" '.[$key] = $val' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
-            # Also enable memory in config
-            jq '.memory_enabled = true' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
-            atomic_success "Supermemory key saved (from env)"
-            return 0
-        fi
-    fi
-
-    echo -e "  ${DIM}Format: sm_...${NC}"
-    read -s -p "    Key: " api_key
-    echo ""
-
-    if [[ -z "$api_key" ]]; then
-        atomic_warn "No key provided - memory will be local only"
-        local tmp=$(atomic_mktemp)
-        jq '.memory_enabled = false' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
-        return 0
-    fi
-
-    # Show masked key for confirmation
-    local masked=$(_004_mask_key "$api_key")
-    echo -e "    Entered: ${DIM}$masked${NC}"
-
-    # Offer validation via MCP
-    read -e -p "    Validate key? [y/N]: " do_validate || true
-    if [[ "$do_validate" =~ ^[Yy] ]]; then
-        if _004_validate_supermemory "$api_key"; then
-            atomic_success "Key validated successfully"
-        else
-            atomic_warn "Validation failed - saving anyway"
-        fi
-    fi
+    read -e -p "    Enable local memory? [Y/n]: " enable_memory || true
+    enable_memory=${enable_memory:-Y}
 
     local tmp=$(atomic_mktemp)
-    jq --arg key "$key_name" --arg val "$api_key" '.[$key] = $val' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
-    jq '.memory_enabled = true' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
-    atomic_success "Supermemory key saved"
-}
-
-# Validate Supermemory API key via direct HTTP API call
-_004_validate_supermemory() {
-    local key="$1"
-    local api_url="https://api.supermemory.ai"
-
-    echo -e "    ${DIM}Testing Supermemory API key...${NC}"
-
-    # Make a simple search request to validate the key
-    # A valid key will return a response (even if empty); invalid key returns 401
-    local http_code
-    http_code=$(curl -s -o /dev/null -w "%{http_code}" \
-        -X POST "$api_url/v3/search" \
-        -H "Authorization: Bearer $key" \
-        -H "Content-Type: application/json" \
-        -d '{"q":"test","containerTags":["sm_project_default"],"topK":1}' \
-        --connect-timeout 10 2>/dev/null)
-
-    case "$http_code" in
-        200|201)
-            echo -e "    ${GREEN}✓${NC} Supermemory API key validated"
-            return 0
-            ;;
-        401|403)
-            atomic_error "Invalid API key (authentication failed)"
-            return 1
-            ;;
-        000)
-            atomic_error "Could not connect to Supermemory API"
-            echo -e "    ${DIM}Check your internet connection${NC}"
-            return 1
-            ;;
-        *)
-            # Other responses (404, 500, etc.) might still mean the key is valid
-            # but there's some other issue - treat as success with warning
-            atomic_warn "API returned status $http_code - key may be valid"
-            return 0
-            ;;
-    esac
+    if [[ "$enable_memory" =~ ^[Yy] ]]; then
+        jq '.memory_enabled = true' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
+        atomic_success "Local memory enabled"
+    else
+        jq '.memory_enabled = false' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
+        atomic_info "Local memory disabled"
+    fi
 }
 
 # Azure OpenAI configuration

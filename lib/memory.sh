@@ -1,14 +1,19 @@
 #!/bin/bash
 #
 # ATOMIC-CLAUDE Memory Layer
-# Persistent memory via Supermemory with checkpoint coherence
+# Persistent memory via local SQLite storage (via claude-mem hooks)
 #
 # Architecture:
-#   - Checkpoint model: Memory saved at phase closeouts only
+#   - Checkpoint model: Memory saved at phase closeouts + task-level
 #   - Head tracking: Local state knows current phase progression
-#   - Backtrack handling: Invalidates/forgets orphaned memories
+#   - Backtrack handling: Invalidates orphaned memories
 #   - Scope separation: Pipeline work vs meta/debug work
 #   - User approval: Nothing persists without explicit consent
+#   - Claude-mem integration: Hook-based automatic context capture
+#
+# Storage Backends:
+#   - Local files: .state/memory/ (always available, fast)
+#   - Claude-mem: SQLite via hooks (automatic during Claude Code sessions)
 #
 
 # ============================================================================
@@ -33,12 +38,6 @@ _memory_load_config() {
     # Check secrets file for memory settings if not in environment
     local secrets_file="${ATOMIC_OUTPUT_DIR:-${ATOMIC_ROOT:-.}/.outputs}/0-setup/secrets.json"
 
-    # Load SUPERMEMORY_API_KEY from secrets if not in env
-    if [[ -z "${SUPERMEMORY_API_KEY:-}" ]] && [[ -f "$secrets_file" ]]; then
-        SUPERMEMORY_API_KEY=$(jq -r '.supermemory_api_key // empty' "$secrets_file" 2>/dev/null)
-        export SUPERMEMORY_API_KEY
-    fi
-
     # Load memory enabled flag from secrets if not in env
     if [[ -z "${ATOMIC_MEMORY_ENABLED:-}" ]] && [[ -f "$secrets_file" ]]; then
         local mem_enabled
@@ -51,7 +50,6 @@ _memory_load_config() {
 
     # Set module-level variables
     MEMORY_ENABLED="${ATOMIC_MEMORY_ENABLED:-false}"
-    SUPERMEMORY_API_KEY="${SUPERMEMORY_API_KEY:-}"
 }
 
 # Load config on source
@@ -72,16 +70,16 @@ memory_init() {
     # Create state directories
     mkdir -p "$(dirname "$MEMORY_HEAD_FILE")"
     mkdir -p "$MEMORY_CHECKPOINTS_DIR"
+    mkdir -p "$MEMORY_LOCAL_DIR"
 
     # Initialize head file if missing
     if [[ ! -f "$MEMORY_HEAD_FILE" ]]; then
         _memory_init_head
     fi
 
-    # Check supermemory availability (non-blocking)
-    if [[ -n "$SUPERMEMORY_API_KEY" ]]; then
-        _memory_check_connection &
-    fi
+    # Log initialization
+    mkdir -p "${ATOMIC_ROOT:-.}/.logs"
+    echo "[$(date -Iseconds)] Memory system initialized (local storage)" >> "${ATOMIC_ROOT:-.}/.logs/memory.log"
 
     return 0
 }
@@ -100,27 +98,6 @@ _memory_init_head() {
   "updated_at": "$(date -Iseconds)"
 }
 EOF
-}
-
-_memory_check_connection() {
-    if [[ -z "${SUPERMEMORY_API_KEY:-}" ]]; then
-        return 1
-    fi
-
-    # Quick connection check via search endpoint with empty query
-    local response
-    response=$(curl -s -X POST "${SUPERMEMORY_API_BASE:-https://api.supermemory.ai}/v3/search" \
-        -H "x-supermemory-api-key: $SUPERMEMORY_API_KEY" \
-        -H "Content-Type: application/json" \
-        -d '{"q": "connection test"}' 2>/dev/null)
-
-    # Check if we got a valid response (has results field)
-    if echo "$response" | jq -e '.results' &>/dev/null; then
-        mkdir -p "${ATOMIC_ROOT:-.}/.logs"
-        echo "[$(date -Iseconds)] Supermemory connected" >> "${ATOMIC_ROOT:-.}/.logs/memory.log"
-        return 0
-    fi
-    return 1
 }
 
 # ============================================================================
@@ -157,7 +134,6 @@ _memory_get_container_tag() {
 
 # Check if we should persist to memory
 # Returns 0 (true) if in pipeline mode with memory enabled, 1 (false) otherwise
-# Note: Does NOT require API key - local checkpoints work without Supermemory
 memory_should_persist() {
     # Memory must be enabled
     if [[ "$MEMORY_ENABLED" != "true" ]]; then
@@ -169,222 +145,29 @@ memory_should_persist() {
         return 1
     fi
 
-    # Local checkpoints work without Supermemory API key
-    # Remote persistence will gracefully degrade in _memory_commit_phase()
     return 0
 }
 
-# Check if remote persistence (Supermemory) is available
-# Returns 0 (true) if API key is configured, 1 (false) otherwise
+# Check if claude-mem is available (always true when running in Claude Code)
+# Legacy function kept for API compatibility
 memory_has_remote() {
-    [[ -n "$SUPERMEMORY_API_KEY" ]]
-}
-
-# ============================================================================
-# SUPERMEMORY MCP TOOL WRAPPERS
-# ============================================================================
-#
-# Tool names from supermemory-mcp server:
-#   - addToSupermemory: {thingToRemember: string}
-#   - searchSupermemory: {informationToGet: string}
-#
-# Supermemory REST API endpoints (v3):
-#   - POST /v3/documents - Add memory (content field)
-#   - POST /v3/search - Search memories (q field)
-#   - Auth: x-supermemory-api-key header
-#
-
-SUPERMEMORY_API_BASE="${SUPERMEMORY_API_BASE:-https://api.supermemory.ai}"
-
-# Save content to Supermemory
-# Usage: _sm_memory "content to save"
-_sm_memory() {
-    local content="$1"
-    local log_file="${ATOMIC_ROOT:-.}/.logs/memory.log"
-    mkdir -p "$(dirname "$log_file")"
-
-    echo "[$(date -Iseconds)] [DEBUG] _sm_memory() ENTER" >> "$log_file"
-    echo "  [DEBUG] MEMORY_ENABLED=$MEMORY_ENABLED" >> "$log_file"
-    echo "  [DEBUG] API_KEY_SET=$([ -n "$SUPERMEMORY_API_KEY" ] && echo 'yes' || echo 'no')" >> "$log_file"
-
-    if [[ -z "$SUPERMEMORY_API_KEY" ]]; then
-        echo "[$(date -Iseconds)] SAVE FAILED: No API key" >> "$log_file"
-        return 1
-    fi
-
-    # Include project context in the memory
-    local project_id
-    project_id=$(_memory_get_project_id)
-    local enriched_content="[Project: $project_id] $content"
-
-    local payload
-    payload=$(jq -n --arg content "$enriched_content" '{content: $content}')
-
-    echo "[$(date -Iseconds)] SAVE: Sending to Supermemory..." >> "$log_file"
-    echo "  Content: ${content:0:100}..." >> "$log_file"
-    echo "  [DEBUG] API_BASE=$SUPERMEMORY_API_BASE" >> "$log_file"
-
-    # Call Supermemory v3 documents API
-    local response
-    response=$(curl -s -X POST "${SUPERMEMORY_API_BASE}/v3/documents" \
-        -H "x-supermemory-api-key: $SUPERMEMORY_API_KEY" \
-        -H "Content-Type: application/json" \
-        -d "$payload" 2>/dev/null)
-
-    echo "  [DEBUG] Response: ${response:0:200}" >> "$log_file"
-
-    # Check for success (response has id and status)
-    if echo "$response" | jq -e '.id' &>/dev/null; then
-        local doc_id=$(echo "$response" | jq -r '.id')
-        echo "[$(date -Iseconds)] SAVE SUCCESS: doc_id=$doc_id" >> "$log_file"
-        echo "[$(date -Iseconds)] [DEBUG] _sm_memory() EXIT success" >> "$log_file"
-        return 0
-    fi
-
-    echo "[$(date -Iseconds)] SAVE FAILED: $response" >> "$log_file"
-    echo "[$(date -Iseconds)] [DEBUG] _sm_memory() EXIT failed" >> "$log_file"
-    return 1
-}
-
-# Search/recall memories from Supermemory
-# Usage: _sm_recall "query"
-# Returns: Always returns 0 (echoes empty string on failure)
-_sm_recall() {
-    local query="$1"
-    local log_file="${ATOMIC_ROOT:-.}/.logs/memory.log"
-    mkdir -p "$(dirname "$log_file")"
-
-    echo "[$(date -Iseconds)] [DEBUG] _sm_recall() ENTER" >> "$log_file"
-    echo "  [DEBUG] MEMORY_ENABLED=$MEMORY_ENABLED" >> "$log_file"
-    echo "  [DEBUG] API_KEY_SET=$([ -n "$SUPERMEMORY_API_KEY" ] && echo 'yes' || echo 'no')" >> "$log_file"
-
-    if [[ -z "$SUPERMEMORY_API_KEY" ]]; then
-        echo "[$(date -Iseconds)] RECALL FAILED: No API key" >> "$log_file"
-        echo ""
-        return 0
-    fi
-
-    # Include project context in the search
-    local project_id
-    project_id=$(_memory_get_project_id)
-    local enriched_query="[Project: $project_id] $query"
-
-    local payload
-    payload=$(jq -n --arg q "$enriched_query" '{q: $q}')
-
-    echo "[$(date -Iseconds)] RECALL: Searching Supermemory..." >> "$log_file"
-    echo "  Query: $query" >> "$log_file"
-    echo "  [DEBUG] API_BASE=$SUPERMEMORY_API_BASE" >> "$log_file"
-
-    # Call Supermemory v3 search API
-    local response
-    response=$(curl -s -X POST "${SUPERMEMORY_API_BASE}/v3/search" \
-        -H "x-supermemory-api-key: $SUPERMEMORY_API_KEY" \
-        -H "Content-Type: application/json" \
-        -d "$payload" 2>/dev/null)
-
-    echo "  [DEBUG] Response length: ${#response} chars" >> "$log_file"
-
-    # Return the response (or empty on failure)
-    if [[ -n "$response" ]] && echo "$response" | jq -e '.results' &>/dev/null; then
-        local result_count=$(echo "$response" | jq '.results | length')
-        echo "[$(date -Iseconds)] RECALL SUCCESS: $result_count results found" >> "$log_file"
-        echo "[$(date -Iseconds)] [DEBUG] _sm_recall() EXIT success" >> "$log_file"
-        echo "$response"
-    else
-        echo "[$(date -Iseconds)] RECALL: No results or error - response: ${response:0:100}" >> "$log_file"
-        echo "[$(date -Iseconds)] [DEBUG] _sm_recall() EXIT empty" >> "$log_file"
-        echo ""
-    fi
+    # Claude-mem hooks capture context automatically during Claude Code sessions
+    # Local files are always used as the primary storage
     return 0
 }
 
-# Delete a document from Supermemory by ID
-# Usage: _sm_delete "doc_id"
-_sm_delete() {
-    local doc_id="$1"
-    local log_file="${ATOMIC_ROOT:-.}/.logs/memory.log"
-    mkdir -p "$(dirname "$log_file")"
-
-    if [[ -z "$SUPERMEMORY_API_KEY" ]]; then
-        echo "[$(date -Iseconds)] DELETE FAILED: No API key" >> "$log_file"
-        return 1
-    fi
-
-    echo "[$(date -Iseconds)] DELETE: Removing doc_id=$doc_id from Supermemory..." >> "$log_file"
-
-    local response
-    response=$(curl -s -X DELETE "${SUPERMEMORY_API_BASE}/v3/documents/$doc_id" \
-        -H "x-supermemory-api-key: $SUPERMEMORY_API_KEY" 2>/dev/null)
-
-    # Check for success
-    if [[ -z "$response" ]] || echo "$response" | jq -e '.success // .deleted // true' &>/dev/null; then
-        echo "[$(date -Iseconds)] DELETE SUCCESS: doc_id=$doc_id" >> "$log_file"
-        return 0
-    fi
-
-    echo "[$(date -Iseconds)] DELETE FAILED: $response" >> "$log_file"
-    return 1
-}
-
-# Search and delete memories matching a query
-# Usage: _sm_forget_matching "query"
-_sm_forget_matching() {
-    local query="$1"
-    local log_file="${ATOMIC_ROOT:-.}/.logs/memory.log"
-    mkdir -p "$(dirname "$log_file")"
-
-    if [[ -z "$SUPERMEMORY_API_KEY" ]]; then
-        echo "[$(date -Iseconds)] FORGET FAILED: No API key" >> "$log_file"
-        return 1
-    fi
-
-    echo "[$(date -Iseconds)] FORGET: Searching for memories matching: $query" >> "$log_file"
-
-    # Search for matching memories - use broader query without brackets
-    local project_id
-    project_id=$(_memory_get_project_id)
-    # Simpler query - just project + search term
-    local search_query="$project_id $query"
-
-    local payload
-    payload=$(jq -n --arg q "$search_query" '{q: $q}')
-
-    echo "[$(date -Iseconds)]   Search query: $search_query" >> "$log_file"
-
-    local response
-    response=$(curl -s -X POST "${SUPERMEMORY_API_BASE}/v3/search" \
-        -H "x-supermemory-api-key: $SUPERMEMORY_API_KEY" \
-        -H "Content-Type: application/json" \
-        -d "$payload" 2>/dev/null)
-
-    local result_count
-    result_count=$(echo "$response" | jq '.results | length' 2>/dev/null || echo "0")
-    echo "[$(date -Iseconds)]   Search returned $result_count results" >> "$log_file"
-
-    # Extract doc IDs and delete each - API returns 'documentId' not 'id'
-    local doc_ids deleted_count=0
-    doc_ids=$(echo "$response" | jq -r '.results[]?.documentId // empty' 2>/dev/null)
-
-    for doc_id in $doc_ids; do
-        if [[ -n "$doc_id" ]]; then
-            echo "[$(date -Iseconds)]   Deleting doc_id: $doc_id" >> "$log_file"
-            if _sm_delete "$doc_id"; then
-                deleted_count=$((deleted_count + 1))
-            fi
-        fi
-    done
-
-    echo "[$(date -Iseconds)] FORGET COMPLETE: Deleted $deleted_count memories" >> "$log_file"
-    echo "  Deleted $deleted_count memories from Supermemory"
-    return 0
-}
-
-# Legacy wrapper for compatibility
-_sm_forget() {
-    local content="$1"
-    _sm_forget_matching "$content"
-}
+# ============================================================================
+# MEMORY STORAGE (Local + Claude-mem)
+# ============================================================================
+#
+# Storage strategy:
+#   - Local files (.state/memory/): Always used, fast, works offline
+#   - Claude-mem hooks: Automatic context capture during Claude Code sessions
+#
+# Claude-mem integration:
+#   - No explicit save needed - hooks capture tool usage automatically
+#   - For recall, use local files (claude-mem's mem-search is session-based)
+#
 
 # ============================================================================
 # HEAD TRACKING
@@ -473,7 +256,7 @@ memory_check_backtrack() {
     return 1  # Normal progression
 }
 
-# Handle backtrack - invalidate or forget orphaned memories
+# Handle backtrack - invalidate orphaned memories
 memory_handle_backtrack() {
     local target_phase="$1"
     local head_phase
@@ -485,11 +268,10 @@ memory_handle_backtrack() {
     echo -e "  Current memory head: Phase $head_phase"
     echo -e "  Target phase: Phase $target_phase"
     echo ""
-    echo -e "  Memories from phases $((target_phase + 1))-$head_phase will be affected."
+    echo -e "  Local memories from phases $((target_phase + 1))-$head_phase will be cleared."
     echo ""
     echo -e "  Options:"
-    echo -e "    ${GREEN:-}[continue]${NC:-} Invalidate locally (memories remain in Supermemory but ignored)"
-    echo -e "    ${YELLOW:-}[forget]${NC:-}   Also remove from Supermemory"
+    echo -e "    ${GREEN:-}[continue]${NC:-} Clear local memories and proceed"
     echo -e "    ${RED:-}[abort]${NC:-}    Cancel and stay at current phase"
     echo ""
 
@@ -498,10 +280,6 @@ memory_handle_backtrack() {
     choice=${choice:-continue}
 
     case "$choice" in
-        forget)
-            _memory_forget_after_phase "$target_phase"
-            _memory_invalidate_after_phase "$target_phase"
-            ;;
         abort)
             echo ""
             echo -e "  ${DIM:-}Backtrack cancelled.${NC:-}"
@@ -585,96 +363,6 @@ _memory_invalidate_after_phase() {
     fi
 }
 
-# Delete ALL memories for this project from Supermemory
-_memory_forget_all_project() {
-    local log_file="${ATOMIC_ROOT:-.}/.logs/memory.log"
-    local project_id
-    project_id=$(_memory_get_project_id)
-
-    echo "[$(date -Iseconds)] FORGET_ALL: Deleting ALL memories for project $project_id" >> "$log_file"
-    echo -e "  ${YELLOW:-}Deleting all project memories from Supermemory...${NC:-}"
-
-    # Search broadly for the project
-    local payload response
-    payload=$(jq -n --arg q "$project_id" '{q: $q}')
-
-    response=$(curl -s -X POST "${SUPERMEMORY_API_BASE}/v3/search" \
-        -H "x-supermemory-api-key: $SUPERMEMORY_API_KEY" \
-        -H "Content-Type: application/json" \
-        -d "$payload" 2>/dev/null)
-
-    local result_count deleted_count=0
-    result_count=$(echo "$response" | jq '.results | length' 2>/dev/null || echo "0")
-    echo "[$(date -Iseconds)]   Found $result_count memories to delete" >> "$log_file"
-
-    # DEBUG: Log the response structure
-    echo "[$(date -Iseconds)]   [DEBUG] Response keys: $(echo "$response" | jq -r 'keys | join(", ")' 2>/dev/null)" >> "$log_file"
-    echo "[$(date -Iseconds)]   [DEBUG] First result keys: $(echo "$response" | jq -r '.results[0] | keys | join(", ")' 2>/dev/null)" >> "$log_file"
-    echo "[$(date -Iseconds)]   [DEBUG] First result: $(echo "$response" | jq -c '.results[0]' 2>/dev/null)" >> "$log_file"
-
-    # API returns 'documentId' - prioritize that field
-    local doc_ids
-    doc_ids=$(echo "$response" | jq -r '.results[]?.documentId // empty' 2>/dev/null)
-
-    echo "[$(date -Iseconds)]   [DEBUG] Extracted doc_ids: $doc_ids" >> "$log_file"
-
-    for doc_id in $doc_ids; do
-        if [[ -n "$doc_id" && "$doc_id" != "null" ]]; then
-            echo "[$(date -Iseconds)]   [DEBUG] Attempting to delete: $doc_id" >> "$log_file"
-            if _sm_delete "$doc_id"; then
-                deleted_count=$((deleted_count + 1))
-            fi
-        fi
-    done
-
-    echo "[$(date -Iseconds)] FORGET_ALL COMPLETE: Deleted $deleted_count of $result_count memories" >> "$log_file"
-    echo -e "  ${GREEN:-}✓${NC:-} Deleted $deleted_count memories from Supermemory"
-    return 0
-}
-
-# Forget memories from target phase onward from Supermemory
-# When user chooses "forget" during backtrack, they want a fresh start
-_memory_forget_after_phase() {
-    local target_phase="$1"
-    local log_file="${ATOMIC_ROOT:-.}/.logs/memory.log"
-
-    # If backtracking to Phase 0, just delete everything (fresh start)
-    if [[ "$target_phase" -eq 0 ]]; then
-        _memory_forget_all_project
-        return $?
-    fi
-
-    echo "[$(date -Iseconds)] FORGET_AFTER_PHASE: Deleting memories from phase $target_phase onward" >> "$log_file"
-
-    # Phase name mapping for search (memories use these names)
-    local -A phase_names=(
-        [0]="Setup"
-        [1]="Discovery"
-        [2]="PRD"
-        [3]="Tasking"
-        [4]="Specification"
-        [5]="Implementation"
-        [6]="Code Review"
-        [7]="Integration"
-        [8]="Deployment"
-        [9]="Release"
-    )
-
-    # Delete memories for target phase AND all phases after
-    local phase_num phase_name
-    for phase_num in $(seq $target_phase 9); do
-        phase_name="${phase_names[$phase_num]:-Phase$phase_num}"
-
-        # Search for phase closeout memories: "[Phase N: Name]"
-        echo -e "  ${DIM:-}Searching for Phase $phase_num ($phase_name) memories...${NC:-}"
-        _sm_forget_matching "Phase $phase_num"
-
-        # Search for task-level memories: "[PhaseName]"
-        _sm_forget_matching "$phase_name task"
-    done
-
-    echo "[$(date -Iseconds)] FORGET_AFTER_PHASE: Complete" >> "$log_file"
-}
 
 # ============================================================================
 # CHECKPOINT OPERATIONS
@@ -741,31 +429,17 @@ memory_prompt_save() {
         return 1
     fi
 
-    local has_remote=false
-    if memory_has_remote; then
-        has_remote=true
-    fi
-
     echo ""
     echo -e "  ${BOLD:-}MEMORY CHECKPOINT${NC:-}"
-    if [[ "$has_remote" != "true" ]]; then
-        echo -e "  ${DIM:-}(local only - Supermemory not configured)${NC:-}"
-    fi
     echo ""
     echo -e "  ${DIM:-}Summary to persist:${NC:-}"
     echo ""
     echo "$summary" | sed 's/^/    /'
     echo ""
     echo -e "  ${CYAN:-}Options:${NC:-}"
-    if [[ "$has_remote" == "true" ]]; then
-        echo -e "    ${GREEN:-}[save]${NC:-} Save to long-term memory (Supermemory + local)"
-        echo -e "    ${YELLOW:-}[edit]${NC:-} Edit summary before saving"
-        echo -e "    ${DIM:-}[skip]${NC:-} Don't save (local checkpoint only)"
-    else
-        echo -e "    ${GREEN:-}[save]${NC:-} Save local checkpoint"
-        echo -e "    ${YELLOW:-}[edit]${NC:-} Edit summary before saving"
-        echo -e "    ${DIM:-}[skip]${NC:-} Don't save"
-    fi
+    echo -e "    ${GREEN:-}[save]${NC:-} Save to local memory"
+    echo -e "    ${YELLOW:-}[edit]${NC:-} Edit summary before saving"
+    echo -e "    ${DIM:-}[skip]${NC:-} Don't save"
     echo ""
 
     local choice
@@ -791,47 +465,29 @@ memory_prompt_save() {
         *)
             echo ""
             echo -e "  ${DIM:-}Memory save skipped.${NC:-}"
-            # Still create local checkpoint, just don't push to supermemory
+            # Still create local checkpoint
             memory_create_checkpoint "$phase" "$phase_name" "$summary"
             return 1
             ;;
     esac
 }
 
-# Actually commit phase to supermemory
-# Uses DUAL-WRITE: Always save locally, also save to Supermemory if available
+# Commit phase to local memory storage
 _memory_commit_phase() {
     local phase="$1"
     local phase_name="$2"
     local summary="$3"
 
-    # Create local checkpoint first
+    # Create local checkpoint
     local checkpoint_id
     checkpoint_id=$(memory_create_checkpoint "$phase" "$phase_name" "$summary")
 
-    # ALWAYS save closeout to local file storage
+    # Save closeout to local file storage
     _memory_save_closeout "$phase" "$phase_name" "$summary"
     _memory_log "_memory_commit_phase" "Saved closeout locally for Phase $phase"
 
-    # Format content for supermemory
-    local content="[Phase $phase: $phase_name] $summary"
-
-    # Also save to supermemory if available
-    if [[ -n "$SUPERMEMORY_API_KEY" ]]; then
-        if _sm_memory "$content"; then
-            echo ""
-            echo -e "  ${GREEN:-}✓${NC:-} Saved to long-term memory (checkpoint: $checkpoint_id)"
-            _memory_log "_memory_commit_phase" "Saved to Supermemory"
-        else
-            echo ""
-            echo -e "  ${YELLOW:-}!${NC:-} Saved locally only (Supermemory unavailable)"
-            _memory_log "_memory_commit_phase" "Supermemory save failed, local backup exists"
-        fi
-    else
-        echo ""
-        echo -e "  ${GREEN:-}✓${NC:-} Saved to local memory (checkpoint: $checkpoint_id)"
-        _memory_log "_memory_commit_phase" "Supermemory not configured, saved locally only"
-    fi
+    echo ""
+    echo -e "  ${GREEN:-}✓${NC:-} Saved to local memory (checkpoint: $checkpoint_id)"
 }
 
 # ============================================================================
@@ -1070,7 +726,7 @@ _memory_extract_content() {
                 local providers=""
                 [[ "$(jq -r '.max_enabled // false' "$secrets_file" 2>/dev/null)" == "true" ]] && providers+="claude-max "
                 [[ -n "$(jq -r '.anthropic_api_key // empty' "$secrets_file" 2>/dev/null)" ]] && providers+="anthropic-api "
-                [[ -n "$(jq -r '.supermemory_api_key // empty' "$secrets_file" 2>/dev/null)" ]] && providers+="supermemory "
+                [[ "$(jq -r '.memory_enabled // false' "$secrets_file" 2>/dev/null)" == "true" ]] && providers+="local-memory "
                 [[ "$(jq -r '.ollama_hosts | length' "$secrets_file" 2>/dev/null)" -gt 0 ]] && providers+="ollama "
                 content="PROVIDERS CONFIGURED: ${providers:-none}"
             fi
@@ -1422,40 +1078,8 @@ memory_task_start() {
         _memory_debug "recall_local" "success" '{"chars":0,"preview":""}'
     fi
 
-    # STEP 2: Also query Supermemory if API key configured (cross-session context)
-    if [[ -n "$SUPERMEMORY_API_KEY" ]]; then
-        _memory_log "_sm_recall" "Querying Supermemory: $recall_query"
-        _memory_debug "recall_remote" "start" "$(jq -nc --arg q "$recall_query" '{query:$q,provider:"supermemory"}')"
-
-        local recalled
-        recalled=$(_sm_recall "$recall_query") || true
-
-        if [[ -n "$recalled" ]] && [[ "$recalled" != "null" ]]; then
-            local result_count
-            result_count=$(echo "$recalled" | jq '.results | length' 2>/dev/null || echo "0")
-
-            if [[ "$result_count" -gt 0 ]]; then
-                local remote_content
-                remote_content=$(echo "$recalled" | jq -r '.results[]? | .chunks[]?.content // .content // empty' 2>/dev/null)
-                echo "## Supermemory Context" >> "$task_context_file"
-                echo "" >> "$task_context_file"
-                echo "$remote_content" >> "$task_context_file"
-                echo "" >> "$task_context_file"
-                has_context=true
-                remote_chars=${#remote_content}
-                _memory_log "_sm_recall" "Supermemory returned $result_count results"
-                _memory_debug "recall_remote" "success" "$(jq -nc --argjson count "$result_count" --argjson chars "$remote_chars" --arg preview "$(_memory_truncate "$remote_content" 150)" '{results:$count,chars:$chars,preview:$preview}')"
-            else
-                _memory_log "_sm_recall" "Supermemory returned 0 results"
-                _memory_debug "recall_remote" "success" '{"results":0,"chars":0}'
-            fi
-        else
-            _memory_debug "recall_remote" "success" '{"results":0,"chars":0}'
-        fi
-    else
-        _memory_log "memory_task_start" "Supermemory not configured, using local only"
-        _memory_debug "recall_remote" "skip" '{"reason":"not_configured"}'
-    fi
+    # Note: claude-mem captures context automatically via hooks during Claude Code sessions
+    # Local files are the primary storage - no external API calls needed
 
     # Clean up if no context was found
     if [[ "$has_context" != "true" ]]; then
@@ -1542,26 +1166,11 @@ memory_task_end() {
     _memory_log "_memory_save_local" "Saved to $saved_file"
     _memory_debug "save_local" "success" "$(jq -nc --arg file "$saved_file" --argjson chars "$content_chars" '{file:$file,chars:$chars}')"
 
-    # STEP 2: Also write to Supermemory if API key configured
-    local remote_saved=false
-    if [[ -n "$SUPERMEMORY_API_KEY" ]]; then
-        _memory_log "_sm_memory" "Saving to Supermemory: ${full_content:0:80}..."
-        _memory_debug "save_remote" "start" '{"provider":"supermemory"}'
-        if _sm_memory "$full_content"; then
-            _memory_log "_sm_memory" "Supermemory save SUCCESS"
-            _memory_debug "save_remote" "success" '{"provider":"supermemory"}'
-            remote_saved=true
-        else
-            _memory_log "_sm_memory" "Supermemory save FAILED (local backup exists)"
-            _memory_debug "save_remote" "fail" '{"provider":"supermemory","fallback":"local"}'
-        fi
-    else
-        _memory_log "memory_task_end" "Supermemory not configured, saved locally only"
-        _memory_debug "save_remote" "skip" '{"reason":"not_configured"}'
-    fi
+    # Note: claude-mem hooks capture context automatically during Claude Code sessions
+    # Local files are the primary storage
 
     _memory_log "memory_task_end" "EXIT"
-    _memory_debug "task_end" "success" "$(jq -nc --argjson local true --argjson remote "$remote_saved" --argjson chars "$content_chars" '{saved_local:$local,saved_remote:$remote,content_chars:$chars}')"
+    _memory_debug "task_end" "success" "$(jq -nc --argjson local true --argjson chars "$content_chars" '{saved_local:$local,content_chars:$chars}')"
     return 0
 }
 
@@ -1569,7 +1178,7 @@ memory_task_end() {
 # SESSION LIFECYCLE
 # ============================================================================
 
-# Called on session start - retrieves relevant context
+# Called on session start - retrieves relevant context from local storage
 memory_session_start() {
     if [[ "$MEMORY_ENABLED" != "true" ]]; then
         return 0
@@ -1585,31 +1194,44 @@ memory_session_start() {
     echo "_Retrieved: $(date -Iseconds)_" >> "$session_context_file"
     echo "" >> "$session_context_file"
 
-    # Recall project context (|| true to prevent set -e from killing script)
-    local recalled
-    recalled=$(_sm_recall "project context and current state" true) || true
-
-    if [[ -n "$recalled" ]] && [[ "$recalled" != "null" ]]; then
-        echo "## Project Context" >> "$session_context_file"
-        echo "" >> "$session_context_file"
-        # API returns content in .results[].chunks[].content
-        echo "$recalled" | jq -r '.results[]? | .chunks[]?.content // .content // empty' >> "$session_context_file" 2>/dev/null
-        echo "" >> "$session_context_file"
-
-        echo -e "  ${GREEN:-}✓${NC:-} Session context loaded from memory"
-    else
-        echo "_No memories found for this project._" >> "$session_context_file"
-    fi
+    # Load context from local memory files
+    local has_context=false
 
     # Add local head state
     if [[ -f "$MEMORY_HEAD_FILE" ]]; then
         local head_phase
         head_phase=$(memory_get_head_phase)
         if [[ "$head_phase" -ge 0 ]]; then
-            echo "## Local State" >> "$session_context_file"
+            echo "## Pipeline State" >> "$session_context_file"
             echo "" >> "$session_context_file"
             echo "Current phase progression: Phase $head_phase" >> "$session_context_file"
+            echo "" >> "$session_context_file"
+            has_context=true
         fi
+    fi
+
+    # Load the most recent closeout(s)
+    if [[ -d "$MEMORY_LOCAL_DIR" ]]; then
+        local closeout_files
+        closeout_files=$(find "$MEMORY_LOCAL_DIR" -name "closeout.md" -type f 2>/dev/null | sort -V)
+        if [[ -n "$closeout_files" ]]; then
+            echo "## Previous Closeouts" >> "$session_context_file"
+            echo "" >> "$session_context_file"
+            # Include last 2 closeouts for context
+            echo "$closeout_files" | tail -2 | while read -r closeout; do
+                if [[ -f "$closeout" ]]; then
+                    cat "$closeout" >> "$session_context_file"
+                    echo "" >> "$session_context_file"
+                fi
+            done
+            has_context=true
+        fi
+    fi
+
+    if [[ "$has_context" == "true" ]]; then
+        echo -e "  ${GREEN:-}✓${NC:-} Session context loaded from local memory"
+    else
+        echo "_No memories found for this project._" >> "$session_context_file"
     fi
 
     return 0

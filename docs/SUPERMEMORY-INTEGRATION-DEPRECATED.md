@@ -1,4 +1,10 @@
-# Supermemory Integration Design
+# Supermemory Integration Design (DEPRECATED)
+
+> **DEPRECATED**: This document describes the original Supermemory-based memory system.
+> ATOMIC-CLAUDE has migrated to local file storage for memory persistence.
+> See `CLAUDE-MEM-MIGRATION.md` for the migration plan and `lib/memory.sh` for the current implementation.
+
+---
 
 ## Problem Statement
 

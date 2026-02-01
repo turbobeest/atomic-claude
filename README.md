@@ -224,21 +224,24 @@ ollama pull llama3.2:3b    # Fast validation tasks
 ollama pull llama3.1:8b    # Fallback workhorse
 ```
 
-## Persistent Memory (Supermemory)
+## Persistent Memory
 
-Atomic Claude can persist project context across Claude Code sessions using [Supermemory](https://supermemory.ai). This reduces the "token tax" of re-explaining project state each session.
+Atomic Claude persists project context across tasks using local file storage. This reduces the "token tax" of re-explaining project state across Claude Code invocations.
 
 ### How It Works
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ Session Start                                           │
-│   → Recall project context from Supermemory             │
-│   → Write to .outputs/session-context.md                │
+│ Task Start                                              │
+│   → Recall relevant context from local memory           │
+│   → Inject into task-context.md                         │
+├─────────────────────────────────────────────────────────┤
+│ Task End                                                │
+│   → Save meaningful outputs to .state/memory/           │
 ├─────────────────────────────────────────────────────────┤
 │ Phase Closeout                                          │
 │   → Prompt user to save phase summary                   │
-│   → Persist to Supermemory (with approval)              │
+│   → Persist to local checkpoints (with approval)        │
 ├─────────────────────────────────────────────────────────┤
 │ Next Session                                            │
 │   → Retrieve context automatically                      │
@@ -250,16 +253,12 @@ Atomic Claude can persist project context across Claude Code sessions using [Sup
 
 **Option 1: During Setup (Phase 0)**
 
-Run Phase 0 and select option `5` (Supermemory) when prompted for providers.
+Run Phase 0 and select option `5` (Local Memory) when prompted for providers.
 
 **Option 2: Environment Variables**
 
 ```bash
 export ATOMIC_MEMORY_ENABLED=true
-export SUPERMEMORY_API_KEY=your_key_here
-
-# Optional: Custom MCP server name (default: supermemory)
-export SUPERMEMORY_MCP_SERVER=supermemory
 ```
 
 **Option 3: Secrets File**
@@ -267,25 +266,34 @@ export SUPERMEMORY_MCP_SERVER=supermemory
 Add to `.outputs/0-setup/secrets.json`:
 ```json
 {
-  "supermemory_api_key": "your_key_here",
   "memory_enabled": true
 }
 ```
-
-### Prerequisites
-
-1. **Supermemory API Key** - Get one at [supermemory.ai](https://supermemory.ai)
-2. **MCP Server** - Configure `supermemory-mcp` in your Claude Code settings
 
 ### Features
 
 | Feature | Description |
 |---------|-------------|
 | **Session Bootstrap** | Recalls project context on `./main.sh run` |
+| **Task-Level Memory** | Each task recalls/saves context based on its needs |
 | **Phase Checkpoints** | Saves summary at each phase closeout (with approval) |
-| **Backtrack Detection** | Warns when re-running earlier phases, offers to invalidate orphaned memories |
+| **Backtrack Detection** | Warns when re-running earlier phases, offers to clear orphaned memories |
 | **Scope Separation** | Only pipeline work persists; bug-fix sessions don't pollute memory |
-| **Graceful Degradation** | Works without Supermemory (local checkpoints only) |
+
+### Storage Location
+
+Memory is stored locally in `.state/memory/`:
+```
+.state/memory/
+├── phase-0/
+│   ├── task-002-extracted_config.md
+│   ├── task-005-material_manifest.md
+│   └── closeout.md
+├── phase-1/
+│   ├── task-104-selected_agents.md
+│   └── closeout.md
+└── ...
+```
 
 ### Backtrack Handling
 
@@ -297,10 +305,9 @@ When you restart an earlier phase (e.g., Phase 2 after completing Phase 4):
 Current memory head: Phase 4
 Target phase: Phase 2
 
-Memories from phases 3-4 will be affected.
+Local memories from phases 3-4 will be cleared.
 
 Options:
-  [continue] Invalidate locally (memories remain but ignored)
-  [forget]   Also remove from Supermemory
+  [continue] Clear local memories and proceed
   [abort]    Cancel and stay at current phase
 ```
