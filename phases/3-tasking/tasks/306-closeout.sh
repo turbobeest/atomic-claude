@@ -291,14 +291,23 @@ EOF
     # MEMORY CHECKPOINT
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    # Build summary for memory persistence
-    local memory_summary="Phase 3 Tasking complete. $task_count tasks decomposed from PRD, $high_priority high priority. $package_count work packages created. Dependencies mapped and validated."
+    # Build rich summary for memory persistence
+    local memory_summary
+    memory_summary="PHASE 3 TASKING COMPLETE
 
-    # Prompt user to save to long-term memory (if enabled)
-    memory_prompt_save 3 "Tasking" "$memory_summary"
+TASKS CREATED: $task_count total
+HIGH PRIORITY: $high_priority tasks
+WORK PACKAGES: $package_count packages
 
-    # Git: commit and push phase
-    atomic_git_phase_complete 3 "Tasking"
+KEY ARTIFACTS:
+- tasks.json: Task definitions with dependencies
+- work-packages.json: Work package groupings
+- dependency-graph.json: Task dependency analysis
+
+READY FOR: Phase 4 (Specification) - OpenSpec generation and TDD planning"
+
+    # Prompt user to save to long-term memory
+    memory_prompt_save "3" "Tasking" "$memory_summary"
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # SESSION END

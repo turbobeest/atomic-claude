@@ -5,8 +5,14 @@
 	import { navigation, syncStatus, user, errorMessage, clearError } from '$lib/stores';
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
+	import { page } from '$app/stores';
 
 	let { children, data } = $props();
+
+	// Hide header and sidebar on tasks page for clean standalone view
+	let isTasksPage = $derived($page.url.pathname.startsWith('/tasks'));
+	let hideSidebar = $derived(isTasksPage);
+	let hideHeader = $derived(isTasksPage);
 
 	// Initialize stores from server data
 	$effect(() => {
@@ -47,10 +53,14 @@
 </svelte:head>
 
 <div class="min-h-screen bg-gray-900 flex flex-col">
-	<Header />
+	{#if !hideHeader}
+		<Header />
+	{/if}
 
 	<div class="flex flex-1 overflow-hidden">
-		<Sidebar categories={$navigation} />
+		{#if !hideSidebar}
+			<Sidebar categories={$navigation} />
+		{/if}
 
 		<main class="flex-1 overflow-y-auto p-6">
 			{#if $errorMessage}

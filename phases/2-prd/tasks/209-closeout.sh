@@ -270,14 +270,24 @@ EOF
     # MEMORY CHECKPOINT
     # ═══════════════════════════════════════════════════════════════════════════
 
-    # Build summary for memory persistence
-    local memory_summary="Phase 2 PRD complete. $prd_sections sections, $prd_lines lines. Product requirements documented and approved. Ready for tasking phase."
+    # Build rich summary for memory persistence
+    local memory_summary
+    memory_summary="PHASE 2 PRD COMPLETE
 
-    # Prompt user to save to long-term memory (if enabled)
-    memory_prompt_save 2 "PRD" "$memory_summary"
+PRD DOCUMENT: $prd_lines lines, $prd_sections sections
+LOCATION: docs/prd/PRD.md
+STATUS: Approved and validated
 
-    # Git: commit and push phase
-    atomic_git_phase_complete 2 "PRD"
+KEY ARTIFACTS:
+- PRD.md: Complete product requirements document
+- prd-interview.json: Stakeholder interview responses
+- prd-validation.json: Validation results
+- prd-approved.json: Approval record
+
+READY FOR: Phase 3 (Tasking) - Task decomposition and prioritization"
+
+    # Prompt user to save to long-term memory
+    memory_prompt_save "2" "PRD" "$memory_summary"
 
     # ═══════════════════════════════════════════════════════════════════════════
     # SESSION END

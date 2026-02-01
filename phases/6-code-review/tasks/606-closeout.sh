@@ -301,14 +301,23 @@ EOF
     # MEMORY CHECKPOINT
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    # Build summary for memory persistence
-    local memory_summary="Phase 6 Code Review complete. $critical_fixed/$critical_found critical issues fixed, $major_fixed/$major_found major issues fixed. Tests passing: $tests_passing. Ready for integration testing."
+    # Build rich summary for memory persistence
+    local memory_summary
+    memory_summary="PHASE 6 CODE REVIEW COMPLETE
 
-    # Prompt user to save to long-term memory (if enabled)
-    memory_prompt_save 6 "Code Review" "$memory_summary"
+CRITICAL ISSUES: $critical_fixed of $critical_found fixed
+MAJOR ISSUES: $major_fixed of $major_found fixed
+REVIEW STATUS: Complete
 
-    # Git: commit and push phase
-    atomic_git_phase_complete 6 "Code Review"
+KEY ARTIFACTS:
+- findings.json: All code review findings
+- refinement-report.json: What was fixed
+- Verification tests passing
+
+READY FOR: Phase 7 (Integration) - Integration and acceptance testing"
+
+    # Prompt user to save to long-term memory
+    memory_prompt_save "6" "Code Review" "$memory_summary"
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # SESSION END

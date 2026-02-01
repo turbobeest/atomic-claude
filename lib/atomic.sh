@@ -16,6 +16,19 @@ set -euo pipefail
 
 ATOMIC_VERSION="0.1.0"
 ATOMIC_ROOT="${ATOMIC_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+
+# Detect embedded installation (ATOMIC-CLAUDE as subdirectory of another project)
+# ATOMIC_ORCHESTRATOR points to the parent project being orchestrated
+if [[ -z "${ATOMIC_ORCHESTRATOR:-}" ]]; then
+    # Check if we're in a directory named ATOMIC-CLAUDE with a parent that has docs/
+    _atomic_parent_dir=$(dirname "$ATOMIC_ROOT")
+    if [[ "$(basename "$ATOMIC_ROOT")" == "ATOMIC-CLAUDE" ]] && [[ -d "$_atomic_parent_dir/docs" || -f "$_atomic_parent_dir/README.md" ]]; then
+        ATOMIC_ORCHESTRATOR="$_atomic_parent_dir"
+        export ATOMIC_ORCHESTRATOR
+    fi
+    unset _atomic_parent_dir
+fi
+
 ATOMIC_STATE_DIR="${ATOMIC_STATE_DIR:-$ATOMIC_ROOT/.state}"
 ATOMIC_OUTPUT_DIR="${ATOMIC_OUTPUT_DIR:-$ATOMIC_ROOT/.outputs}"
 ATOMIC_LOG_DIR="${ATOMIC_LOG_DIR:-$ATOMIC_ROOT/.logs}"
@@ -37,6 +50,85 @@ PROVIDER_ROLE_MAP[primary]="${PROVIDER_ROLE_PRIMARY:-max}"
 PROVIDER_ROLE_MAP[fast]="${PROVIDER_ROLE_FAST:-ollama}"
 PROVIDER_ROLE_MAP[gardener]="${PROVIDER_ROLE_GARDENER:-ollama}"
 PROVIDER_ROLE_MAP[heavyweight]="${PROVIDER_ROLE_HEAVYWEIGHT:-max}"
+
+# Dashboard ports
+ATOMIC_TASKS_PORT="${ATOMIC_TASKS_PORT:-5173}"
+ATOMIC_AGENTS_PORT="${ATOMIC_AGENTS_PORT:-5174}"
+ATOMIC_AUDITS_PORT="${ATOMIC_AUDITS_PORT:-5175}"
+
+# ============================================================================
+# DASHBOARD URL HELPERS
+# ============================================================================
+
+# Get local IP for LAN access
+_atomic_get_local_ip() {
+    if command -v ip &>/dev/null; then
+        ip route get 1 2>/dev/null | awk '{print $7; exit}' 2>/dev/null || echo "localhost"
+    elif command -v ifconfig &>/dev/null; then
+        ifconfig 2>/dev/null | grep -Eo 'inet (addr:)?([0-9]*\.){3}[0-9]*' | grep -Eo '([0-9]*\.){3}[0-9]*' | grep -v '127.0.0.1' | head -1 || echo "localhost"
+    else
+        echo "localhost"
+    fi
+}
+
+# Show Tasks dashboard URL reference
+# Usage: atomic_ref_tasks [message]
+atomic_ref_tasks() {
+    local msg="${1:-View pipeline progress in the dashboard}"
+    local ip
+    ip=$(_atomic_get_local_ip)
+    echo ""
+    echo -e "  ${DIM}$msg${NC}"
+    echo -e "  ${CYAN}Tasks Dashboard:${NC} http://localhost:${ATOMIC_TASKS_PORT}/tasks"
+    [[ "$ip" != "localhost" ]] && echo -e "                   http://${ip}:${ATOMIC_TASKS_PORT}/tasks"
+    echo ""
+}
+
+# Show Agents dashboard URL reference
+# Usage: atomic_ref_agents [message]
+atomic_ref_agents() {
+    local msg="${1:-Browse and manage agents in the dashboard}"
+    local ip
+    ip=$(_atomic_get_local_ip)
+    echo ""
+    echo -e "  ${DIM}$msg${NC}"
+    echo -e "  ${GREEN}Agents Dashboard:${NC} http://localhost:${ATOMIC_AGENTS_PORT}"
+    [[ "$ip" != "localhost" ]] && echo -e "                    http://${ip}:${ATOMIC_AGENTS_PORT}"
+    echo ""
+}
+
+# Show Audits dashboard URL reference
+# Usage: atomic_ref_audits [message]
+atomic_ref_audits() {
+    local msg="${1:-Browse audit library in the dashboard}"
+    local ip
+    ip=$(_atomic_get_local_ip)
+    echo ""
+    echo -e "  ${DIM}$msg${NC}"
+    echo -e "  ${YELLOW}Audits Dashboard:${NC} http://localhost:${ATOMIC_AUDITS_PORT}/audits"
+    [[ "$ip" != "localhost" ]] && echo -e "                    http://${ip}:${ATOMIC_AUDITS_PORT}/audits"
+    echo ""
+}
+
+# Show all dashboard URLs
+atomic_ref_dashboards() {
+    local ip
+    ip=$(_atomic_get_local_ip)
+    echo ""
+    echo -e "  ${BOLD}ATOMIC Dashboards${NC}"
+    echo ""
+    echo -e "  ${CYAN}Tasks${NC}   http://localhost:${ATOMIC_TASKS_PORT}/tasks"
+    echo -e "  ${GREEN}Agents${NC}  http://localhost:${ATOMIC_AGENTS_PORT}"
+    echo -e "  ${YELLOW}Audits${NC}  http://localhost:${ATOMIC_AUDITS_PORT}/audits"
+    if [[ "$ip" != "localhost" ]]; then
+        echo ""
+        echo -e "  ${DIM}LAN Access:${NC}"
+        echo -e "  ${CYAN}Tasks${NC}   http://${ip}:${ATOMIC_TASKS_PORT}/tasks"
+        echo -e "  ${GREEN}Agents${NC}  http://${ip}:${ATOMIC_AGENTS_PORT}"
+        echo -e "  ${YELLOW}Audits${NC}  http://${ip}:${ATOMIC_AUDITS_PORT}/audits"
+    fi
+    echo ""
+}
 
 # ============================================================================
 # AGENT DISCOVERY & MAPPING
@@ -648,7 +740,24 @@ _atomic_resolve_model() {
         return 0
     fi
 
-    # Claude unavailable - find Ollama fallback
+    # Check if Ollama fallback is enabled in project config
+    local project_config="$ATOMIC_OUTPUT_DIR/0-setup/project-config.json"
+    local ollama_enabled="true"
+    local local_fallback="true"
+    if [[ -f "$project_config" ]]; then
+        # Note: jq's // operator treats false as falsy, so we must handle false explicitly
+        ollama_enabled=$(jq -r '.providers.ollama_enabled | if . == null then "true" else tostring end' "$project_config" 2>/dev/null)
+        local_fallback=$(jq -r '.llm.local_fallback | if . == null then "true" else tostring end' "$project_config" 2>/dev/null)
+    fi
+
+    # If Ollama/local fallback is disabled, skip fallback logic entirely (no warning)
+    if [[ "$ollama_enabled" == "false" || "$local_fallback" == "false" ]]; then
+        # User explicitly disabled Ollama - proceed with Claude
+        echo "$requested_model:$CLAUDE_PROVIDER"
+        return 0
+    fi
+
+    # Claude unavailable and Ollama enabled - find Ollama fallback
     fallbacks=$(jq -r --arg m "$requested_model" '.tier_mapping[$m].ollama_fallbacks // []' "$config_file" 2>/dev/null)
     local ollama_host="${CLAUDE_OLLAMA_HOST:-http://localhost:11434}"
 
@@ -802,7 +911,7 @@ atomic_validate_deps() {
         return 1
     fi
 
-    # Report missing optional (only in strict mode - optional means optional)
+    # Report missing optional only in strict mode (they're optional, no need to warn)
     if [[ ${#missing_optional[@]} -gt 0 ]]; then
         if [[ "$strict" == "--strict" ]] || [[ "$strict" == "true" ]]; then
             echo "ERROR: Missing optional dependencies (strict mode):" >&2
@@ -811,8 +920,7 @@ atomic_validate_deps() {
             done
             return 1
         fi
-        # Silent for non-strict mode - user will get error if they try to use a feature
-        # that requires an optional dependency they don't have
+        # Silent for optional deps - they're optional after all
     fi
 
     return 0
@@ -1210,14 +1318,8 @@ _atomic_build_invoke_cmd() {
     local escaped_wrapper_path
     escaped_wrapper_path=$(printf '%s' "$wrapper_path" | sed "s/'/'\\\\''/g")
 
-    # Escape ATOMIC_ROOT for shell (Claude CLI working directory)
-    local escaped_atomic_root
-    escaped_atomic_root=$(printf '%s' "$ATOMIC_ROOT" | sed "s/'/'\\\\''/g")
-
     # Build command with proper quoting
-    # CRITICAL: Use PYTHONPATH to find local_launcher, but keep CWD as ATOMIC_ROOT
-    # so Claude CLI sees the correct project context (not the wrapper's directory)
-    local cmd="cd '${escaped_atomic_root}' && PYTHONPATH='${escaped_wrapper_path}:\${PYTHONPATH}' python -m local_launcher"
+    local cmd="cd '${escaped_wrapper_path}' && python -m local_launcher"
     cmd="${cmd} --provider '${provider}'"
     cmd="${cmd} --model '${model}'"
     cmd="${cmd} --no-banner"
@@ -1305,7 +1407,6 @@ atomic_wrapper_status() {
 #   --timeout=<seconds>    Override default timeout
 #   --stdin                Read additional context from stdin to append to prompt
 #   --ollama-host=<url>    Override Ollama host URL
-#   --no-stream            Disable real-time output streaming (useful for JSON extraction)
 #
 atomic_invoke() {
     local prompt_source="$1"
@@ -1326,7 +1427,6 @@ atomic_invoke() {
     local max_retries="${ATOMIC_MAX_RETRIES:-2}"
     local retry_delay="${ATOMIC_RETRY_DELAY:-5}"
     local ollama_host="$CLAUDE_OLLAMA_HOST"
-    local stream_override=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -1339,7 +1439,6 @@ atomic_invoke() {
             --retry-delay=*) retry_delay="${1#*=}" ;;
             --stdin) use_stdin=true ;;
             --ollama-host=*) ollama_host="${1#*=}" ;;
-            --no-stream) stream_override="false" ;;
             *) atomic_warn "Unknown option: $1" ;;
         esac
         shift
@@ -1384,17 +1483,39 @@ CONTEXT:
 $stdin_content"
     fi
 
+    # Inject task context from memory (if available)
+    local task_context_file="${ATOMIC_ROOT:-.}/.outputs/task-context.md"
+    if [[ -f "$task_context_file" && -s "$task_context_file" ]]; then
+        local task_context
+        task_context=$(cat "$task_context_file")
+        prompt_content="## Recalled Context from Previous Tasks
+
+$task_context
+
+---
+
+$prompt_content"
+        # Log the injection
+        local log_file="${ATOMIC_ROOT:-.}/.logs/memory.log"
+        mkdir -p "$(dirname "$log_file")"
+        echo "[$(date -Iseconds)] [atomic_invoke] Prepended ${#task_context} chars of context to prompt" >> "$log_file"
+    fi
+
     # Update state
     atomic_state_set "current_task" "\"$description\""
 
     # Create output directory if needed
     mkdir -p "$(dirname "$output_file")"
 
-    # Unified task header
-    atomic_task_header "$description" "$provider" "$model" "$role" "$timeout" "$prompt_source" "$output_file" "$ollama_host"
-
-    atomic_waiting "Invoking Claude..."
-    echo ""
+    # Unified task header (skip if ATOMIC_QUIET for cleaner conversational output)
+    if [[ "${ATOMIC_QUIET:-false}" != "true" ]]; then
+        atomic_task_header "$description" "$provider" "$model" "$role" "$timeout" "$prompt_source" "$output_file" "$ollama_host"
+        atomic_waiting "Invoking Claude..."
+        echo ""
+    else
+        # Minimal status for quiet/conversational mode
+        echo -ne "  ${DIM}⏳ $description...${NC}"
+    fi
 
     # Build the invocation command using claude-local wrapper
     local invoke_cmd
@@ -1407,9 +1528,9 @@ $stdin_content"
     local attempt=1
     local total_duration=0
 
-    # Stream Claude output to terminal in real-time (default on, disable with ATOMIC_STREAM=false or --no-stream)
+    # Stream Claude output to terminal in real-time (default on, disable with ATOMIC_STREAM=false)
     local stream_pid=""
-    local stream_enabled="${stream_override:-${ATOMIC_STREAM:-true}}"
+    local stream_enabled="${ATOMIC_STREAM:-true}"
 
     while [[ $attempt -le $((max_retries + 1)) ]]; do
         attempt_start=$(date +%s)
@@ -1470,8 +1591,13 @@ $stdin_content"
     echo "[$(date -Iseconds)] task=\"$description\" provider=$provider model=$model duration=${duration}s exit=$exit_code output=$output_file" >> "$log_file"
 
     if [[ $exit_code -eq 0 ]]; then
-        atomic_success "Claude completed task (${duration}s)"
-        atomic_substep "Output written to: $output_file"
+        if [[ "${ATOMIC_QUIET:-false}" != "true" ]]; then
+            atomic_success "Claude completed task (${duration}s)"
+            atomic_substep "Output written to: $output_file"
+        else
+            # Minimal completion for quiet mode
+            echo -e " ${GREEN}✓${NC} ${DIM}(${duration}s)${NC}"
+        fi
 
         # Validate output format if specified
         if [[ "$format" == "json" ]]; then

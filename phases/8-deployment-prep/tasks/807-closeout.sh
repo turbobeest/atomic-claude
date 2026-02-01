@@ -271,14 +271,23 @@ EOF
     # MEMORY CHECKPOINT
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    # Build summary for memory persistence
-    local memory_summary="Phase 8 Deployment Prep complete. Version $version packaged. Changelog generated, documentation complete, installation guide created. Deployment approved: $approval_status. Ready for release."
+    # Build rich summary for memory persistence
+    local memory_summary
+    memory_summary="PHASE 8 DEPLOYMENT PREP COMPLETE
 
-    # Prompt user to save to long-term memory (if enabled)
-    memory_prompt_save 8 "Deployment Prep" "$memory_summary"
+VERSION: v$version
+DEPLOYMENT STATUS: Approved and ready
+PACKAGES: Generated and verified
 
-    # Git: commit and push phase
-    atomic_git_phase_complete 8 "Deployment Prep"
+KEY ARTIFACTS:
+- artifacts.json: Package manifest
+- CHANGELOG.md: Version history
+- deployment-approval.json: Approval record
+
+READY FOR: Phase 9 (Release) - Final deployment and release"
+
+    # Prompt user to save to long-term memory
+    memory_prompt_save "8" "Deployment Prep" "$memory_summary"
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # SESSION END

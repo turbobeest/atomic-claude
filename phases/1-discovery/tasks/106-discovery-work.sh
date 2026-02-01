@@ -388,16 +388,17 @@ Keep it concise - 2-3 sentences max. Be warm but professional.
 EOF
 
     local opening_response="$prompts_dir/opening-response.txt"
-    if atomic_invoke "$opening_prompt" "$opening_response" "Orchestrator opening"; then
+    # Disable streaming for conversational display - we format the output ourselves
+    if ATOMIC_QUIET=true ATOMIC_STREAM=false atomic_invoke "$opening_prompt" "$opening_response" "Orchestrator opening"; then
         local opening=$(cat "$opening_response")
+        # Always display response - streaming output can be unreliable
+        echo ""
         echo -e "  ${CYAN}orchestrator:${NC}"
         echo ""
-        if [[ "${ATOMIC_STREAM:-true}" != "true" || ! -t 2 ]]; then
-            echo "$opening" | fold -s -w 60 | while IFS= read -r line; do
-                echo -e "    $line"
-            done
-            echo ""
-        fi
+        echo "$opening" | fold -s -w 60 | while IFS= read -r line; do
+            echo -e "    $line"
+        done
+        echo ""
 
         # Log to deliberation
         echo "## Orchestrator (Opening)" >> "$deliberation_log"
@@ -433,8 +434,18 @@ EOF
         ((turn++))
 
         # Parse command or route naturally
-        case "${user_input,,}" in
-            done|exit|quit)
+        local input_lower="${user_input,,}"
+
+        # Detect closure intent (common phrases that mean "we're done")
+        if [[ "$input_lower" =~ (close.*out|move.*on|proceed|next.*phase|let.?s.*go|wrap.*up|finish|complete|agreed|ready.*to.*move|ready.*for.*prd|lgtm|looks.*good) ]]; then
+            echo ""
+            echo -e "  ${DIM}Detected closure intent. Closing deliberation...${NC}"
+            deliberation_complete=true
+            break
+        fi
+
+        case "$input_lower" in
+            done|exit|quit|close|finish|proceed)
                 deliberation_complete=true
                 break
                 ;;
@@ -451,6 +462,12 @@ EOF
             analyze|"first principles"|fp)
                 if [[ "$approaches_generated" == true ]]; then
                     _106_first_principles "$context_file" "$approaches_file" "$conversation_json" "$prompts_dir"
+                    # Add first-principles response to conversation
+                    if [[ -f "$prompts_dir/fp-response.txt" ]]; then
+                        local fp_msg=$(cat "$prompts_dir/fp-response.txt")
+                        conversation_json=$(echo "$conversation_json" | jq --arg msg "$fp_msg" \
+                            '.exchanges += [{"agent": "first-principles-analyst", "message": $msg, "timestamp": (now | todate)}]')
+                    fi
                 else
                     echo ""
                     echo -e "    ${YELLOW}!${NC} Generate approaches first."
@@ -460,6 +477,12 @@ EOF
 
             challenge|critique)
                 _106_challenge "$context_file" "$conversation_json" "$prompts_dir" "${panel_agents[@]}"
+                # Add challenge response to conversation
+                if [[ -f "$prompts_dir/challenge-response.txt" ]]; then
+                    local challenge_msg=$(cat "$prompts_dir/challenge-response.txt")
+                    conversation_json=$(echo "$conversation_json" | jq --arg msg "$challenge_msg" \
+                        '.exchanges += [{"agent": "challenger", "message": $msg, "timestamp": (now | todate)}]')
+                fi
                 ;;
 
             consensus|agree)
@@ -475,6 +498,12 @@ EOF
 
                 if [[ " ${panel_agents[*]} " =~ " ${target_agent} " ]]; then
                     _106_agent_response "$target_agent" "$message" "$context_file" "$conversation_json" "$prompts_dir" "$deliberation_log"
+                    # Add agent response to conversation context
+                    if [[ -f "$prompts_dir/agent-response.txt" ]]; then
+                        local agent_msg=$(cat "$prompts_dir/agent-response.txt")
+                        conversation_json=$(echo "$conversation_json" | jq --arg agent "$target_agent" --arg msg "$agent_msg" \
+                            '.exchanges += [{"agent": $agent, "message": $msg, "timestamp": (now | todate)}]')
+                    fi
                 else
                     echo ""
                     echo -e "    ${RED}!${NC} Agent '$target_agent' not on panel."
@@ -486,6 +515,13 @@ EOF
             *)
                 # Natural input - orchestrator routes it
                 _106_route_input "$user_input" "$context_file" "$conversation_json" "$prompts_dir" "$deliberation_log" "${panel_agents[@]}"
+                # Add routed agent response to conversation context
+                if [[ -f "$prompts_dir/agent-response.txt" ]]; then
+                    local routed_agent=$(cat "$prompts_dir/route-response.txt" 2>/dev/null | tr -d '[:space:]')
+                    local agent_msg=$(cat "$prompts_dir/agent-response.txt")
+                    conversation_json=$(echo "$conversation_json" | jq --arg agent "${routed_agent:-agent}" --arg msg "$agent_msg" \
+                        '.exchanges += [{"agent": $agent, "message": $msg, "timestamp": (now | todate)}]')
+                fi
                 ;;
         esac
 
@@ -629,19 +665,17 @@ Summarize the discussion so far in 2-3 bullet points.
 Focus on: key insights, emerging consensus, open questions.
 
 ## Recent Exchanges
-$(echo "$conversation_json" | jq -r '.exchanges[-6:] | .[] | "**\(.agent):** \(.message)"')
+$(echo "$conversation_json" | jq -r '.exchanges[-15:] | .[] | "**\(.agent):** \(.message)"')
 
 Be extremely concise. Output plain text, no JSON.
 EOF
 
     echo ""
-    if atomic_invoke "$prompts_dir/synthesize.md" "$prompts_dir/synthesis.txt" "Synthesis" --model=haiku; then
+    if ATOMIC_QUIET=true ATOMIC_STREAM=false atomic_invoke "$prompts_dir/synthesize.md" "$prompts_dir/synthesis.txt" "Synthesis" --model=haiku; then
         echo -e "  ${DIM}synthesis:${NC}"
-        if [[ "${ATOMIC_STREAM:-true}" != "true" || ! -t 2 ]]; then
-            cat "$prompts_dir/synthesis.txt" | fold -s -w 60 | while IFS= read -r line; do
-                echo -e "    ${DIM}$line${NC}"
-            done
-        fi
+        cat "$prompts_dir/synthesis.txt" | fold -s -w 60 | while IFS= read -r line; do
+            echo -e "    ${DIM}$line${NC}"
+        done
     fi
     echo ""
 }
@@ -741,14 +775,12 @@ Keep it to 3-5 key points. Plain text, not JSON.
 EOF
 
     echo ""
-    if atomic_invoke "$prompts_dir/first-principles.md" "$prompts_dir/fp-response.txt" "First principles"; then
+    if ATOMIC_QUIET=true ATOMIC_STREAM=false atomic_invoke "$prompts_dir/first-principles.md" "$prompts_dir/fp-response.txt" "First principles"; then
         echo -e "  ${CYAN}first-principles-analyst:${NC}"
         echo ""
-        if [[ "${ATOMIC_STREAM:-true}" != "true" || ! -t 2 ]]; then
-            cat "$prompts_dir/fp-response.txt" | fold -s -w 60 | while IFS= read -r line; do
-                echo -e "    $line"
-            done
-        fi
+        cat "$prompts_dir/fp-response.txt" | fold -s -w 60 | while IFS= read -r line; do
+            echo -e "    $line"
+        done
     fi
     echo ""
 }
@@ -779,14 +811,12 @@ Respond as $challenger. 2-4 sentences. Plain text.
 EOF
 
     echo ""
-    if atomic_invoke "$prompts_dir/challenge.md" "$prompts_dir/challenge-response.txt" "Challenge"; then
+    if ATOMIC_QUIET=true ATOMIC_STREAM=false atomic_invoke "$prompts_dir/challenge.md" "$prompts_dir/challenge-response.txt" "Challenge"; then
         echo -e "  ${CYAN}$challenger:${NC}"
         echo ""
-        if [[ "${ATOMIC_STREAM:-true}" != "true" || ! -t 2 ]]; then
-            cat "$prompts_dir/challenge-response.txt" | fold -s -w 60 | while IFS= read -r line; do
-                echo -e "    $line"
-            done
-        fi
+        cat "$prompts_dir/challenge-response.txt" | fold -s -w 60 | while IFS= read -r line; do
+            echo -e "    $line"
+        done
     fi
     echo ""
 }
@@ -826,14 +856,12 @@ Be concise. Plain text, 3-5 bullet points.
 EOF
 
     echo ""
-    if atomic_invoke "$prompts_dir/consensus-check.md" "$prompts_dir/consensus-response.txt" "Consensus check" --model=haiku; then
+    if ATOMIC_QUIET=true ATOMIC_STREAM=false atomic_invoke "$prompts_dir/consensus-check.md" "$prompts_dir/consensus-response.txt" "Consensus check" --model=haiku; then
         echo -e "  ${DIM}consensus check:${NC}"
         echo ""
-        if [[ "${ATOMIC_STREAM:-true}" != "true" || ! -t 2 ]]; then
-            cat "$prompts_dir/consensus-response.txt" | fold -s -w 60 | while IFS= read -r line; do
-                echo -e "    $line"
-            done
-        fi
+        cat "$prompts_dir/consensus-response.txt" | fold -s -w 60 | while IFS= read -r line; do
+            echo -e "    $line"
+        done
     fi
     echo ""
 }
@@ -861,7 +889,7 @@ _106_agent_response() {
 
     # Use summarized context and recent exchanges
     local ctx_summary=$(atomic_context_summarize "$context_file" "direction confirmation context" 150)
-    local recent_exchanges=$(echo "$conversation_json" | jq -r '.exchanges[-6:] | .[] | "**\(.agent):** \(.message)"')
+    local recent_exchanges=$(echo "$conversation_json" | jq -r '.exchanges[-15:] | .[] | "**\(.agent):** \(.message)"')
 
     cat > "$prompts_dir/agent-direct.md" << EOF
 # Direct Question to $agent
@@ -883,14 +911,12 @@ Respond as $agent. Be helpful, specific, and draw on your expertise.
 EOF
 
     echo ""
-    if atomic_invoke "$prompts_dir/agent-direct.md" "$prompts_dir/agent-response.txt" "$agent response"; then
+    if ATOMIC_QUIET=true ATOMIC_STREAM=false atomic_invoke "$prompts_dir/agent-direct.md" "$prompts_dir/agent-response.txt" "$agent response"; then
         echo -e "  ${CYAN}$agent:${NC}"
         echo ""
-        if [[ "${ATOMIC_STREAM:-true}" != "true" || ! -t 2 ]]; then
-            cat "$prompts_dir/agent-response.txt" | fold -s -w 60 | while IFS= read -r line; do
-                echo -e "    $line"
-            done
-        fi
+        cat "$prompts_dir/agent-response.txt" | fold -s -w 60 | while IFS= read -r line; do
+            echo -e "    $line"
+        done
 
         # Log to deliberation
         echo "## $agent" >> "$deliberation_log"

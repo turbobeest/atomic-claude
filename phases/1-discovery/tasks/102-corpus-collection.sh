@@ -10,13 +10,23 @@
 #   4. Conversational reflection with human
 #   5. Organize into docs/corpus/CORPUS-INDEX.md
 #
-# Supported file types: .md, .txt, .rst, .pdf, .json, .yaml, .yml
+# Supported file types: .md, .txt, .rst, .pdf, .json, .yaml, .yml, .dot, .svg
 #
 
 # Track seen paths for deduplication
 declare -A _102_SEEN_PATHS
 
 task_102_corpus_collection() {
+    # ═══════════════════════════════════════════════════════════════════════════
+    # DIRECTORY SETUP
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    # For embedded installations: ATOMIC_ORCHESTRATOR = parent project (e.g., /acapella/)
+    # ATOMIC_ROOT = ATOMIC-CLAUDE framework directory (e.g., /acapella/ATOMIC-CLAUDE/)
+    # For standalone: both are the same
+    local project_root="${ATOMIC_ORCHESTRATOR:-$ATOMIC_ROOT}"
+
+    # Corpus output always goes to ATOMIC-CLAUDE's docs directory
     local corpus_dir="$ATOMIC_ROOT/docs/corpus"
     local corpus_index="$corpus_dir/CORPUS-INDEX.md"
     local corpus_json="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/corpus.json"
@@ -36,9 +46,16 @@ task_102_corpus_collection() {
     echo -e "${DIM}  │ Let's gather all materials relevant to your project:   │${NC}"
     echo -e "${DIM}  │ documents, specs, PRDs, links, references, prior work. │${NC}"
     echo -e "${DIM}  │                                                         │${NC}"
-    echo -e "${DIM}  │ Supported: .md .txt .rst .pdf .json .yaml              │${NC}"
+    echo -e "${DIM}  │ Supported: .md .txt .rst .pdf .json .yaml .dot .svg    │${NC}"
     echo -e "${DIM}  └─────────────────────────────────────────────────────────┘${NC}"
     echo ""
+
+    # Show which directories we're using
+    if [[ "$project_root" != "$ATOMIC_ROOT" ]]; then
+        echo -e "  ${DIM}Project root: $project_root${NC}"
+        echo -e "  ${DIM}Framework:    $ATOMIC_ROOT${NC}"
+        echo ""
+    fi
 
     # Initialize corpus tracking
     local corpus='{"materials": [], "links": [], "scanned_at": "'$(date -Iseconds)'"}'
@@ -56,83 +73,110 @@ task_102_corpus_collection() {
 
     echo -e "  ${CYAN}Scanning for documents...${NC}"
 
-    # Framework directories to exclude from auto-discovery
+    # Framework directories to ALWAYS exclude from auto-discovery
     # These contain ATOMIC-CLAUDE framework code, not project materials
-    local -a _find_excludes=(
+    local -a _framework_excludes=(
+        # ATOMIC-CLAUDE framework internals
         -not -path "$ATOMIC_ROOT/phases/*"
         -not -path "$ATOMIC_ROOT/lib/*"
+        -not -path "$ATOMIC_ROOT/skills/*"
+        -not -path "$ATOMIC_ROOT/config/*"
+        -not -path "$ATOMIC_ROOT/agents/*"
+        -not -path "$ATOMIC_ROOT/audits/*"
+        -not -path "$ATOMIC_ROOT/tools/*"
+        -not -path "$ATOMIC_ROOT/docs/corpus/*"
         -not -path "$ATOMIC_ROOT/.git/*"
         -not -path "$ATOMIC_ROOT/.claude/*"
         -not -path "$ATOMIC_ROOT/.outputs/*"
+        -not -path "$ATOMIC_ROOT/.state/*"
+        -not -path "$ATOMIC_ROOT/.logs/*"
         -not -path "$ATOMIC_ROOT/node_modules/*"
     )
 
-    # Auto-include initialization/setup.md (project-specific config)
+    # Project-level excludes (applied to project_root)
+    local -a _project_excludes=(
+        -not -path "*/.git/*"
+        -not -path "*/node_modules/*"
+        -not -path "*/.claude/*"
+        -not -path "*/.outputs/*"
+        -not -path "*/.state/*"
+        -not -path "*/.logs/*"
+        -not -path "*/docs/corpus/*"
+        -not -name "._*"
+    )
+
+    # If embedded mode, also exclude the entire ATOMIC-CLAUDE directory from project scans
+    if [[ "$project_root" != "$ATOMIC_ROOT" ]]; then
+        _project_excludes+=(-not -path "$ATOMIC_ROOT/*")
+    fi
+
+    # Auto-include initialization/setup.md (project-specific config in ATOMIC-CLAUDE)
     if [[ -f "$ATOMIC_ROOT/initialization/setup.md" ]]; then
         if _102_add_material "$ATOMIC_ROOT/initialization/setup.md" "auto"; then
             echo -e "    ${GREEN}✓${NC} setup.md ${DIM}(initialization)${NC}"
-            ((found_count++))
+            found_count=$((found_count + 1))
         fi
     fi
 
-    # README files (safe while-read pattern), excluding framework dirs
+    # README files in PROJECT ROOT (safe while-read pattern)
     while IFS= read -r -d '' readme; do
         if _102_add_material "$readme" "auto"; then
-            local rel_path="${readme#$ATOMIC_ROOT/}"
+            local rel_path="${readme#$project_root/}"
             echo -e "    ${GREEN}✓${NC} $(basename "$readme") ${DIM}(${rel_path%/*})${NC}"
-            ((found_count++))
+            found_count=$((found_count + 1))
         fi
-    done < <(find "$ATOMIC_ROOT" -maxdepth 3 -name "README*" -type f "${_find_excludes[@]}" -print0 2>/dev/null | head -z -n 10)
+    done < <(find "$project_root" -maxdepth 3 -name "README*" -type f "${_project_excludes[@]}" -print0 2>/dev/null | head -z -n 10)
 
-    # PRD/spec documents (safe while-read pattern), excluding framework dirs
+    # PRD/spec documents in PROJECT ROOT (safe while-read pattern)
     while IFS= read -r -d '' doc; do
         if _102_add_material "$doc" "auto"; then
             echo -e "    ${GREEN}✓${NC} $(basename "$doc")"
-            ((found_count++))
+            found_count=$((found_count + 1))
         fi
-    done < <(find "$ATOMIC_ROOT" -maxdepth 3 \( -name "*.md" -o -name "*.txt" -o -name "*.rst" \) -type f "${_find_excludes[@]}" -print0 2>/dev/null | grep -zE -i "(prd|spec|design|architecture|requirements)" | head -z -n 10)
+    done < <(find "$project_root" -maxdepth 3 \( -name "*.md" -o -name "*.txt" -o -name "*.rst" \) -type f "${_project_excludes[@]}" -print0 2>/dev/null | grep -zE -i "(prd|spec|design|architecture|requirements)" | head -z -n 10)
 
-    # docs/ directory
-    if [[ -d "$ATOMIC_ROOT/docs" ]]; then
-        local doc_count
-        doc_count=$(find "$ATOMIC_ROOT/docs" -type f \( -name "*.md" -o -name "*.txt" -o -name "*.rst" \) 2>/dev/null | wc -l | tr -d ' ')
-        if [[ $doc_count -gt 0 ]]; then
-            echo -e "    ${GREEN}✓${NC} docs/ directory: $doc_count files available"
-        fi
-    fi
-
-    # docs/reference/ directory (project-specific reference materials from setup)
-    if [[ -d "$ATOMIC_ROOT/docs/reference" ]]; then
-        # Scan for supported text files in reference/
-        while IFS= read -r -d '' ref_doc; do
+    # docs/ directory in PROJECT ROOT - scan ALL documentation files recursively
+    if [[ -d "$project_root/docs" ]]; then
+        local docs_added=0
+        while IFS= read -r -d '' doc_file; do
             # Skip macOS metadata files
-            [[ "$(basename "$ref_doc")" == ._* ]] && continue
-            if _102_add_material "$ref_doc" "auto"; then
-                local ref_rel="${ref_doc#$ATOMIC_ROOT/}"
-                echo -e "    ${GREEN}✓${NC} $(basename "$ref_doc") ${DIM}(${ref_rel%/*})${NC}"
-                ((found_count++))
+            [[ "$(basename "$doc_file")" == ._* ]] && continue
+            # Skip corpus output directory (in ATOMIC-CLAUDE, not project)
+            [[ "$doc_file" == "$ATOMIC_ROOT/docs/corpus/"* ]] && continue
+
+            if _102_add_material "$doc_file" "auto"; then
+                local doc_rel="${doc_file#$project_root/}"
+                echo -e "    ${GREEN}✓${NC} $(basename "$doc_file") ${DIM}(${doc_rel%/*})${NC}"
+                found_count=$((found_count + 1))
+                docs_added=$((docs_added + 1))
             fi
-        done < <(find "$ATOMIC_ROOT/docs/reference" -type f \( -name "*.md" -o -name "*.txt" -o -name "*.rst" -o -name "*.json" -o -name "*.yaml" -o -name "*.yml" \) -print0 2>/dev/null)
+        done < <(find "$project_root/docs" -type f \( -name "*.md" -o -name "*.txt" -o -name "*.rst" -o -name "*.json" -o -name "*.yaml" -o -name "*.yml" -o -name "*.dot" -o -name "*.svg" \) "${_project_excludes[@]}" -print0 2>/dev/null)
+
+        if [[ $docs_added -gt 0 ]]; then
+            echo -e "    ${DIM}($docs_added files from docs/)${NC}"
+        fi
 
         # Note any .docx files (can't read inline but worth tracking)
         local docx_count
-        docx_count=$(find "$ATOMIC_ROOT/docs/reference" -type f -name "*.docx" -not -name "._*" 2>/dev/null | wc -l | tr -d ' ')
+        docx_count=$(find "$project_root/docs" -type f -name "*.docx" -not -name "._*" "${_project_excludes[@]}" 2>/dev/null | wc -l | tr -d ' ')
         if [[ $docx_count -gt 0 ]]; then
-            echo -e "    ${YELLOW}!${NC} $docx_count .docx files found in docs/reference/ ${DIM}(binary - convert to .md for analysis)${NC}"
+            echo -e "    ${YELLOW}!${NC} $docx_count .docx files found in docs/ ${DIM}(binary - convert to .md for analysis)${NC}"
             # Track docx files as reference notes so they appear in corpus
             while IFS= read -r docx_file; do
                 [[ "$(basename "$docx_file")" == ._* ]] && continue
                 corpus=$(echo "$corpus" | jq --arg path "$docx_file" --arg name "$(basename "$docx_file")" \
                     '.materials += [{"path": $path, "name": $name, "type": "binary_document", "note": "Word document - convert to .md or .txt for content analysis"}]')
-            done < <(find "$ATOMIC_ROOT/docs/reference" -type f -name "*.docx" -not -name "._*" 2>/dev/null)
+            done < <(find "$project_root/docs" -type f -name "*.docx" -not -name "._*" "${_project_excludes[@]}" 2>/dev/null)
         fi
+    else
+        echo -e "    ${YELLOW}!${NC} No docs/ directory found in $project_root"
     fi
 
-    # Existing corpus
+    # Existing corpus (in ATOMIC-CLAUDE framework dir)
     if [[ -d "$corpus_dir" ]] && [[ "$(ls -A "$corpus_dir" 2>/dev/null)" ]]; then
         local existing_count
         existing_count=$(find "$corpus_dir" -type f 2>/dev/null | wc -l | tr -d ' ')
-        echo -e "    ${GREEN}✓${NC} Existing corpus: $existing_count files"
+        echo -e "    ${DIM}○${NC} Existing corpus: $existing_count files ${DIM}(in framework)${NC}"
     fi
 
     echo ""
@@ -154,6 +198,7 @@ task_102_corpus_collection() {
     echo -e "    • File paths (relative or absolute)"
     echo -e "    • Directory paths to scan"
     echo -e "    • URLs ${DIM}(stored as references, not fetched)${NC}"
+    echo -e "    • Supported: .md .txt .rst .pdf .json .yaml .dot .svg"
     echo -e "    • Press Enter when finished"
     echo ""
 
@@ -172,38 +217,38 @@ task_102_corpus_collection() {
             # URL - store as reference (not fetched)
             corpus=$(echo "$corpus" | jq --arg url "$material_input" '.links += [$url]')
             echo -e "    ${GREEN}✓${NC} Link saved: ${DIM}(reference only)${NC} $material_input"
-            ((manual_count++))
+            manual_count=$((manual_count + 1))
 
         elif [[ -f "$material_input" ]]; then
             # Absolute file path
             if _102_add_material "$material_input" "manual"; then
                 echo -e "    ${GREEN}✓${NC} File added: $(basename "$material_input")"
-                ((manual_count++))
+                manual_count=$((manual_count + 1))
             else
                 echo -e "    ${DIM}○${NC} Already included: $(basename "$material_input")"
             fi
 
-        elif [[ -f "$ATOMIC_ROOT/$material_input" ]]; then
-            # Relative file path
-            if _102_add_material "$ATOMIC_ROOT/$material_input" "manual"; then
+        elif [[ -f "$project_root/$material_input" ]]; then
+            # Relative file path (resolved against project root)
+            if _102_add_material "$project_root/$material_input" "manual"; then
                 echo -e "    ${GREEN}✓${NC} File added: $(basename "$material_input")"
-                ((manual_count++))
+                manual_count=$((manual_count + 1))
             else
                 echo -e "    ${DIM}○${NC} Already included: $(basename "$material_input")"
             fi
 
-        elif [[ -d "$material_input" ]] || [[ -d "$ATOMIC_ROOT/$material_input" ]]; then
+        elif [[ -d "$material_input" ]] || [[ -d "$project_root/$material_input" ]]; then
             # Directory
             local dir_path="$material_input"
-            [[ ! -d "$dir_path" ]] && dir_path="$ATOMIC_ROOT/$material_input"
+            [[ ! -d "$dir_path" ]] && dir_path="$project_root/$material_input"
 
             local dir_files
-            dir_files=$(find "$dir_path" -type f \( -name "*.md" -o -name "*.txt" -o -name "*.rst" -o -name "*.pdf" -o -name "*.json" -o -name "*.yaml" -o -name "*.yml" \) 2>/dev/null | wc -l | tr -d ' ')
+            dir_files=$(find "$dir_path" -type f \( -name "*.md" -o -name "*.txt" -o -name "*.rst" -o -name "*.pdf" -o -name "*.json" -o -name "*.yaml" -o -name "*.yml" -o -name "*.dot" -o -name "*.svg" \) 2>/dev/null | wc -l | tr -d ' ')
 
             corpus=$(echo "$corpus" | jq --arg path "$dir_path" --argjson count "$dir_files" \
                 '.materials += [{"path": $path, "type": "directory", "file_count": $count}]')
             echo -e "    ${GREEN}✓${NC} Directory added: $dir_path ($dir_files supported files)"
-            ((manual_count++))
+            manual_count=$((manual_count + 1))
 
         else
             echo -e "    ${YELLOW}!${NC} Not found: $material_input"
@@ -213,7 +258,7 @@ task_102_corpus_collection() {
                 corpus=$(echo "$corpus" | jq --arg note "$material_input" \
                     '.materials += [{"note": $note, "type": "reference"}]')
                 echo -e "      ${GREEN}✓${NC} Stored as reference"
-                ((manual_count++))
+                manual_count=$((manual_count + 1))
             fi
         fi
     done
@@ -263,14 +308,14 @@ task_102_corpus_collection() {
 
                 if [[ $line_count -gt $max_lines ]]; then
                     truncated=" [TRUNCATED: showing first $max_lines of $line_count lines]"
-                    ((files_truncated++))
+                    files_truncated=$((files_truncated + 1))
                 fi
 
                 corpus_content+="
 === FILE: $(basename "$path")$truncated ===
 $(head -$max_lines "$path" 2>/dev/null)
 "
-                ((files_read++))
+                files_read=$((files_read + 1))
             fi
         done
 
@@ -508,7 +553,7 @@ EOF
             echo ""
             echo -e "  ${GREEN}✓${NC} Feedback noted"
             echo ""
-            ((reflection_turns++))
+            reflection_turns=$((reflection_turns + 1))
 
             # After a few turns, offer to proceed
             if [[ $reflection_turns -ge 3 ]]; then
@@ -542,7 +587,7 @@ EOF
             if [[ -f "$dest" ]]; then
                 # Check if same file
                 if cmp -s "$path" "$dest" 2>/dev/null; then
-                    ((skipped++))
+                    skipped=$((skipped + 1))
                     continue
                 fi
                 # Different file, add suffix
@@ -550,13 +595,13 @@ EOF
                 local name="${basename%.*}"
                 local ext="${basename##*.}"
                 while [[ -f "$corpus_dir/${name}_${counter}.${ext}" ]]; do
-                    ((counter++))
+                    counter=$((counter + 1))
                 done
                 dest="$corpus_dir/${name}_${counter}.${ext}"
             fi
 
             if cp "$path" "$dest" 2>/dev/null; then
-                ((copied++))
+                copied=$((copied + 1))
             fi
         fi
     done
@@ -669,7 +714,7 @@ _102_add_material() {
     # Check if it's a supported file type
     local ext="${abs_path##*.}"
     case "${ext,,}" in
-        md|txt|rst|pdf|json|yaml|yml)
+        md|txt|rst|pdf|json|yaml|yml|dot|svg)
             _102_SEEN_PATHS["$abs_path"]="$source"
             return 0
             ;;

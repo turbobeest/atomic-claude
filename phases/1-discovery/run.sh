@@ -133,32 +133,34 @@ main() {
     # Don't abort on failure - this is optional
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # CONVERSATION 2: OPENING DIALOGUE
+    # CONVERSATION 2: AGENT SELECTION
+    # Agents selected BEFORE dialogue so they can participate in ideation
     # ═══════════════════════════════════════════════════════════════════════════
 
     echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${CYAN}  CONVERSATION 2: OPENING DIALOGUE${NC}"
+    echo -e "${CYAN}  CONVERSATION 2: AGENT SELECTION${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 
-    # Task 104: Opening Dialogue
-    phase_task_interactive "104" "Opening Dialogue" task_104_opening_dialogue
+    # Task 104: Agent Selection (now BEFORE dialogue)
+    phase_task_interactive "104" "Agent Selection" task_104_agent_selection
     result=$?
     [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # CONVERSATION 3: AGENT SELECTION
+    # CONVERSATION 3: OPENING DIALOGUE
+    # Selected agents can now participate in the ideation conversation
     # ═══════════════════════════════════════════════════════════════════════════
 
     echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${CYAN}  CONVERSATION 3: AGENT SELECTION${NC}"
+    echo -e "${CYAN}  CONVERSATION 3: OPENING DIALOGUE${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 
-    # Task 105: Agent Selection
-    phase_task_interactive "105" "Agent Selection" task_105_agent_selection
+    # Task 105: Opening Dialogue (agents can participate)
+    phase_task_interactive "105" "Opening Dialogue" task_105_opening_dialogue
     result=$?
     [[ $result -eq $TASK_QUIT ]] && { atomic_error "Phase aborted"; exit 1; }
 

@@ -119,6 +119,14 @@ ATOMIC-CLAUDE/
 └── .logs/               # Invocation logs
 ```
 
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [`docs/TASK-CHEATSHEET.md`](docs/TASK-CHEATSHEET.md) | Complete reference for all 70+ tasks across 10 phases (inputs, outputs, LLM calls) |
+| [`docs/AIRGAPPED-MODEL-RANKING.md`](docs/AIRGAPPED-MODEL-RANKING.md) | Ollama model selection for offline/airgapped environments |
+| [`CLAUDE.md`](CLAUDE.md) | Session context and key directories for Claude Code |
+
 ## Using the Library
 
 ```bash

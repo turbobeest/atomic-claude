@@ -285,14 +285,23 @@ EOF
     # MEMORY CHECKPOINT
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    # Build summary for memory persistence
-    local memory_summary="Phase 4 Specification complete. $spec_count OpenSpecs created. $tasks_with_tdd tasks with TDD subtasks (RED/GREEN/REFACTOR/VERIFY). Ready for implementation."
+    # Build rich summary for memory persistence
+    local memory_summary
+    memory_summary="PHASE 4 SPECIFICATION COMPLETE
 
-    # Prompt user to save to long-term memory (if enabled)
-    memory_prompt_save 4 "Specification" "$memory_summary"
+OPENSPECS CREATED: $spec_count specifications
+TASKS WITH TDD: $tasks_with_tdd tasks with TDD subtasks
+TOTAL SUBTASKS: $total_subtasks (RED→GREEN→REFACTOR→VERIFY)
 
-    # Git: commit and push phase
-    atomic_git_phase_complete 4 "Specification"
+KEY ARTIFACTS:
+- .claude/specs/*.json: OpenSpec definitions
+- tasks.json: Updated with TDD subtasks
+- Test strategies defined for each spec
+
+READY FOR: Phase 5 (Implementation) - TDD execution cycles"
+
+    # Prompt user to save to long-term memory
+    memory_prompt_save "4" "Specification" "$memory_summary"
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # SESSION END

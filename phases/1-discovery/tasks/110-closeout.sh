@@ -260,14 +260,24 @@ EOF
     # MEMORY CHECKPOINT
     # ═══════════════════════════════════════════════════════════════════════════
 
-    # Build summary for memory persistence
-    local memory_summary="Phase 1 Discovery complete. $corpus_count materials collected. Selected approach: $approach_name. Direction confirmed and locked for PRD phase."
+    # Build rich summary for memory persistence
+    local memory_summary
+    memory_summary="PHASE 1 DISCOVERY COMPLETE
 
-    # Prompt user to save to long-term memory (if enabled)
-    memory_prompt_save 1 "Discovery" "$memory_summary"
+PROJECT CORPUS: $corpus_count materials collected
+SELECTED APPROACH: $approach_name
+AGENTS SELECTED: $agent_count
 
-    # Git: commit and push phase
-    atomic_git_phase_complete 1 "Discovery"
+KEY ARTIFACTS:
+- corpus.json: Project materials index
+- dialogue.json: Opening dialogue capture
+- selected-approach.json: Chosen implementation approach
+- docs/diagrams/*: Architecture diagrams
+
+READY FOR: Phase 2 (PRD) - Product Requirements Document"
+
+    # Prompt user to save to long-term memory
+    memory_prompt_save "1" "Discovery" "$memory_summary"
 
     # ═══════════════════════════════════════════════════════════════════════════
     # SESSION END

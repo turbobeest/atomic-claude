@@ -17,7 +17,6 @@ PHASE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$PHASE_LIB_DIR/atomic.sh"
 source "$PHASE_LIB_DIR/task-state.sh"
 source "$PHASE_LIB_DIR/memory.sh"
-source "$PHASE_LIB_DIR/git-ops.sh"
 
 # ============================================================================
 # PHASE STATE
@@ -260,17 +259,6 @@ phase_start() {
         return 1
     fi
 
-    # Get phase number from id (e.g., "0-setup" -> "0")
-    local phase_num="${phase_id%%-*}"
-
-    # Check for memory backtrack (starting a phase <= current head)
-    if memory_check_backtrack "$phase_num"; then
-        if ! memory_handle_backtrack "$phase_num"; then
-            echo "Backtrack cancelled by user" >&2
-            return 1
-        fi
-    fi
-
     # Create snapshot before starting (for rollback capability)
     PHASE_SNAPSHOT_DIR=$(phase_snapshot "$phase_id")
 
@@ -495,6 +483,9 @@ phase_task_interactive() {
         _PHASE_ACTIVE_TASK_ID="$task_id"
         _PHASE_ACTIVE_TASK_NAME="$task_name"
 
+        # Recall context for this task (if memory enabled)
+        memory_task_start "$task_id" "$task_name" "$CURRENT_PHASE"
+
         # Run the task
         local task_result=0
         if $task_func; then
@@ -502,6 +493,10 @@ phase_task_interactive() {
             task_state_complete "$task_id" "$task_name"
             _PHASE_ACTIVE_TASK_ID=""
             _PHASE_ACTIVE_TASK_NAME=""
+
+            # Save task outcomes to memory (if memory enabled)
+            memory_task_end "$task_id" "$task_name" "$CURRENT_PHASE"
+
             atomic_success "Task completed"
 
             # Post-task navigation
@@ -639,17 +634,16 @@ phase_run_tasks() {
     done
 
     while [[ $i -lt $total ]]; do
-        # Capture exit code without triggering set -e on non-zero returns
-        local result=0
-        phase_task_interactive "${task_ids[$i]}" "${task_names[$i]}" "${tasks[$i]}" || result=$?
+        phase_task_interactive "${task_ids[$i]}" "${task_names[$i]}" "${tasks[$i]}"
+        local result=$?
 
         case $result in
             $TASK_CONTINUE)
-                i=$((i + 1))
+                ((i++))
                 ;;
             $TASK_BACK)
                 if [[ $i -gt 0 ]]; then
-                    i=$((i - 1))
+                    ((i--))
                 else
                     atomic_warn "Already at first task"
                 fi

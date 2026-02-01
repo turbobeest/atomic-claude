@@ -323,14 +323,23 @@ EOF
     # MEMORY CHECKPOINT
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    # Build summary for memory persistence
-    local memory_summary="Phase 5 TDD Implementation complete. $completed_tasks/$total_tasks tasks done. $passing_tests tests passing with ${unit_coverage}% coverage. $critical_issues critical security issues. Ready for code review."
+    # Build rich summary for memory persistence
+    local memory_summary
+    memory_summary="PHASE 5 IMPLEMENTATION COMPLETE
 
-    # Prompt user to save to long-term memory (if enabled)
-    memory_prompt_save 5 "TDD Implementation" "$memory_summary"
+TASKS COMPLETED: $completed_tasks of $total_tasks
+TEST COVERAGE: ${unit_coverage}%
+FLAKY TESTS: ${flaky_tests:-0}
 
-    # Git: commit and push phase
-    atomic_git_phase_complete 5 "Implementation"
+KEY ARTIFACTS:
+- .claude/testing/: TDD execution records
+- validation-report.json: Coverage and quality metrics
+- All TDD cycles: RED→GREEN→REFACTOR→VERIFY
+
+READY FOR: Phase 6 (Code Review) - Comprehensive code review"
+
+    # Prompt user to save to long-term memory
+    memory_prompt_save "5" "Implementation" "$memory_summary"
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # SESSION END

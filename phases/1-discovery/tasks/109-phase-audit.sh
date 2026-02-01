@@ -27,6 +27,9 @@ task_109_phase_audit() {
     echo -e "${DIM}  └─────────────────────────────────────────────────────────────┘${NC}"
     echo ""
 
+    # Show audits dashboard reference
+    atomic_ref_audits "Browse the full audit library in the web dashboard"
+
     # ═══════════════════════════════════════════════════════════════════════════
     # AUDIT MODE SELECTION
     # ═══════════════════════════════════════════════════════════════════════════

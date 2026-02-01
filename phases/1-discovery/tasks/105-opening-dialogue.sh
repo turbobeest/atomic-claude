@@ -1,7 +1,8 @@
 #!/bin/bash
 #
-# Task 104: Opening Dialogue (Conversation 2)
+# Task 105: Opening Dialogue (Conversation 3)
 # Deep conversational exchange with human about vision, goals, and constraints
+# NOTE: Now runs AFTER agent selection so agents can participate
 #
 # This is a TRUE CONVERSATION - not a form to fill out.
 #
@@ -17,7 +18,7 @@
 #   - Agent has gathered all critical information
 #
 
-task_104_opening_dialogue() {
+task_105_opening_dialogue() {
     local corpus_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/corpus.json"
     local corpus_analysis="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/corpus-analysis.md"
     local dialogue_output="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/dialogue.json"
@@ -37,7 +38,7 @@ task_104_opening_dialogue() {
 
     echo ""
     echo -e "${DIM}  ┌─────────────────────────────────────────────────────────┐${NC}"
-    echo -e "${DIM}  │ CONVERSATION 2: OPENING DIALOGUE                        │${NC}"
+    echo -e "${DIM}  │ CONVERSATION 3: OPENING DIALOGUE                        │${NC}"
     echo -e "${DIM}  │                                                         │${NC}"
     echo -e "${DIM}  │ This is a real conversation, not a form.                │${NC}"
     echo -e "${DIM}  │ We'll talk until we both understand the vision.        │${NC}"
@@ -130,7 +131,6 @@ $p_goals"
     # Generate opening based on context
     local agent_opening=""
 
-    local _opening_streamed=false
     if [[ "$has_corpus" == true ]]; then
         # We have corpus - agent opens with observations
         cat > "$prompts_dir/dialogue-opening.md" << EOF
@@ -171,9 +171,9 @@ EOF
 
         atomic_waiting "Preparing opening..."
 
-        if atomic_invoke "$prompts_dir/dialogue-opening.md" "$prompts_dir/opening-response.txt" "Generate opening"; then
+        # Disable streaming - we format the conversational output ourselves
+        if ATOMIC_QUIET=true ATOMIC_STREAM=false atomic_invoke "$prompts_dir/dialogue-opening.md" "$prompts_dir/opening-response.txt" "Generate opening"; then
             agent_opening=$(cat "$prompts_dir/opening-response.txt")
-            [[ "${ATOMIC_STREAM:-true}" == "true" && -t 2 ]] && _opening_streamed=true
         else
             agent_opening="I've reviewed the materials you've gathered. I see some interesting patterns and have questions. What's the core problem you're trying to solve?"
         fi
@@ -182,15 +182,13 @@ EOF
         agent_opening="This looks like a fresh start - exciting! Before we dive in, I'd love to hear your vision in your own words. What are you trying to build, and why does it matter to you?"
     fi
 
-    # Display agent opening (skip content if streaming already showed it)
+    # Always display agent opening - streaming output can be unreliable
     echo -e "  ${CYAN}Agent:${NC}"
     echo ""
-    if [[ "$_opening_streamed" != true ]]; then
-        echo "$agent_opening" | fold -s -w 60 | while IFS= read -r line; do
-            echo -e "    $line"
-        done
-        echo ""
-    fi
+    echo "$agent_opening" | fold -s -w 60 | while IFS= read -r line; do
+        echo -e "    $line"
+    done
+    echo ""
 
     # Log the opening
     echo "## Turn 1" >> "$conversation_log"
@@ -210,36 +208,15 @@ EOF
 
         while [[ "$input_accepted" == false ]]; do
             echo -e "  ${GREEN}You:${NC}"
-            echo ""
-
-            # Multi-line input
-            human_response=""
-            local empty_count=0
-            while true; do
-                read -e -p "    " line || true
-                if [[ -z "$line" ]]; then
-                    ((empty_count++))
-                    [[ $empty_count -ge 1 ]] && break
-                else
-                    empty_count=0
-                    human_response+="$line"$'\n'
-                fi
-            done
-
-            # Trim whitespace for command checking
-            local trimmed_response
-            trimmed_response=$(echo "$human_response" | tr -d '[:space:]')
+            read -e -p "    " human_response || true
 
             # Check for undo command
-            if [[ "${trimmed_response,,}" == "undo" ]]; then
+            if [[ "${human_response,,}" == "undo" ]]; then
                 if [[ $turn -gt 1 ]]; then
-                    # Remove last agent message from dialogue
                     dialogue=$(echo "$dialogue" | jq '.conversation = .conversation[:-1]')
                     ((turn--))
                     echo ""
-                    echo -e "  ${YELLOW}↩${NC}  Last exchange undone. Conversation rolled back."
-                    echo ""
-                    # Show the current last message (previous agent response)
+                    echo -e "  ${YELLOW}↩${NC}  Last exchange undone."
                     local prev_msg
                     prev_msg=$(echo "$dialogue" | jq -r '.conversation[-1].content // empty')
                     if [[ -n "$prev_msg" ]]; then
@@ -255,62 +232,24 @@ EOF
                 fi
             fi
 
-            # Check for exit commands or empty input
-            if [[ "${trimmed_response,,}" =~ ^(done|finished|thatsit|exit|quit)$ ]] || [[ -z "$trimmed_response" ]]; then
-                if [[ $turn -lt 3 ]]; then
-                    echo ""
-                    echo -e "    ${YELLOW}We should talk a bit more to ensure I understand your vision.${NC}"
-                    echo -e "    ${DIM}Please share your thoughts, or type 'skip' to force exit.${NC}"
-                    echo ""
-
-                    read -e -p "    " force_response || true
-                    if [[ "${force_response,,}" == "skip" ]]; then
-                        conversation_complete=true
-                        input_accepted=true
-                        break
-                    fi
-                    human_response="$force_response"$'\n'
-                    input_accepted=true
-                else
-                    conversation_complete=true
-                    input_accepted=true
-                    break
+            # Check for exit commands
+            if [[ "${human_response,,}" =~ ^(done|finished|exit|quit|skip)$ ]]; then
+                if [[ $turn -lt 3 ]] && [[ "${human_response,,}" != "skip" ]]; then
+                    echo -e "    ${DIM}(Talk a bit more, or type 'skip' to exit early)${NC}"
+                    continue
                 fi
-            else
-                # Confirm before sending
-                echo -e "  ${DIM}[Enter] send  [r] redo  [u] undo last${NC}"
-                local _confirm
-                read -e -p "  " _confirm || true
-                case "${_confirm,,}" in
-                    r|redo)
-                        echo ""
-                        continue  # back to input collection
-                        ;;
-                    u|undo)
-                        if [[ $turn -gt 1 ]]; then
-                            dialogue=$(echo "$dialogue" | jq '.conversation = .conversation[:-1]')
-                            ((turn--))
-                            echo ""
-                            echo -e "  ${YELLOW}↩${NC}  Last exchange undone."
-                            echo ""
-                            local prev_msg2
-                            prev_msg2=$(echo "$dialogue" | jq -r '.conversation[-1].content // empty')
-                            if [[ -n "$prev_msg2" ]]; then
-                                echo -e "  ${CYAN}Agent:${NC} ${DIM}(restored)${NC}"
-                                echo ""
-                                echo "$prev_msg2" | fold -s -w 60 | while IFS= read -r _l; do echo -e "    $_l"; done
-                                echo ""
-                            fi
-                        else
-                            echo -e "  ${YELLOW}!${NC} Nothing to undo"
-                        fi
-                        continue
-                        ;;
-                    *)
-                        input_accepted=true
-                        ;;
-                esac
+                conversation_complete=true
+                input_accepted=true
+                break
             fi
+
+            # Empty input - prompt again
+            if [[ -z "$human_response" ]]; then
+                continue
+            fi
+
+            # Accept input
+            input_accepted=true
         done
 
         # If conversation was completed via exit command, break
@@ -401,10 +340,9 @@ EOF
         atomic_waiting "Thinking..."
 
         local agent_response=""
-        local _response_streamed=false
-        if atomic_invoke "$prompts_dir/dialogue-continue.md" "$prompts_dir/continue-response.txt" "Continue dialogue"; then
+        # Disable streaming - we format the conversational output ourselves
+        if ATOMIC_QUIET=true ATOMIC_STREAM=false atomic_invoke "$prompts_dir/dialogue-continue.md" "$prompts_dir/continue-response.txt" "Continue dialogue"; then
             agent_response=$(cat "$prompts_dir/continue-response.txt")
-            [[ "${ATOMIC_STREAM:-true}" == "true" && -t 2 ]] && _response_streamed=true
         else
             # Fallback responses based on probe focus
             case "$probe_focus" in
@@ -416,15 +354,14 @@ EOF
             esac
         fi
 
+        # Always display the response - streaming output can be unreliable
         echo ""
         echo -e "  ${CYAN}Agent:${NC}"
         echo ""
-        if [[ "$_response_streamed" != true ]]; then
-            echo "$agent_response" | fold -s -w 60 | while IFS= read -r line; do
-                echo -e "    $line"
-            done
-            echo ""
-        fi
+        echo "$agent_response" | fold -s -w 60 | while IFS= read -r line; do
+            echo -e "    $line"
+        done
+        echo ""
 
         # Log agent response
         echo "## Turn $((turn + 1))" >> "$conversation_log"
