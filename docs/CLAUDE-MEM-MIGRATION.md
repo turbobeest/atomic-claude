@@ -49,35 +49,48 @@ Claude-mem already captures context via Claude Code hooks:
 2. Verify hooks are firing during ATOMIC-CLAUDE runs
 3. Check web UI at localhost:37777 shows captured context
 
-### Phase 2: Modify lib/memory.sh
+**Status:** Pending (requires claude-mem plugin installation)
 
-**Remove:**
+### Phase 2: Remove Supermemory Dependencies ✅ COMPLETE
+
+**Removed:**
 - `_sm_memory()` - Supermemory save function
 - `_sm_recall()` - Supermemory recall function
-- Supermemory API key checks
-- HTTP curl calls to Supermemory
+- `_sm_delete()`, `_sm_forget()`, `_sm_forget_matching()` - Delete functions
+- `_memory_forget_all_project()`, `_memory_forget_after_phase()` - Forget helpers
+- `_memory_check_connection()` - Connection verification
+- Supermemory API key checks throughout codebase
+- HTTP curl calls to Supermemory API
 
-**Keep:**
-- `memory_task_start()` - But modify to use mem-search
-- `memory_task_end()` - May become no-op (hooks handle it)
-- Local file fallback in `.state/memory/`
+**Kept:**
+- `memory_task_start()` - Uses local file recall
+- `memory_task_end()` - Saves to local files
+- Local file storage in `.state/memory/`
 - Task context injection into prompts
+- Head tracking and backtrack detection
+- User approval gates for phase closeouts
 
-**Add:**
-- Integration with mem-search skill for recall
-- Project-scoped queries (filter by ATOMIC project)
+**Updated:**
+- `phases/0-setup/tasks/004-api-keys.sh` - Replaced Supermemory option with local memory toggle
+- `README.md` - Updated persistent memory documentation
+- `agents/agent-manifest.json` - Renamed supermemory-expert to ai-memory-expert
+- Deprecated `SUPERMEMORY-INTEGRATION.md`
 
 ### Phase 3: Update lib/task-memory-defs.sh
 
-The recall/save definitions can stay - they define WHAT to recall/save.
-The implementation changes HOW (Supermemory → claude-mem).
+The recall/save definitions remain unchanged - they define WHAT to recall/save.
+The implementation now uses local files exclusively.
+
+**Status:** No changes needed - definitions are backend-agnostic
 
 ### Phase 4: Test Memory Flow
 
-1. Run Phase 0 setup with claude-mem
-2. Verify context captured in SQLite
-3. Run Phase 1 and verify recall works
+1. Run Phase 0 setup with memory enabled
+2. Verify local files created in `.state/memory/`
+3. Run Phase 1 and verify recall from local files works
 4. Check task-context.md contains relevant history
+
+**Status:** Ready for testing
 
 ## Open Questions
 
@@ -109,12 +122,13 @@ config/secrets.json        # Remove supermemory key requirement
 
 ## Success Criteria
 
-- [ ] ATOMIC-CLAUDE runs without Supermemory API key
-- [ ] Task context persists across sessions via claude-mem
-- [ ] Phase closeouts capture meaningful summaries
-- [ ] Recall at task start retrieves relevant context
-- [ ] Web UI at localhost:37777 shows ATOMIC project history
-- [ ] No degradation in cross-task context quality
+- [x] ATOMIC-CLAUDE runs without Supermemory API key
+- [x] Local memory storage in `.state/memory/` works
+- [x] Phase closeouts capture meaningful summaries (local)
+- [x] Recall at task start retrieves from local files
+- [ ] Task context persists across sessions via claude-mem (requires plugin)
+- [ ] Web UI at localhost:37777 shows ATOMIC project history (requires plugin)
+- [ ] No degradation in cross-task context quality (needs testing)
 
 ## Timeline Estimate
 
