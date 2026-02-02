@@ -11,7 +11,7 @@ SCRIPT ──prompt.md──► CLAUDE ──output.json──► SCRIPT ──p
 [state.json]                                 [state.json]
 ```
 
-<img width="2816" height="1536" alt="Gemini_Generated_Image_ewch6tewch6tewch" src="https://github.com/user-attachments/assets/deb5bc34-cd3c-42cd-bf0f-ab08f9644215" />
+![Gemini_Generated_Image_ewch6tewch6tewch](https://github.boozallencsn.com/user-attachments/assets/d599c157-5627-4896-b333-6036bf0b9003)
 
 
 
