@@ -157,6 +157,9 @@ EOF
         echo -e "    ${DIM}├── reports/${NC}"
         echo -e "    ${DIM}└── history/${NC}"
     fi
+
+    # Configure TaskMaster for Bedrock if enabled
+    _301_configure_taskmaster_provider "$taskmaster_dir"
     echo ""
 
     # ─────────────────────────────────────────────────────────────────────────────
@@ -224,4 +227,80 @@ EOF
     atomic_success "Entry and initialization complete"
 
     return 0
+}
+
+# Configure TaskMaster to use the same provider as atomic-claude
+# Reads from secrets.json and creates .taskmaster/config.json
+_301_configure_taskmaster_provider() {
+    local taskmaster_dir="$1"
+    local config_file="$taskmaster_dir/config.json"
+    local secrets_file="$ATOMIC_OUTPUT_DIR/0-setup/secrets.json"
+
+    # Check if secrets exist
+    if [[ ! -f "$secrets_file" ]]; then
+        echo -e "  ${DIM}No provider configuration found - TaskMaster will use defaults${NC}"
+        return 0
+    fi
+
+    # Check if Bedrock is enabled
+    local bedrock_enabled
+    bedrock_enabled=$(jq -r '.bedrock_enabled // false' "$secrets_file" 2>/dev/null)
+
+    if [[ "$bedrock_enabled" == "true" ]]; then
+        local aws_region aws_profile bedrock_model
+        aws_region=$(jq -r '.aws_region // "us-east-1"' "$secrets_file" 2>/dev/null)
+        aws_profile=$(jq -r '.aws_profile // "default"' "$secrets_file" 2>/dev/null)
+        bedrock_model=$(jq -r '.bedrock_model // empty' "$secrets_file" 2>/dev/null)
+
+        # Extract model ID from inference profile (e.g., us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0 -> claude-sonnet-4-5-20250929)
+        local model_id="claude-sonnet-4-5-20250929"
+        if [[ -n "$bedrock_model" ]]; then
+            # Try to extract the model name from the inference profile
+            model_id=$(echo "$bedrock_model" | sed -E 's/.*anthropic\.([^:]+).*/\1/' | sed 's/-v[0-9]*$//')
+        fi
+
+        echo -e "  ${DIM}Configuring TaskMaster for AWS Bedrock...${NC}"
+
+        # Create TaskMaster config for Bedrock
+        cat > "$config_file" <<EOF
+{
+  "models": {
+    "main": {
+      "provider": "bedrock",
+      "modelId": "$model_id",
+      "maxTokens": 64000,
+      "temperature": 0.2
+    },
+    "research": {
+      "provider": "bedrock",
+      "modelId": "$model_id",
+      "maxTokens": 32000,
+      "temperature": 0.1
+    },
+    "fallback": {
+      "provider": "bedrock",
+      "modelId": "$model_id",
+      "maxTokens": 64000,
+      "temperature": 0.2
+    }
+  },
+  "global": {
+    "logLevel": "info",
+    "debug": false,
+    "defaultSubtasks": 5,
+    "defaultPriority": "medium",
+    "projectName": "$(basename "$ATOMIC_ROOT")"
+  }
+}
+EOF
+
+        echo -e "  ${GREEN}✓${NC} TaskMaster configured for AWS Bedrock"
+        echo -e "    ${DIM}Region: $aws_region | Profile: $aws_profile${NC}"
+        echo -e "    ${DIM}Model: $model_id${NC}"
+
+        # Note: TaskMaster uses AWS credential chain, so AWS_PROFILE and AWS_REGION
+        # environment variables (set by atomic.sh) will be used automatically
+    else
+        echo -e "  ${DIM}Using TaskMaster default provider configuration${NC}"
+    fi
 }
