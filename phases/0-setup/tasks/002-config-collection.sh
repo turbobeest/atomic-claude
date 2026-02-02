@@ -482,12 +482,16 @@ task_002_config_guided() {
     echo ""
 
     # --- Repository ---
-    local detected_repo=$(git remote get-url origin 2>/dev/null || true)
-    echo -e "${CYAN}  Repository URL${NC}"
+    # Only auto-detect if we're embedded in a project (ATOMIC_ORCHESTRATOR set)
+    local detected_repo=""
+    if [[ -n "${ATOMIC_ORCHESTRATOR:-}" ]]; then
+        detected_repo=$(cd "$ATOMIC_ORCHESTRATOR" && git remote get-url origin 2>/dev/null || true)
+    fi
+    echo -e "${CYAN}  Repository URL${NC} ${DIM}(optional, press Enter to skip)${NC}"
     if [[ -n "$detected_repo" ]]; then
         echo -e "${DIM}    Detected: $detected_repo${NC}"
     fi
-    read -e -p "    URL [$detected_repo]: " repo_url || true
+    read -e -p "    URL [${detected_repo:-none}]: " repo_url || true
     repo_url=${repo_url:-$detected_repo}
     echo ""
 
@@ -645,8 +649,15 @@ task_002_config_quick() {
     primary_goal=${primary_goal:-"Build a production-ready component"}
     echo ""
 
-    # Detect repo
-    local detected_repo=$(git remote get-url origin 2>/dev/null || true)
+    # Detect repo - only use if we're in the project root, not inside ATOMIC-CLAUDE
+    local detected_repo=""
+    if [[ -n "${ATOMIC_ORCHESTRATOR:-}" ]]; then
+        # We're embedded in a project - check the parent's git remote
+        detected_repo=$(cd "$ATOMIC_ORCHESTRATOR" && git remote get-url origin 2>/dev/null || true)
+    else
+        # Standalone - don't auto-detect (user should provide)
+        detected_repo=""
+    fi
 
     # Build config with all defaults (using --arg for safe string handling)
     local tmp=$(atomic_mktemp)
