@@ -226,6 +226,7 @@ PROMPT_HEADER
     "forbidden_paths": ["array of paths"],
     "forbidden_commands": ["array of commands"],
     "command_approval_mode": "strict|cautious|permissive",
+    "network_mode": "cui|internet",
     "network_access": "none|fetch-only|allowlist|blocklist|full",
     "blocked_ips": ["array of CIDR ranges"]
   },
@@ -296,6 +297,7 @@ For a Node.js API project with TypeScript and PostgreSQL:
     "forbidden_paths": [".env*", "secrets/", "*.key"],
     "forbidden_commands": ["rm -rf /"],
     "command_approval_mode": "cautious",
+    "network_mode": "cui",
     "network_access": "fetch-only",
     "blocked_ips": ["169.254.169.254/32"]
   },
@@ -569,6 +571,7 @@ task_002_config_guided() {
             "sandbox": {
                 "forbidden_paths": [".env*", "secrets/", "credentials/", "*.pem", "*.key"],
                 "command_approval_mode": "cautious",
+                "network_mode": "cui",
                 "network_access": "fetch-only",
                 "blocked_ips": ["169.254.169.254/32"]
             },
@@ -683,6 +686,7 @@ task_002_config_quick() {
             "sandbox": {
                 "forbidden_paths": [".env*", "secrets/", "credentials/", "*.pem", "*.key"],
                 "command_approval_mode": "cautious",
+                "network_mode": "cui",
                 "network_access": "fetch-only",
                 "blocked_ips": ["169.254.169.254/32"]
             },

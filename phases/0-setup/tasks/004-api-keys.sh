@@ -45,33 +45,51 @@ task_004_api_keys() {
     # =========================================================================
     # NETWORK MODE SELECTION (CUI vs Internet-enabled)
     # =========================================================================
-    echo -e "  ${BOLD}Network Access Mode${NC}"
-    echo -e "  ${DIM}Controls whether Claude Code can access the internet${NC}"
-    echo ""
-    echo -e "  ${CYAN}1.${NC} CUI Mode       ${DIM}- No internet access (airgapped/secure)${NC}"
-    echo -e "  ${CYAN}2.${NC} Internet Mode  ${DIM}- Full network access (web search, fetch)${NC}"
-    echo ""
-    # Drain stdin before prompt
-    while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
-    read -e -p "  Network mode [1]: " network_choice || true
-    network_choice=${network_choice:-1}
+    # Check if network_mode was pre-configured in setup.md (via project-config.json)
+    local preconfigured_mode=""
+    if [[ -f "$config_file" ]]; then
+        preconfigured_mode=$(jq -r '.extracted.sandbox.network_mode // empty' "$config_file" 2>/dev/null)
+    fi
 
     local network_mode="cui"
-    case "$network_choice" in
-        1) network_mode="cui" ;;
-        2) network_mode="internet" ;;
-        *) network_mode="cui" ;;
-    esac
+    if [[ -n "$preconfigured_mode" && "$preconfigured_mode" != "null" ]]; then
+        # Use pre-configured value from setup.md
+        network_mode="$preconfigured_mode"
+        echo -e "  ${BOLD}Network Access Mode${NC} ${DIM}(from setup.md)${NC}"
+        if [[ "$network_mode" == "cui" ]]; then
+            echo -e "  ${GREEN}✓${NC} CUI Mode: Claude Code will be sandboxed from internet"
+        else
+            echo -e "  ${GREEN}✓${NC} Internet Mode: Claude Code can access the web"
+        fi
+    else
+        # Interactive selection
+        echo -e "  ${BOLD}Network Access Mode${NC}"
+        echo -e "  ${DIM}Controls whether Claude Code can access the internet${NC}"
+        echo ""
+        echo -e "  ${CYAN}1.${NC} CUI Mode       ${DIM}- No internet access (airgapped/secure)${NC}"
+        echo -e "  ${CYAN}2.${NC} Internet Mode  ${DIM}- Full network access (web search, fetch)${NC}"
+        echo ""
+        # Drain stdin before prompt
+        while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
+        read -e -p "  Network mode [1]: " network_choice || true
+        network_choice=${network_choice:-1}
+
+        case "$network_choice" in
+            1) network_mode="cui" ;;
+            2) network_mode="internet" ;;
+            *) network_mode="cui" ;;
+        esac
+
+        if [[ "$network_mode" == "cui" ]]; then
+            echo -e "  ${GREEN}✓${NC} CUI Mode: Claude Code will be sandboxed from internet"
+        else
+            echo -e "  ${GREEN}✓${NC} Internet Mode: Claude Code can access the web"
+        fi
+    fi
 
     # Save network mode to secrets
     local tmp=$(atomic_mktemp)
     jq --arg mode "$network_mode" '.network_mode = $mode' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
-
-    if [[ "$network_mode" == "cui" ]]; then
-        echo -e "  ${GREEN}✓${NC} CUI Mode: Claude Code will be sandboxed from internet"
-    else
-        echo -e "  ${GREEN}✓${NC} Internet Mode: Claude Code can access the web"
-    fi
     echo ""
 
     # =========================================================================

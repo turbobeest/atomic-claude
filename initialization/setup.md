@@ -116,8 +116,23 @@ default
 
 default
 
-## Network Access
-# What external network access is allowed?
+## Network Mode
+# Controls Claude Code's ability to access the internet.
+#
+#   cui      - CUI/Airgapped mode: Blocks WebSearch, WebFetch, Browser tools.
+#              Claude cannot access any external URLs or search the web.
+#              Use for: classified environments, air-gapped networks, CUI data.
+#
+#   internet - Full network access: All tools available.
+#              Claude can search the web, fetch URLs, and use browser tools.
+#              Use for: development, research, projects needing web access.
+#
+# Options: cui | internet | default [cui]
+
+cui
+
+## Network Access (Advanced)
+# Fine-grained network control for bash commands (separate from Claude tools above).
 #   none        - No external network calls (fully offline)
 #   fetch-only  - Can fetch/read from URLs, no POST/PUT/DELETE
 #   allowlist   - Only specific domains (list below)
