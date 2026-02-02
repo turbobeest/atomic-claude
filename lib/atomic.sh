@@ -674,6 +674,25 @@ _atomic_load_bedrock_config() {
     fi
 }
 
+# Load network mode configuration from secrets.json
+# Sets ATOMIC_NETWORK_MODE to "cui" or "internet"
+_atomic_load_network_mode() {
+    local secrets_file="$ATOMIC_OUTPUT_DIR/0-setup/secrets.json"
+
+    if [[ ! -f "$secrets_file" ]]; then
+        # Default to CUI mode (most secure)
+        ATOMIC_NETWORK_MODE="cui"
+        return 0
+    fi
+
+    local network_mode
+    network_mode=$(jq -r '.network_mode // "cui"' "$secrets_file" 2>/dev/null)
+    ATOMIC_NETWORK_MODE="${network_mode:-cui}"
+}
+
+# Global variable for network mode
+ATOMIC_NETWORK_MODE="cui"
+
 # Flag to track if config has been loaded
 _ATOMIC_CONFIG_LOADED=false
 
@@ -681,6 +700,7 @@ _ATOMIC_CONFIG_LOADED=false
 _atomic_ensure_config() {
     if [[ "$_ATOMIC_CONFIG_LOADED" != "true" ]]; then
         _atomic_load_provider_config
+        _atomic_load_network_mode
     fi
 }
 
@@ -1131,6 +1151,12 @@ atomic_task_header() {
         status_indicator="${RD}●${LB} OFFLINE"
     fi
 
+    # Network mode indicator
+    local network_indicator=""
+    if [[ "${ATOMIC_NETWORK_MODE:-cui}" == "cui" ]]; then
+        network_indicator="${LB}[CUI]"
+    fi
+
     # Context window + cost lookup from models.json
     local context_window="?" cost_tier="?"
     local config_file="$ATOMIC_ROOT/config/models.json"
@@ -1162,7 +1188,7 @@ atomic_task_header() {
     # Print header block
     echo ""
     printf '%s  ╶─── %s ─────────────────────────────────%s\n' "$LB" "$description" "$RST"
-    printf '%s    %-10s%-15s%-10s%-16s%s%s\n' "$LB" "provider" "$provider" "model" "$model" "$status_indicator" "$RST"
+    printf '%s    %-10s%-15s%-10s%-16s%s%s%s\n' "$LB" "provider" "$provider" "model" "$model" "$status_indicator" "$network_indicator" "$RST"
     printf '%s    %-10s%-15s%-10s%-16s%-6s%s%s\n' "$LB" "context" "$context_window" "cost" "$cost_tier" "role" "${role:-─}" "$RST"
     printf '%s    %-10s%-15s%-10s%s%s\n' "$LB" "host" "$host_type" "timeout" "${timeout}s" "$RST"
     if [[ "$provider" == "ollama" && -n "$ollama_host" ]]; then
@@ -1360,6 +1386,15 @@ _atomic_build_invoke_cmd() {
     escaped_atomic_root=$(printf '%s' "$ATOMIC_ROOT" | sed "s/'/'\\\\''/g")
 
     # =========================================================================
+    # CUI MODE: Block network tools (WebSearch, WebFetch, Browser)
+    # =========================================================================
+    local network_block=""
+    if [[ "${ATOMIC_NETWORK_MODE:-cui}" == "cui" ]]; then
+        # Block all network-accessing tools for airgapped/CUI environments
+        network_block="--disallowedTools 'WebSearch,WebFetch,Browser'"
+    fi
+
+    # =========================================================================
     # BEDROCK: Use Claude CLI directly (it reads CLAUDE_CODE_USE_BEDROCK env var)
     # =========================================================================
     if [[ "${CLAUDE_CODE_USE_BEDROCK:-}" == "1" || "$provider" == "bedrock" ]]; then
@@ -1370,6 +1405,11 @@ _atomic_build_invoke_cmd() {
         cmd="${cmd} --dangerously-skip-permissions"
         cmd="${cmd} --output-format text"
         cmd="${cmd} --max-turns '${CLAUDE_MAX_TURNS:-1}'"
+
+        # Network mode restriction (CUI blocks web tools)
+        if [[ -n "$network_block" ]]; then
+            cmd="${cmd} ${network_block}"
+        fi
 
         # Tool restriction
         if [[ -n "${CLAUDE_TOOLS+set}" ]]; then
@@ -1400,6 +1440,11 @@ _atomic_build_invoke_cmd() {
         cmd="${cmd} --output-format text"
         cmd="${cmd} --max-turns '${CLAUDE_MAX_TURNS:-1}'"
 
+        # Network mode restriction (CUI blocks web tools)
+        if [[ -n "$network_block" ]]; then
+            cmd="${cmd} ${network_block}"
+        fi
+
         # Tool restriction
         if [[ -n "${CLAUDE_TOOLS+set}" ]]; then
             cmd="${cmd} --tools '${CLAUDE_TOOLS}'"
@@ -1421,6 +1466,11 @@ _atomic_build_invoke_cmd() {
     # Add model if specified and not using default
     if [[ -n "$model" && "$model" != "opus" && "$model" != "sonnet" ]]; then
         cmd="${cmd} --model '${model}'"
+    fi
+
+    # Network mode restriction (CUI blocks web tools)
+    if [[ -n "$network_block" ]]; then
+        cmd="${cmd} ${network_block}"
     fi
 
     # Tool restriction
