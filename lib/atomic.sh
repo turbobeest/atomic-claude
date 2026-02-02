@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # ATOMIC CLAUDE - Core Library
 # Provides atomic Claude invocation primitives for script-controlled LLM tasks
@@ -9,6 +9,81 @@
 #
 
 set -euo pipefail
+
+# ============================================================================
+# TIMEOUT WRAPPER (macOS/Linux compatible)
+# ============================================================================
+
+# Cross-platform timeout command
+# Usage: _atomic_timeout <seconds> <command> [args...]
+_atomic_timeout() {
+    local timeout_duration="$1"
+    shift
+
+    # Check if native timeout command exists (Linux)
+    if command -v timeout &>/dev/null; then
+        timeout "$timeout_duration" "$@"
+        return $?
+    fi
+
+    # Check if gtimeout exists (macOS with coreutils)
+    if command -v gtimeout &>/dev/null; then
+        gtimeout "$timeout_duration" "$@"
+        return $?
+    fi
+
+    # Fallback: bash-native timeout implementation
+    (
+        "$@" &
+        local cmd_pid=$!
+
+        # Start timeout monitor
+        (
+            sleep "$timeout_duration"
+            kill -TERM "$cmd_pid" 2>/dev/null
+            sleep 1
+            kill -KILL "$cmd_pid" 2>/dev/null
+        ) &
+        local monitor_pid=$!
+
+        # Wait for command to complete
+        wait "$cmd_pid" 2>/dev/null
+        local exit_code=$?
+
+        # Kill monitor if command finished first
+        kill -TERM "$monitor_pid" 2>/dev/null
+        wait "$monitor_pid" 2>/dev/null
+
+        exit $exit_code
+    )
+    return $?
+}
+
+# ============================================================================
+# JSON ESCAPING
+# ============================================================================
+
+# Escape a string for safe inclusion in JSON
+# Handles: quotes, backslashes, newlines, tabs, control characters
+# Usage: local escaped=$(atomic_json_escape "$raw_string")
+atomic_json_escape() {
+    local input="$1"
+    # Escape backslashes first (must be first!)
+    input="${input//\\/\\\\}"
+    # Escape double quotes
+    input="${input//\"/\\\"}"
+    # Escape newlines
+    input="${input//$'\n'/\\n}"
+    # Escape tabs
+    input="${input//$'\t'/\\t}"
+    # Escape carriage returns
+    input="${input//$'\r'/\\r}"
+    # Escape form feeds
+    input="${input//$'\f'/\\f}"
+    # Escape backspaces
+    input="${input//$'\b'/\\b}"
+    echo "$input"
+}
 
 # ============================================================================
 # CONFIGURATION
@@ -34,9 +109,55 @@ ATOMIC_OUTPUT_DIR="${ATOMIC_OUTPUT_DIR:-$ATOMIC_ROOT/.outputs}"
 ATOMIC_LOG_DIR="${ATOMIC_LOG_DIR:-$ATOMIC_ROOT/.logs}"
 
 # Claude configuration
-CLAUDE_MODEL="${CLAUDE_MODEL:-opus}"
+# Default to sonnet (more widely available, cost-effective)
+# Model can be overridden via CLAUDE_MODEL env var or setup.md primary_model
+CLAUDE_MODEL="${CLAUDE_MODEL:-sonnet}"
 CLAUDE_MAX_TURNS="${CLAUDE_MAX_TURNS:-30}"
 CLAUDE_TIMEOUT="${CLAUDE_TIMEOUT:-1200}"  # 20 minutes for large prompts
+
+# ============================================================================
+# MODEL CONFIGURATION HELPERS
+# ============================================================================
+
+# Get the primary model from project config (setup.md)
+# Returns the configured model or falls back to CLAUDE_MODEL default
+# Usage: local model=$(atomic_get_primary_model)
+atomic_get_primary_model() {
+    local project_config="$ATOMIC_OUTPUT_DIR/0-setup/project-config.json"
+
+    if [[ -f "$project_config" ]]; then
+        local primary_model
+        primary_model=$(jq -r '.extracted.llm.primary_model // empty' "$project_config" 2>/dev/null)
+
+        if [[ -n "$primary_model" && "$primary_model" != "null" ]]; then
+            echo "$primary_model"
+            return 0
+        fi
+    fi
+
+    # Fallback to environment default
+    echo "$CLAUDE_MODEL"
+}
+
+# Get the fast model from project config (setup.md)
+# Returns the configured fast model or falls back to haiku
+# Usage: local model=$(atomic_get_fast_model)
+atomic_get_fast_model() {
+    local project_config="$ATOMIC_OUTPUT_DIR/0-setup/project-config.json"
+
+    if [[ -f "$project_config" ]]; then
+        local fast_model
+        fast_model=$(jq -r '.extracted.llm.fast_model // empty' "$project_config" 2>/dev/null)
+
+        if [[ -n "$fast_model" && "$fast_model" != "null" ]]; then
+            echo "$fast_model"
+            return 0
+        fi
+    fi
+
+    # Fallback to haiku for fast operations
+    echo "haiku"
+}
 
 # Claude-local wrapper configuration
 CLAUDE_LOCAL_PATH="${CLAUDE_LOCAL_PATH:-$ATOMIC_ROOT/../claude-local}"
@@ -128,6 +249,50 @@ atomic_ref_dashboards() {
         echo -e "  ${YELLOW}Audits${NC}  http://${ip}:${ATOMIC_AUDITS_PORT}/audits"
     fi
     echo ""
+}
+
+# Auto-start tasks dashboard if not running
+# Usage: atomic_start_dashboard [silent]
+atomic_start_dashboard() {
+    local silent="${1:-false}"
+    local dashboard_port="${ATOMIC_DASHBOARD_PORT:-8420}"
+
+    # Check if already running
+    if curl -s --connect-timeout 1 "http://localhost:${dashboard_port}/" &>/dev/null; then
+        [[ "$silent" != "true" ]] && atomic_info "Dashboard already running"
+        return 0
+    fi
+
+    # Check if Python is available
+    if ! command -v python3 &>/dev/null; then
+        [[ "$silent" != "true" ]] && atomic_warn "Python3 not installed - dashboard unavailable"
+        return 1
+    fi
+
+    # Check if dashboard.py exists
+    local dashboard_script="$ATOMIC_ROOT/dashboard.py"
+    if [[ ! -f "$dashboard_script" ]]; then
+        [[ "$silent" != "true" ]] && atomic_warn "Dashboard script not found at $dashboard_script"
+        return 1
+    fi
+
+    # Start dashboard in background (detached from terminal)
+    nohup python3 "$dashboard_script" "$ROOT_DIR" --port "$dashboard_port" < /dev/null > "$ATOMIC_LOG_DIR/dashboard.log" 2>&1 &
+    local dashboard_pid=$!
+    disown 2>/dev/null || true
+
+    # Wait a moment for startup
+    sleep 2
+
+    # Verify it started
+    if curl -s --connect-timeout 1 "http://localhost:${dashboard_port}/" &>/dev/null; then
+        [[ "$silent" != "true" ]] && atomic_success "Dashboard started on port $dashboard_port (PID: $dashboard_pid)"
+        [[ "$silent" != "true" ]] && echo -e "  ${CYAN}→${NC} http://localhost:$dashboard_port"
+        return 0
+    else
+        [[ "$silent" != "true" ]] && atomic_warn "Dashboard failed to start - check $ATOMIC_LOG_DIR/dashboard.log"
+        return 1
+    fi
 }
 
 # ============================================================================
@@ -772,7 +937,7 @@ _atomic_is_claude_available() {
     timeout=$(jq -r '.fallback_behavior.offline_detection_timeout // 5' "$config_file" 2>/dev/null)
 
     # Try to reach Claude API (quick health check via claude-local)
-    if timeout "$timeout" "$CLAUDE_LOCAL_PATH/invoke.sh" --provider=max --health-check &>/dev/null 2>&1; then
+    if _atomic_timeout "$timeout" "$CLAUDE_LOCAL_PATH/invoke.sh" --provider=max --health-check &>/dev/null 2>&1; then
         _CLAUDE_AVAILABLE="true"
         _CLAUDE_CHECK_TIME=$now
         return 0
@@ -1124,11 +1289,6 @@ atomic_task_header() {
     local output_file="$7"
     local ollama_host="${8:-}"
 
-    local LB=$'\033[94m'   # Light blue
-    local RST=$'\033[0m'   # Reset
-    local GRN=$'\033[32m'  # Green
-    local RD=$'\033[31m'   # Red
-
     # Online/offline detection
     local is_online=false
     case "$provider" in
@@ -1137,25 +1297,15 @@ atomic_task_header() {
         bedrock) [[ "${CLAUDE_CODE_USE_BEDROCK:-}" == "1" ]] && is_online=true ;;
         ollama) curl -s --connect-timeout 1 "${ollama_host:-http://localhost:11434}/api/tags" &>/dev/null && is_online=true ;;
     esac
-    
+
     # If CLAUDE_CODE_USE_BEDROCK is set, override provider display
     if [[ "${CLAUDE_CODE_USE_BEDROCK:-}" == "1" ]]; then
         provider="bedrock"
         is_online=true
     fi
 
-    local status_indicator
-    if $is_online; then
-        status_indicator="${GRN}●${LB} online"
-    else
-        status_indicator="${RD}●${LB} OFFLINE"
-    fi
-
-    # Network mode indicator
-    local network_indicator=""
-    if [[ "${ATOMIC_NETWORK_MODE:-cui}" == "cui" ]]; then
-        network_indicator="${LB}[CUI]"
-    fi
+    # Network mode
+    local network_mode="${ATOMIC_NETWORK_MODE:-cui}"
 
     # Context window + cost lookup from models.json
     local context_window="?" cost_tier="?"
@@ -1168,35 +1318,74 @@ atomic_task_header() {
         [[ -n "$cost" ]] && cost_tier="$cost"
     fi
 
-    # Format context window for display (200000 -> 200K)
-    if [[ "$context_window" =~ ^[0-9]+$ ]] && (( context_window >= 1000 )); then
-        context_window="$((context_window / 1000))K"
-    fi
-
-    # Shorten paths relative to ATOMIC_ROOT
-    local short_prompt="${prompt_source#$ATOMIC_ROOT/}"
-    local short_output="${output_file#$ATOMIC_ROOT/}"
-
     # Host type
     local host_type
     case "$provider" in
-        max|api) host_type="CLAUDECODE" ;;
+        max|api|bedrock) host_type="CLAUDECODE" ;;
         ollama) host_type="OLLAMA" ;;
         *) host_type="LOCAL" ;;
     esac
 
-    # Print header block
+    # Write status to JSON for dashboard (real-time monitoring)
+    local status_file="$ATOMIC_STATE_DIR/current-task.json"
+    mkdir -p "$ATOMIC_STATE_DIR"
+
+    # Escape all string values for JSON safety
+    local desc_escaped=$(atomic_json_escape "$description")
+    local provider_escaped=$(atomic_json_escape "$provider")
+    local model_escaped=$(atomic_json_escape "$model")
+    local role_escaped=$(atomic_json_escape "${role:-}")
+    local network_escaped=$(atomic_json_escape "$network_mode")
+    local context_escaped=$(atomic_json_escape "$context_window")
+    local cost_escaped=$(atomic_json_escape "$cost_tier")
+    local host_escaped=$(atomic_json_escape "$host_type")
+    local ollama_escaped=$(atomic_json_escape "${ollama_host:-}")
+    local prompt_escaped=$(atomic_json_escape "$prompt_source")
+    local output_escaped=$(atomic_json_escape "$output_file")
+    local phase_escaped=$(atomic_json_escape "${CURRENT_PHASE:-}")
+    local task_escaped=$(atomic_json_escape "${CURRENT_TASK_ID:-}")
+
+    cat > "$status_file" << EOF
+{
+  "active": true,
+  "description": "$desc_escaped",
+  "provider": "$provider_escaped",
+  "model": "$model_escaped",
+  "role": "$role_escaped",
+  "timeout": $timeout,
+  "online": $is_online,
+  "network_mode": "$network_escaped",
+  "context_window": "$context_escaped",
+  "cost_tier": "$cost_escaped",
+  "host_type": "$host_escaped",
+  "ollama_host": "$ollama_escaped",
+  "prompt_source": "$prompt_escaped",
+  "output_file": "$output_escaped",
+  "phase": "$phase_escaped",
+  "task_id": "$task_escaped",
+  "timestamp": "$(date -Iseconds)"
+}
+EOF
+
+    # Minimal CLI output - just show what's happening
     echo ""
-    printf '%s  ╶─── %s ─────────────────────────────────%s\n' "$LB" "$description" "$RST"
-    printf '%s    %-10s%-15s%-10s%-16s%s%s%s\n' "$LB" "provider" "$provider" "model" "$model" "$status_indicator" "$network_indicator" "$RST"
-    printf '%s    %-10s%-15s%-10s%-16s%-6s%s%s\n' "$LB" "context" "$context_window" "cost" "$cost_tier" "role" "${role:-─}" "$RST"
-    printf '%s    %-10s%-15s%-10s%s%s\n' "$LB" "host" "$host_type" "timeout" "${timeout}s" "$RST"
-    if [[ "$provider" == "ollama" && -n "$ollama_host" ]]; then
-        printf '%s    %-10s%s%s\n' "$LB" "endpoint" "$ollama_host" "$RST"
+    echo -e "  ${CYAN}▶${NC} $description ${DIM}($provider/$model)${NC}"
+}
+
+# Clear task status (call when task completes)
+# Usage: atomic_task_clear
+atomic_task_clear() {
+    local status_file="$ATOMIC_STATE_DIR/current-task.json"
+    if [[ -f "$status_file" ]]; then
+        local timestamp=$(date -Iseconds)
+        cat > "$status_file" << EOF
+{
+  "active": false,
+  "message": "No active task",
+  "timestamp": "$timestamp"
+}
+EOF
     fi
-    printf '%s    %-10s%s%s\n' "$LB" "prompt" "$short_prompt" "$RST"
-    printf '%s    %-10s%s%s\n' "$LB" "output" "$short_output" "$RST"
-    printf '%s  ╶──────────────────────────────────────────────────────%s\n' "$LB" "$RST"
 }
 
 # ============================================================================
@@ -1549,7 +1738,9 @@ atomic_invoke() {
     _atomic_ensure_config
 
     # Parse options
-    local model="$CLAUDE_MODEL"
+    # Try to use configured primary model from setup.md, fall back to CLAUDE_MODEL env var
+    local model
+    model=$(atomic_get_primary_model 2>/dev/null || echo "$CLAUDE_MODEL")
     local provider="$CLAUDE_PROVIDER"
     local role=""
     local format=""
@@ -1558,6 +1749,7 @@ atomic_invoke() {
     local max_retries="${ATOMIC_MAX_RETRIES:-2}"
     local retry_delay="${ATOMIC_RETRY_DELAY:-5}"
     local ollama_host="$CLAUDE_OLLAMA_HOST"
+    local task_type=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -1570,12 +1762,30 @@ atomic_invoke() {
             --retry-delay=*) retry_delay="${1#*=}" ;;
             --stdin) use_stdin=true ;;
             --ollama-host=*) ollama_host="${1#*=}" ;;
+            --task-type=*) task_type="${1#*=}" ;;
             *) atomic_warn "Unknown option: $1" ;;
         esac
         shift
     done
 
-    # Role-based provider routing
+    # Task-type based provider chain resolution (Phase 2 hierarchical routing)
+    if [[ -n "$task_type" ]]; then
+        # Load provider.sh if not already loaded
+        if ! declare -f provider_resolve_for_task &>/dev/null; then
+            source "${ATOMIC_ROOT}/lib/provider.sh" 2>/dev/null || true
+        fi
+
+        # Resolve best provider from chain
+        if declare -f provider_resolve_for_task &>/dev/null; then
+            local resolved_provider
+            resolved_provider=$(provider_resolve_for_task "$task_type" 2>/dev/null || echo "")
+            if [[ -n "$resolved_provider" ]]; then
+                provider="$resolved_provider"
+            fi
+        fi
+    fi
+
+    # Role-based provider routing (legacy)
     if [[ -n "$role" ]]; then
         provider="${PROVIDER_ROLE_MAP[$role]:-$provider}"
     fi
@@ -1583,7 +1793,7 @@ atomic_invoke() {
     # Model fallback resolution (for airgapped/offline environments)
     local skip_fallback="${ATOMIC_SKIP_FALLBACK:-false}"
     local resolved resolved_model resolved_provider
-    if [[ "$skip_fallback" != "true" && "$provider" != "ollama" ]]; then
+    if [[ "$skip_fallback" != "true" && "$provider" != "ollama" && "$provider" != "bedrock" ]]; then
         resolved=$(_atomic_resolve_model "$model")
         if [[ -n "$resolved" && "$resolved" != *"WARN"* ]]; then
             resolved_model=$(echo "$resolved" | cut -d: -f1)
@@ -1675,7 +1885,7 @@ $prompt_content"
             stream_pid=$!
         fi
 
-        if timeout "$timeout" bash -c "$invoke_cmd" > "$output_file" 2>"${output_file}.err"; then
+        if _atomic_timeout "$timeout" bash -c "$invoke_cmd" < /dev/null > "$output_file" 2>"${output_file}.err"; then
             exit_code=0
             # Stop streaming
             if [[ -n "$stream_pid" ]]; then
@@ -1740,6 +1950,7 @@ $prompt_content"
 
         rm -f "${output_file}.err"
         atomic_state_increment "tasks_completed"
+        atomic_task_clear
         return 0
     else
         if [[ $exit_code -eq 124 ]]; then
@@ -1752,6 +1963,7 @@ $prompt_content"
         fi
         atomic_substep "Check output file for details: $output_file"
         atomic_state_increment "tasks_failed"
+        atomic_task_clear
         return $exit_code
     fi
 }
