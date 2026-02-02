@@ -1593,7 +1593,8 @@ _atomic_build_invoke_cmd() {
         cmd="${cmd} -p '${escaped_prompt}'"
         cmd="${cmd} --dangerously-skip-permissions"
         cmd="${cmd} --output-format text"
-        cmd="${cmd} --max-turns '${CLAUDE_MAX_TURNS:-1}'"
+        # Force single-turn for atomic invocations (prevents hanging after response)
+        cmd="${cmd} --max-turns 1"
 
         # Network mode restriction (CUI blocks web tools)
         if [[ -n "$network_block" ]]; then
@@ -1627,7 +1628,8 @@ _atomic_build_invoke_cmd() {
         cmd="${cmd} -p '${escaped_prompt}'"
         cmd="${cmd} --dangerously-skip-permissions"
         cmd="${cmd} --output-format text"
-        cmd="${cmd} --max-turns '${CLAUDE_MAX_TURNS:-1}'"
+        # Force single-turn for atomic invocations (prevents hanging after response)
+        cmd="${cmd} --max-turns 1"
 
         # Network mode restriction (CUI blocks web tools)
         if [[ -n "$network_block" ]]; then
@@ -1650,7 +1652,8 @@ _atomic_build_invoke_cmd() {
     cmd="${cmd} -p '${escaped_prompt}'"
     cmd="${cmd} --dangerously-skip-permissions"
     cmd="${cmd} --output-format text"
-    cmd="${cmd} --max-turns '${CLAUDE_MAX_TURNS:-1}'"
+    # Force single-turn for atomic invocations (prevents hanging after response)
+    cmd="${cmd} --max-turns 1"
 
     # Add model if specified and not using default
     if [[ -n "$model" && "$model" != "opus" && "$model" != "sonnet" ]]; then
