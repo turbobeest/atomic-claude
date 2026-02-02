@@ -624,7 +624,54 @@ _atomic_load_provider_config() {
     [[ -n "$role_gardener" ]] && PROVIDER_ROLE_MAP[gardener]="$role_gardener"
     [[ -n "$role_heavyweight" ]] && PROVIDER_ROLE_MAP[heavyweight]="$role_heavyweight"
 
+    # Load Bedrock configuration from secrets.json (if configured)
+    _atomic_load_bedrock_config
+
     _ATOMIC_CONFIG_LOADED=true
+}
+
+# Load AWS Bedrock configuration from secrets.json
+# Sets environment variables that Claude Code uses for Bedrock mode
+_atomic_load_bedrock_config() {
+    local secrets_file="$ATOMIC_OUTPUT_DIR/0-setup/secrets.json"
+
+    if [[ ! -f "$secrets_file" ]]; then
+        return 0
+    fi
+
+    # Check if Bedrock is enabled
+    local bedrock_enabled
+    bedrock_enabled=$(jq -r '.bedrock_enabled // false' "$secrets_file" 2>/dev/null)
+
+    if [[ "$bedrock_enabled" == "true" ]]; then
+        local aws_region aws_profile bedrock_model
+
+        aws_region=$(jq -r '.aws_region // empty' "$secrets_file" 2>/dev/null)
+        aws_profile=$(jq -r '.aws_profile // empty' "$secrets_file" 2>/dev/null)
+        bedrock_model=$(jq -r '.bedrock_model // empty' "$secrets_file" 2>/dev/null)
+
+        # Set Claude Code Bedrock environment variables
+        export CLAUDE_CODE_USE_BEDROCK=1
+
+        if [[ -n "$aws_region" ]]; then
+            export AWS_REGION="$aws_region"
+        fi
+
+        if [[ -n "$aws_profile" && "$aws_profile" != "default" ]]; then
+            export AWS_PROFILE="$aws_profile"
+        fi
+
+        if [[ -n "$bedrock_model" ]]; then
+            export ANTHROPIC_MODEL="$bedrock_model"
+        fi
+
+        # Recommended token settings for Bedrock
+        export CLAUDE_CODE_MAX_OUTPUT_TOKENS="${CLAUDE_CODE_MAX_OUTPUT_TOKENS:-4096}"
+        export MAX_THINKING_TOKENS="${MAX_THINKING_TOKENS:-1024}"
+
+        # Update provider to bedrock
+        CLAUDE_PROVIDER="bedrock"
+    fi
 }
 
 # Flag to track if config has been loaded
@@ -1067,8 +1114,15 @@ atomic_task_header() {
     case "$provider" in
         max) [[ -f "$HOME/.claude/.credentials.json" ]] && is_online=true ;;
         api) [[ -n "${ANTHROPIC_API_KEY:-}" ]] && is_online=true ;;
+        bedrock) [[ "${CLAUDE_CODE_USE_BEDROCK:-}" == "1" ]] && is_online=true ;;
         ollama) curl -s --connect-timeout 1 "${ollama_host:-http://localhost:11434}/api/tags" &>/dev/null && is_online=true ;;
     esac
+    
+    # If CLAUDE_CODE_USE_BEDROCK is set, override provider display
+    if [[ "${CLAUDE_CODE_USE_BEDROCK:-}" == "1" ]]; then
+        provider="bedrock"
+        is_online=true
+    fi
 
     local status_indicator
     if $is_online; then
@@ -1301,57 +1355,78 @@ _atomic_build_invoke_cmd() {
     local escaped_prompt
     escaped_prompt=$(printf '%s' "$prompt" | sed "s/'/'\\\\''/g")
 
-    # Resolve wrapper path
-    local wrapper_path="$CLAUDE_LOCAL_PATH"
-    if [[ ! -d "$wrapper_path" ]]; then
-        # Try relative to ATOMIC_ROOT
-        wrapper_path="$ATOMIC_ROOT/../claude-local"
-    fi
-    if [[ ! -d "$wrapper_path" ]]; then
-        # Fallback to direct claude if wrapper not found
-        atomic_warn "claude-local wrapper not found at $CLAUDE_LOCAL_PATH, falling back to direct claude"
-        printf '%s\n' "claude -p '${escaped_prompt}' --model '${model}' --dangerously-skip-permissions"
-        return
-    fi
-
-    # Escape wrapper path for shell
-    local escaped_wrapper_path
-    escaped_wrapper_path=$(printf '%s' "$wrapper_path" | sed "s/'/'\\\\''/g")
-
     # Escape ATOMIC_ROOT for shell (Claude CLI working directory)
     local escaped_atomic_root
     escaped_atomic_root=$(printf '%s' "$ATOMIC_ROOT" | sed "s/'/'\\\\''/g")
 
-    # Build command with proper quoting
-    # CRITICAL: Use PYTHONPATH to find local_launcher, but keep CWD as ATOMIC_ROOT
-    # so Claude CLI sees the correct project context (not the wrapper's directory)
-    local cmd="cd '${escaped_atomic_root}' && PYTHONPATH='${escaped_wrapper_path}':\${PYTHONPATH} python -m local_launcher"
-    cmd="${cmd} --provider '${provider}'"
-    cmd="${cmd} --model '${model}'"
-    cmd="${cmd} --no-banner"
-    cmd="${cmd} --skip-checks"
+    # =========================================================================
+    # BEDROCK: Use Claude CLI directly (it reads CLAUDE_CODE_USE_BEDROCK env var)
+    # =========================================================================
+    if [[ "${CLAUDE_CODE_USE_BEDROCK:-}" == "1" || "$provider" == "bedrock" ]]; then
+        # Claude Code natively supports Bedrock via environment variables
+        # Just use claude CLI directly - env vars are already set by _atomic_load_bedrock_config
+        local cmd="cd '${escaped_atomic_root}' && claude"
+        cmd="${cmd} -p '${escaped_prompt}'"
+        cmd="${cmd} --dangerously-skip-permissions"
+        cmd="${cmd} --output-format text"
+        cmd="${cmd} --max-turns '${CLAUDE_MAX_TURNS:-1}'"
 
-    # Add Ollama-specific options
+        # Tool restriction
+        if [[ -n "${CLAUDE_TOOLS+set}" ]]; then
+            cmd="${cmd} --tools '${CLAUDE_TOOLS}'"
+        fi
+
+        printf '%s\n' "$cmd"
+        return
+    fi
+
+    # =========================================================================
+    # OLLAMA: Use Claude CLI with Anthropic API base URL pointing to Ollama
+    # =========================================================================
     if [[ "$provider" == "ollama" ]]; then
         # Validate ollama_host format
         if [[ ! "$ollama_host" =~ ^https?://[a-zA-Z0-9._-]+(:[0-9]+)?$ ]]; then
-            atomic_warn "Invalid Ollama host format, using default"
             ollama_host="http://localhost:11434"
         fi
-        cmd="${cmd} --ollama-host '${ollama_host}'"
-        cmd="${cmd} --context-length '${CLAUDE_OLLAMA_CONTEXT:-8192}'"
+
+        # Claude Code can use Ollama via ANTHROPIC_BASE_URL
+        local cmd="cd '${escaped_atomic_root}' && "
+        cmd="${cmd}ANTHROPIC_BASE_URL='${ollama_host}' "
+        cmd="${cmd}ANTHROPIC_API_KEY='ollama' "
+        cmd="${cmd}claude"
+        cmd="${cmd} --model '${model}'"
+        cmd="${cmd} -p '${escaped_prompt}'"
+        cmd="${cmd} --dangerously-skip-permissions"
+        cmd="${cmd} --output-format text"
+        cmd="${cmd} --max-turns '${CLAUDE_MAX_TURNS:-1}'"
+
+        # Tool restriction
+        if [[ -n "${CLAUDE_TOOLS+set}" ]]; then
+            cmd="${cmd} --tools '${CLAUDE_TOOLS}'"
+        fi
+
+        printf '%s\n' "$cmd"
+        return
     fi
 
-    # Add prompt and max-turns for non-interactive mode
-    cmd="${cmd} --max-turns '${CLAUDE_MAX_TURNS:-1}'"
+    # =========================================================================
+    # DEFAULT: Use Claude CLI directly (subscription or API mode)
+    # =========================================================================
+    local cmd="cd '${escaped_atomic_root}' && claude"
+    cmd="${cmd} -p '${escaped_prompt}'"
+    cmd="${cmd} --dangerously-skip-permissions"
     cmd="${cmd} --output-format text"
+    cmd="${cmd} --max-turns '${CLAUDE_MAX_TURNS:-1}'"
 
-    # Tool restriction: CLAUDE_TOOLS="" disables all tools (pure text generation)
+    # Add model if specified and not using default
+    if [[ -n "$model" && "$model" != "opus" && "$model" != "sonnet" ]]; then
+        cmd="${cmd} --model '${model}'"
+    fi
+
+    # Tool restriction
     if [[ -n "${CLAUDE_TOOLS+set}" ]]; then
         cmd="${cmd} --tools '${CLAUDE_TOOLS}'"
     fi
-
-    cmd="${cmd} -p '${escaped_prompt}'"
 
     printf '%s\n' "$cmd"
 }

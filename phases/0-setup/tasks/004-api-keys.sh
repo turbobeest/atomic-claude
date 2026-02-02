@@ -318,26 +318,79 @@ _004_collect_bedrock() {
     local secrets_file="$1"
 
     echo -e "  ${CYAN}AWS Bedrock${NC}"
-    echo -e "  ${DIM}Uses AWS credentials from environment or ~/.aws/credentials${NC}"
+    echo -e "  ${DIM}Claude Code will use AWS Bedrock for all LLM calls${NC}"
+    echo ""
 
     # Check for existing AWS config
+    local has_credentials=false
     if [[ -n "${AWS_ACCESS_KEY_ID:-}" ]]; then
         echo -e "  ${GREEN}✓${NC} AWS credentials found in environment"
-    elif [[ -f ~/.aws/credentials ]]; then
-        echo -e "  ${GREEN}✓${NC} AWS credentials file found"
-    else
-        atomic_warn "No AWS credentials detected"
+        has_credentials=true
+    elif [[ -f ~/.aws/credentials || -f ~/.aws/config ]]; then
+        echo -e "  ${GREEN}✓${NC} AWS config found (~/.aws/)"
+        has_credentials=true
     fi
 
+    if [[ "$has_credentials" != "true" ]]; then
+        atomic_warn "No AWS credentials detected"
+        echo -e "  ${DIM}Configure with: aws configure${NC}"
+        echo -e "  ${DIM}Or SSO: aws sso login --profile <profile>${NC}"
+        echo ""
+    fi
+
+    # Region - detect GovCloud vs commercial
+    echo -e "  ${DIM}Common regions: us-east-1, us-west-2, us-gov-west-1 (GovCloud)${NC}"
     read -e -p "    AWS Region [us-east-1]: " aws_region || true
     aws_region=${aws_region:-us-east-1}
+
+    # Profile
     read -e -p "    AWS Profile [default]: " aws_profile || true
     aws_profile=${aws_profile:-default}
 
+    # Model selection based on region
+    echo ""
+    if [[ "$aws_region" == us-gov-* ]]; then
+        echo -e "  ${DIM}GovCloud models (via inference profiles):${NC}"
+        echo -e "    1. sonnet-4.5  ${DIM}(Claude Sonnet 4.5 - recommended)${NC}"
+        echo -e "    2. sonnet-3.7  ${DIM}(Claude 3.7 Sonnet)${NC}"
+        echo -e "    3. sonnet-3.5  ${DIM}(Claude 3.5 Sonnet)${NC}"
+        echo -e "    4. haiku       ${DIM}(Claude 3 Haiku - fast/cheap)${NC}"
+        read -e -p "    Model [1]: " model_choice || true
+        model_choice=${model_choice:-1}
+        case "$model_choice" in
+            1) bedrock_model="us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0" ;;
+            2) bedrock_model="us-gov.anthropic.claude-3-7-sonnet-20250219-v1:0" ;;
+            3) bedrock_model="us-gov.anthropic.claude-3-5-sonnet-20240620-v1:0" ;;
+            4) bedrock_model="us-gov.anthropic.claude-3-haiku-20240307-v1:0" ;;
+            *) bedrock_model="us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0" ;;
+        esac
+    else
+        echo -e "  ${DIM}Commercial models:${NC}"
+        echo -e "    1. sonnet-4.5  ${DIM}(Claude Sonnet 4.5 - recommended)${NC}"
+        echo -e "    2. opus        ${DIM}(Claude Opus 4 - highest capability)${NC}"
+        echo -e "    3. haiku-4.5   ${DIM}(Claude Haiku 4.5 - fast/cheap)${NC}"
+        read -e -p "    Model [1]: " model_choice || true
+        model_choice=${model_choice:-1}
+        case "$model_choice" in
+            1) bedrock_model="global.anthropic.claude-sonnet-4-5-20250929-v1:0" ;;
+            2) bedrock_model="global.anthropic.claude-opus-4-20250514-v1:0" ;;
+            3) bedrock_model="us.anthropic.claude-haiku-4-5-20251001-v1:0" ;;
+            *) bedrock_model="global.anthropic.claude-sonnet-4-5-20250929-v1:0" ;;
+        esac
+    fi
+
+    # Save configuration
     local tmp=$(atomic_mktemp)
-    jq --arg region "$aws_region" --arg profile "$aws_profile" \
-        '.aws_region = $region | .aws_profile = $profile' "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
+    jq --arg region "$aws_region" \
+       --arg profile "$aws_profile" \
+       --arg model "$bedrock_model" \
+       '.bedrock_enabled = true | .aws_region = $region | .aws_profile = $profile | .bedrock_model = $model' \
+       "$secrets_file" > "$tmp" && mv "$tmp" "$secrets_file"
+
+    echo ""
     atomic_success "AWS Bedrock configured"
+    echo -e "  ${DIM}Region: $aws_region | Profile: $aws_profile${NC}"
+    echo -e "  ${DIM}Model: $bedrock_model${NC}"
 }
 
 # Local Memory configuration (persistent context across tasks)
