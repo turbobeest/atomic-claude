@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 603: Comprehensive Review
 # Execute parallel code review across all dimensions

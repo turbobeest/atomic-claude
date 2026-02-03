@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 702: Integration Setup
 # Configure integration environment and review acceptance criteria

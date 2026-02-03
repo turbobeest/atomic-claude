@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # ATOMIC-CLAUDE Memory Layer
 # Persistent memory via local SQLite storage (via claude-mem hooks)
@@ -25,12 +25,10 @@ MEMORY_HEAD_FILE="${ATOMIC_ROOT:-.}/.state/memory-head.json"
 MEMORY_CHECKPOINTS_DIR="${ATOMIC_ROOT:-.}/.state/memory-checkpoints"
 MEMORY_LOCAL_DIR="${ATOMIC_ROOT:-.}/.state/memory"
 
-# Source task memory definitions if not already loaded
-if [[ -z "${TASK_MEMORY_RECALL[*]:-}" ]]; then
-    _MEMORY_DEFS_PATH="${BASH_SOURCE[0]%/*}/task-memory-defs.sh"
-    if [[ -f "$_MEMORY_DEFS_PATH" ]]; then
-        source "$_MEMORY_DEFS_PATH"
-    fi
+# Source task memory definitions
+_MEMORY_DEFS_PATH="${BASH_SOURCE[0]%/*}/task-memory-defs.sh"
+if [[ -f "$_MEMORY_DEFS_PATH" ]]; then
+    source "$_MEMORY_DEFS_PATH"
 fi
 
 # Load configuration from environment and/or secrets file
@@ -50,6 +48,7 @@ _memory_load_config() {
 
     # Set module-level variables
     MEMORY_ENABLED="${ATOMIC_MEMORY_ENABLED:-false}"
+    export MEMORY_ENABLED
 }
 
 # Load config on source
@@ -1028,9 +1027,19 @@ memory_task_start() {
 
     # Get task-specific recall query from definitions
     local task_key="${phase_num}-${task_id}"
-    local recall_query="${TASK_MEMORY_RECALL[$task_key]:-}"
-    local expected_recall="${TASK_MEMORY_RECALL[$task_key]:-}"
-    local expected_save="${TASK_MEMORY_SAVE[$task_key]:-}"
+    # Safely access arrays (may not be available in all contexts)
+    local recall_query=""
+    local expected_recall=""
+    local expected_save=""
+
+    if declare -p TASK_MEMORY_RECALL &>/dev/null; then
+        recall_query="${TASK_MEMORY_RECALL[$task_key]:-}"
+        expected_recall="${TASK_MEMORY_RECALL[$task_key]:-}"
+    fi
+
+    if declare -p TASK_MEMORY_SAVE &>/dev/null; then
+        expected_save="${TASK_MEMORY_SAVE[$task_key]:-}"
+    fi
 
     # If no definition, use generic query
     if [[ -z "$recall_query" ]]; then

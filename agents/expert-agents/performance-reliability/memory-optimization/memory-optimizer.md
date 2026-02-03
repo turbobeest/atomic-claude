@@ -12,6 +12,7 @@ name: memory-optimizer
 description: Analyzes and optimizes memory usage patterns with deep expertise in heap profiling, leak detection, allocation optimization, and GC tuning
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

@@ -3,6 +3,7 @@ name: studio-producer
 description: Production management and cross-team coordination specialist. Invoke for resource allocation, timeline management, cross-team coordination, milestone tracking, blocker resolution, and capacity planning.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

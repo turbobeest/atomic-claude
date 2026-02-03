@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 604: Refinement
 # Address review findings and apply code improvements

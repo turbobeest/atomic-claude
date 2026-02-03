@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 203: PRD Interview (Confirmatory) - OPTIONAL
 # Gather/confirm key PRD inputs: stakeholders, success criteria, non-goals, MVP

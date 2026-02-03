@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 101: Entry Validation
 # Validate Phase 0 completion and load prerequisites

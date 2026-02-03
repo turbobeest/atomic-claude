@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 103: Import Existing Requirements (Optional)
 # Import requirements from existing project documentation

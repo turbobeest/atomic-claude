@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 506: Phase Audit - Implementation (TDD)
 # AI-driven audit selection from turbobeest/audits repository

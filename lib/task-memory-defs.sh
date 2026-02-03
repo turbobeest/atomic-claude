@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # ATOMIC-CLAUDE Task Memory Definitions
 # Defines what context each task should RECALL at start and SAVE at end
@@ -20,7 +20,7 @@
 # Key format: "PHASE-TASKID" (e.g., "0-001", "1-102")
 # Value: Query string to search for relevant context
 
-declare -A TASK_MEMORY_RECALL
+declare -gA TASK_MEMORY_RECALL
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Phase 0: Setup
@@ -144,7 +144,7 @@ TASK_MEMORY_RECALL["9-906"]="ALL phases complete project"        # Needs: EVERYT
 # Value: Content type identifier used by _memory_extract_content()
 # Empty string = no save needed for that task
 
-declare -A TASK_MEMORY_SAVE
+declare -gA TASK_MEMORY_SAVE
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Phase 0: Setup

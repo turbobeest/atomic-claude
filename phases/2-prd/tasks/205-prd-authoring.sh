@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 205: PRD Authoring
 # Multi-agent PRD document creation using 15-section template
@@ -321,7 +321,7 @@ EOF
     local reqs_file="$prompts_dir/requirements.json"
     local saved_turns_reqs="${CLAUDE_MAX_TURNS:-1}"
     export CLAUDE_MAX_TURNS=15
-    if atomic_invoke "$prompts_dir/requirements-synthesis.md" "$reqs_file" "Requirements synthesis" --model=opus --timeout=1800; then
+    if atomic_invoke "$prompts_dir/requirements-synthesis.md" "$reqs_file" "Requirements synthesis" --timeout=1800; then
         if jq -e . "$reqs_file" &>/dev/null; then
             local fr_count=$(jq '.functional_requirements | length' "$reqs_file" 2>/dev/null || echo 0)
             local nfr_count=$(jq '.non_functional_requirements | length' "$reqs_file" 2>/dev/null || echo 0)
@@ -611,7 +611,7 @@ EOF
     local saved_turns="${CLAUDE_MAX_TURNS:-1}"
     export ATOMIC_MAX_RETRIES=0
     export CLAUDE_MAX_TURNS=30
-    if atomic_invoke "$prompts_dir/prd-writing.md" "$prd_file" "PRD authoring" --model=opus --timeout=7200; then
+    if atomic_invoke "$prompts_dir/prd-writing.md" "$prd_file" "PRD authoring" --timeout=7200; then
         local line_count=$(wc -l < "$prd_file")
         echo -e "  ${GREEN}✓${NC} PRD document created ($line_count lines)"
     else

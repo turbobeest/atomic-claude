@@ -1,24 +1,26 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # PHASE 0: SETUP
-# Configuration via Initialization Files, Guided Setup, or Quick Defaults
+# Configuration via initialization/setup.md (single path forward)
 #
 # Tasks: 001-009 (0xx range)
 #
-# Three modes:
-#   DOCUMENT MODE: Parse initialization/ files, Claude extracts config (1 LLM task)
-#   GUIDED MODE:   Answer questions one by one (deterministic)
-#   QUICK MODE:    Use sensible defaults for greenfield projects
+# Setup Process:
+#   1. Validates that initialization/setup.md exists (creates template if not)
+#   2. Parses setup.md with Claude to extract configuration
+#   3. Collects API keys and configures environment
+#   4. Scans reference materials and validates repository
 #
-# Initialization files (in initialization/ directory):
-#   setup.md       - Project configuration
-#   agent-plan.md  - Agent assignments per phase
-#   audit-plan.md  - Audit profiles and overrides
+# Required file:
+#   initialization/setup.md - Project configuration (ground truth for all settings)
+#
+# Optional files:
+#   initialization/agent-plan.md  - Agent assignments per phase
+#   initialization/audit-plan.md  - Audit profiles and overrides
 #
 # CLI Flags:
-#   --mode=document|guided|quick   Skip mode selection, use specified mode
-#   --task=NNN                     Resume from a specific task (skips intro)
-#   --skip-intro                   Skip the WarGames intro animation
+#   --task=NNN       Resume from a specific task (skips intro)
+#   --skip-intro     Skip the WarGames intro animation
 #
 # Navigation: After each task, you can:
 #   [c] Continue    - proceed to next task
@@ -40,9 +42,7 @@ source "$ROOT_DIR/lib/intro.sh"
 # GLOBAL STATE (shared across tasks)
 # ============================================================================
 
-SETUP_MODE=""           # "guided", "document", or "quick"
-SETUP_MODE_OVERRIDE=""  # Set via --mode= CLI flag
-SETUP_FILE_PATH=""      # Path to setup.md file (document mode)
+SETUP_FILE_PATH=""      # Path to setup.md file
 
 # ============================================================================
 # LOAD TASKS
@@ -102,9 +102,6 @@ main() {
             --skip-intro)
                 skip_intro=true
                 ;;
-            --mode=*)
-                SETUP_MODE_OVERRIDE="${arg#*=}"
-                ;;
             --task=*)
                 start_task="${arg#*=}"
                 # Resuming from a specific task implies skip intro
@@ -123,6 +120,10 @@ main() {
 
     phase_start "0-setup" "Setup"
 
+    # Auto-start tasks dashboard (silent mode)
+    
+    atomic_start_dashboard true
+
     echo ""
     echo -e "${DIM}Navigation: After each task you can:${NC}"
     echo -e "${DIM}  [c] Continue  [r] Redo  [b] Go back  [q] Quit${NC}"
@@ -131,7 +132,7 @@ main() {
     # Task definitions: ID, Name, Function
     local task_ids=("001" "002" "003" "004" "005" "006" "007" "008" "009")
     local task_names=(
-        "Mode Selection"
+        "Setup File Validation"
         "Config Collection"
         "Config Review"
         "API Keys"
@@ -142,7 +143,7 @@ main() {
         "Environment Check"
     )
     local task_funcs=(
-        "task_001_mode_selection"
+        "task_001_setup_validation"
         "task_002_config_collection"
         "task_003_config_review"
         "task_004_api_keys"
@@ -162,12 +163,14 @@ main() {
                 break
             fi
         done
-        # Restore state for skipped tasks
+        # Restore setup file path for skipped tasks
         if [[ $i -gt 0 ]]; then
             local config_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/project-config.json"
             if [[ -f "$config_file" ]]; then
-                SETUP_MODE=$(jq -r '.setup_mode // "document"' "$config_file")
-                atomic_info "Restored mode from previous run: $SETUP_MODE"
+                SETUP_FILE_PATH=$(jq -r '.setup_file // ""' "$config_file")
+                if [[ -n "$SETUP_FILE_PATH" ]]; then
+                    atomic_info "Restored setup file path: $SETUP_FILE_PATH"
+                fi
             fi
         fi
     fi
@@ -180,15 +183,14 @@ main() {
         local task_name="${task_names[$i]}"
         local task_func="${task_funcs[$i]}"
 
-        # Ensure SETUP_MODE is set before Task 002+ (restore from config if needed)
-        if [[ $i -ge 1 && -z "$SETUP_MODE" ]]; then
+        # Ensure SETUP_FILE_PATH is set before Task 002+ (restore from config if needed)
+        if [[ $i -ge 1 && -z "$SETUP_FILE_PATH" ]]; then
             local config_file="$ATOMIC_OUTPUT_DIR/0-setup/project-config.json"
             if [[ -f "$config_file" ]]; then
-                SETUP_MODE=$(jq -r '.setup_mode // "document"' "$config_file")
-                atomic_info "Restored setup mode: $SETUP_MODE"
-            else
-                SETUP_MODE="document"
-                atomic_warn "No saved config found, defaulting to document mode"
+                SETUP_FILE_PATH=$(jq -r '.setup_file // ""' "$config_file")
+                if [[ -n "$SETUP_FILE_PATH" ]]; then
+                    atomic_info "Restored setup file path: $SETUP_FILE_PATH"
+                fi
             fi
         fi
 
@@ -206,9 +208,9 @@ main() {
                     i=$((i - 1))
                     # Reset state for the task we're going back to
                     task_state_reset_from "${task_ids[$i]}"
-                    # Clear SETUP_MODE if going back to task 001 so it can be re-selected
+                    # Clear SETUP_FILE_PATH if going back to task 001 so it can be re-validated
                     if [[ $i -eq 0 ]]; then
-                        SETUP_MODE=""
+                        SETUP_FILE_PATH=""
                     fi
                 else
                     atomic_warn "Already at first task"

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 007: Environment Setup
 # List required/recommended dependencies and give user opportunity to install

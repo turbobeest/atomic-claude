@@ -11,6 +11,7 @@ name: database-admin
 description: Ensures mission-critical database operations including backup strategies, replication, monitoring, and disaster recovery for production systems
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

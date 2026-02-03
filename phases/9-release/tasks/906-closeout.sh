@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 906: Phase Closeout (Final)
 # Generate closeout document and complete project

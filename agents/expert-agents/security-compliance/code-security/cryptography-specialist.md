@@ -6,6 +6,7 @@ name: cryptography-specialist
 description: Implements secure cryptographic systems with advanced encryption, key management, and cryptographic protocol design for maximum security assurance
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

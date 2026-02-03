@@ -12,6 +12,7 @@ name: audit-report-generator
 description: Report aggregation agent that combines structural scores from agent-linter and qualitative assessments from agent-quality-auditor into comprehensive audit reports. Invoke after both automated and agent-evaluated audits are complete.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

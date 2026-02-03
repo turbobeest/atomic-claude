@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 106: Discovery Conversation
 # Multi-agent deliberation to establish project direction

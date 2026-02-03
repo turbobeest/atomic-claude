@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 505: Final Validation
 # Analyze coverage, test quality, and generate validation report

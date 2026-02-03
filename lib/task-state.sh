@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # ATOMIC CLAUDE - Task State Management
 # Provides persistent task-level state tracking for resumable workflows

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 503: Agent Selection
 # Select agents for TDD execution: test-writer, code-implementer, refactorer, security-scanner

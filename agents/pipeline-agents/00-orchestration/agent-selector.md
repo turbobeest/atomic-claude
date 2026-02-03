@@ -3,6 +3,7 @@ name: agent-selector
 description: Phase-aware agent adjudication engine for multi-phase SDLC pipelines. Scores and selects optimal agents for each phase task, presents candidates with confidence scores for human adjudication, and maintains selection accuracy through feedback loops.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 102: Corpus Collection (Conversation 1)
 # Collect, analyze, and organize all project materials

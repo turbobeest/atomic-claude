@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 504: TDD Execution
 # Execute RED/GREEN/REFACTOR/VERIFY cycles for each task
@@ -947,7 +947,7 @@ PROMPT
 
     echo -e "  ${DIM}Generating implementation with LLM...${NC}"
 
-    if atomic_invoke "$prompt_file" "$output_file" "GREEN T$task_id" --model=opus; then
+    if atomic_invoke "$prompt_file" "$output_file" "GREEN T$task_id" ; then
         # Check for error messages in output (don't save errors as code)
         if grep -qE "^Error:|Reached max turns|error:" "$output_file" 2>/dev/null; then
             echo -e "  ${RED}✗${NC} LLM output contains error, not valid code"

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 403: OpenSpec Generation
 # Create detailed specification files for each task

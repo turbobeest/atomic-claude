@@ -12,6 +12,7 @@ name: websocket-expert
 description: Masters WebSocket protocol for real-time bidirectional web communication, specializing in live data streaming, chat applications, gaming protocols, and scalable real-time web architectures with advanced connection management
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

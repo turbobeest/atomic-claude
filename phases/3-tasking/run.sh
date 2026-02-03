@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # PHASE 3: TASKING
 # Break down PRD into implementable tasks

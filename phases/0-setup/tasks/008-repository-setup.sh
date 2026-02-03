@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 008: Repository Setup
 # Validates embedded agents/audits and configures task routing

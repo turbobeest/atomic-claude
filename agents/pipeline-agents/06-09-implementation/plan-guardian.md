@@ -3,6 +3,7 @@ name: plan-guardian
 description: Phases 6-9 continuous monitoring agent for the SDLC pipeline. Tracks implementation drift against PRD, specs, and task plan. Computes alignment scores (0.0-1.0) and triggers conditional gates when drift exceeds thresholds.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

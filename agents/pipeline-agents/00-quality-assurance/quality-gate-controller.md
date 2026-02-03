@@ -3,6 +3,7 @@ name: quality-gate-controller
 description: Configures validation intensity and quality criteria for each SDLC pipeline gate. Scales testing depth by phase, risk tolerance, and human preferences. Prepares gate criteria for human decision points.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

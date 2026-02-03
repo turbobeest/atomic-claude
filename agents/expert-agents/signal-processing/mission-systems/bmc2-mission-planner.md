@@ -12,6 +12,7 @@ name: bmc2-mission-planner
 description: Battle Management Command and Control mission planning specialist. Invoke for multi-domain operations, sensor-effector integration, tactical mission planning, and 3D tactical environment modeling.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

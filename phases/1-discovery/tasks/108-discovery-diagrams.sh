@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 108: Discovery Diagrams
 # Generate standard software architecture diagrams in DOT format

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # PHASE 2: PRD
 # PRD Authoring + Validation

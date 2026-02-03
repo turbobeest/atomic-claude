@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Verify LLM availability for airgapped/offline operation
 # Supports local and LAN Ollama servers

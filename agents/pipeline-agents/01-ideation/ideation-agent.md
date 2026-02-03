@@ -3,6 +3,7 @@ name: ideation-agent
 description: Phase 1 agent for SDLC pipelines. Facilitates requirement gathering, stakeholder synthesis, and initial PRD drafting. Transforms vague ideas into structured product requirements.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

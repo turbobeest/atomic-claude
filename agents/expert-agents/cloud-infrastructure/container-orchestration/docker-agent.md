@@ -12,6 +12,7 @@ name: docker-agent
 description: Builds, manages, and optimizes Docker containers for application deployment with focus on lightweight, secure container images. Invoke for Dockerfile optimization, container security, and multi-stage build design.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

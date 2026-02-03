@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 003: Config Review
 # Human reviews and approves the extracted/collected configuration

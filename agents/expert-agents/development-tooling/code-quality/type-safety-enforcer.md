@@ -12,6 +12,7 @@ name: type-safety-enforcer
 description: Ensures comprehensive type safety using advanced type checkers (mypy, pyright, TypeScript) for runtime error prevention through sophisticated static type analysis
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 502: TDD Setup
 # Configure coverage targets, test pyramid, and execution mode

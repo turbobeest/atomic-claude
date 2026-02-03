@@ -12,6 +12,7 @@ name: prompt-engineer
 description: Crafts and optimizes prompts for LLMs and AI systems with systematic optimization, performance measurement, and iterative refinement for maximum effectiveness
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

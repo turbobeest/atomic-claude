@@ -3,6 +3,7 @@ name: pipeline-orchestrator
 description: Central dispatcher for multi-phase SDLC pipelines. Coordinates phase transitions, manages human gates, routes tasks to agents via agent-selector, and ensures alignment with PRD through Plan Guardian integration.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

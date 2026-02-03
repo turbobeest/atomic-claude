@@ -12,6 +12,7 @@ name: c-pro
 description: C systems programming specialist for memory-efficient, performance-critical applications with manual memory management and hardware control
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

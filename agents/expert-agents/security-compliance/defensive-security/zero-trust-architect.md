@@ -6,6 +6,7 @@ name: zero-trust-architect
 description: Designs and implements zero trust architecture principles with secure identity verification, least privilege access, and continuous monitoring for mission-critical systems
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # ATOMIC CLAUDE - Audit Library
 # AI-driven audit selection and execution for phase audits
@@ -2828,7 +2828,7 @@ PROMPT_HEADER
     echo ""
     atomic_waiting "Applying $resolved_count audit resolutions to $(basename "$artifact_path")..."
 
-    if ! atomic_invoke "$remediation_prompt" "$remediation_output" "Audit remediation (phase $phase_num)" --model=opus --timeout=3600; then
+    if ! atomic_invoke "$remediation_prompt" "$remediation_output" "Audit remediation (phase $phase_num)" --timeout=3600; then
         export CLAUDE_MAX_TURNS="$saved_turns"
         echo -e "  ${RED}Remediation failed. Artifact unchanged.${NC}"
         return 1

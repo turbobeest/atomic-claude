@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 206b: PRD Revision (LLM-Assisted Q&A)
 # Invoked from task 206 when user chooses to revise the PRD
@@ -247,7 +247,7 @@ PROMPT_HEADER
     echo ""
     atomic_waiting "Applying $resolved_count resolutions to PRD..."
 
-    if ! atomic_invoke "$revision_prompt" "$revision_output" "PRD revision" --model=opus --timeout=3600; then
+    if ! atomic_invoke "$revision_prompt" "$revision_output" "PRD revision" --timeout=3600; then
         export CLAUDE_MAX_TURNS="$saved_turns"
         echo -e "  ${RED}Revision failed. PRD unchanged.${NC}"
         return 1

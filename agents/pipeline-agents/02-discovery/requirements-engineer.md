@@ -3,6 +3,7 @@ name: requirements-engineer
 description: Phase 2 agent for SDLC pipelines. Synthesizes project discovery artifacts into structured, traceable requirements using sphinx-needs taxonomy (req/spec/impl/test) and OpenSpec scenario format. Produces dependency-ordered requirements JSON for PRD authoring and TaskMaster consumption.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

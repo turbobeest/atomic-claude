@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 404: TDD Subtask Injection
 # Write RED/GREEN/REFACTOR/VERIFY subtasks into tasks.json

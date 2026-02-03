@@ -12,6 +12,7 @@ name: finance-tracker
 description: Financial operations specialist for startup and business finance management. Invoke for budget tracking, burn rate analysis, revenue forecasting, expense categorization, runway calculation, and financial reporting.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

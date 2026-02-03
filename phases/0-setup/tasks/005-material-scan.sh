@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 005: Material Scan
 # Index existing project files (docs, configs, source code)

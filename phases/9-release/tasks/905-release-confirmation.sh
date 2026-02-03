@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 905: Release Confirmation
 # Human gate for confirming release success

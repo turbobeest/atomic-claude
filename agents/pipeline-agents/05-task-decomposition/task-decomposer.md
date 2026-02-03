@@ -3,6 +3,7 @@ name: task-decomposer
 description: Phase 5 agent for SDLC pipelines. Transforms audited PRDs into executable task DAGs with dependencies, complexity estimates, and acceptance criteria. Generates task graphs for implementation planning.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

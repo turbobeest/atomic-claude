@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 303: Task Decomposition
 # Break PRD into TaskMaster-format tasks
@@ -290,7 +290,7 @@ PROMPT_HEADER
 
     atomic_waiting "task-decomposer generating tasks..."
 
-    if atomic_invoke "$prompts_dir/task-decomposition.md" "$raw_tasks_file" "Task decomposition" --model=opus; then
+    if atomic_invoke "$prompts_dir/task-decomposition.md" "$raw_tasks_file" "Task decomposition" ; then
         # Validate JSON
         if jq -e . "$raw_tasks_file" &>/dev/null; then
             local task_count=$(jq '.tasks | length // 0' "$raw_tasks_file" 2>/dev/null || echo 0)

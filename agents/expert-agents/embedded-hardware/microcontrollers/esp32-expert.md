@@ -12,6 +12,7 @@ name: esp32-expert
 description: Masters ESP32 microcontroller for WiFi/Bluetooth IoT applications, wireless communication, low-power design, real-time applications, and advanced ESP-IDF development with FreeRTOS integration
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

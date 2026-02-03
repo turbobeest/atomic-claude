@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 401: Entry & Initialization
 # Verify Phase 3 artifacts exist and initialize specification directory

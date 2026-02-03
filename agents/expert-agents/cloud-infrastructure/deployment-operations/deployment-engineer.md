@@ -12,6 +12,7 @@ name: deployment-engineer
 description: Configures CI/CD pipelines and cloud deployments with sophisticated automation, parallel stages, and integrated security scanning. Invoke for pipeline design, deployment automation, and release management.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

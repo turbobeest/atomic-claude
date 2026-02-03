@@ -12,6 +12,7 @@ name: arducopter-expert
 description: Masters ArduCopter autopilot system for unmanned aerial vehicle development, flight control algorithms, mission planning, sensor integration, and custom firmware development with advanced autonomous flight capabilities
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

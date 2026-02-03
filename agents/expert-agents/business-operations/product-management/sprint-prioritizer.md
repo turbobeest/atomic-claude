@@ -3,6 +3,7 @@ name: sprint-prioritizer
 description: Agile backlog management and sprint planning specialist. Invoke for story point estimation, sprint planning, backlog grooming, RICE/ICE scoring, dependency mapping, and velocity tracking.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

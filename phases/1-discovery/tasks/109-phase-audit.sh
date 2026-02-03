@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 109: Phase Audit - Discovery
 # AI-driven audit selection from turbobeest/audits repository

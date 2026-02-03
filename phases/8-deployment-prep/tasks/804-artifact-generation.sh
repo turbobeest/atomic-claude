@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 804: Artifact Generation
 # Generate release package, changelog, documentation, and installation guide

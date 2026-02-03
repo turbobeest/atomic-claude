@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 705: Integration Approval
 # Human gate for approving integration test results

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 305: Phase Audit - Task Decomposition
 # AI-driven audit selection from turbobeest/audits repository

@@ -12,6 +12,7 @@ name: integration-test-coordinator
 description: Orchestrates cross-service testing with contract validation, API compatibility verification, and end-to-end integration testing across distributed systems
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

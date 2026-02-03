@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 605: Phase Audit - Code Review
 # AI-driven audit selection from turbobeest/audits repository

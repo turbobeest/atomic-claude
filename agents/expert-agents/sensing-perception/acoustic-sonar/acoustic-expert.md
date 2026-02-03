@@ -6,6 +6,7 @@ name: acoustic-expert
 description: Masters acoustic sensor systems for defense applications, specializing in underwater acoustics, airborne sound detection, seismic monitoring, and advanced signal processing for tactical acoustic intelligence
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

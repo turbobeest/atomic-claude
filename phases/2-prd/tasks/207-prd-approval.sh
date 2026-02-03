@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 207: PRD Review, Refinement & Approval
 #
@@ -343,7 +343,7 @@ PROMPT_HEADER
     echo ""
     atomic_waiting "Applying $resolved_count resolutions to PRD..."
 
-    if ! atomic_invoke "$refine_prompt" "$refine_output" "PRD refinement (207)" --model=opus --timeout=3600; then
+    if ! atomic_invoke "$refine_prompt" "$refine_output" "PRD refinement (207)" --timeout=3600; then
         export CLAUDE_MAX_TURNS="$saved_turns"
         echo -e "  ${RED}Refinement failed. PRD unchanged.${NC}"
         return 1
@@ -645,7 +645,7 @@ _207_revalidate() {
 
     atomic_waiting "Re-validating with prd-validator..."
 
-    if atomic_invoke "$val_prompt" "$raw_validation" "PRD re-validation" --model=opus --timeout=1800; then
+    if atomic_invoke "$val_prompt" "$raw_validation" "PRD re-validation" --timeout=1800; then
         # JSON recovery pipeline (same as 206)
         if _206_recover_json "$raw_validation" "$prompts_dir" 2>/dev/null; then
             cp "$raw_validation" "$validation_file"

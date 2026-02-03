@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 301: Entry & Initialization
 # Verify Phase 2 artifacts and initialize TaskMaster structure

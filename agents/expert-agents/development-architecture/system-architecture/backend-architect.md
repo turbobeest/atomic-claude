@@ -11,6 +11,12 @@
 name: backend-architect
 description: Designs RESTful APIs, microservice boundaries, and database schemas with focus on performance, scalability, and integration efficiency
 model: opus  # Well-defined backend patterns, use opus for novel architectures
+
+model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
+  - DeepSeek-V3
+  - Qwen2.5-Coder-32B
+  - llama3.3:70b
 tier: expert
 
 model_selection:

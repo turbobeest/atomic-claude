@@ -3,6 +3,7 @@ name: first-principles-advisor
 description: First-principles problem decomposition specialist for SDLC pipelines. Invoked by orchestrator when tasks are novel, ambiguous, or require fundamental analysis beyond pattern-based task decomposition.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

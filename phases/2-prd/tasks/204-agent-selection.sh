@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 204: Agent Selection
 # Select agents for PRD authoring and validation

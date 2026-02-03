@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 704: Testing Execution
 # Execute E2E tests, acceptance validation, and performance testing

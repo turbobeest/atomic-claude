@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 803: Agent Selection
 # Present and select deployment preparation agents

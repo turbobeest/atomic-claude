@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 302: Agent Selection
 # Analyze PRD and select agents for task decomposition

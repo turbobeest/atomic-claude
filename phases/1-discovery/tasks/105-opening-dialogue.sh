@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 105: Opening Dialogue (Conversation 3)
 # Deep conversational exchange with human about vision, goals, and constraints

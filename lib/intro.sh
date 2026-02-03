@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # ATOMIC CLAUDE - Retro Terminal Intro
 # WarGames-style typing animation
@@ -101,6 +101,8 @@ wopr_cursor() {
         sleep 0.5
         echo -ne "\b"
     done
+    # Ensure cursor block is cleared
+    echo -ne " \b"
 }
 
 # Clear screen with retro effect
@@ -184,37 +186,10 @@ EOF
     echo ""
     echo -e "    ${WOPR_DIM}You stay in control. The script orchestrates; Claude assists.${NC}"
     echo ""
-
-    # System info
-    echo -e "${WOPR_DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-
-    echo -ne "    ${WOPR_GREEN}"
-    wopr_type "SYSTEM STATUS: " "$TYPING_SPEED_FAST"
-    echo -ne "${WOPR_BRIGHT}ONLINE${NC}"
-    echo ""
-
-    echo -ne "    ${WOPR_GREEN}"
-    wopr_type "MODE: " "$TYPING_SPEED_FAST"
-    echo -ne "${WOPR_BRIGHT}PHASE 0 - SETUP${NC}"
-    echo ""
-
-    echo -ne "    ${WOPR_GREEN}"
-    wopr_type "PRINCIPLE: " "$TYPING_SPEED_FAST"
-    echo -ne "${WOPR_BRIGHT}SCRIPT IS SOVEREIGN${NC}"
-    echo ""
-
-    echo ""
-    echo -e "${WOPR_DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-
     sleep "$LINE_PAUSE"
     echo ""
-    echo -ne "    ${WOPR_DIM}"
-    wopr_type "Press ENTER to begin..." "$TYPING_SPEED_FAST"
-    echo -ne "${NC}"
-    wopr_cursor 2
-    read -r
-
+    echo ""
+    sleep 1
     clear
 }
 

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 402: Agent Selection
 # Select and configure agents for OpenSpec generation

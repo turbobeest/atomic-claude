@@ -10,6 +10,12 @@
 name: ui-ux-designer
 description: Master of user interface and experience design specializing in comprehensive design systems, accessibility-first approach, user-centered design, and implementation-ready specifications
 model: opus
+
+model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
+  - DeepSeek-V3
+  - Qwen2.5-Coder-32B
+  - llama3.3:70b
 tier: expert
 
 model_selection:

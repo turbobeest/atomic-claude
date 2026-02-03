@@ -7,6 +7,7 @@ name: isaac-expert
 description: Architect of NVIDIA Isaac robotics simulation and AI frameworks, specializing in photorealistic simulation, autonomous navigation, and GPU-accelerated robotics pipelines
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

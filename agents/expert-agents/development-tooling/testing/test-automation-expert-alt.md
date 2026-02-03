@@ -12,6 +12,7 @@ name: test-automation-expert
 description: Specialized in automated testing frameworks, test strategy design, and quality assurance processes for complex software systems
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

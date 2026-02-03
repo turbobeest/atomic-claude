@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # LLM Availability System
 # Real-time tracking of available LLMs across Claude and Ollama providers

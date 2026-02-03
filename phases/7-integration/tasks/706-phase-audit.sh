@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 706: Phase Audit - Integration
 # AI-driven audit selection from turbobeest/audits repository

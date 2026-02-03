@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 805: Phase Audit - Deployment Prep
 # AI-driven audit selection from turbobeest/audits repository

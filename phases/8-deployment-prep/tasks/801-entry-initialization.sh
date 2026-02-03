@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 801: Entry & Initialization
 # Validate prerequisites and present phase objectives

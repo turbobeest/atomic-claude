@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 703: Agent Selection
 # Present and select integration testing agents

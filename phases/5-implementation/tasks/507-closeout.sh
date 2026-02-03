@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 507: Phase Closeout
 # Generate closeout document and prepare for Phase 6 (Code Review)

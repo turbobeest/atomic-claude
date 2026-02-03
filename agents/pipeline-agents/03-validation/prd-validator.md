@@ -3,6 +3,7 @@ name: prd-validator
 description: Phase 3 agent for SDLC pipelines. Validates PRD completeness against 19-section structure, verifies EARS syntax compliance, checks requirement traceability, and prepares for audit gate.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

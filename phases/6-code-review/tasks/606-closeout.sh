@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 606: Phase Closeout
 # Generate closeout document and prepare for Phase 7 (Integration Testing)

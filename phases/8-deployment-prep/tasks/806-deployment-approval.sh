@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 806: Deployment Approval
 # Human gate for approving deployment artifacts

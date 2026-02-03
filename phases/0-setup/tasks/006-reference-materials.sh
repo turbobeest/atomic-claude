@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 006: Reference Materials
 # Guide user to gather enriching materials for Discovery and PRD phases

@@ -12,6 +12,7 @@ name: quant-analyst
 description: Quantitative modeling and financial algorithm specialist. Invoke for quantitative model development, financial algorithm design, risk quantification, and backtesting validation.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

@@ -11,6 +11,7 @@ name: kerasml-expert
 description: Masters Keras framework for streaming ML applications, specializing in real-time model inference, online learning, distributed training, and adaptive neural networks for continuous data streams
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

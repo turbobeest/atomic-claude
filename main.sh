@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # ATOMIC CLAUDE - Main Entry Point
 # Orchestrates phase execution for software development pipelines
@@ -9,6 +9,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$ROOT_DIR/lib/atomic.sh"
 source "$ROOT_DIR/lib/memory.sh"
+source "$ROOT_DIR/lib/provider.sh"
 
 # ============================================================================
 # USAGE
@@ -24,6 +25,7 @@ Commands:
   run <phase>       Run a specific phase (e.g., run 0)
   status            Show current pipeline status
   list              List available phases
+  providers         Check provider availability
   reset             Reset pipeline state
 
 Phase Flags (passed after phase number):
@@ -36,7 +38,6 @@ Phase Flags (passed after phase number):
 
 Phase 0 Only:
   --task=NNN        Resume Phase 0 from specific task
-  --mode=MODE       Set setup mode (document|guided|quick)
   --skip-intro      Skip the intro animation
 
 Options:
@@ -112,6 +113,43 @@ cmd_status() {
         fi
     done
     echo ""
+}
+
+cmd_providers() {
+    atomic_header "Provider Availability Check"
+
+    # Show availability status
+    provider_show_availability
+
+    # Show what providers would be used for each task type
+    source "$ROOT_DIR/lib/provider.sh"
+    provider_init
+
+    echo "Task Type Routing:"
+    echo ""
+    echo "  Critical tasks:     $(provider_get_for_task 'critical')"
+    echo "  Bulk tasks:         $(provider_get_for_task 'bulk')"
+    echo "  Background tasks:   $(provider_get_for_task 'background')"
+    echo ""
+
+    # Show recommended actions if primary provider not available
+    if ! provider_check_availability "aws-bedrock" && ! provider_check_availability "anthropic"; then
+        echo "⚠ Recommended Actions:"
+        echo ""
+        echo "  No cloud providers configured. You can:"
+        echo ""
+        echo "  1. Set up AWS Bedrock:"
+        echo "     export AWS_ACCESS_KEY_ID='your-key'"
+        echo "     export AWS_SECRET_ACCESS_KEY='your-secret'"
+        echo "     export AWS_REGION='us-east-1'"
+        echo ""
+        echo "  2. Set up Anthropic API:"
+        echo "     export ANTHROPIC_API_KEY='your-key'"
+        echo ""
+        echo "  3. Use Ollama locally (free):"
+        echo "     See: https://ollama.com/download"
+        echo ""
+    fi
 }
 
 cmd_run() {
@@ -204,6 +242,9 @@ main() {
             ;;
         list)
             cmd_list
+            ;;
+        providers)
+            cmd_providers
             ;;
         reset)
             cmd_reset

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 802: Deployment Setup
 # Configure release type, version, and distribution channels

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 602: Agent Selection
 # Select agents for code review: deep-code-reviewer, arch-compliance, perf-analyzer, doc-reviewer, code-refiner

@@ -12,6 +12,7 @@ name: unit-test-specialist
 description: TDD-focused specialist creating comprehensive unit tests with high coverage, mutation testing validation, and test-first development practices for bulletproof code quality
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

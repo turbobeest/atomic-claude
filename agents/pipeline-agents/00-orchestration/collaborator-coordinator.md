@@ -3,6 +3,7 @@ name: collaborator-coordinator
 description: Multi-agent collaboration architect for complex phase tasks. Designs team compositions, manages shared context, orchestrates handoffs, resolves conflicts, and drives convergence toward phase deliverables within SDLC pipelines.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

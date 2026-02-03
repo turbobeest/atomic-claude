@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 601: Entry & Initialization
 # Welcome to Phase 6, verify Phase 5 completion, display review overview

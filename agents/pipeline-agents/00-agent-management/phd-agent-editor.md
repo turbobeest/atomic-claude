@@ -3,6 +3,7 @@ name: phd-agent-editor
 description: World-class agent architect for PhD-tier definitions (~3000 tokens, 25-35 instructions). Invoke for complex specialists requiring first-principles design, architectural decisions, or novel agent domains.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

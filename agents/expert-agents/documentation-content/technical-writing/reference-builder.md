@@ -3,6 +3,7 @@ name: reference-builder
 description: Builds comprehensive reference materials and quick-start guides focused on developer productivity and rapid onboarding
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 304: Dependency Analysis & Work Packages
 # Validate DAG, visualize execution levels with complexity, generate work packages

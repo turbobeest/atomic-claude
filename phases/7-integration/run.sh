@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # PHASE 7: INTEGRATION
 # System Integration + E2E Validation

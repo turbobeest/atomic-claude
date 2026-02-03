@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 501: Entry & Initialization
 # Verify Phase 4 artifacts exist and prepare for TDD implementation

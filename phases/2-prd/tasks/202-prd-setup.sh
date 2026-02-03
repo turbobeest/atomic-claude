@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 202: PRD Setup
 # Recap approach from Phase 1, confirm scope and focus areas

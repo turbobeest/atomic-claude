@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # PHASE 1: DISCOVERY
 # Ideation + Technical Research + Agent Planning

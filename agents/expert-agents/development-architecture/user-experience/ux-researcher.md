@@ -10,6 +10,12 @@
 name: ux-researcher
 description: Master of user research methodology specializing in user interviews, usability testing, persona creation, journey mapping, A/B test design, survey methodology, and behavioral analysis for evidence-based design decisions
 model: opus
+
+model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
+  - DeepSeek-V3
+  - Qwen2.5-Coder-32B
+  - llama3.3:70b
 tier: expert
 
 model_selection:

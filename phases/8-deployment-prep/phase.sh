@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Phase 8: Deployment Prep
 # Release Preparation + Documentation

@@ -6,6 +6,7 @@ name: security-auditor
 description: Security assessment specialist for SDLC pipelines. Performs threat modeling, vulnerability scanning, compliance validation, and security gate reviews at critical pipeline checkpoints. Integrates with code review and deployment phases.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

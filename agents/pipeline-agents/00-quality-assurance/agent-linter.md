@@ -12,6 +12,7 @@ name: agent-linter
 description: Structural validation agent that evaluates agent definitions against objective, measurable criteria. Invoke for automated quality checks on agent structure, tier alignment, frontmatter completeness, and output format compliance.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

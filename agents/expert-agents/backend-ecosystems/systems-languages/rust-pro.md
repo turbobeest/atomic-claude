@@ -12,6 +12,7 @@ name: rust-pro
 description: Rust systems programming specialist for memory-safe, high-performance applications with ownership optimization and safety guarantees
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

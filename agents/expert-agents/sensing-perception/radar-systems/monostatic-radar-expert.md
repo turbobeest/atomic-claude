@@ -12,6 +12,7 @@ name: monostatic-radar-expert
 description: Masters monostatic radar systems for defense applications, specializing in target detection, tracking, and classification using co-located transmitter/receiver configurations with advanced waveform design and signal processing
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

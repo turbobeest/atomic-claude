@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 208: Phase Audit - PRD Validation
 # AI-driven audit selection from turbobeest/audits repository
@@ -235,7 +235,7 @@ EOF
     local audit_raw="$prompts_dir/audit-raw.json"
     local saved_turns="${CLAUDE_MAX_TURNS:-1}"
     export CLAUDE_MAX_TURNS=15
-    if atomic_invoke "$prompts_dir/prd-audit.md" "$audit_raw" "PRD audit" --model=opus --timeout=1800; then
+    if atomic_invoke "$prompts_dir/prd-audit.md" "$audit_raw" "PRD audit" --timeout=1800; then
         if jq -e . "$audit_raw" &>/dev/null; then
             cp "$audit_raw" "$audit_file"
             atomic_success "Audit complete"

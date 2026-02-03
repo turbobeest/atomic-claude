@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 405: Phase Audit - Specification
 # AI-driven audit selection from turbobeest/audits repository

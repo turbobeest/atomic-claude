@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 107: Direction Confirmation (Human Gate)
 # Review and confirm the consensus from deliberation

@@ -1879,24 +1879,30 @@ $prompt_content"
     while [[ $attempt -le $((max_retries + 1)) ]]; do
         attempt_start=$(date +%s)
 
+        # Use temporary file to avoid truncation race with tail -f
+        local temp_output="${output_file}.tmp.$$"
+
         # Start streaming if enabled and terminal is interactive
         if [[ "$stream_enabled" == "true" && -t 2 ]]; then
-            : > "$output_file"  # ensure file exists
+            : > "$temp_output"  # ensure temp file exists
             local _dim=$'\033[2m' _nc=$'\033[0m'
             echo -e "${DIM}    ┌── Claude Code ──────────────────────────────────${NC}" >&2
-            tail -f "$output_file" 2>/dev/null | sed "s/^/    ${_dim}│${_nc} /" >&2 &
+            tail -f "$temp_output" 2>/dev/null | sed "s/^/    ${_dim}│${_nc} /" >&2 &
             stream_pid=$!
         fi
 
-        if _atomic_timeout "$timeout" bash -c "$invoke_cmd" < /dev/null > "$output_file" 2>"${output_file}.err"; then
+        if _atomic_timeout "$timeout" bash -c "$invoke_cmd" < /dev/null > "$temp_output" 2>"${output_file}.err"; then
             exit_code=0
             # Stop streaming
             if [[ -n "$stream_pid" ]]; then
                 sleep 0.2  # let tail flush last output
-                kill "$stream_pid" 2>/dev/null; wait "$stream_pid" 2>/dev/null
+                kill -9 "$stream_pid" 2>/dev/null || true
+                # Don't wait - tail -f hangs on wait, just kill it
                 stream_pid=""
                 echo -e "${DIM}    └──────────────────────────────────────────────────${NC}" >&2
             fi
+            # Move temp file to final location
+            mv "$temp_output" "$output_file"
             break
         else
             exit_code=$?
@@ -1904,8 +1910,13 @@ $prompt_content"
 
         # Stop streaming on failure too
         if [[ -n "$stream_pid" ]]; then
-            kill "$stream_pid" 2>/dev/null; wait "$stream_pid" 2>/dev/null
+            kill -9 "$stream_pid" 2>/dev/null || true
             stream_pid=""
+        fi
+
+        # Clean up temp file on failure
+        if [[ -f "$temp_output" ]]; then
+            mv "$temp_output" "$output_file" 2>/dev/null || rm -f "$temp_output"
         fi
 
         attempt_end=$(date +%s)

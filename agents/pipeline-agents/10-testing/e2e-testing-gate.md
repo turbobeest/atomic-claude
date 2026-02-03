@@ -3,6 +3,7 @@ name: e2e-testing-gate
 description: Phase 10 end-to-end testing agent for the SDLC pipeline. Executes user journey tests, validates system behavior from user perspective, performs final GO/NO-GO validation before deployment phase.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

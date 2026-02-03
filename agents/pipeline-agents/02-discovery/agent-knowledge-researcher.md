@@ -3,6 +3,7 @@ name: agent-knowledge-researcher
 description: World-class knowledge curator for agent systems. Researches, validates, and adjudicates the true value of knowledge sources. Determines whether information warrants URL reference, local excerpt extraction, or agent embedding. Uses Firecrawl MCP for parallel intelligent scraping.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Standalone audit remediation launcher
 # Runs audit_post_execution against an existing report file

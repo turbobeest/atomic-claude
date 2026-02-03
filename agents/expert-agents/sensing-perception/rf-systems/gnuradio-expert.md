@@ -3,6 +3,7 @@ name: gnuradio-expert
 description: Masters GNU Radio framework for software-defined radio development, specializing in digital signal processing, flowgraph design, custom block development, and real-time RF application implementation
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

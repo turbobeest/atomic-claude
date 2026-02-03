@@ -3,6 +3,7 @@ name: seo-cannibalization-detector
 description: Detects and resolves keyword cannibalization issues through comprehensive content analysis and strategic differentiation
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # PHASE 6: CODE REVIEW
 # Comprehensive code review with specialized agents

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # PHASE 5: TDD IMPLEMENTATION
 # Execute RED/GREEN/REFACTOR/VERIFY cycles for all tasks

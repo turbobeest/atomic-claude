@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # ATOMIC-CLAUDE Git Operations
 # Auto-commit after tasks, auto-push after phases

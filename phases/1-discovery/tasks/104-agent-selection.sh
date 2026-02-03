@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 104: Agent Selection (Conversation 2)
 # Select agents to guide the pipeline phases - NOW BEFORE DIALOGUE

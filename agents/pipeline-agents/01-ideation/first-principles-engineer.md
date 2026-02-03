@@ -11,6 +11,7 @@ name: first-principles-engineer
 description: World-class first-principles reasoning specialist for SDLC pipelines. Invoke for novel problems resisting pattern decomposition, fundamental architectural decisions, and assumption-laden requirements requiring Socratic analysis.
 model: opus  # REQUIRED—PhD-tier reasoning demands frontier capability
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

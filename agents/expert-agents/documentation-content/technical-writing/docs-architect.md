@@ -3,6 +3,7 @@ name: docs-architect
 description: Designs comprehensive documentation architecture and knowledge base systems with focus on information organization and user discovery
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

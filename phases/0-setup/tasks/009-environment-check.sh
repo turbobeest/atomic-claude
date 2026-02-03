@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 009: Environment Check
 # Validate tools and assess system capabilities

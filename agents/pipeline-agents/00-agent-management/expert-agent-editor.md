@@ -3,6 +3,7 @@ name: expert-agent-editor
 description: Creates and revises expert-tier agent definitions (~1500 tokens, 15-20 instructions). Invoke for specialized domain agents requiring depth.
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

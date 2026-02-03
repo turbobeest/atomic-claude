@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 206: PRD Validation
 # Validate PRD completeness, testability, and consistency
@@ -371,7 +371,7 @@ EOF
         export CLAUDE_MAX_TURNS=15
         local validation_ok=false
 
-        if atomic_invoke "$prompts_dir/prd-validation.md" "$raw_validation" "PRD validation" --model=opus --timeout=1800; then
+        if atomic_invoke "$prompts_dir/prd-validation.md" "$raw_validation" "PRD validation" --timeout=1800; then
             # Attempt JSON recovery pipeline
             if _206_recover_json "$raw_validation" "$prompts_dir"; then
                 validation_ok=true

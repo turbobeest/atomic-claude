@@ -11,6 +11,7 @@ name: flutter-expert
 description: Master of Flutter cross-platform development specializing in widget architecture, Dart optimization, native platform integration, and performance tuning for iOS/Android
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

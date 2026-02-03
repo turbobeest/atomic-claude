@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Build agent-manifest.json from agent-inventory.csv
 #

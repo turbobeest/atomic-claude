@@ -3,6 +3,7 @@ name: business-analyst
 description: Analyzes business requirements and creates comprehensive specifications with stakeholder alignment and strategic business value focus
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

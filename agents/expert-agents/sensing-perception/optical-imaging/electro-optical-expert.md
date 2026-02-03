@@ -6,6 +6,7 @@ name: electro-optical-expert
 description: Masters electro-optical sensor systems for defense applications, specializing in visible spectrum optics, reflected light analysis, precision imaging, computer vision integration, and tactical sensor deployment with Johnson criteria optimization
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Kimi-K2-Thinking
   - Qwen3-235B-A22B

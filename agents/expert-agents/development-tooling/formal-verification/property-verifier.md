@@ -12,6 +12,7 @@ name: property-verifier
 description: Validates system properties and invariants through comprehensive property-based testing and specification verification using tools like Hypothesis, QuickCheck, and PropEr
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 201: Entry Validation
 # Validate Phase 1 artifacts exist and load context

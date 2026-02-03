@@ -11,6 +11,7 @@ name: nextjs-expert
 description: Architect of Next.js full-stack applications specializing in hybrid rendering strategies (SSR/SSG/ISR/CSR), performance optimization, SEO excellence, and modern web deployment
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

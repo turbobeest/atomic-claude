@@ -12,6 +12,7 @@ name: opcua-expert
 description: Masters OPC-UA (Open Platform Communications Unified Architecture) for industrial automation and SCADA systems, specializing in secure machine-to-machine communication, information modeling, and industrial IoT integration
 model: opus
 model_fallbacks:
+  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   - DeepSeek-V3
   - Qwen2.5-Coder-32B
   - llama3.3:70b

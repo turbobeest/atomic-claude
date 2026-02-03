@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 902: Release Setup
 # Final confirmation and release notes review

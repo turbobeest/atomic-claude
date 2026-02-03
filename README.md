@@ -31,6 +31,8 @@ SCRIPT ──prompt.md──► CLAUDE ──output.json──► SCRIPT ──p
 
 ## Quick Start
 
+**Prerequisites**: ATOMIC CLAUDE requires `initialization/setup.md` as the single source of truth for project configuration. If missing, Phase 0 will create a template for you to fill out.
+
 ```bash
 # Run the main CLI
 ./main.sh run 0          # Run Phase 0 (Setup)
@@ -38,11 +40,12 @@ SCRIPT ──prompt.md──► CLAUDE ──output.json──► SCRIPT ──p
 ./main.sh list           # List all phases
 
 # The script will:
-# 1. Collect configuration (user input)
-# 2. Invoke Claude ONLY for non-deterministic tasks
-# 3. Validate outputs
-# 4. Wait for human approval at gates
-# 5. Move to next phase
+# 1. Validate/create setup.md (single source of truth)
+# 2. Parse configuration with Claude
+# 3. Collect API keys
+# 4. Invoke Claude ONLY for non-deterministic tasks
+# 5. Wait for human approval at gates
+# 6. Move to next phase
 ```
 
 ## Hybrid LLM Support
@@ -102,7 +105,7 @@ ATOMIC-CLAUDE/
 │   └── webapp-testing/  # Playwright E2E patterns (auto-loaded for web projects)
 │
 ├── phases/
-│   ├── 0-setup/         # Project initialization
+│   ├── 0-setup/         # setup.md validation, API keys, environment
 │   ├── 1-discovery/     # Requirements gathering & agent selection
 │   ├── 2-prd/           # PRD authoring
 │   ├── 3-tasking/       # Task decomposition

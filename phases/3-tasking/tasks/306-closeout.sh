@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 306: Phase Closeout
 # Generate closeout document and prepare for Phase 4 (Specification)

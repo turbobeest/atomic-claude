@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # PHASE 4: SPECIFICATION
 # Expand tasks into TDD-ready OpenSpec definitions

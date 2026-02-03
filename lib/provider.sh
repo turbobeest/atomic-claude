@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # ATOMIC CLAUDE - Provider Routing Library
 # Hybrid LLM provider routing for cost-optimized operations
@@ -108,6 +108,365 @@ _provider_load_config() {
 }
 
 # ============================================================================
+# PROVIDER AVAILABILITY DETECTION
+# ============================================================================
+
+# Check if Claude Code (subscription) is available
+# Returns: 0 if available, 1 otherwise
+provider_check_claude_code() {
+    local cache_file="$PROVIDER_CACHE_DIR/availability_claude_code.json"
+
+    # Check cache
+    if [[ -f "$cache_file" ]]; then
+        local cached_at=$(jq -r '.timestamp // 0' "$cache_file")
+        local now=$(date +%s)
+        local age=$((now - cached_at))
+
+        if [[ $age -lt $PROVIDER_HEALTH_CACHE_TTL ]]; then
+            local cached_available=$(jq -r '.available // false' "$cache_file")
+            [[ "$cached_available" == "true" ]] && return 0 || return 1
+        fi
+    fi
+
+    # Check if claude command exists and works
+    local available=false
+    if command -v claude &>/dev/null; then
+        if claude --version &>/dev/null; then
+            available=true
+        fi
+    fi
+
+    # Cache result
+    cat > "$cache_file" << EOF
+{
+    "provider": "claude-code",
+    "available": $available,
+    "timestamp": $(date +%s)
+}
+EOF
+
+    [[ "$available" == "true" ]] && return 0 || return 1
+}
+
+# Check if Anthropic API is available
+# Returns: 0 if available, 1 otherwise
+provider_check_anthropic() {
+    local cache_file="$PROVIDER_CACHE_DIR/availability_anthropic.json"
+
+    # Check cache
+    if [[ -f "$cache_file" ]]; then
+        local cached_at=$(jq -r '.timestamp // 0' "$cache_file")
+        local now=$(date +%s)
+        local age=$((now - cached_at))
+
+        if [[ $age -lt $PROVIDER_HEALTH_CACHE_TTL ]]; then
+            local cached_available=$(jq -r '.available // false' "$cache_file")
+            [[ "$cached_available" == "true" ]] && return 0 || return 1
+        fi
+    fi
+
+    # Check for API key
+    local available=false
+    if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+        available=true
+    fi
+
+    # Cache result
+    cat > "$cache_file" << EOF
+{
+    "provider": "anthropic",
+    "available": $available,
+    "timestamp": $(date +%s),
+    "key_present": $available
+}
+EOF
+
+    [[ "$available" == "true" ]] && return 0 || return 1
+}
+
+# Check if AWS Bedrock is available
+# Returns: 0 if available, 1 otherwise
+provider_check_aws_bedrock() {
+    local cache_file="$PROVIDER_CACHE_DIR/availability_aws_bedrock.json"
+
+    # Check cache
+    if [[ -f "$cache_file" ]]; then
+        local cached_at=$(jq -r '.timestamp // 0' "$cache_file")
+        local now=$(date +%s)
+        local age=$((now - cached_at))
+
+        if [[ $age -lt $PROVIDER_HEALTH_CACHE_TTL ]]; then
+            local cached_available=$(jq -r '.available // false' "$cache_file")
+            [[ "$cached_available" == "true" ]] && return 0 || return 1
+        fi
+    fi
+
+    # Check for AWS credentials
+    local available=false
+    local method="none"
+
+    # Check for explicit credentials
+    if [[ -n "${AWS_ACCESS_KEY_ID:-}" && -n "${AWS_SECRET_ACCESS_KEY:-}" ]]; then
+        available=true
+        method="env_vars"
+    # Check for AWS CLI configured credentials
+    elif command -v aws &>/dev/null; then
+        if aws sts get-caller-identity &>/dev/null 2>&1; then
+            available=true
+            method="aws_cli"
+        fi
+    fi
+
+    # Cache result
+    cat > "$cache_file" << EOF
+{
+    "provider": "aws-bedrock",
+    "available": $available,
+    "timestamp": $(date +%s),
+    "method": "$method"
+}
+EOF
+
+    [[ "$available" == "true" ]] && return 0 || return 1
+}
+
+# Check if OpenAI API is available
+# Returns: 0 if available, 1 otherwise
+provider_check_openai() {
+    local cache_file="$PROVIDER_CACHE_DIR/availability_openai.json"
+
+    # Check cache
+    if [[ -f "$cache_file" ]]; then
+        local cached_at=$(jq -r '.timestamp // 0' "$cache_file")
+        local now=$(date +%s)
+        local age=$((now - cached_at))
+
+        if [[ $age -lt $PROVIDER_HEALTH_CACHE_TTL ]]; then
+            local cached_available=$(jq -r '.available // false' "$cache_file")
+            [[ "$cached_available" == "true" ]] && return 0 || return 1
+        fi
+    fi
+
+    # Check for API key
+    local available=false
+    if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+        available=true
+    fi
+
+    # Cache result
+    cat > "$cache_file" << EOF
+{
+    "provider": "openai",
+    "available": $available,
+    "timestamp": $(date +%s),
+    "key_present": $available
+}
+EOF
+
+    [[ "$available" == "true" ]] && return 0 || return 1
+}
+
+# Check if Google (Gemini) API is available
+# Returns: 0 if available, 1 otherwise
+provider_check_google() {
+    local cache_file="$PROVIDER_CACHE_DIR/availability_google.json"
+
+    # Check cache
+    if [[ -f "$cache_file" ]]; then
+        local cached_at=$(jq -r '.timestamp // 0' "$cache_file")
+        local now=$(date +%s)
+        local age=$((now - cached_at))
+
+        if [[ $age -lt $PROVIDER_HEALTH_CACHE_TTL ]]; then
+            local cached_available=$(jq -r '.available // false' "$cache_file")
+            [[ "$cached_available" == "true" ]] && return 0 || return 1
+        fi
+    fi
+
+    # Check for API key
+    local available=false
+    if [[ -n "${GOOGLE_API_KEY:-}" ]]; then
+        available=true
+    fi
+
+    # Cache result
+    cat > "$cache_file" << EOF
+{
+    "provider": "google",
+    "available": $available,
+    "timestamp": $(date +%s),
+    "key_present": $available
+}
+EOF
+
+    [[ "$available" == "true" ]] && return 0 || return 1
+}
+
+# Check if Azure OpenAI is available
+# Returns: 0 if available, 1 otherwise
+provider_check_azure() {
+    local cache_file="$PROVIDER_CACHE_DIR/availability_azure.json"
+
+    # Check cache
+    if [[ -f "$cache_file" ]]; then
+        local cached_at=$(jq -r '.timestamp // 0' "$cache_file")
+        local now=$(date +%s)
+        local age=$((now - cached_at))
+
+        if [[ $age -lt $PROVIDER_HEALTH_CACHE_TTL ]]; then
+            local cached_available=$(jq -r '.available // false' "$cache_file")
+            [[ "$cached_available" == "true" ]] && return 0 || return 1
+        fi
+    fi
+
+    # Check for Azure credentials
+    local available=false
+    if [[ -n "${AZURE_OPENAI_API_KEY:-}" && -n "${AZURE_OPENAI_ENDPOINT:-}" ]]; then
+        available=true
+    fi
+
+    # Cache result
+    cat > "$cache_file" << EOF
+{
+    "provider": "azure",
+    "available": $available,
+    "timestamp": $(date +%s),
+    "key_present": $available
+}
+EOF
+
+    [[ "$available" == "true" ]] && return 0 || return 1
+}
+
+# Check if OpenRouter is available
+# Returns: 0 if available, 1 otherwise
+provider_check_openrouter() {
+    local cache_file="$PROVIDER_CACHE_DIR/availability_openrouter.json"
+
+    # Check cache
+    if [[ -f "$cache_file" ]]; then
+        local cached_at=$(jq -r '.timestamp // 0' "$cache_file")
+        local now=$(date +%s)
+        local age=$((now - cached_at))
+
+        if [[ $age -lt $PROVIDER_HEALTH_CACHE_TTL ]]; then
+            local cached_available=$(jq -r '.available // false' "$cache_file")
+            [[ "$cached_available" == "true" ]] && return 0 || return 1
+        fi
+    fi
+
+    # Check for API key
+    local available=false
+    if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
+        available=true
+    fi
+
+    # Cache result
+    cat > "$cache_file" << EOF
+{
+    "provider": "openrouter",
+    "available": $available,
+    "timestamp": $(date +%s),
+    "key_present": $available
+}
+EOF
+
+    [[ "$available" == "true" ]] && return 0 || return 1
+}
+
+# Check if a specific provider is available
+# Usage: provider_check_availability <provider_name>
+# Returns: 0 if available, 1 otherwise
+provider_check_availability() {
+    mkdir -p "$PROVIDER_CACHE_DIR"
+    local provider="$1"
+
+    case "$provider" in
+        claude-code)
+            provider_check_claude_code
+            ;;
+        anthropic)
+            provider_check_anthropic
+            ;;
+        aws-bedrock)
+            provider_check_aws_bedrock
+            ;;
+        openai)
+            provider_check_openai
+            ;;
+        google)
+            provider_check_google
+            ;;
+        azure)
+            provider_check_azure
+            ;;
+        openrouter)
+            provider_check_openrouter
+            ;;
+        ollama)
+            # Check if any Ollama server is available
+            provider_init
+            [[ ${#_OLLAMA_HEALTHY_SERVERS[@]} -gt 0 ]] && return 0 || return 1
+            ;;
+        *)
+            echo "ERROR: Unknown provider: $provider" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Get list of all available providers in priority order
+# Usage: provider_get_available [priority_chain]
+# Returns: Newline-separated list of available providers
+provider_get_available() {
+    local priority_chain="${1:-claude-code anthropic aws-bedrock ollama openai google azure openrouter}"
+    local available=()
+
+    for provider in $priority_chain; do
+        if provider_check_availability "$provider"; then
+            available+=("$provider")
+        fi
+    done
+
+    printf '%s\n' "${available[@]}"
+}
+
+# Invalidate all provider availability cache
+provider_invalidate_availability_cache() {
+    rm -f "$PROVIDER_CACHE_DIR"/availability_*.json 2>/dev/null || true
+}
+
+# Show availability status for all providers
+provider_show_availability() {
+    echo ""
+    echo "Provider Availability:"
+    echo ""
+
+    local providers=(
+        "claude-code:Claude Code (Subscription)"
+        "anthropic:Anthropic API"
+        "aws-bedrock:AWS Bedrock"
+        "ollama:Ollama (Local)"
+        "openai:OpenAI API"
+        "google:Google Gemini"
+        "azure:Azure OpenAI"
+        "openrouter:OpenRouter"
+    )
+
+    for entry in "${providers[@]}"; do
+        local provider="${entry%%:*}"
+        local name="${entry#*:}"
+
+        if provider_check_availability "$provider"; then
+            echo "  ✓ $name"
+        else
+            echo "  ✗ $name"
+        fi
+    done
+    echo ""
+}
+
+# ============================================================================
 # HEALTH CHECKING
 # ============================================================================
 
@@ -160,6 +519,95 @@ EOF
 provider_invalidate_health_cache() {
     rm -f "$PROVIDER_CACHE_DIR"/health_*.json 2>/dev/null || true
     _provider_refresh_healthy_servers
+}
+
+# ============================================================================
+# PROVIDER CHAIN RESOLUTION
+# ============================================================================
+
+# Resolve the best available provider from a preference chain
+# Usage: provider_resolve_chain <chain> [context]
+# Returns: provider name or empty string if none available
+provider_resolve_chain() {
+    local chain="$1"
+    local context="${2:-}"
+
+    # Parse chain (space or comma-separated)
+    local providers
+    IFS=' ,' read -ra providers <<< "$chain"
+
+    # Try each provider in order
+    for provider in "${providers[@]}"; do
+        # Skip empty entries
+        [[ -z "$provider" ]] && continue
+
+        # Check if provider is available
+        if provider_check_availability "$provider"; then
+            echo "$provider"
+            return 0
+        fi
+    done
+
+    # No provider available
+    return 1
+}
+
+# Get provider chain for a task type from project config
+# Usage: provider_get_chain <task_type>
+# Returns: space-separated provider chain
+provider_get_chain() {
+    local task_type="${1:-critical}"
+
+    provider_init
+
+    # Check for task-specific chain in config
+    local chain=""
+    case "$task_type" in
+        critical)
+            chain=$(jq -r '.providers.chains.critical // ""' "$PROVIDER_CONFIG_FILE" 2>/dev/null || echo "")
+            ;;
+        bulk)
+            chain=$(jq -r '.providers.chains.bulk // ""' "$PROVIDER_CONFIG_FILE" 2>/dev/null || echo "")
+            ;;
+        quick|background)
+            chain=$(jq -r '.providers.chains.quick // ""' "$PROVIDER_CONFIG_FILE" 2>/dev/null || echo "")
+            ;;
+    esac
+
+    # Fall back to global chain if no task-specific chain
+    if [[ -z "$chain" ]]; then
+        chain=$(jq -r '.providers.chains.global // ""' "$PROVIDER_CONFIG_FILE" 2>/dev/null || echo "")
+    fi
+
+    # Ultimate fallback: default chain
+    if [[ -z "$chain" ]]; then
+        chain="claude-code anthropic aws-bedrock ollama"
+    fi
+
+    echo "$chain"
+}
+
+# Resolve best provider for a task type
+# Usage: provider_resolve_for_task <task_type> [context]
+# Returns: provider name
+provider_resolve_for_task() {
+    local task_type="${1:-critical}"
+    local context="${2:-}"
+
+    # Get provider chain for this task type
+    local chain
+    chain=$(provider_get_chain "$task_type")
+
+    # Resolve best available provider
+    local provider
+    provider=$(provider_resolve_chain "$chain" "$context")
+
+    if [[ -z "$provider" ]]; then
+        # Last resort fallback
+        echo "claude-code"
+    else
+        echo "$provider"
+    fi
 }
 
 # ============================================================================

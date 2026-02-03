@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Task 904: Release Execution
 # Execute GitHub release, package publishing, and announcement
