@@ -946,6 +946,58 @@ def atomic_validate_files(*files: str) -> bool:
 
 
 # ============================================================================
+# DEPENDENCY VALIDATION
+# ============================================================================
+
+# Required and optional dependencies
+ATOMIC_REQUIRED_DEPS = ["jq", "git"]
+ATOMIC_OPTIONAL_DEPS = ["claude", "curl", "ollama", "realpath"]
+
+
+def atomic_validate_deps(strict: bool = False) -> bool:
+    """
+    Validate that required (and optionally, optional) dependencies are available.
+
+    Args:
+        strict: If True, also require optional dependencies
+
+    Returns:
+        True if all required (and optional, if strict) dependencies are available,
+        False otherwise
+    """
+    missing_required: List[str] = []
+    missing_optional: List[str] = []
+
+    # Check required dependencies
+    for dep in ATOMIC_REQUIRED_DEPS:
+        if not shutil.which(dep):
+            missing_required.append(dep)
+
+    # Check optional dependencies
+    for dep in ATOMIC_OPTIONAL_DEPS:
+        if not shutil.which(dep):
+            missing_optional.append(dep)
+
+    # Report missing required
+    if missing_required:
+        print("ERROR: Missing required dependencies:", file=sys.stderr)
+        for dep in missing_required:
+            print(f"  - {dep}", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Install missing dependencies and try again.", file=sys.stderr)
+        return False
+
+    # Report missing optional only in strict mode (they're optional, no need to warn)
+    if missing_optional and strict:
+        print("ERROR: Missing optional dependencies (strict mode):", file=sys.stderr)
+        for dep in missing_optional:
+            print(f"  - {dep}", file=sys.stderr)
+        return False
+
+    return True
+
+
+# ============================================================================
 # INITIALIZATION
 # ============================================================================
 
@@ -967,3 +1019,193 @@ if __name__ == "__main__":
     print(f"ATOMIC_ROOT: {ATOMIC_ROOT}")
     print(f"Provider: {CLAUDE_PROVIDER}")
     print(f"Model: {CLAUDE_MODEL}")
+
+
+def atomic_context_init(phase_id: str) -> None:
+    """
+    Initialize context directory for a phase.
+    
+    Creates context directory and inherits summary from previous phase if available.
+    
+    Args:
+        phase_id: Phase identifier (e.g., "4-specification")
+    """
+    import shutil
+    from pathlib import Path
+    
+    output_dir = Path(os.getenv("ATOMIC_OUTPUT_DIR", ".outputs"))
+    context_dir = output_dir / phase_id / "context"
+    context_dir.mkdir(parents=True, exist_ok=True)
+    
+    summary_file = context_dir / "summary.md"
+    
+    # Try to inherit from previous phase
+    if not summary_file.exists():
+        # Extract phase number
+        phase_num_str = phase_id.split("-")[0]
+        try:
+            phase_num = int(phase_num_str)
+            if phase_num > 0:
+                # Find previous phase summary
+                prev_num = phase_num - 1
+                for prev_dir in output_dir.glob(f"{prev_num}-*/context/summary.md"):
+                    if prev_dir.exists():
+                        shutil.copy(prev_dir, summary_file)
+                        break
+        except ValueError:
+            pass
+    
+    # Create default summary if still doesn't exist
+    if not summary_file.exists():
+        summary_file.write_text(f"""# Project Context Summary
+
+*This file is automatically maintained. It provides rolling context for LLM tasks.*
+
+## Phase: {phase_id}
+
+Context will be accumulated as tasks execute.
+""")
+
+
+def atomic_phase_header(phase_id: str, project_name: str = "atomic-test") -> None:
+    """
+    Print phase header with project name.
+    
+    Args:
+        phase_id: Phase identifier (e.g., "0-setup")
+        project_name: Name of the project
+    """
+    c = Colors()
+    print()
+    print(f"{c.BRIGHT_BLUE}{'∙' * 72}{c.NC}")
+    print(f"{c.BRIGHT_BLUE}  ⬢ PHASE {phase_id.upper()} [{project_name}]{c.NC}")
+    print(f"{c.BRIGHT_BLUE}{'∙' * 72}{c.NC}")
+
+
+def atomic_header(title: str) -> None:
+    """
+    Print a formatted header.
+    
+    Args:
+        title: Header title text
+    """
+    c = Colors()
+    print()
+    print(f"{c.BRIGHT_BLUE}{'∙' * 72}{c.NC}")
+    print(f"{c.BRIGHT_BLUE}  ⬢ {title}{c.NC}")
+    print(f"{c.BRIGHT_BLUE}{'∙' * 72}{c.NC}")
+    print()
+
+
+def atomic_get_project_name() -> str:
+    """
+    Get project name from configuration.
+    
+    Returns:
+        Project name from config, or "atomic-test" as fallback
+    """
+    import json
+    from pathlib import Path
+    
+    output_dir = Path(os.getenv("ATOMIC_OUTPUT_DIR", ".outputs"))
+    config_file = output_dir / "0-setup" / "project-config.json"
+    
+    if config_file.exists():
+        try:
+            with open(config_file) as f:
+                config = json.load(f)
+                return config.get("project", {}).get("name", "atomic-test")
+        except Exception:
+            pass
+    
+    return "atomic-test"
+
+
+def atomic_git_tag(tag_name: str, message: str = "") -> bool:
+    """
+    Create a git tag.
+    
+    Args:
+        tag_name: Name of the tag
+        message: Optional tag message
+        
+    Returns:
+        True if tag created successfully, False otherwise
+    """
+    import subprocess
+    
+    try:
+        if message:
+            subprocess.run(
+                ["git", "tag", "-a", tag_name, "-m", message],
+                check=True,
+                capture_output=True
+            )
+        else:
+            subprocess.run(
+                ["git", "tag", tag_name],
+                check=True,
+                capture_output=True
+            )
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
+def atomic_context_refresh(phase_id: str) -> None:
+    """
+    Refresh context summary for a phase.
+    
+    TODO: Implement context refresh logic
+    
+    Args:
+        phase_id: Phase identifier
+    """
+    pass
+
+
+def atomic_llm_available() -> bool:
+    """
+    Check if an LLM provider is available.
+    
+    Returns:
+        True if at least one provider is available
+    """
+    from lib.provider import ProviderManager
+    mgr = ProviderManager()
+    mgr.init()
+    return (mgr.check_anthropic() or 
+            mgr.check_aws_bedrock() or 
+            mgr.check_claude_code())
+
+
+def atomic_context_artifact(name: str, path: str) -> None:
+    """Record a context artifact. TODO: Implement"""
+    pass
+
+def atomic_context_decision(decision: str, rationale: str) -> None:
+    """Record a context decision. TODO: Implement"""
+    pass
+
+def atomic_context_save() -> None:
+    """Save context to file. TODO: Implement"""
+    pass
+
+# Stub functions - TODO: Implement these
+def atomic_drain_stdin() -> None:
+    """Drain stdin to prevent input issues. TODO: Implement"""
+    import sys
+    if not sys.stdin.isatty():
+        sys.stdin.read()
+
+def atomic_log(message: str) -> None:
+    """Log message to atomic log file. TODO: Implement"""
+    pass
+
+def atomic_get_model_for_role(role: str) -> str:
+    """Get model for a specific role. TODO: Implement"""
+    return "sonnet"
+
+def atomic_get_fast_model_for_role(role: str) -> str:
+    """Get fast model for role. TODO: Implement"""
+    return "haiku"
