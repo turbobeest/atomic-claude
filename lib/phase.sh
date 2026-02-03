@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # ATOMIC CLAUDE - Phase Management Library
 # Provides phase lifecycle management for multi-step workflows
@@ -12,11 +12,22 @@
 
 set -euo pipefail
 
-# Source core library
-PHASE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$PHASE_LIB_DIR/atomic.sh"
-source "$PHASE_LIB_DIR/task-state.sh"
-source "$PHASE_LIB_DIR/memory.sh"
+# Source core library (only if not already sourced)
+if [[ -z "${ATOMIC_VERSION:-}" ]]; then
+    PHASE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    source "$PHASE_LIB_DIR/atomic.sh"
+fi
+
+# Source dependencies (only if not already sourced)
+if ! declare -f task_state_init &>/dev/null; then
+    PHASE_LIB_DIR="${PHASE_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+    source "$PHASE_LIB_DIR/task-state.sh"
+fi
+
+if ! declare -f memory_init &>/dev/null; then
+    PHASE_LIB_DIR="${PHASE_LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+    source "$PHASE_LIB_DIR/memory.sh"
+fi
 
 # ============================================================================
 # PHASE STATE
@@ -309,12 +320,7 @@ phase_task() {
     PHASE_TASKS_RUN=$((PHASE_TASKS_RUN + 1))
 
     echo ""
-    # Use printf with precision for fixed-width (58 chars, truncate if longer)
-    local box_text
-    box_text=$(printf "%-58.58s" "TASK $PHASE_TASKS_RUN: $task_name")
-    echo -e "${BOLD}${CYAN}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
-    echo -e "${BOLD}${CYAN}┃${NC} ${BOLD}${box_text}${NC} ${BOLD}${CYAN}┃${NC}"
-    echo -e "${BOLD}${CYAN}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
+    echo -e "${BOLD}${CYAN}▶ Task ${task_id}:${NC} ${BOLD}${task_name}${NC}"
 
     # Execute the task function/command passed
     if "$@"; then
@@ -462,21 +468,16 @@ phase_task_interactive() {
         echo ""
         # Use printf with precision for fixed-width (58 chars, truncate if longer)
         local skip_text
-        skip_text=$(printf "%-58.58s" "TASK $task_id: $task_name [COMPLETE - SKIPPED]")
-        echo -e "${DIM}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
-        echo -e "${DIM}┃${NC} ${skip_text} ${DIM}┃${NC}"
-        echo -e "${DIM}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
+        echo ""
+        echo -e "${DIM}▶ Task ${task_id}: ${task_name} ${GREEN}[COMPLETE - SKIPPED]${NC}"
+        echo ""
         return $TASK_CONTINUE
     fi
 
     while true; do
         echo ""
-        # Use printf with precision for fixed-width (58 chars, truncate if longer)
-        local box_text
-        box_text=$(printf "%-58.58s" "TASK $task_id: $task_name")
-        echo -e "${BOLD}${CYAN}┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓${NC}"
-        echo -e "${BOLD}${CYAN}┃${NC} ${BOLD}${box_text}${NC} ${BOLD}${CYAN}┃${NC}"
-        echo -e "${BOLD}${CYAN}┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛${NC}"
+        echo -e "${BOLD}${CYAN}▶ Task ${task_id}:${NC} ${BOLD}${task_name}${NC}"
+        echo ""
 
         # Mark task as started and track for signal cleanup
         task_state_start "$task_id" "$task_name"

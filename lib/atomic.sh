@@ -2287,7 +2287,7 @@ atomic_validate_path() {
     fi
 
     # Check for suspicious patterns
-    if [[ "$path" =~ ^\~|^\$|^\||^\; ]]; then
+    if [[ "$path" =~ ^(\~|\$|\||\;) ]]; then
         echo "Path contains suspicious prefix"
         return 1
     fi
