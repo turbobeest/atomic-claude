@@ -467,6 +467,73 @@ tail -f .logs/atomic.log
 3. Override min/max recommendations if needed
 4. Run phase with audit
 
+### Committing and Pushing Changes (Dual-Repo Workflow)
+
+This repository is synced to two remote repositories:
+- `origin`: https://github.com/turbobeest/atomic-claude.git (PUBLIC)
+- `internal`: https://github.boozallencsn.com/TerBeest-James/atomic-claude.git (PRIVATE - Booz Allen)
+
+**Branch**: `python-bash` (active development branch)
+
+#### Quick Workflow
+
+```bash
+# 1. Load sync helpers (first time in session)
+source .git-sync-config.sh
+
+# 2. Check sync status before starting work
+sync-status
+
+# 3. Pull updates from both repos
+sync-pull
+git merge origin/python-bash    # if needed
+git merge internal/python-bash  # if needed
+
+# 4. Make your changes and commit
+git add .
+git commit -m "Your commit message
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
+
+# 5. Push to BOTH repos at once
+sync-push
+```
+
+#### Helper Commands
+
+- **`sync-push`** - Push current branch to both repos
+- **`sync-pull`** - Fetch from both repos and show what's new
+- **`sync-status`** - Check sync state of both repos
+- **`sync-origin-to-internal`** - Sync PUBLIC → PRIVATE
+- **`sync-internal-to-origin`** - Sync PRIVATE → PUBLIC
+
+#### Working from External Location
+
+When outside the Booz Allen network (can't access `internal`):
+
+```bash
+# Only push to public repo
+git push origin python-bash
+
+# Later, when back on Bedrock, sync to internal:
+source .git-sync-config.sh
+sync-origin-to-internal
+```
+
+#### Manual Method (Without Helper Script)
+
+```bash
+# Push to both repos manually
+git push origin python-bash
+git push internal python-bash
+
+# Check for updates
+git fetch origin python-bash
+git fetch internal python-bash
+```
+
+**See `SYNC-STRATEGY.md` for complete documentation and troubleshooting.**
+
 ## External Repositories
 
 Atomic Claude integrates two companion repos:
