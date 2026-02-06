@@ -10,7 +10,9 @@
 task_002_config_collection() {
     local config_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/project-config.json"
     local extracted_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/extracted-config.json"
-    local init_dir="$ATOMIC_ROOT/initialization"
+    # Look for initialization in project root (parent of ATOMIC-CLAUDE)
+    local project_root="$(dirname "$ATOMIC_ROOT")"
+    local init_dir="$project_root/initialization"
 
     atomic_step "Document Configuration"
 
@@ -32,6 +34,15 @@ task_002_config_collection() {
         echo -e "${DIM}  └─────────────────────────────────────────────────────────┘${NC}"
         echo ""
 
+        # Auto-launch dashboard if not already running
+        if ! lsof -Pi :5173 -sTCP:LISTEN -t >/dev/null 2>&1; then
+            atomic_substep "Launching tasks dashboard..."
+            if [[ -f "$ATOMIC_ROOT/../start-dashboard.sh" ]]; then
+                nohup "$ATOMIC_ROOT/../start-dashboard.sh" >/dev/null 2>&1 &
+                sleep 2  # Give it time to start and open browser
+            fi
+        fi
+
         # Check for initialization directory
         local default_path=""
         if [[ -f "$init_dir/setup.md" ]]; then
@@ -51,7 +62,7 @@ task_002_config_collection() {
 
         while true; do
             if [[ -n "$default_path" ]]; then
-                read -e -p "  Setup file path [$default_path]: " SETUP_FILE_PATH || true
+                read -e -p "  Setup file path (default: $default_path): " SETUP_FILE_PATH || true
                 SETUP_FILE_PATH=${SETUP_FILE_PATH:-$default_path}
             else
                 read -e -p "  Setup file path: " SETUP_FILE_PATH || true
@@ -433,7 +444,7 @@ PROMPT_SCHEMA
         echo -e "  ${RED}[q]${NC} Quit"
         echo ""
     atomic_drain_stdin
-        read -e -p "  Choice [r]: " fallback_choice || true
+        read -e -p "  Choice (default: r): " fallback_choice || true
         fallback_choice=${fallback_choice:-r}
 
         case "$fallback_choice" in

@@ -153,7 +153,7 @@ prd_revision_flow() {
         esac
 
         echo -e "  ${DIM}Suggested: $suggestion${NC}"
-        read -e -p "  Resolution [accept]: " user_response || true
+        read -e -p "  Resolution (default: accept): " user_response || true
 
         if [[ "$user_response" == "done" ]]; then
             echo ""
@@ -301,7 +301,7 @@ PROMPT_HEADER
 
     while true; do
     atomic_drain_stdin
-        read -e -p "  Choice [apply]: " ref_choice || true
+        read -e -p "  Choice (default: apply): " ref_choice || true
         ref_choice=${ref_choice:-apply}
 
         case "$ref_choice" in

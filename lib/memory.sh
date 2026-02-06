@@ -275,7 +275,7 @@ memory_handle_backtrack() {
     echo ""
 
     local choice
-    read -rp "  Choice [continue]: " choice || choice="continue"
+    read -rp "  Choice (default: continue): " choice || choice="continue"
     choice=${choice:-continue}
 
     case "$choice" in
@@ -441,8 +441,11 @@ memory_prompt_save() {
     echo -e "    ${DIM:-}[skip]${NC:-} Don't save"
     echo ""
 
+    # Drain any buffered stdin before prompting
+    while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
+
     local choice
-    read -rp "  Choice [save]: " choice || choice="save"
+    read -e -r -p "  Choice (default: save): " choice || choice="save"
     choice=${choice:-save}
 
     case "$choice" in

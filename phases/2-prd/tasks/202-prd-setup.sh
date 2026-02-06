@@ -69,7 +69,7 @@ task_202_prd_setup() {
     echo -e "    ${MAGENTA}[custom]${NC}    Define custom scope"
     echo ""
 
-    read -e -p "  Scope [mvp]: " scope_choice || true
+    read -e -p "  Scope (default: mvp): " scope_choice || true
     scope_choice=${scope_choice:-mvp}
 
     local scope_type="$scope_choice"
@@ -121,7 +121,7 @@ task_202_prd_setup() {
     echo -e "    ${DIM}8.${NC} Deployment/operations"
     echo ""
 
-    read -e -p "  Focus areas [1 2 7]: " focus_input || true
+    read -e -p "  Focus areas (default: 1 2 7): " focus_input || true
     focus_input=${focus_input:-"1 2 7"}
 
     local focus_areas=()

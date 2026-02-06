@@ -212,7 +212,7 @@ EOF
         echo ""
 
     atomic_drain_stdin
-        read -e -p "  Choice [abort]: " entry_choice || true
+        read -e -p "  Choice (default: abort): " entry_choice || true
         entry_choice=${entry_choice:-abort}
 
         if [[ "$entry_choice" != "continue" ]]; then

@@ -89,7 +89,7 @@ task_009_environment_check() {
 
     while true; do
     atomic_drain_stdin
-            read -e -p "  Choice [r]: " choice || true
+            read -e -p "  Choice (default: r): " choice || true
             choice=${choice:-r}
             case "$choice" in
                 r|R)
@@ -209,7 +209,7 @@ _009_agent_exploration() {
     echo ""
 
     atomic_drain_stdin
-    read -e -p "  Choice [skip]: " explore_choice || true
+    read -e -p "  Choice (default: skip): " explore_choice || true
     explore_choice=${explore_choice:-skip}
 
     case "$explore_choice" in

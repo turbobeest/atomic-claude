@@ -119,7 +119,7 @@ task_110_closeout() {
     while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
 
     # Handle EOF gracefully - default to approve
-    read -e -p "  Choice [approve]: " closeout_choice || true
+    read -e -p "  Choice (default: approve): " closeout_choice || true
     closeout_choice=${closeout_choice:-approve}
 
     case "$closeout_choice" in

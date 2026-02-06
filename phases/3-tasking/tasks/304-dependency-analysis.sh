@@ -91,7 +91,7 @@ task_304_dependency_analysis() {
         echo ""
 
     atomic_drain_stdin
-        read -e -p "  Choice [fix]: " fix_choice || true
+        read -e -p "  Choice (default: fix): " fix_choice || true
         fix_choice=${fix_choice:-fix}
 
         if [[ "$fix_choice" == "abort" ]]; then

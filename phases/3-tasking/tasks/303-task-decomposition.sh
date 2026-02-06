@@ -26,6 +26,107 @@ task_303_task_decomposition() {
 
     mkdir -p "$prompts_dir" "$taskmaster_dir/tasks"
 
+    # =========================================================================
+    # UAT MODE BYPASS
+    # =========================================================================
+    if [[ "${ATOMIC_UAT_MODE:-false}" == "true" ]]; then
+        atomic_info "UAT mode: Creating minimal tasks..."
+
+        # Create minimal but valid tasks.json with 3-5 sample tasks
+        cat > "$tasks_file" << 'EOF'
+{
+  "meta": {
+    "project_name": "UAT Test Project",
+    "generated_at": "2024-01-01T00:00:00Z",
+    "source": "uat",
+    "version": "1.0"
+  },
+  "tasks": [
+    {
+      "id": 1,
+      "title": "F0: Foundation Setup",
+      "description": "Initialize project structure with required tech stack",
+      "status": "pending",
+      "priority": "high",
+      "category": "infrastructure",
+      "dependencies": [],
+      "acceptance_criteria": "- Project structure created\n- Dependencies installed\n- Build system configured",
+      "tags": ["setup", "foundation"],
+      "estimated_complexity": "simple",
+      "prd_section": "Section 2",
+      "subtasks": []
+    },
+    {
+      "id": 2,
+      "title": "F1: Core Feature Implementation",
+      "description": "Implement primary feature per FR-001",
+      "status": "pending",
+      "priority": "high",
+      "category": "feature",
+      "dependencies": [1],
+      "acceptance_criteria": "- Feature works as specified\n- Unit tests pass\n- Integration tests pass",
+      "tags": ["feature", "core"],
+      "estimated_complexity": "moderate",
+      "prd_section": "Section 3",
+      "subtasks": []
+    },
+    {
+      "id": 3,
+      "title": "Test Infrastructure",
+      "description": "Configure testing framework and utilities",
+      "status": "pending",
+      "priority": "high",
+      "category": "testing",
+      "dependencies": [1],
+      "acceptance_criteria": "- Test framework configured\n- Test utilities available\n- Sample tests run",
+      "tags": ["testing", "infrastructure"],
+      "estimated_complexity": "simple",
+      "prd_section": "Section 8",
+      "subtasks": []
+    },
+    {
+      "id": 4,
+      "title": "Documentation",
+      "description": "Write project documentation",
+      "status": "pending",
+      "priority": "medium",
+      "category": "documentation",
+      "dependencies": [2],
+      "acceptance_criteria": "- README complete\n- API documentation written\n- Usage examples provided",
+      "tags": ["docs"],
+      "estimated_complexity": "simple",
+      "prd_section": "Section 10",
+      "subtasks": []
+    },
+    {
+      "id": 5,
+      "title": "Deployment Setup",
+      "description": "Configure deployment pipeline",
+      "status": "pending",
+      "priority": "medium",
+      "category": "infrastructure",
+      "dependencies": [2, 3],
+      "acceptance_criteria": "- CI/CD pipeline configured\n- Deployment scripts ready\n- Environment variables set",
+      "tags": ["deployment", "ci-cd"],
+      "estimated_complexity": "moderate",
+      "prd_section": "Section 11",
+      "subtasks": []
+    }
+  ]
+}
+EOF
+
+        # Also create raw-tasks.json (copy of tasks.json)
+        cp "$tasks_file" "$raw_tasks_file"
+
+        atomic_success "UAT mode: Created 5 minimal tasks"
+        return 0
+    fi
+
+    # -------------------------------------------------------------------------
+    # NORMAL MODE - Continue with full task decomposition
+    # -------------------------------------------------------------------------
+
     echo ""
     echo -e "  ${DIM}Breaking PRD into atomic, implementable tasks using TaskMaster format.${NC}"
     echo -e "  ${DIM}Output: .taskmaster/tasks/tasks.json${NC}"
@@ -42,7 +143,7 @@ task_303_task_decomposition() {
     # Check embedded repo first (monorepo deployment), then env var, then default
     local agent_repo="$ATOMIC_ROOT/repos/agents"
     [[ -f "$ATOMIC_ROOT/agents/agent-inventory.csv" ]] && agent_repo="$ATOMIC_ROOT/agents"
-    [[ -n "$ATOMIC_AGENT_REPO" ]] && agent_repo="$ATOMIC_AGENT_REPO"
+    [[ -n "${ATOMIC_AGENT_REPO:-}" ]] && agent_repo="$ATOMIC_AGENT_REPO"
 
     if [[ -f "$agents_file" ]]; then
         # Load decomposition agent prompts from agents repository
@@ -150,11 +251,20 @@ You are a task-decomposer agent. Your job is to break down the PRD into atomic, 
 PROMPT_HEADER
     fi
 
+    # Fast-path mode: Limit task count
+    local max_tasks_constraint=""
+    if [[ "${ATOMIC_FAST_PATH:-false}" == "true" ]]; then
+        local max_tasks="${ATOMIC_MAX_TASKS:-5}"
+        max_tasks_constraint="**FAST-PATH MODE**: Generate MAXIMUM $max_tasks tasks only. Focus on:\n- 1 infrastructure/setup task\n- 1-2 core feature tasks\n- 1 testing task\n- 1 deployment task\n\nKeep it minimal for pipeline testing."
+        echo -e "  ${YELLOW}⚡${NC} Fast-path mode: Limiting to $max_tasks tasks"
+        echo ""
+    fi
+
     cat >> "$prompts_dir/task-decomposition.md" << PROMPT_HEADER
 
 ## Token Budget Warning
 
-Your output should be 50-150 tasks typically. Keep descriptions concise (1-2 sentences). Acceptance criteria should be bullet points, not paragraphs.
+${max_tasks_constraint:-Your output should be 50-150 tasks typically.} Keep descriptions concise (1-2 sentences). Acceptance criteria should be bullet points, not paragraphs.
 
 ## Project Context
 

@@ -11,6 +11,41 @@ task_502_tdd_setup() {
 
     atomic_step "TDD Setup"
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # UAT MODE BYPASS
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    if [[ "${ATOMIC_UAT_MODE:-false}" == "true" ]]; then
+        echo ""
+        echo -e "  ${YELLOW}⚡${NC} UAT Mode: Skipping TDD configuration, creating minimal setup"
+        echo ""
+        
+        local setup_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/tdd-setup.json"
+        mkdir -p "$(dirname "$setup_file")"
+        
+        jq -n '{
+            "coverage_targets": {
+                "unit": 80,
+                "integration": 70
+            },
+            "pyramid_profile": "unit-heavy",
+            "execution": {
+                "mode": "parallel",
+                "workers": 2
+            },
+            "task_count": 3,
+            "detected_stack": "python",
+            "mode": "uat",
+            "configured_at": (now | todate)
+        }' > "$setup_file"
+        
+        atomic_context_artifact "$setup_file" "tdd-setup" "TDD configuration (UAT mode)"
+        atomic_context_decision "TDD setup: UAT mode with default configuration" "configuration"
+        
+        atomic_success "TDD Setup complete (UAT mode)"
+        return 0
+    fi
+
     mkdir -p "$(dirname "$setup_file")" "$(dirname "$config_file")"
 
     echo ""
@@ -60,7 +95,7 @@ task_502_tdd_setup() {
     echo -e "      ${DIM}[70]${NC}  Relaxed  ${DIM}- Prototypes, internal tools, MVPs${NC}"
     echo ""
 
-    read -e -p "    Unit test coverage target [80]: " unit_coverage || true
+    read -e -p "    Unit test coverage target (default: 80): " unit_coverage || true
     unit_coverage=${unit_coverage:-80}
 
     echo ""
@@ -71,7 +106,7 @@ task_502_tdd_setup() {
     echo -e "      ${DIM}[60]${NC}  Relaxed  ${DIM}- Monoliths with strong unit tests${NC}"
     echo ""
 
-    read -e -p "    Integration test coverage target [70]: " integration_coverage || true
+    read -e -p "    Integration test coverage target (default: 70): " integration_coverage || true
     integration_coverage=${integration_coverage:-70}
 
     echo ""
@@ -126,7 +161,7 @@ task_502_tdd_setup() {
     echo -e "    ${CYAN}[integration]${NC}    40% unit, 45% integration, 15% E2E"
     echo ""
 
-    read -e -p "  Pyramid profile [unit-heavy]: " pyramid_profile || true
+    read -e -p "  Pyramid profile (default: unit-heavy): " pyramid_profile || true
     pyramid_profile=${pyramid_profile:-unit-heavy}
 
     echo ""

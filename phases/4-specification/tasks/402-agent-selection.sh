@@ -10,10 +10,45 @@ task_402_agent_selection() {
     # Check embedded repo first (monorepo deployment), then env var, then default
     local agent_repo="$ATOMIC_ROOT/repos/agents"
     [[ -f "$ATOMIC_ROOT/agents/agent-inventory.csv" ]] && agent_repo="$ATOMIC_ROOT/agents"
-    [[ -n "$ATOMIC_AGENT_REPO" ]] && agent_repo="$ATOMIC_AGENT_REPO"
+    [[ -n "${ATOMIC_AGENT_REPO:-}" ]] && agent_repo="$ATOMIC_AGENT_REPO"
     local csv_path="$agent_repo/agent-inventory.csv"
 
     atomic_step "Agent Selection"
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # UAT MODE BYPASS
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    if [[ "${ATOMIC_UAT_MODE:-false}" == "true" ]]; then
+        echo ""
+        echo -e "  ${YELLOW}⚡${NC} UAT Mode: Auto-selecting core specification agents"
+        echo ""
+        
+        # Create minimal agent roster
+        local roster_output="$ATOMIC_ROOT/.claude/agent-roster.json"
+        mkdir -p "$(dirname "$roster_output")"
+        
+        cat > "$roster_output" << 'EOF'
+{
+    "phase": 4,
+    "phase_name": "Specification",
+    "agents": [
+        "specification-agent:sonnet",
+        "tdd-implementation-agent:sonnet"
+    ],
+    "task_count": 3,
+    "source": "uat-mode",
+    "confirmed_at": "2026-02-04T00:00:00Z"
+}
+EOF
+        
+        atomic_context_artifact "$roster_output" "agent-roster" "Phase 4 agent roster (UAT)"
+        atomic_context_decision "Selected 2 agents for specification in UAT mode" "agents"
+        atomic_success "Agent Selection complete (UAT mode)"
+        
+        return 0
+    fi
+
 
     echo ""
     echo -e "  ${DIM}Selecting agents for OpenSpec generation and TDD subtask creation.${NC}"
@@ -160,7 +195,7 @@ task_402_agent_selection() {
 
     while true; do
         atomic_drain_stdin
-        read -e -p "  Choice [approve]: " agent_choice || true
+        read -e -p "  Choice (default: approve): " agent_choice || true
         agent_choice=${agent_choice:-approve}
 
         case "$agent_choice" in

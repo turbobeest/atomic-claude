@@ -36,6 +36,42 @@ EOF
 
     atomic_step "Entry & Initialization"
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # UAT MODE BYPASS
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    if [[ "${ATOMIC_UAT_MODE:-false}" == "true" ]]; then
+        echo ""
+        echo -e "  ${YELLOW}⚡${NC} UAT Mode: Bypassing Phase 3 verification and creating minimal initialization"
+        echo ""
+        
+        # Create minimal initialization output
+        local init_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/initialization.json"
+        mkdir -p "$(dirname "$init_file")"
+        
+        cat > "$init_file" << 'EOF'
+{
+    "phase3_verified": true,
+    "task_count": 3,
+    "priority_breakdown": {
+        "high": 2,
+        "medium": 1,
+        "low": 0
+    },
+    "existing_specs": 0,
+    "initialized_at": "2026-02-04T00:00:00Z",
+    "mode": "uat"
+}
+EOF
+        
+        atomic_context_artifact "$init_file" "initialization" "Phase 4 initialization state (UAT)"
+        atomic_context_decision "Phase 4 initialized in UAT mode with 3 test tasks" "initialization"
+        atomic_success "Entry & Initialization complete (UAT mode)"
+        
+        return 0
+    fi
+
+
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # PHASE 3 VERIFICATION
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -143,7 +179,7 @@ EOF
         echo ""
 
     atomic_drain_stdin
-        read -e -p "  Choice [keep]: " spec_choice || true
+        read -e -p "  Choice (default: keep): " spec_choice || true
         spec_choice=${spec_choice:-keep}
 
         case "$spec_choice" in

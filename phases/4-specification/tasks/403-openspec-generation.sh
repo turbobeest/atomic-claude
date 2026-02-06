@@ -13,6 +13,63 @@ task_403_openspec_generation() {
 
     atomic_step "OpenSpec Generation"
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # UAT MODE BYPASS
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    if [[ "${ATOMIC_UAT_MODE:-false}" == "true" ]]; then
+        echo ""
+        echo -e "  ${YELLOW}⚡${NC} UAT Mode: Generating minimal OpenSpec stubs"
+        echo ""
+        
+        mkdir -p "$specs_dir"
+        
+        # Create 3 minimal OpenSpec files for UAT testing
+        for task_id in TASK-001 TASK-002 TASK-003; do
+            local spec_file="$specs_dir/spec-${task_id}.json"
+            
+            cat > "$spec_file" << EOF
+{
+    "task_id": "$task_id",
+    "title": "UAT Test Task",
+    "test_strategy": {
+        "unit_tests": ["Basic unit test"],
+        "integration_tests": ["Basic integration test"]
+    },
+    "interface_contracts": {
+        "inputs": {"param": "string"},
+        "outputs": {"result": "string"}
+    },
+    "edge_cases": ["null input", "empty string"],
+    "security_requirements": ["Input validation"],
+    "generated_at": "2026-02-04T00:00:00Z",
+    "mode": "uat"
+}
+EOF
+        done
+        
+        # Create progress file
+        cat > "$progress_file" << 'EOF'
+{
+    "generation_mode": "uat",
+    "generated": 3,
+    "skipped": 0,
+    "failed": 0,
+    "total_specs": 3,
+    "task_count": 3,
+    "coverage_percent": 100,
+    "completed_at": "2026-02-04T00:00:00Z"
+}
+EOF
+        
+        atomic_context_artifact "$specs_dir" "openspec-dir" "OpenSpec definitions directory (UAT)"
+        atomic_context_decision "Generated 3 minimal specs in UAT mode (100% coverage)" "specification"
+        atomic_success "OpenSpec Generation complete (UAT mode)"
+        
+        return 0
+    fi
+
+
     mkdir -p "$specs_dir" "$prompts_dir" "$(dirname "$progress_file")"
 
     echo ""
@@ -20,7 +77,75 @@ task_403_openspec_generation() {
     echo ""
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-    # LOAD SELECTED AGENTS
+    # FAST-PATH MODE: GENERATE STUB OPENSPECS
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    if [[ "${ATOMIC_STUB_OPENSPEC:-false}" == "true" ]]; then
+        echo -e "  ${YELLOW}⚡${NC} Fast-path mode: Generating stub OpenSpecs"
+        echo ""
+
+        # Get task list from tasks.json
+        if [[ ! -f "$tasks_file" ]]; then
+            atomic_error "Tasks file not found: $tasks_file"
+            return 1
+        fi
+
+        local task_ids=$(jq -r '.tasks[].id' "$tasks_file" 2>/dev/null | sort -n)
+        local task_count=$(echo "$task_ids" | wc -w)
+
+        echo -e "  ${DIM}Creating $task_count stub specifications...${NC}"
+        echo ""
+
+        # Generate stub OpenSpec for each task
+        for task_id in $task_ids; do
+            local task_title=$(jq -r ".tasks[] | select(.id == $task_id) | .title" "$tasks_file")
+            local task_desc=$(jq -r ".tasks[] | select(.id == $task_id) | .description" "$tasks_file")
+            local task_category=$(jq -r ".tasks[] | select(.id == $task_id) | .category" "$tasks_file")
+            local spec_file="$specs_dir/spec-t${task_id}.json"
+
+            cat > "$spec_file" << EOF
+{
+  "task_id": ${task_id},
+  "title": "${task_title}",
+  "description": "${task_desc}",
+  "category": "${task_category}",
+  "acceptance_criteria": [
+    "Core functionality implemented",
+    "Unit tests pass",
+    "Code review complete"
+  ],
+  "technical_approach": "Standard implementation using project tech stack",
+  "api_contracts": [],
+  "test_scenarios": [
+    {
+      "scenario": "Happy path test",
+      "given": "Valid inputs",
+      "when": "Function called",
+      "then": "Expected output returned"
+    }
+  ],
+  "edge_cases": ["Invalid input", "Empty state", "Error conditions"],
+  "security_considerations": "Follow security best practices",
+  "estimated_complexity": "medium",
+  "stub_mode": true
+}
+EOF
+
+            echo -e "  ${GREEN}✓${NC} Created stub spec: spec-t${task_id}.json"
+        done
+
+        echo ""
+        echo -e "  ${GREEN}✓${NC} Generated $task_count stub OpenSpecs"
+        echo ""
+
+        # Create progress file
+        echo "{\"completed\": $task_count, \"total\": $task_count, \"mode\": \"stub\"}" > "$progress_file"
+
+        return 0
+    fi
+
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # LOAD SELECTED AGENTS (Normal mode)
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     local spec_writer_prompt=""
@@ -33,7 +158,7 @@ task_403_openspec_generation() {
     # Check embedded repo first (monorepo deployment), then env var, then default
     local agent_repo="$ATOMIC_ROOT/repos/agents"
     [[ -f "$ATOMIC_ROOT/agents/agent-inventory.csv" ]] && agent_repo="$ATOMIC_ROOT/agents"
-    [[ -n "$ATOMIC_AGENT_REPO" ]] && agent_repo="$ATOMIC_AGENT_REPO"
+    [[ -n "${ATOMIC_AGENT_REPO:-}" ]] && agent_repo="$ATOMIC_AGENT_REPO"
 
     if [[ -f "$roster_file" ]]; then
         echo -e "  ${DIM}Loading agents from roster...${NC}"
@@ -118,7 +243,7 @@ task_403_openspec_generation() {
     echo ""
 
     atomic_drain_stdin
-    read -e -p "  Choice [auto]: " gen_mode || true
+    read -e -p "  Choice (default: auto): " gen_mode || true
     gen_mode=${gen_mode:-auto}
 
     # Handle parallel mode with optional worker count

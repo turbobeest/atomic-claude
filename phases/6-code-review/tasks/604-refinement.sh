@@ -34,7 +34,7 @@ task_604_refinement() {
     # Check embedded repo first (monorepo deployment), then env var, then default
     local agent_repo="$ATOMIC_ROOT/repos/agents"
     [[ -f "$ATOMIC_ROOT/agents/agent-inventory.csv" ]] && agent_repo="$ATOMIC_ROOT/agents"
-    [[ -n "$ATOMIC_AGENT_REPO" ]] && agent_repo="$ATOMIC_AGENT_REPO"
+    [[ -n "${ATOMIC_AGENT_REPO:-}" ]] && agent_repo="$ATOMIC_AGENT_REPO"
 
     # Agent prompt (loaded from agents repository if available)
     export _604_REFINER_AGENT_PROMPT=""
@@ -110,7 +110,7 @@ task_604_refinement() {
 
     atomic_drain_stdin
     local refinement_scope
-    read -e -p "  Refinement scope [major]: " refinement_scope || true
+    read -e -p "  Refinement scope (default: major): " refinement_scope || true
     refinement_scope=${refinement_scope:-major}
 
     if [[ "$refinement_scope" == "skip" ]]; then
@@ -169,6 +169,16 @@ task_604_refinement() {
     echo ""
     echo -e "  ${BOLD}- REFINEMENT EXECUTION${NC}"
     echo ""
+
+    # Fast-path mode: Skip refinement
+    if [[ "${ATOMIC_QUICK_REVIEW:-false}" == "true" ]]; then
+        echo -e "  ${YELLOW}⚡${NC} Fast-path mode: Skipping code refinement"
+        echo ""
+        echo -e "  ${DIM}Review findings recorded but not applied (testing mode)${NC}"
+        echo ""
+        atomic_success "Refinement skipped (fast-path)"
+        return 0
+    fi
 
     local fixed_critical=0
     local fixed_major=0
@@ -561,7 +571,8 @@ PROMPT
                 if jq -e . "${fix_file}.tmp" &>/dev/null; then
                     mv "${fix_file}.tmp" "$fix_file"
                     # Recursive call to process the repaired JSON
-                    return $(_604_apply_fix "$finding" "$output_prefix" "$project_root" && echo 0 || echo 1)
+                    _604_apply_fix "$finding" "$output_prefix" "$project_root"
+                    return $?
                 fi
                 rm -f "${fix_file}.tmp"
             fi

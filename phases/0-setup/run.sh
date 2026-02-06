@@ -65,7 +65,6 @@ _bootstrap_project_structure() {
         "$ATOMIC_ROOT/.outputs"
         "$ATOMIC_ROOT/.state"
         "$ATOMIC_ROOT/.logs"
-        "$ATOMIC_ROOT/initialization"
         "$ATOMIC_ROOT/docs"
     )
 

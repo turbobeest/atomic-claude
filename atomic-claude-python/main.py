@@ -126,21 +126,22 @@ def cmd_reset():
     return 0
 
 
-def cmd_run(phase: str, **kwargs):
+def cmd_run(phase: str, task=None, resume_at=None, redo=False, status=False, **kwargs):
     """Run a specific phase."""
-    phase_num = phase.lstrip("0")
+    # Fix: Don't strip "0" when it's the only character
+    phase_num = phase if phase == "0" else phase.lstrip("0")
     phase_names = {
         "0": "setup", "1": "discovery", "2": "prd",
         "3": "tasking", "4": "specification", "5": "implementation",
         "6": "code-review", "7": "integration",
         "8": "deployment-prep", "9": "release",
     }
-    
+
     phase_name = phase_names.get(phase_num, None)
     if not phase_name:
         atomic_error(f"Invalid phase number: {phase}")
         return 1
-        
+
     phase_id = f"{int(phase_num)}-{phase_name}"
     phase_dir = PHASES_DIR / phase_id
 
@@ -154,7 +155,19 @@ def cmd_run(phase: str, **kwargs):
 
     if bash_runner.exists():
         atomic_info(f"Running phase: {phase_id}")
-        result = subprocess.run([str(bash_runner)], cwd=str(phase_dir))
+
+        # Build command with flags - document mode is default
+        cmd = [str(bash_runner), "--mode=document"]
+        if task:
+            cmd.append(f"--task={task}")
+        if resume_at:
+            cmd.append(f"--resume-at={resume_at}")
+        if redo:
+            cmd.append("--redo")
+        if status:
+            cmd.append("--status")
+
+        result = subprocess.run(cmd, cwd=str(phase_dir))
         return result.returncode
 
     atomic_error(f"No runner found for phase: {phase_id}")
@@ -171,8 +184,10 @@ def main():
 
     run_parser = subparsers.add_parser("run", help="Run a specific phase")
     run_parser.add_argument("phase", help="Phase number (e.g., 0, 1, 2)")
+    run_parser.add_argument("--task", help="Resume from specific task (Phase 0 only)")
     run_parser.add_argument("--resume-at", help="Resume from specific task")
     run_parser.add_argument("--redo", action="store_true", help="Force redo all tasks")
+    run_parser.add_argument("--status", action="store_true", help="Show task state")
 
     subparsers.add_parser("status", help="Show pipeline status")
     subparsers.add_parser("list", help="List available phases")
@@ -186,7 +201,9 @@ def main():
         return 1
 
     if args.command == "run":
-        return cmd_run(args.phase, **vars(args))
+        # Extract args, excluding 'phase' and 'command' to avoid duplicates
+        run_kwargs = {k: v for k, v in vars(args).items() if k not in ['phase', 'command']}
+        return cmd_run(args.phase, **run_kwargs)
     elif args.command == "status":
         return cmd_status()
     elif args.command == "list":

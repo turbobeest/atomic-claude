@@ -37,7 +37,7 @@ task_203_prd_interview() {
     echo ""
 
     atomic_drain_stdin
-    read -e -p "  Choice [continue]: " skip_choice || true
+    read -e -p "  Choice (default: continue): " skip_choice || true
     skip_choice=${skip_choice:-continue}
 
     case "$skip_choice" in
@@ -88,7 +88,7 @@ task_203_prd_interview() {
     echo ""
 
     atomic_drain_stdin
-    read -e -p "  Choice [confirm]: " stake_choice || true
+    read -e -p "  Choice (default: confirm): " stake_choice || true
     stake_choice=${stake_choice:-confirm}
 
     if [[ "$stake_choice" == "adjust" ]]; then
@@ -127,7 +127,7 @@ task_203_prd_interview() {
     echo ""
 
     atomic_drain_stdin
-    read -e -p "  Choice [confirm]: " success_choice || true
+    read -e -p "  Choice (default: confirm): " success_choice || true
     success_choice=${success_choice:-confirm}
 
     if [[ "$success_choice" == "adjust" ]]; then
@@ -166,7 +166,7 @@ task_203_prd_interview() {
     echo ""
 
     atomic_drain_stdin
-    read -e -p "  Choice [confirm]: " nongoal_choice || true
+    read -e -p "  Choice (default: confirm): " nongoal_choice || true
     nongoal_choice=${nongoal_choice:-confirm}
 
     if [[ "$nongoal_choice" == "adjust" ]]; then

@@ -23,19 +23,46 @@ if (!fs.existsSync(STATE_DIR)) {
 }
 
 // Middleware
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, path) => {
+    // Disable caching for HTML to ensure updates are always fresh
+    if (path.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  }
+}));
 app.use(express.json());
 
-// API: Get current task status
+// API: Get current task status with staleness detection
 app.get('/api/status', (req, res) => {
   try {
     if (fs.existsSync(STATUS_FILE)) {
       const status = JSON.parse(fs.readFileSync(STATUS_FILE, 'utf8'));
+
+      // Check staleness against the most recent of current-task.json OR task-state.json
+      // (current-task.json tracks LLM invocations, task-state.json tracks task completions)
+      let mostRecentTime = fs.statSync(STATUS_FILE).mtimeMs;
+
+      if (fs.existsSync(TASK_STATE_FILE)) {
+        const taskStateTime = fs.statSync(TASK_STATE_FILE).mtimeMs;
+        mostRecentTime = Math.max(mostRecentTime, taskStateTime);
+      }
+
+      const ageSeconds = Math.floor((Date.now() - mostRecentTime) / 1000);
+
+      // Add staleness metadata
+      status.file_age_seconds = ageSeconds;
+      status.is_stale = ageSeconds > 60; // No update in 60+ seconds
+      status.last_modified = new Date(mostRecentTime).toISOString();
+
       res.json(status);
     } else {
       res.json({
         active: false,
-        message: 'No active task'
+        message: 'No active task',
+        is_stale: true
       });
     }
   } catch (error) {
@@ -229,10 +256,38 @@ app.get('/api/stream', (req, res) => {
     try {
       if (fs.existsSync(STATUS_FILE)) {
         const status = JSON.parse(fs.readFileSync(STATUS_FILE, 'utf8'));
+
+        // Add staleness detection (same as /api/status)
+        let mostRecentTime = fs.statSync(STATUS_FILE).mtimeMs;
+        if (fs.existsSync(TASK_STATE_FILE)) {
+          const taskStateTime = fs.statSync(TASK_STATE_FILE).mtimeMs;
+          mostRecentTime = Math.max(mostRecentTime, taskStateTime);
+        }
+        const ageSeconds = Math.floor((Date.now() - mostRecentTime) / 1000);
+
+        status.file_age_seconds = ageSeconds;
+        status.is_stale = ageSeconds > 60; // No update in 60+ seconds
+        status.last_modified = new Date(mostRecentTime).toISOString();
+
         res.write(`data: ${JSON.stringify(status)}\n\n`);
+      } else {
+        // Send explicit inactive status when file doesn't exist
+        res.write(`data: ${JSON.stringify({
+          active: false,
+          message: 'No active task',
+          provider: null,
+          model: null,
+          is_stale: false
+        })}\n\n`);
       }
     } catch (error) {
-      // Ignore streaming errors
+      // Send error status on exception
+      res.write(`data: ${JSON.stringify({
+        active: false,
+        error: true,
+        message: 'Error reading status',
+        is_stale: true
+      })}\n\n`);
     }
   };
 
@@ -313,11 +368,23 @@ function getTaskMemoryFlow(phaseId, taskId) {
   }
 
   // Check local memory files
-  const taskMemoryDir = path.join(MEMORY_DIR, `phase-${phaseId}`);
+  // Extract phase number from phaseId (e.g., "0-setup" -> "0")
+  const phaseNum = phaseId.split('-')[0];
+  const taskMemoryDir = path.join(MEMORY_DIR, `phase-${phaseNum}`);
   if (fs.existsSync(taskMemoryDir)) {
     const files = fs.readdirSync(taskMemoryDir);
+
+    // Check if task has a specific memory file
     if (files.some(f => f.includes(taskId))) {
       memoryFlow.local = true;
+    }
+
+    // Special case: final tasks (009, 110, 209, etc.) save to closeout.md
+    // Check if this is a closeout task and closeout.md exists
+    if (taskId.endsWith('09') || taskId.endsWith('10')) {
+      if (files.includes('closeout.md')) {
+        memoryFlow.local = true;
+      }
     }
   }
 
@@ -369,13 +436,17 @@ function getTaskFiles(phaseId, taskId) {
             };
 
             // Check if file is related to this task
-            // Be more inclusive: match task ID, or show all files for phase 0-setup
+            // Be more inclusive: match task ID, or show all files for certain phases
             const isRelated = relPath.includes(taskId) ||
                              relPath.includes(phaseId) ||
                              phaseId === '0-setup' ||  // Show all files for phase 0
+                             phaseId === '1-discovery' ||  // Show all files for phase 1
+                             phaseId === '2-prd' ||  // Show all files for phase 2
                              relPath === 'session.json' ||
                              relPath === 'metadata.json' ||
-                             relPath === 'current-task.json';
+                             relPath === 'current-task.json' ||
+                             relPath === 'closeout.md' ||
+                             relPath === 'closeout.json';
 
             if (!isRelated) return;
 

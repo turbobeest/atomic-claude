@@ -102,7 +102,7 @@ task_803_agent_selection() {
     echo -e "    ${DIM}[2]${NC} release-packager (haiku) - Fast, standard"
     echo -e "    ${YELLOW}[c]${NC} Custom agent"
     echo ""
-    read -e -p "  Select [1]: " packager_choice || true
+    read -e -p "  Select (default: 1): " packager_choice || true
     packager_choice=${packager_choice:-1}
 
     case "$packager_choice" in
@@ -110,7 +110,7 @@ task_803_agent_selection() {
         2) selected_agents+=("release-packager:haiku") ;;
         c|C)
             read -e -p "  Custom agent name: " custom_name || true
-            read -e -p "  Custom agent model [sonnet]: " custom_model || true
+            read -e -p "  Custom agent model (default: sonnet): " custom_model || true
             custom_model=${custom_model:-sonnet}
             selected_agents+=("$custom_name:$custom_model")
             ;;
@@ -124,7 +124,7 @@ task_803_agent_selection() {
     echo -e "    ${DIM}[2]${NC} changelog-writer (haiku) - Fast, standard"
     echo -e "    ${YELLOW}[c]${NC} Custom agent"
     echo ""
-    read -e -p "  Select [1]: " changelog_choice || true
+    read -e -p "  Select (default: 1): " changelog_choice || true
     changelog_choice=${changelog_choice:-1}
 
     case "$changelog_choice" in
@@ -132,7 +132,7 @@ task_803_agent_selection() {
         2) selected_agents+=("changelog-writer:haiku") ;;
         c|C)
             read -e -p "  Custom agent name: " custom_name || true
-            read -e -p "  Custom agent model [sonnet]: " custom_model || true
+            read -e -p "  Custom agent model (default: sonnet): " custom_model || true
             custom_model=${custom_model:-sonnet}
             selected_agents+=("$custom_name:$custom_model")
             ;;
@@ -146,7 +146,7 @@ task_803_agent_selection() {
     echo -e "    ${DIM}[2]${NC} documentation-generator (sonnet) - Standard"
     echo -e "    ${YELLOW}[c]${NC} Custom agent"
     echo ""
-    read -e -p "  Select [1]: " docs_choice || true
+    read -e -p "  Select (default: 1): " docs_choice || true
     docs_choice=${docs_choice:-1}
 
     case "$docs_choice" in
@@ -154,7 +154,7 @@ task_803_agent_selection() {
         2) selected_agents+=("documentation-generator:sonnet") ;;
         c|C)
             read -e -p "  Custom agent name: " custom_name || true
-            read -e -p "  Custom agent model [opus]: " custom_model || true
+            read -e -p "  Custom agent model (default: opus): " custom_model || true
             custom_model=${custom_model:-opus}
             selected_agents+=("$custom_name:$custom_model")
             ;;
@@ -168,7 +168,7 @@ task_803_agent_selection() {
     echo -e "    ${DIM}[2]${NC} installation-guide-writer (haiku) - Fast, standard"
     echo -e "    ${YELLOW}[c]${NC} Custom agent"
     echo ""
-    read -e -p "  Select [1]: " install_choice || true
+    read -e -p "  Select (default: 1): " install_choice || true
     install_choice=${install_choice:-1}
 
     case "$install_choice" in
@@ -176,7 +176,7 @@ task_803_agent_selection() {
         2) selected_agents+=("installation-guide-writer:haiku") ;;
         c|C)
             read -e -p "  Custom agent name: " custom_name || true
-            read -e -p "  Custom agent model [sonnet]: " custom_model || true
+            read -e -p "  Custom agent model (default: sonnet): " custom_model || true
             custom_model=${custom_model:-sonnet}
             selected_agents+=("$custom_name:$custom_model")
             ;;

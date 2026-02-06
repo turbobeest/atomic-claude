@@ -86,7 +86,7 @@ task_103_import_requirements() {
                 if [[ -f "$manual_path" ]]; then
                     local abs_path
                     abs_path=$(realpath "$manual_path" 2>/dev/null) || abs_path="$manual_path"
-                    if [[ -n "${_103_SEEN_MANUAL[$abs_path]:-}" ]]; then
+                    if [ -n "${_103_SEEN_MANUAL[$abs_path]:-}" ]; then
                         echo -e "    ${YELLOW}!${NC} Already added: $manual_path"
                     else
                         _103_SEEN_MANUAL["$abs_path"]=1

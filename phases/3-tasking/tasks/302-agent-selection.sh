@@ -267,7 +267,7 @@ task_302_agent_selection() {
         local agent_choice=""
         while [[ ! "$agent_choice" =~ ^(approve|core|custom)$ ]]; do
     atomic_drain_stdin
-            read -e -p "  Choice [approve]: " agent_choice || true
+            read -e -p "  Choice (default: approve): " agent_choice || true
             agent_choice=${agent_choice:-approve}
             if [[ ! "$agent_choice" =~ ^(approve|core|custom)$ ]]; then
                 echo -e "  ${RED}Invalid choice.${NC} Enter: approve, core, or custom"
@@ -307,7 +307,7 @@ task_302_agent_selection() {
         local agent_choice=""
         while [[ ! "$agent_choice" =~ ^(approve|custom)$ ]]; do
     atomic_drain_stdin
-            read -e -p "  Choice [approve]: " agent_choice || true
+            read -e -p "  Choice (default: approve): " agent_choice || true
             agent_choice=${agent_choice:-approve}
             if [[ ! "$agent_choice" =~ ^(approve|custom)$ ]]; then
                 echo -e "  ${RED}Invalid choice.${NC} Enter: approve or custom"

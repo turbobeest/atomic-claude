@@ -109,7 +109,7 @@ _003_prompt_action() {
 
     while true; do
     atomic_drain_stdin
-        read -e -p "  Choice [a]: " choice || true
+        read -e -p "  Choice (default: a): " choice || true
         choice=${choice:-a}
 
         case "$choice" in
@@ -194,14 +194,14 @@ _003_edit_field() {
     echo -e "    6. Network Access"
     echo -e "    7. Command Approval Mode"
     echo ""
-    read -e -p "  Field [1-7]: " field_choice || true
+    read -e -p "  Field (default: 1-7): " field_choice || true
 
     local extracted=$(jq '.extracted' "$config_file")
 
     case "$field_choice" in
         1)
             local old_val=$(echo "$extracted" | jq -r '.project.name // "not set"')
-            read -e -p "  New project name [$old_val]: " new_name || true
+            read -e -p "  New project name (default: $old_val): " new_name || true
             new_name=${new_name:-$old_val}
             if atomic_validate_project_name "$new_name" >/dev/null 2>&1; then
                 local tmp=$(atomic_mktemp)
@@ -221,7 +221,7 @@ _003_edit_field() {
             ;;
         3)
             local old_val=$(echo "$extracted" | jq -r '.repository.url // "not set"')
-            read -e -p "  New repository URL [$old_val]: " new_url || true
+            read -e -p "  New repository URL (default: $old_val): " new_url || true
             new_url=${new_url:-$old_val}
             local tmp=$(atomic_mktemp)
             jq --arg val "$new_url" '.extracted.repository.url = $val' "$config_file" > "$tmp" && mv "$tmp" "$config_file"
@@ -234,7 +234,7 @@ _003_edit_field() {
             echo -e "    ${DIM}2.${NC} full       ${DIM}- Full application${NC}"
             echo -e "    ${DIM}3.${NC} library    ${DIM}- Reusable library/package${NC}"
             echo -e "    ${DIM}4.${NC} prototype  ${DIM}- Quick prototype (fewer gates)${NC}"
-            read -e -p "  Mode [1-4]: " mode || true
+            read -e -p "  Mode (default: 1-4): " mode || true
             local new_mode="$old_val"
             case "$mode" in
                 1) new_mode="component" ;;
@@ -253,7 +253,7 @@ _003_edit_field() {
             echo -e "    ${DIM}2.${NC} openai     ${DIM}- GPT models${NC}"
             echo -e "    ${DIM}3.${NC} google     ${DIM}- Gemini models${NC}"
             echo -e "    ${DIM}4.${NC} local      ${DIM}- Local LLM (ollama, etc)${NC}"
-            read -e -p "  Provider [1-4]: " prov || true
+            read -e -p "  Provider (default: 1-4): " prov || true
             local new_provider="$old_val"
             case "$prov" in
                 1) new_provider="anthropic" ;;
@@ -271,7 +271,7 @@ _003_edit_field() {
             echo -e "    ${DIM}1.${NC} none       ${DIM}- No network access${NC}"
             echo -e "    ${DIM}2.${NC} fetch-only ${DIM}- HTTP GET only (recommended)${NC}"
             echo -e "    ${DIM}3.${NC} full       ${DIM}- Full network access${NC}"
-            read -e -p "  Network access [1-3]: " net || true
+            read -e -p "  Network access (default: 1-3): " net || true
             local new_network="$old_val"
             case "$net" in
                 1) new_network="none" ;;
@@ -288,7 +288,7 @@ _003_edit_field() {
             echo -e "    ${DIM}1.${NC} ask-always ${DIM}- Prompt before every command${NC}"
             echo -e "    ${DIM}2.${NC} cautious   ${DIM}- Prompt for risky commands (recommended)${NC}"
             echo -e "    ${DIM}3.${NC} auto       ${DIM}- Auto-approve safe commands${NC}"
-            read -e -p "  Command approval [1-3]: " cmd || true
+            read -e -p "  Command approval (default: 1-3): " cmd || true
             local new_cmd="$old_val"
             case "$cmd" in
                 1) new_cmd="ask-always" ;;

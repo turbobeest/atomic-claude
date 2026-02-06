@@ -90,7 +90,12 @@ atomic_json_escape() {
 # ============================================================================
 
 ATOMIC_VERSION="0.1.0"
-ATOMIC_ROOT="${ATOMIC_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+
+# Library root is always determined from where this script lives (for fallbacks)
+ATOMIC_LIB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Project root can be overridden by environment (for embedded installations)
+ATOMIC_ROOT="${ATOMIC_ROOT:-$ATOMIC_LIB_ROOT}"
 
 # Detect embedded installation (ATOMIC-CLAUDE as subdirectory of another project)
 # ATOMIC_ORCHESTRATOR points to the parent project being orchestrated
@@ -742,6 +747,11 @@ atomic_list_agents() {
 _atomic_load_provider_config() {
     local config_file="$ATOMIC_ROOT/config/models.json"
 
+    # Fall back to library config if project config doesn't exist
+    if [[ ! -f "$config_file" && -n "${ATOMIC_LIB_ROOT:-}" ]]; then
+        config_file="$ATOMIC_LIB_ROOT/config/models.json"
+    fi
+
     if [[ ! -f "$config_file" ]]; then
         return 0  # Use defaults if config doesn't exist
     fi
@@ -916,6 +926,12 @@ _CLAUDE_CHECK_TIME=0
 # Check if Claude API is available (with caching)
 _atomic_is_claude_available() {
     local config_file="$ATOMIC_ROOT/config/models.json"
+
+    # Fall back to library config if project config doesn't exist
+    if [[ ! -f "$config_file" && -n "${ATOMIC_LIB_ROOT:-}" ]]; then
+        config_file="$ATOMIC_LIB_ROOT/config/models.json"
+    fi
+
     local now fallback_enabled timeout
     now=$(date +%s)
     local cache_ttl=60  # Cache for 60 seconds
@@ -954,6 +970,12 @@ _atomic_is_claude_available() {
 _atomic_resolve_model() {
     local requested_model="$1"
     local config_file="$ATOMIC_ROOT/config/models.json"
+
+    # Fall back to library config if project config doesn't exist
+    if [[ ! -f "$config_file" && -n "${ATOMIC_LIB_ROOT:-}" ]]; then
+        config_file="$ATOMIC_LIB_ROOT/config/models.json"
+    fi
+
     local is_claude_tier fallbacks base_name matched log_fallback
 
     # Check if it's a Claude tier (opus/sonnet/haiku)
@@ -965,9 +987,22 @@ _atomic_resolve_model() {
         return 0
     fi
 
+    # Check if project config has provider-specific tier mapping (e.g., for Bedrock)
+    local project_config="$ATOMIC_OUTPUT_DIR/0-setup/project-config.json"
+    if [[ -f "$project_config" ]]; then
+        local provider_model
+        provider_model=$(jq -r --arg tier "$requested_model" '.extracted.llm.tier_mapping[$tier] // empty' "$project_config" 2>/dev/null)
+
+        if [[ -n "$provider_model" && "$provider_model" != "null" ]]; then
+            # Project config has explicit tier → model mapping (use it)
+            echo "$provider_model:$CLAUDE_PROVIDER"
+            return 0
+        fi
+    fi
+
     # Check if Claude is available
     if _atomic_is_claude_available; then
-        # Claude available - use requested model
+        # Claude available - use requested model (abstract name)
         echo "$requested_model:$CLAUDE_PROVIDER"
         return 0
     fi
@@ -1298,18 +1333,22 @@ atomic_task_header() {
         ollama) curl -s --connect-timeout 1 "${ollama_host:-http://localhost:11434}/api/tags" &>/dev/null && is_online=true ;;
     esac
 
-    # If CLAUDE_CODE_USE_BEDROCK is set, override provider display
-    if [[ "${CLAUDE_CODE_USE_BEDROCK:-}" == "1" ]]; then
-        provider="bedrock"
-        is_online=true
-    fi
+    # Note: Do NOT override provider here if fallback occurred
+    # The provider parameter already reflects the ACTUAL provider being used
 
     # Network mode
     local network_mode="${ATOMIC_NETWORK_MODE:-cui}"
 
     # Context window + cost lookup from models.json
+    # Try project config first, fall back to library config
     local context_window="?" cost_tier="?"
     local config_file="$ATOMIC_ROOT/config/models.json"
+
+    # Fall back to library config if project config doesn't exist
+    if [[ ! -f "$config_file" && -n "${ATOMIC_LIB_ROOT:-}" ]]; then
+        config_file="$ATOMIC_LIB_ROOT/config/models.json"
+    fi
+
     if [[ -f "$config_file" ]]; then
         local ctx cost
         ctx=$(jq -r --arg m "$model" '.models.claude[$m].context_window // .models.ollama[$m].context_window // empty' "$config_file" 2>/dev/null)
@@ -1593,8 +1632,14 @@ _atomic_build_invoke_cmd() {
         cmd="${cmd} -p '${escaped_prompt}'"
         cmd="${cmd} --dangerously-skip-permissions"
         cmd="${cmd} --output-format text"
-        # Force single-turn for atomic invocations (prevents hanging after response)
-        cmd="${cmd} --max-turns 1"
+
+        # PRD-specific override: Force single-turn to avoid Bedrock CLI truncation
+        if [[ "$description" =~ "PRD Gen" || "$description" =~ "PRD Chunk" ]]; then
+            cmd="${cmd} --max-turns 1"
+        else
+            # Use configured max turns for atomic invocations
+            cmd="${cmd} --max-turns ${CLAUDE_MAX_TURNS}"
+        fi
 
         # Network mode restriction (CUI blocks web tools)
         if [[ -n "$network_block" ]]; then
@@ -1628,8 +1673,8 @@ _atomic_build_invoke_cmd() {
         cmd="${cmd} -p '${escaped_prompt}'"
         cmd="${cmd} --dangerously-skip-permissions"
         cmd="${cmd} --output-format text"
-        # Force single-turn for atomic invocations (prevents hanging after response)
-        cmd="${cmd} --max-turns 1"
+        # Use configured max turns for atomic invocations
+        cmd="${cmd} --max-turns ${CLAUDE_MAX_TURNS}"
 
         # Network mode restriction (CUI blocks web tools)
         if [[ -n "$network_block" ]]; then
@@ -1793,10 +1838,13 @@ atomic_invoke() {
         provider="${PROVIDER_ROLE_MAP[$role]:-$provider}"
     fi
 
-    # Model fallback resolution (for airgapped/offline environments)
+    # Model resolution for tier names (sonnet/opus/haiku) and fallbacks
     local skip_fallback="${ATOMIC_SKIP_FALLBACK:-false}"
     local resolved resolved_model resolved_provider
-    if [[ "$skip_fallback" != "true" && "$provider" != "ollama" && "$provider" != "bedrock" ]]; then
+
+    # Always resolve for bedrock to map tier names → full model IDs
+    # Skip resolution for ollama (uses model names directly) unless fallback needed
+    if [[ "$skip_fallback" != "true" && "$provider" != "ollama" ]]; then
         resolved=$(_atomic_resolve_model "$model")
         if [[ -n "$resolved" && "$resolved" != *"WARN"* ]]; then
             resolved_model=$(echo "$resolved" | cut -d: -f1)
@@ -1804,6 +1852,18 @@ atomic_invoke() {
             if [[ "$resolved_model" != "$model" || "$resolved_provider" != "$provider" ]]; then
                 model="$resolved_model"
                 provider="$resolved_provider"
+
+                # Update status file with ACTUAL provider/model after fallback
+                local status_file="$ATOMIC_STATE_DIR/current-task.json"
+                if [[ -f "$status_file" ]]; then
+                    local model_escaped=$(atomic_json_escape "$model")
+                    local provider_escaped=$(atomic_json_escape "$provider")
+                    local tmp_status
+                    tmp_status=$(atomic_mktemp) || true
+                    if [[ -n "$tmp_status" ]]; then
+                        jq ".provider = \"$provider_escaped\" | .model = \"$model_escaped\"" "$status_file" > "$tmp_status" 2>/dev/null && mv "$tmp_status" "$status_file" || rm -f "$tmp_status"
+                    fi
+                fi
             fi
         fi
     fi
@@ -2353,6 +2413,11 @@ atomic_validate_path_bounds() {
 atomic_validate_models_config() {
     local config_file="${1:-$ATOMIC_ROOT/config/models.json}"
 
+    # Fall back to library config if project config doesn't exist
+    if [[ ! -f "$config_file" && -n "${ATOMIC_LIB_ROOT:-}" && -z "$1" ]]; then
+        config_file="$ATOMIC_LIB_ROOT/config/models.json"
+    fi
+
     # Check file exists
     if [[ ! -f "$config_file" ]]; then
         echo "Models config not found: $config_file"
@@ -2444,9 +2509,14 @@ atomic_validate_project_config() {
 atomic_validate_all_configs() {
     local errors=()
 
-    # Validate models config if it exists
-    if [[ -f "$ATOMIC_ROOT/config/models.json" ]]; then
-        if ! atomic_validate_models_config; then
+    # Validate models config if it exists (check both locations)
+    local models_config="$ATOMIC_ROOT/config/models.json"
+    if [[ ! -f "$models_config" && -n "${ATOMIC_LIB_ROOT:-}" ]]; then
+        models_config="$ATOMIC_LIB_ROOT/config/models.json"
+    fi
+
+    if [[ -f "$models_config" ]]; then
+        if ! atomic_validate_models_config "$models_config"; then
             errors+=("models.json")
         fi
     fi
@@ -2951,7 +3021,7 @@ atomic_amend_context() {
 
     while true; do
         atomic_drain_stdin
-        read -e -p "  Choice [p]: " choice
+        read -e -p "  Choice (default: p): " choice
         choice=${choice:-p}
 
         case "$choice" in
@@ -3160,7 +3230,16 @@ EOF
 # MODEL REGISTRY & TOKEN MANAGEMENT
 # ============================================================================
 
-ATOMIC_MODELS_CONFIG="${ATOMIC_MODELS_CONFIG:-$ATOMIC_ROOT/config/models.json}"
+# Set models config with fallback to library location
+if [[ -z "${ATOMIC_MODELS_CONFIG:-}" ]]; then
+    if [[ -f "$ATOMIC_ROOT/config/models.json" ]]; then
+        ATOMIC_MODELS_CONFIG="$ATOMIC_ROOT/config/models.json"
+    elif [[ -n "${ATOMIC_LIB_ROOT:-}" && -f "$ATOMIC_LIB_ROOT/config/models.json" ]]; then
+        ATOMIC_MODELS_CONFIG="$ATOMIC_LIB_ROOT/config/models.json"
+    else
+        ATOMIC_MODELS_CONFIG="$ATOMIC_ROOT/config/models.json"  # Default even if doesn't exist
+    fi
+fi
 
 # Discover available Ollama models and merge with known registry
 # Usage: atomic_discover_models

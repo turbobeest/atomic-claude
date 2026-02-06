@@ -36,6 +36,34 @@ EOF
 
     atomic_step "Entry & Initialization"
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # UAT MODE BYPASS
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    if [[ "${ATOMIC_UAT_MODE:-false}" == "true" ]]; then
+        echo ""
+        echo -e "  ${YELLOW}⚡${NC} UAT Mode: Skipping Phase 4 verification, creating minimal initialization"
+        echo ""
+        
+        local init_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/initialization.json"
+        mkdir -p "$(dirname "$init_file")"
+        
+        jq -n '{
+            "phase4_verified": true,
+            "tasks_with_tdd": 3,
+            "total_subtasks": 12,
+            "spec_count": 3,
+            "mode": "uat",
+            "initialized_at": (now | todate)
+        }' > "$init_file"
+        
+        atomic_context_artifact "$init_file" "initialization" "Phase 5 initialization state (UAT mode)"
+        atomic_context_decision "Phase 5 initialized in UAT mode with mock verification" "initialization"
+        
+        atomic_success "Entry & Initialization complete (UAT mode)"
+        return 0
+    fi
+
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # PHASE 4 VERIFICATION
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -83,7 +83,7 @@ task_006_reference_materials() {
     echo ""
 
     atomic_drain_stdin
-    read -e -p "  Choice [3]: " ref_choice || true
+    read -e -p "  Choice (default: 3): " ref_choice || true
     ref_choice=${ref_choice:-3}
 
     case "$ref_choice" in

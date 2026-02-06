@@ -1,0 +1,4 @@
+#!/bin/bash
+echo "CURRENT_PHASE=$CURRENT_PHASE"
+echo "ATOMIC_OUTPUT_DIR=$ATOMIC_OUTPUT_DIR"
+exit 0

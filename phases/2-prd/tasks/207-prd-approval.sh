@@ -21,10 +21,11 @@ task_207_prd_approval() {
     local validation_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/prd-validation.json"
     local approval_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/prd-approved.json"
     local prompts_dir="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/prompts"
-    # Check embedded repo first (monorepo deployment), then env var, then default
+    # Check embedded repo first (monorepo deployment), then env var, then library root, then default
     local agent_repo="$ATOMIC_ROOT/repos/agents"
     [[ -d "$ATOMIC_ROOT/agents" ]] && agent_repo="$ATOMIC_ROOT/agents"
-    [[ -n "$AGENT_REPO" ]] && agent_repo="$AGENT_REPO"
+    [[ -n "${AGENT_REPO:-}" ]] && agent_repo="$AGENT_REPO"
+    [[ ! -d "$agent_repo" && -n "${ATOMIC_LIB_ROOT:-}" && -d "$ATOMIC_LIB_ROOT/agents" ]] && agent_repo="$ATOMIC_LIB_ROOT/agents"
 
     atomic_step "PRD Review, Refinement & Approval"
     mkdir -p "$prompts_dir"
@@ -74,7 +75,7 @@ task_207_prd_approval() {
             echo -e "    ${YELLOW}[view]${NC}     View PRD content"
             echo ""
     atomic_drain_stdin
-            read -e -p "  Choice [approve]: " top_choice || true
+            read -e -p "  Choice (default: approve): " top_choice || true
             top_choice=${top_choice:-approve}
         else
             echo -e "  ${CYAN}${num_suggestions} recommended improvements available.${NC}"
@@ -85,7 +86,7 @@ task_207_prd_approval() {
             echo -e "    ${BOLD}[approve]${NC}  Approve PRD as-is and proceed to Phase 3"
             echo ""
     atomic_drain_stdin
-            read -e -p "  Choice [refine]: " top_choice || true
+            read -e -p "  Choice (default: refine): " top_choice || true
             top_choice=${top_choice:-refine}
         fi
 
@@ -192,7 +193,7 @@ _207_guided_walkthrough() {
         echo -e "$details" | sed 's/^/  /'
         echo ""
 
-        read -e -p "  Resolution [accept]: " user_response || true
+        read -e -p "  Resolution (default: accept): " user_response || true
 
         if [[ "$user_response" == "done" ]]; then
             echo ""
@@ -408,7 +409,7 @@ PROMPT_HEADER
 
     while true; do
     atomic_drain_stdin
-        read -e -p "  Choice [apply]: " ref_choice || true
+        read -e -p "  Choice (default: apply): " ref_choice || true
         ref_choice=${ref_choice:-apply}
 
         case "$ref_choice" in

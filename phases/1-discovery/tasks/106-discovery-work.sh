@@ -572,7 +572,8 @@ Synthesize the deliberation into:
 4. **Recommended Next Steps** - What to investigate/prototype first?
 5. **Dissenting Views** - Any unresolved disagreements worth noting?
 
-Output as JSON:
+Return ONLY valid JSON with no additional text, explanation, or markdown formatting.
+Output raw JSON:
 {
     "agreed_direction": {
         "approach": "...",
@@ -712,7 +713,8 @@ For each approach:
 - Unknowns (what needs investigation)
 - Complexity: simple | moderate | complex | exploratory
 
-Output as JSON:
+Return ONLY valid JSON with no additional text, explanation, or markdown formatting.
+Output raw JSON:
 {
     "approaches": [
         {

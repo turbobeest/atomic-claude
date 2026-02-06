@@ -58,7 +58,7 @@ task_902_release_setup() {
     echo ""
 
     atomic_drain_stdin
-    read -e -p "  Choice [yes]: " proceed_choice || true
+    read -e -p "  Choice (default: yes): " proceed_choice || true
     proceed_choice=${proceed_choice:-yes}
 
     case "$proceed_choice" in
@@ -113,7 +113,7 @@ task_902_release_setup() {
 
     echo -e "  ${DIM}Are the release notes acceptable?${NC}"
     echo ""
-    read -e -p "  Accept [y/n]: " notes_confirm || true
+    read -e -p "  Accept (default: y/n): " notes_confirm || true
     notes_confirm=${notes_confirm:-y}
 
     if [[ "$notes_confirm" != "y" && "$notes_confirm" != "Y" ]]; then

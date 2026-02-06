@@ -83,7 +83,7 @@ task_204_agent_selection() {
     echo ""
 
     atomic_drain_stdin
-    read -e -p "  Choice [approve]: " agent_choice || true
+    read -e -p "  Choice (default: approve): " agent_choice || true
     agent_choice=${agent_choice:-approve}
 
     local selected_agents='["requirements-engineer", "prd-writer", "prd-validator"]'

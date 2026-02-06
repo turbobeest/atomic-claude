@@ -125,7 +125,7 @@ task_705_integration_approval() {
     echo ""
 
     atomic_drain_stdin
-    read -e -p "  Choice [approve]: " approval_choice || true
+    read -e -p "  Choice (default: approve): " approval_choice || true
     approval_choice=${approval_choice:-approve}
 
     case "$approval_choice" in

@@ -69,7 +69,7 @@ task_704_testing_execution() {
     # Check embedded repo first (monorepo deployment), then env var, then default
     local agent_repo="$ATOMIC_ROOT/repos/agents"
     [[ -f "$ATOMIC_ROOT/agents/agent-inventory.csv" ]] && agent_repo="$ATOMIC_ROOT/agents"
-    [[ -n "$ATOMIC_AGENT_REPO" ]] && agent_repo="$ATOMIC_AGENT_REPO"
+    [[ -n "${ATOMIC_AGENT_REPO:-}" ]] && agent_repo="$ATOMIC_AGENT_REPO"
 
     # Agent prompts (loaded from agents repository if available)
     local e2e_agent_prompt=""
@@ -187,8 +187,8 @@ Analyze the project and identify E2E test flows. For each flow, determine if it 
 
 $(if [[ -n "$webapp_skill_content" ]]; then echo "If this is a web application, use the webapp-testing skill patterns (Playwright, with_server.py) to design executable tests."; fi)
 
-Return your analysis as JSON:
-\`\`\`json
+Return ONLY valid JSON with no additional text, explanation, or markdown formatting.
+Output raw JSON:
 {
   "total": <number of test flows>,
   "passed": <number passing>,
@@ -200,7 +200,6 @@ Return your analysis as JSON:
     {"name": "test name", "script": "python code using playwright patterns from skill"}
   ]
 }
-\`\`\`
 PROMPT
 
     echo -e "  ${DIM}[e2e-test-runner] Executing end-to-end test suite...${NC}"
@@ -325,8 +324,8 @@ $project_context
 
 Analyze the project implementation and estimate performance metrics. Consider algorithmic complexity, I/O patterns, and resource usage.
 
-Return your analysis as JSON:
-\`\`\`json
+Return ONLY valid JSON with no additional text, explanation, or markdown formatting.
+Output raw JSON:
 {
   "response_time": {"actual": <ms>, "target": 100, "pass": true|false},
   "startup_time": {"actual": <ms>, "target": 3000, "pass": true|false},
@@ -334,7 +333,6 @@ Return your analysis as JSON:
   "error_rate": {"actual": "<percent>", "target": "0.1", "pass": true|false},
   "all_passing": true|false
 }
-\`\`\`
 PROMPT
 
     echo -e "  ${DIM}[performance-tester] Running performance benchmarks...${NC}"
@@ -479,8 +477,8 @@ $project_context
 
 Based on the PRD and test results, validate all acceptance criteria. Check both functional requirements (FR) and non-functional requirements (NFR).
 
-Return your analysis as JSON:
-\`\`\`json
+Return ONLY valid JSON with no additional text, explanation, or markdown formatting.
+Output raw JSON:
 {
   "total": <total criteria count>,
   "passed": <passed count>,
@@ -489,7 +487,6 @@ Return your analysis as JSON:
     {"id": "FR-1", "name": "criterion name", "status": "PASS|FAIL"}
   ]
 }
-\`\`\`
 PROMPT
 
     echo -e "  ${DIM}[acceptance-validator] Validating all criteria (functional + NFR)...${NC}"
@@ -621,14 +618,13 @@ PROMPT
 
 Generate a consolidated integration report. Determine the overall status based on all results.
 
-Return as JSON:
-\`\`\`json
+Return ONLY valid JSON with no additional text, explanation, or markdown formatting.
+Output raw JSON:
 {
   "overall_status": "ready|needs_work",
   "summary": "brief summary",
   "recommendations": ["list of recommendations if any"]
 }
-\`\`\`
 PROMPT
 
     echo -e "  ${DIM}[integration-reporter] Generating comprehensive report...${NC}"

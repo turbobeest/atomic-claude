@@ -104,7 +104,7 @@ task_004_api_keys() {
         echo ""
         # Drain stdin before prompt
         while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
-        read -e -p "  Network mode [1]: " network_choice || true
+        read -e -p "  Network mode (default: 1): " network_choice || true
         network_choice=${network_choice:-1}
 
         case "$network_choice" in
@@ -436,11 +436,11 @@ _004_collect_bedrock() {
 
     # Region - detect GovCloud vs commercial
     echo -e "  ${DIM}Common regions: us-east-1, us-west-2, us-gov-west-1 (GovCloud)${NC}"
-    read -e -p "    AWS Region [us-east-1]: " aws_region || true
+    read -e -p "    AWS Region (default: us-east-1): " aws_region || true
     aws_region=${aws_region:-us-east-1}
 
     # Profile
-    read -e -p "    AWS Profile [default]: " aws_profile || true
+    read -e -p "    AWS Profile (default: default): " aws_profile || true
     aws_profile=${aws_profile:-default}
 
     # Model - Sonnet 4.5 only (available in Bedrock)

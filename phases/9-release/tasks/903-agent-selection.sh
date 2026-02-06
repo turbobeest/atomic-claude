@@ -96,7 +96,7 @@ task_903_agent_selection() {
     # echo -e "    ${DIM}[2]${NC} github-releaser (haiku) - Fast, standard"
     # echo -e "    ${YELLOW}[c]${NC} Custom agent"
     # echo ""
-    # read -e -p "  Select [1]: " gh_choice || true
+    # read -e -p "  Select (default: 1): " gh_choice || true
     # gh_choice=${gh_choice:-1}
     #
     # case "$gh_choice" in
@@ -104,7 +104,7 @@ task_903_agent_selection() {
     #     2) selected_agents+=("github-releaser:haiku") ;;
     #     c|C)
     #         read -e -p "  Custom agent name: " custom_name || true
-    #         read -e -p "  Custom agent model [sonnet]: " custom_model || true
+    #         read -e -p "  Custom agent model (default: sonnet): " custom_model || true
     #         custom_model=${custom_model:-sonnet}
     #         selected_agents+=("$custom_name:$custom_model")
     #         ;;
@@ -118,7 +118,7 @@ task_903_agent_selection() {
     # echo -e "    ${DIM}[2]${NC} package-publisher-careful (sonnet) - Thorough"
     # echo -e "    ${YELLOW}[c]${NC} Custom agent"
     # echo ""
-    # read -e -p "  Select [1]: " pub_choice || true
+    # read -e -p "  Select (default: 1): " pub_choice || true
     # pub_choice=${pub_choice:-1}
     #
     # case "$pub_choice" in
@@ -126,7 +126,7 @@ task_903_agent_selection() {
     #     2) selected_agents+=("package-publisher-careful:sonnet") ;;
     #     c|C)
     #         read -e -p "  Custom agent name: " custom_name || true
-    #         read -e -p "  Custom agent model [haiku]: " custom_model || true
+    #         read -e -p "  Custom agent model (default: haiku): " custom_model || true
     #         custom_model=${custom_model:-haiku}
     #         selected_agents+=("$custom_name:$custom_model")
     #         ;;
@@ -140,7 +140,7 @@ task_903_agent_selection() {
     echo -e "    ${DIM}[2]${NC} announcement-writer-detailed (sonnet) - Comprehensive"
     echo -e "    ${YELLOW}[c]${NC} Custom agent"
     echo ""
-    read -e -p "  Select [1]: " ann_choice || true
+    read -e -p "  Select (default: 1): " ann_choice || true
     ann_choice=${ann_choice:-1}
 
     case "$ann_choice" in
@@ -148,7 +148,7 @@ task_903_agent_selection() {
         2) selected_agents+=("announcement-writer-detailed:sonnet") ;;
         c|C)
             read -e -p "  Custom agent name: " custom_name || true
-            read -e -p "  Custom agent model [haiku]: " custom_model || true
+            read -e -p "  Custom agent model (default: haiku): " custom_model || true
             custom_model=${custom_model:-haiku}
             selected_agents+=("$custom_name:$custom_model")
             ;;

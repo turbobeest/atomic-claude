@@ -11,10 +11,39 @@ task_503_agent_selection() {
     # Check embedded repo first (monorepo deployment), then env var, then default
     local agent_repo="$ATOMIC_ROOT/repos/agents"
     [[ -f "$ATOMIC_ROOT/agents/agent-inventory.csv" ]] && agent_repo="$ATOMIC_ROOT/agents"
-    [[ -n "$ATOMIC_AGENT_REPO" ]] && agent_repo="$ATOMIC_AGENT_REPO"
+    [[ -n "${ATOMIC_AGENT_REPO:-}" ]] && agent_repo="$ATOMIC_AGENT_REPO"
     local csv_path="$agent_repo/agent-inventory.csv"
 
     atomic_step "Agent Selection"
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # UAT MODE BYPASS
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    if [[ "${ATOMIC_UAT_MODE:-false}" == "true" ]]; then
+        echo ""
+        echo -e "  ${YELLOW}⚡${NC} UAT Mode: Auto-selecting default implementation agents"
+        echo ""
+        
+        jq -n '{
+            "tdd_agents": {
+                "red": { "name": "test-first-developer", "model": "haiku", "phase": "RED" },
+                "green": { "name": "implementation-engineer", "model": "sonnet", "phase": "GREEN" },
+                "refactor": { "name": "code-optimization-specialist", "model": "haiku", "phase": "REFACTOR" },
+                "verify": { "name": "security-scanner", "model": "haiku", "phase": "VERIFY" }
+            },
+            "specialists": ["backend-engineer", "api-developer"],
+            "source": "uat-defaults",
+            "mode": "uat",
+            "selected_at": (now | todate)
+        }' > "$agents_file"
+        
+        atomic_context_artifact "$agents_file" "tdd-agents" "Selected TDD agents (UAT mode)"
+        atomic_context_decision "TDD agents auto-selected in UAT mode" "agent-selection"
+        
+        atomic_success "Agent Selection complete (UAT mode)"
+        return 0
+    fi
 
     mkdir -p "$(dirname "$agents_file")"
 
@@ -165,7 +194,7 @@ task_503_agent_selection() {
     echo -e "    ${DIM}[2]${NC} specification-agent"
     echo ""
 
-    read -e -p "    Selection [1]: " red_choice || true
+    read -e -p "    Selection (default: 1): " red_choice || true
     red_choice=${red_choice:-1}
     case "$red_choice" in
         2) red_agent="specification-agent" ;;
@@ -180,7 +209,7 @@ task_503_agent_selection() {
     echo -e "    ${DIM}[2]${NC} specification-agent"
     echo ""
 
-    read -e -p "    Selection [1]: " green_choice || true
+    read -e -p "    Selection (default: 1): " green_choice || true
     green_choice=${green_choice:-1}
     case "$green_choice" in
         2) green_agent="specification-agent" ;;
@@ -195,7 +224,7 @@ task_503_agent_selection() {
     echo -e "    ${DIM}[2]${NC} plan-guardian"
     echo ""
 
-    read -e -p "    Selection [1]: " refactor_choice || true
+    read -e -p "    Selection (default: 1): " refactor_choice || true
     refactor_choice=${refactor_choice:-1}
     case "$refactor_choice" in
         2) refactor_agent="plan-guardian" ;;
@@ -210,7 +239,7 @@ task_503_agent_selection() {
     echo -e "    ${DIM}[2]${NC} code-review-gate"
     echo ""
 
-    read -e -p "    Selection [1]: " verify_choice || true
+    read -e -p "    Selection (default: 1): " verify_choice || true
     verify_choice=${verify_choice:-1}
     case "$verify_choice" in
         2) verify_agent="code-review-gate" ;;

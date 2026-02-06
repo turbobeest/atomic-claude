@@ -1,0 +1,529 @@
+#!/usr/bin/env bash
+# Task 205: PRD Authoring with Document Guardian
+# Strategy: Section-by-section generation with inter-section drift detection
+
+set -euo pipefail
+
+task_205_prd_authoring() {
+    atomic_step "PRD Authoring (Guardian-Enhanced)"
+
+    local output_dir="$ATOMIC_OUTPUT_DIR/2-prd"
+    local prompts_dir="$output_dir/prompts"
+    local prd_file="$output_dir/PRD.md"
+
+    mkdir -p "$prompts_dir"
+
+    # Load project context
+    local project_config="$ATOMIC_OUTPUT_DIR/0-setup/project-config.json"
+    local interview_file="$output_dir/prd-interview.json"
+    local discovery_closeout="$ATOMIC_OUTPUT_DIR/1-discovery/closeout.md"
+
+    if [[ ! -f "$project_config" ]]; then
+        atomic_error "Project config not found: $project_config"
+        return 1
+    fi
+
+    # Extract project details
+    local project_name=$(jq -r '.name // "unknown"' "$project_config")
+    local project_type=$(jq -r '.type // "webapp"' "$project_config")
+    local tech_stack=$(jq -r '.tech_stack // "not specified"' "$project_config")
+
+    atomic_info "Project: $project_name ($project_type)"
+    atomic_info "Tech stack: $tech_stack"
+
+    # Load interview data if available
+    local interview_context=""
+    if [[ -f "$interview_file" ]]; then
+        interview_context=$(cat "$interview_file")
+    fi
+
+    # Load discovery closeout if available
+    local discovery_context=""
+    if [[ -f "$discovery_closeout" ]]; then
+        discovery_context=$(head -100 "$discovery_closeout")
+    fi
+
+    # Detect available Ollama model for guardian
+    local guardian_model="nemotron_mini_4b:latest"
+    if ollama list | grep -q "devstral"; then
+        guardian_model="devstral:latest"
+    elif ollama list | grep -q "llama3.3:70b"; then
+        guardian_model="llama3.3:70b"
+    elif ollama list | grep -q "qwen2.5:72b"; then
+        guardian_model="qwen2.5:72b"
+    fi
+
+    atomic_info "Guardian model: $guardian_model"
+
+    # =========================================================================
+    # SECTION-BY-SECTION GENERATION WITH GUARDIAN
+    # =========================================================================
+
+    # We'll generate in 3 chunks for manageability:
+    # Chunk 1: Sections 0-4 (Foundation)
+    # Chunk 2: Sections 5-9 (Implementation)
+    # Chunk 3: Sections 10-14 (Operations)
+
+    local current_date=$(date +%Y-%m-%d)
+
+    # -------------------------------------------------------------------------
+    # CHUNK 1: Sections 0-4 (Foundation)
+    # -------------------------------------------------------------------------
+
+    atomic_info "Generating Chunk 1: Sections 0-4 (Foundation)"
+
+    cat > "$prompts_dir/prd-chunk1-prompt.md" << EOF
+# Product Requirements Document (PRD) Generation - Chunk 1
+
+You are the **prd-writer** agent generating a formal Product Requirements Document.
+
+## Task
+
+Generate **Sections 0-4** of the 15-section PRD template:
+- Section 0: Vision + Problem Statement
+- Section 1: Executive Summary
+- Section 2: Technical Architecture
+- Section 3: Feature Requirements
+- Section 4: Non-Functional Requirements
+
+## Project Context
+
+**Name**: $project_name
+**Type**: $project_type
+**Tech Stack**: $tech_stack
+**Date**: $current_date
+
+## Interview Data
+
+$interview_context
+
+## Discovery Context
+
+$discovery_context
+
+## Instructions
+
+1. Follow the 15-section PRD template exactly
+2. Use RFC 2119 keywords (SHALL/SHOULD/MAY) for all requirements
+3. Use OpenSpec format for functional requirements (WHEN/THEN scenarios)
+4. Include specific metrics for all non-functional requirements
+5. Generate complete, production-ready content
+
+## Output Format
+
+Output ONLY the markdown content for sections 0-4. Start with:
+
+\`\`\`markdown
+# Product Requirements Document (PRD)
+
+## 0. Vision + Problem Statement
+...
+\`\`\`
+
+End with:
+
+\`\`\`markdown
+---
+
+**END OF SECTIONS 0-4**
+\`\`\`
+
+**CRITICAL**: Output the full sections 0-4. Do NOT summarize or truncate.
+EOF
+
+    local chunk1_file="$prompts_dir/prd-chunk1.md"
+
+    if ! atomic_invoke "$prompts_dir/prd-chunk1-prompt.md" "$chunk1_file" "PRD Chunk 1 (Sections 0-4)" --timeout=1200; then
+        atomic_error "Chunk 1 generation failed"
+        return 1
+    fi
+
+    # Save chunk 1 to memory
+    memory_save "prd_chunk1" "$chunk1_file" "PRD sections 0-4 (Foundation)"
+
+    atomic_success "Chunk 1 complete: $(wc -w < "$chunk1_file") words"
+
+    # -------------------------------------------------------------------------
+    # GUARDIAN CHECK: Validate Chunk 1
+    # -------------------------------------------------------------------------
+
+    atomic_info "Running document-guardian validation on Chunk 1..."
+
+    cat > "$prompts_dir/guardian-chunk1-prompt.md" << EOF
+# Document Guardian - Chunk 1 Validation
+
+You are the **document-guardian** validating a completed PRD section.
+
+## Completed Section (Chunk 1: Sections 0-4)
+
+$(cat "$chunk1_file")
+
+## Project Context
+
+**Tech Stack**: $tech_stack
+**Project Type**: $project_type
+
+## Validation Task
+
+Check for:
+1. **Tech stack consistency**: All technology mentions must match: $tech_stack
+2. **ID sequences**: FRs must be sequential (FR-001, FR-002, ...) with no gaps
+3. **NFR sequences**: NFRs must be sequential (NFR-001, NFR-002, ...) with no gaps
+4. **Format compliance**: FRs must have WHEN/THEN scenarios
+5. **Completeness**: All 5 sections (0-4) present
+
+## Output Format
+
+Return JSON:
+\`\`\`json
+{
+  "validation": {
+    "status": "pass|warn|fail",
+    "drift_detected": true|false,
+    "issues": [
+      {
+        "severity": "critical|warning|info",
+        "category": "tech_stack|id_sequence|format|completeness",
+        "message": "Description of issue",
+        "location": "Section X, FR-YYY"
+      }
+    ]
+  },
+  "context_injection": {
+    "reminders": [
+      "Tech stack: [specific technologies]",
+      "Last FR ID: FR-XXX",
+      "Last NFR ID: NFR-YYY"
+    ],
+    "constraints": [
+      "Next chunk must continue FR sequence from FR-XXX",
+      "Maintain tech stack consistency"
+    ],
+    "watch_for": [
+      "Common pitfalls for next chunk"
+    ]
+  }
+}
+\`\`\`
+EOF
+
+    local guardian_report1="$prompts_dir/guardian-chunk1-report.json"
+
+    if ! atomic_invoke "$prompts_dir/guardian-chunk1-prompt.md" "$guardian_report1" "Guardian: Validate Chunk 1" \
+        --provider=ollama --model="$guardian_model" --format=json --timeout=120; then
+        atomic_warn "Guardian validation failed, proceeding without context injection"
+        guardian_report1=""
+    fi
+
+    # Extract JSON from markdown fences if present
+    if [[ -n "$guardian_report1" && -f "$guardian_report1" ]] && grep -q '```json' "$guardian_report1"; then
+        sed -n '/```json/,/```/p' "$guardian_report1" | sed '1d;$d' > "${guardian_report1}.clean"
+        mv "${guardian_report1}.clean" "$guardian_report1"
+    fi
+
+    # Check for critical issues
+    local chunk1_context=""
+    if [[ -n "$guardian_report1" && -f "$guardian_report1" ]]; then
+        if jq -e '.validation.status == "fail"' "$guardian_report1" > /dev/null 2>&1; then
+            atomic_error "Guardian detected critical drift in Chunk 1"
+            jq -r '.validation.issues[] | "  - [\(.severity)] \(.message)"' "$guardian_report1"
+            return 1
+        fi
+
+        # Extract context injection for Chunk 2
+        chunk1_context=$(jq -r '
+            .context_injection.reminders[] as $r | "- \($r)"
+        ' "$guardian_report1" 2>/dev/null || echo "")
+
+        if [[ -n "$chunk1_context" ]]; then
+            atomic_success "Guardian context captured for Chunk 2"
+        fi
+    fi
+
+    # -------------------------------------------------------------------------
+    # CHUNK 2: Sections 5-9 (Implementation)
+    # -------------------------------------------------------------------------
+
+    atomic_info "Generating Chunk 2: Sections 5-9 (Implementation)"
+
+    cat > "$prompts_dir/prd-chunk2-prompt.md" << EOF
+# Product Requirements Document (PRD) Generation - Chunk 2
+
+You are the **prd-writer** agent continuing the PRD.
+
+## Task
+
+Generate **Sections 5-9** of the 15-section PRD template:
+- Section 5: Logical Dependency Chain (CRITICAL for TaskMaster)
+- Section 6: Development Phases
+- Section 7: Code Structure Map
+- Section 8: TDD Implementation Strategy
+- Section 9: Integration Testing Strategy
+
+## Context from Previous Chunk (Sections 0-4)
+
+$(cat "$chunk1_file" | head -200)
+
+...
+
+$(cat "$chunk1_file" | tail -100)
+
+## Guardian Context Injection
+
+The document-guardian validated Chunk 1 and provides these reminders:
+
+$chunk1_context
+
+## Instructions
+
+1. **Section 5 is CRITICAL**: TaskMaster depends on the Logical Dependency Chain
+2. Reference FRs and NFRs defined in Chunk 1
+3. Maintain tech stack consistency
+4. Use scope-based (not time-based) development phases
+5. Generate complete, production-ready content
+
+## Output Format
+
+Output ONLY the markdown content for sections 5-9. Start with:
+
+\`\`\`markdown
+## 5. Logical Dependency Chain
+...
+\`\`\`
+
+End with:
+
+\`\`\`markdown
+---
+
+**END OF SECTIONS 5-9**
+\`\`\`
+
+**CRITICAL**: Output the full sections 5-9. Do NOT summarize or truncate.
+EOF
+
+    local chunk2_file="$prompts_dir/prd-chunk2.md"
+
+    if ! atomic_invoke "$prompts_dir/prd-chunk2-prompt.md" "$chunk2_file" "PRD Chunk 2 (Sections 5-9)" --timeout=1200; then
+        atomic_error "Chunk 2 generation failed"
+        return 1
+    fi
+
+    memory_save "prd_chunk2" "$chunk2_file" "PRD sections 5-9 (Implementation)"
+
+    atomic_success "Chunk 2 complete: $(wc -w < "$chunk2_file") words"
+
+    # -------------------------------------------------------------------------
+    # GUARDIAN CHECK: Validate Chunk 2
+    # -------------------------------------------------------------------------
+
+    atomic_info "Running document-guardian validation on Chunk 2..."
+
+    cat > "$prompts_dir/guardian-chunk2-prompt.md" << EOF
+# Document Guardian - Chunk 2 Validation
+
+You are the **document-guardian** validating PRD sections 5-9.
+
+## Completed Section (Chunk 2: Sections 5-9)
+
+$(cat "$chunk2_file")
+
+## Prior Sections (Chunk 1: Sections 0-4)
+
+$(cat "$chunk1_file" | head -150)
+
+## Validation Task
+
+Check for:
+1. **Cross-references**: All FR/NFR IDs mentioned in Section 5 must exist in Chunk 1
+2. **Tech stack consistency**: Technology mentions must match Chunk 1
+3. **Dependency chain completeness**: All MUST requirements from Section 3 must appear in Section 5
+4. **Phase structure**: Development phases must be scope-based (not time-based)
+
+## Output Format
+
+Return JSON with validation status and context injection for Chunk 3.
+EOF
+
+    local guardian_report2="$prompts_dir/guardian-chunk2-report.json"
+
+    if ! atomic_invoke "$prompts_dir/guardian-chunk2-prompt.md" "$guardian_report2" "Guardian: Validate Chunk 2" \
+        --provider=ollama --model="$guardian_model" --format=json --timeout=120; then
+        atomic_warn "Guardian validation failed, proceeding without context injection"
+        guardian_report2=""
+    fi
+
+    # Extract JSON from markdown fences
+    if [[ -n "$guardian_report2" && -f "$guardian_report2" ]] && grep -q '```json' "$guardian_report2"; then
+        sed -n '/```json/,/```/p' "$guardian_report2" | sed '1d;$d' > "${guardian_report2}.clean"
+        mv "${guardian_report2}.clean" "$guardian_report2"
+    fi
+
+    # Check for critical issues
+    local chunk2_context=""
+    if [[ -n "$guardian_report2" && -f "$guardian_report2" ]]; then
+        if jq -e '.validation.status == "fail"' "$guardian_report2" > /dev/null 2>&1; then
+            atomic_error "Guardian detected critical drift in Chunk 2"
+            jq -r '.validation.issues[] | "  - [\(.severity)] \(.message)"' "$guardian_report2"
+            return 1
+        fi
+
+        chunk2_context=$(jq -r '
+            .context_injection.reminders[] as $r | "- \($r)"
+        ' "$guardian_report2" 2>/dev/null || echo "")
+
+        if [[ -n "$chunk2_context" ]]; then
+            atomic_success "Guardian context captured for Chunk 3"
+        fi
+    fi
+
+    # -------------------------------------------------------------------------
+    # CHUNK 3: Sections 10-14 (Operations)
+    # -------------------------------------------------------------------------
+
+    atomic_info "Generating Chunk 3: Sections 10-14 (Operations)"
+
+    cat > "$prompts_dir/prd-chunk3-prompt.md" << EOF
+# Product Requirements Document (PRD) Generation - Chunk 3
+
+You are the **prd-writer** agent completing the PRD.
+
+## Task
+
+Generate **Sections 10-14** of the 15-section PRD template:
+- Section 10: Documentation Requirements
+- Section 11: Operational Readiness
+- Section 12: Risks and Assumptions
+- Section 13: Success Metrics
+- Section 14: Approval and Sign-off
+
+## Context from Chunk 1 (Sections 0-4)
+
+$(cat "$chunk1_file" | tail -100)
+
+## Context from Chunk 2 (Sections 5-9)
+
+$(cat "$chunk2_file" | tail -100)
+
+## Guardian Context Injection
+
+$chunk2_context
+
+## Instructions
+
+1. Reference the full project context from Chunks 1-2
+2. Identify minimum 5 risks in Section 12
+3. Include specific, measurable success metrics in Section 13
+4. Generate complete, production-ready content
+
+## Output Format
+
+Output ONLY the markdown content for sections 10-14. Start with:
+
+\`\`\`markdown
+## 10. Documentation Requirements
+...
+\`\`\`
+
+End with:
+
+\`\`\`markdown
+---
+
+*Generated by ATOMIC CLAUDE - Phase 2 PRD*
+*Compatible with TaskMaster and OpenSpec*
+*Date: $current_date*
+\`\`\`
+
+**CRITICAL**: Output the full sections 10-14. Do NOT summarize or truncate.
+EOF
+
+    local chunk3_file="$prompts_dir/prd-chunk3.md"
+
+    if ! atomic_invoke "$prompts_dir/prd-chunk3-prompt.md" "$chunk3_file" "PRD Chunk 3 (Sections 10-14)" --timeout=1200; then
+        atomic_error "Chunk 3 generation failed"
+        return 1
+    fi
+
+    memory_save "prd_chunk3" "$chunk3_file" "PRD sections 10-14 (Operations)"
+
+    atomic_success "Chunk 3 complete: $(wc -w < "$chunk3_file") words"
+
+    # -------------------------------------------------------------------------
+    # FINAL GUARDIAN CHECK: Full PRD Validation
+    # -------------------------------------------------------------------------
+
+    atomic_info "Running final guardian validation..."
+
+    # Assemble full PRD
+    cat "$chunk1_file" > "$prd_file"
+    echo "" >> "$prd_file"
+    cat "$chunk2_file" >> "$prd_file"
+    echo "" >> "$prd_file"
+    cat "$chunk3_file" >> "$prd_file"
+
+    local prd_word_count=$(wc -w < "$prd_file")
+    local prd_line_count=$(wc -l < "$prd_file")
+
+    atomic_success "Full PRD assembled: $prd_word_count words, $prd_line_count lines"
+
+    # Final validation
+    cat > "$prompts_dir/guardian-final-prompt.md" << EOF
+# Document Guardian - Final PRD Validation
+
+## Complete PRD
+
+$(cat "$prd_file" | head -500)
+
+...
+
+$(cat "$prd_file" | tail -300)
+
+## Validation Task
+
+Perform final check:
+1. All 15 sections present (0-14)
+2. No broken cross-references
+3. Tech stack consistent throughout
+4. TaskMaster-ready (Section 5 complete)
+5. OpenSpec-compliant (WHEN/THEN scenarios)
+
+Return JSON with pass/fail and any critical issues.
+EOF
+
+    local guardian_final="$prompts_dir/guardian-final-report.json"
+
+    if atomic_invoke "$prompts_dir/guardian-final-prompt.md" "$guardian_final" "Guardian: Final validation" \
+        --provider=ollama --model="$guardian_model" --format=json --timeout=120; then
+
+        # Extract JSON
+        if grep -q '```json' "$guardian_final"; then
+            sed -n '/```json/,/```/p' "$guardian_final" | sed '1d;$d' > "${guardian_final}.clean"
+            mv "${guardian_final}.clean" "$guardian_final"
+        fi
+
+        if jq -e '.validation.status == "fail"' "$guardian_final" > /dev/null 2>&1; then
+            atomic_warn "Guardian found issues in final PRD:"
+            jq -r '.validation.issues[] | "  - [\(.severity)] \(.message)"' "$guardian_final"
+        else
+            atomic_success "Guardian approved PRD"
+        fi
+    fi
+
+    # Copy to project docs
+    mkdir -p docs/prd
+    cp "$prd_file" docs/prd/PRD.md
+
+    atomic_success "PRD generation complete"
+    atomic_info "Location: docs/prd/PRD.md"
+    atomic_info "Stats: $prd_word_count words, $prd_line_count lines"
+
+    return 0
+}
+
+# Execute if run directly
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    source "$(dirname "${BASH_SOURCE[0]}")/../../../lib/atomic.sh"
+    source "$(dirname "${BASH_SOURCE[0]}")/../../../lib/memory.sh"
+    task_205_prd_authoring
+fi

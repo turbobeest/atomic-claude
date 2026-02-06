@@ -506,7 +506,7 @@ phase_task_interactive() {
             echo -e "  ${GREEN}[c]${NC} Continue    ${YELLOW}[r]${NC} Redo    ${BLUE}[b]${NC} Go back    ${MAGENTA}[j]${NC} Jump to    ${RED}[q]${NC} Quit"
             echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     atomic_drain_stdin
-            read -e -p "  Choice [c]: " choice || true
+            read -e -p "  Choice (default: c): " choice || true
             choice=${choice:-c}
 
             case "$choice" in
@@ -558,7 +558,7 @@ phase_task_interactive() {
             echo -e "  ${YELLOW}[r]${NC} Retry    ${BLUE}[b]${NC} Go back    ${MAGENTA}[j]${NC} Jump to    ${DIM}[s]${NC} Skip    ${RED}[q]${NC} Quit"
             echo -e "${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     atomic_drain_stdin
-            read -e -p "  Choice [r]: " choice || true
+            read -e -p "  Choice (default: r): " choice || true
             choice=${choice:-r}
 
             case "$choice" in
@@ -786,7 +786,7 @@ phase_offer_continue() {
 
     while true; do
         atomic_drain_stdin
-        read -e -p "  Choice [c]: " choice || true
+        read -e -p "  Choice (default: c): " choice || true
         choice=${choice:-c}
         case "$choice" in
             c|C|continue|Continue)

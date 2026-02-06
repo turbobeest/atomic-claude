@@ -125,6 +125,16 @@ _audit_load_config() {
         fi
     fi
 
+    # Fallback 3: check library root audits directory (for embedded projects)
+    if [[ -z "$_AUDIT_REPO_PATH" || ! -d "$_AUDIT_REPO_PATH" ]]; then
+        if [[ -n "${ATOMIC_LIB_ROOT:-}" ]]; then
+            local lib_audits="$ATOMIC_LIB_ROOT/audits"
+            if [[ -d "$lib_audits" && -f "$lib_audits/AUDIT-INVENTORY.csv" ]]; then
+                _AUDIT_REPO_PATH=$(cd "$lib_audits" && pwd)
+            fi
+        fi
+    fi
+
     # Check for local AUDIT-INVENTORY.csv (preferred)
     if [[ -n "$_AUDIT_REPO_PATH" && -f "$_AUDIT_REPO_PATH/AUDIT-INVENTORY.csv" ]]; then
         _AUDIT_INVENTORY_PATH="$_AUDIT_REPO_PATH/AUDIT-INVENTORY.csv"
@@ -364,7 +374,7 @@ audit_browse_catalog() {
         echo ""
         } >&2
 
-        read -e -p "  Select [1]: " browse_choice
+        read -e -p "  Select (default: 1): " browse_choice
         browse_choice=${browse_choice:-1}
 
         case "$browse_choice" in
@@ -1033,7 +1043,15 @@ EOF
     local output_file="$AUDIT_CACHE_DIR/recommendations-phase-$phase_num.json"
 
     # Use provider library for invocation (bulk task)
-    source "$ATOMIC_ROOT/lib/provider.sh"
+    local provider_lib="$ATOMIC_ROOT/lib/provider.sh"
+    if [[ ! -f "$provider_lib" && -n "${ATOMIC_LIB_ROOT:-}" ]]; then
+        provider_lib="$ATOMIC_LIB_ROOT/lib/provider.sh"
+    fi
+    if [[ ! -f "$provider_lib" ]]; then
+        echo "ERROR: provider.sh not found" >&2
+        return 1
+    fi
+    source "$provider_lib"
     local invoke_rc=0
     provider_invoke "$prompt_file" "$output_file" "bulk" --format=json >&2 || invoke_rc=$?
 
@@ -1224,7 +1242,7 @@ audit_present_recommendations() {
     echo ""
     } >&2
 
-    read -e -p "  Select [1]: " choice
+    read -e -p "  Select (default: 1): " choice
     choice=${choice:-1}
 
     echo "$choice"
@@ -1605,7 +1623,15 @@ AUDIT_PROMPT_FOOTER
     # Invoke Claude agent with tool access and enough turns to investigate
     # Architecture audits need many turns to read files + produce JSON output
     # Disable retries — each attempt is already long; retries just triple the wait
-    source "$ATOMIC_ROOT/lib/provider.sh"
+    local provider_lib="$ATOMIC_ROOT/lib/provider.sh"
+    if [[ ! -f "$provider_lib" && -n "${ATOMIC_LIB_ROOT:-}" ]]; then
+        provider_lib="$ATOMIC_LIB_ROOT/lib/provider.sh"
+    fi
+    if [[ ! -f "$provider_lib" ]]; then
+        echo "ERROR: provider.sh not found" >&2
+        return 1
+    fi
+    source "$provider_lib"
     local saved_max_turns="${CLAUDE_MAX_TURNS:-1}"
     local saved_max_retries="${ATOMIC_MAX_RETRIES:-2}"
     # Default 30 turns; complex audits (domain analysis, cohesion) need more exploration
@@ -2182,7 +2208,15 @@ DISCUSS_ARTIFACT
         cat "$history_file" >> "$prompt_file"
 
         # Invoke agent (sonnet, fast/cheap)
-        source "$ATOMIC_ROOT/lib/provider.sh"
+        local provider_lib="$ATOMIC_ROOT/lib/provider.sh"
+        if [[ ! -f "$provider_lib" && -n "${ATOMIC_LIB_ROOT:-}" ]]; then
+            provider_lib="$ATOMIC_LIB_ROOT/lib/provider.sh"
+        fi
+        if [[ ! -f "$provider_lib" ]]; then
+            echo "ERROR: provider.sh not found" >&2
+            return 1
+        fi
+        source "$provider_lib"
         local saved_turns="${CLAUDE_MAX_TURNS:-10}"
         local saved_retries="${ATOMIC_MAX_RETRIES:-2}"
         export CLAUDE_MAX_TURNS=1
@@ -2268,8 +2302,8 @@ _audit_stream_post_summary() {
         while read -t 0.01 -n 1 _discard </dev/tty 2>/dev/null; do :; done
 
         # Force prompt to terminal and ensure it's visible
-        printf "  Choice [%s]: " "$default_choice" >/dev/tty
-        read -e post_choice </dev/tty 2>/dev/null || read -e -p "  Choice [$default_choice]: " post_choice
+        printf "  Choice (default: %s): " "$default_choice" >/dev/tty
+        read -e post_choice </dev/tty 2>/dev/null || read -e -p "  Choice (default: $default_choice): " post_choice
         post_choice=${post_choice:-$default_choice}
 
         case "$post_choice" in
@@ -2497,7 +2531,7 @@ audit_post_execution() {
         echo ""
 
         atomic_drain_stdin
-        read -e -p "  Choice [remediate]: " post_choice
+        read -e -p "  Choice (default: remediate): " post_choice
         post_choice=${post_choice:-remediate}
 
         case "$post_choice" in
@@ -2658,7 +2692,7 @@ audit_remediate_findings() {
         fi
         echo ""
 
-        read -e -p "  Resolution [accept]: " user_response
+        read -e -p "  Resolution (default: accept): " user_response
 
         if [[ "$user_response" == "done" ]]; then
             echo ""
@@ -2891,7 +2925,7 @@ PROMPT_HEADER
 
     while true; do
         atomic_drain_stdin
-        read -e -p "  Choice [apply]: " ref_choice
+        read -e -p "  Choice (default: apply): " ref_choice
         ref_choice=${ref_choice:-apply}
 
         case "$ref_choice" in
@@ -2952,7 +2986,15 @@ audit_phase_wrapper() {
     local phase_name="$2"
     local legacy_callback="${3:-}"
 
-    source "$ATOMIC_ROOT/lib/atomic.sh"
+    local atomic_lib="$ATOMIC_ROOT/lib/atomic.sh"
+    if [[ ! -f "$atomic_lib" && -n "${ATOMIC_LIB_ROOT:-}" ]]; then
+        atomic_lib="$ATOMIC_LIB_ROOT/lib/atomic.sh"
+    fi
+    if [[ ! -f "$atomic_lib" ]]; then
+        echo "ERROR: atomic.sh not found" >&2
+        return 1
+    fi
+    source "$atomic_lib"
 
     local audit_dir="$ATOMIC_ROOT/.claude/audit"
     mkdir -p "$audit_dir"
@@ -2997,7 +3039,7 @@ audit_phase_wrapper() {
     echo -e "        ${DIM}Proceed without audit (not recommended)${NC}"
     echo ""
 
-    read -e -p "  Mode [1]: " mode_choice
+    read -e -p "  Mode (default: 1): " mode_choice
     mode_choice=${mode_choice:-1}
 
     case "$mode_choice" in

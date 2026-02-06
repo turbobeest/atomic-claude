@@ -26,7 +26,7 @@ task_804_artifact_generation() {
     # Check embedded repo first (monorepo deployment), then env var, then default
     local agent_repo="$ATOMIC_ROOT/repos/agents"
     [[ -f "$ATOMIC_ROOT/agents/agent-inventory.csv" ]] && agent_repo="$ATOMIC_ROOT/agents"
-    [[ -n "$ATOMIC_AGENT_REPO" ]] && agent_repo="$ATOMIC_AGENT_REPO"
+    [[ -n "${ATOMIC_AGENT_REPO:-}" ]] && agent_repo="$ATOMIC_AGENT_REPO"
 
     # Agent prompts (loaded from agents repository if available)
     local packager_agent_prompt=""
@@ -130,15 +130,14 @@ $project_context
 
 Analyze the project and determine packaging requirements. List the artifacts that should be created.
 
-Return as JSON:
-\`\`\`json
+Return ONLY valid JSON with no additional text, explanation, or markdown formatting.
+Output raw JSON:
 {
   "package_name": "project-$version",
   "artifacts": ["list of artifact files"],
   "status": "success|failure",
   "notes": "any packaging notes"
 }
-\`\`\`
 PROMPT
 
     echo -e "  ${DIM}[release-packager] Building release package...${NC}"
@@ -215,8 +214,8 @@ $project_context
 
 Generate a changelog entry for this release following Keep a Changelog format. Include Added, Changed, Fixed, Removed sections as appropriate.
 
-Return as JSON:
-\`\`\`json
+Return ONLY valid JSON with no additional text, explanation, or markdown formatting.
+Output raw JSON:
 {
   "version": "$version",
   "date": "$(date +%Y-%m-%d)",
@@ -225,7 +224,6 @@ Return as JSON:
   "fixed": ["list of fixes"],
   "status": "success"
 }
-\`\`\`
 PROMPT
 
     echo -e "  ${DIM}[changelog-writer] Generating changelog...${NC}"
@@ -308,8 +306,8 @@ $project_context
 
 Analyze the project and generate documentation structure. Determine what documentation files are needed.
 
-Return as JSON:
-\`\`\`json
+Return ONLY valid JSON with no additional text, explanation, or markdown formatting.
+Output raw JSON:
 {
   "files": [
     {"name": "docs/README.md", "description": "Project overview"},
@@ -317,7 +315,6 @@ Return as JSON:
   ],
   "status": "success"
 }
-\`\`\`
 PROMPT
 
     echo -e "  ${DIM}[documentation-generator] Creating user documentation...${NC}"
@@ -391,14 +388,13 @@ $project_context
 
 Create an installation guide with platform-specific instructions. Include prerequisites, quick start, and troubleshooting.
 
-Return as JSON:
-\`\`\`json
+Return ONLY valid JSON with no additional text, explanation, or markdown formatting.
+Output raw JSON:
 {
   "sections": ["Prerequisites", "Quick Start", "Manual Installation", "Platform Notes", "Troubleshooting"],
   "platforms": ["Linux", "macOS", "Windows"],
   "status": "success"
 }
-\`\`\`
 PROMPT
 
     echo -e "  ${DIM}[installation-guide-writer] Creating installation guide...${NC}"

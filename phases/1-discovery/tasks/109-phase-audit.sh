@@ -51,7 +51,7 @@ task_109_phase_audit() {
     echo -e "        ${DIM}Proceed without audit (not recommended)${NC}"
     echo ""
 
-    read -e -p "  Mode [1]: " mode_choice || true
+    read -e -p "  Mode (default: 1): " mode_choice || true
     mode_choice=${mode_choice:-1}
 
     case "$mode_choice" in
@@ -75,8 +75,18 @@ task_109_phase_audit() {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _109_ai_driven_audit() {
-    # Source the audit library
-    source "$ATOMIC_ROOT/lib/audit.sh"
+    # Source the audit library (with fallback to library root)
+    local audit_lib="$ATOMIC_ROOT/lib/audit.sh"
+    if [[ ! -f "$audit_lib" && -n "${ATOMIC_LIB_ROOT:-}" ]]; then
+        audit_lib="$ATOMIC_LIB_ROOT/lib/audit.sh"
+    fi
+
+    if [[ ! -f "$audit_lib" ]]; then
+        atomic_error "audit.sh not found at $ATOMIC_ROOT/lib/ or $ATOMIC_LIB_ROOT/lib/"
+        return 1
+    fi
+
+    source "$audit_lib"
 
     # Run the AI-driven phase audit
     audit_run_phase 1 "Discovery"
@@ -127,7 +137,7 @@ _109_legacy_audit() {
     echo -e "    ${GREEN}[all]${NC}    All 9 dimensions (thorough)"
     echo ""
 
-    read -e -p "  Profile [quick]: " audit_profile || true
+    read -e -p "  Profile (default: quick): " audit_profile || true
     audit_profile=${audit_profile:-quick}
 
     local selected_dims=()
@@ -301,7 +311,8 @@ done)
 
 For EACH dimension, provide a finding with specific evidence from the artifacts.
 
-Output as JSON:
+Return ONLY valid JSON with no additional text, explanation, or markdown formatting.
+Output raw JSON:
 {
   "audit_timestamp": "$(date -Iseconds)",
   "audit_mode": "legacy",
@@ -325,8 +336,6 @@ Output as JSON:
   "proceed_recommendation": true,
   "proceed_rationale": "Brief explanation of why it's safe (or not) to proceed to Phase 2"
 }
-
-Output ONLY valid JSON. No markdown, no explanation.
 EOF
 
     atomic_waiting "auditor analyzing..."
@@ -399,7 +408,7 @@ EOF
         echo ""
 
     atomic_drain_stdin
-        read -e -p "  Choice [accept]: " review_choice || true
+        read -e -p "  Choice (default: accept): " review_choice || true
         review_choice=${review_choice:-accept}
 
         case "$review_choice" in

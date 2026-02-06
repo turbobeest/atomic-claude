@@ -91,7 +91,7 @@ task_108_discovery_diagrams() {
     echo -e "    ${CYAN}[standard]${NC}  Context + Container + Data Flow + Deployment"
     echo ""
 
-    read -e -p "  Selection [standard]: " diagram_selection || true
+    read -e -p "  Selection (default: standard): " diagram_selection || true
     diagram_selection=${diagram_selection:-standard}
 
     local selected_diagrams=()
@@ -304,7 +304,7 @@ task_108_discovery_diagrams() {
 
     while true; do
     atomic_drain_stdin
-        read -e -p "  Choice [approve]: " review_choice || true
+        read -e -p "  Choice (default: approve): " review_choice || true
         review_choice=${review_choice:-approve}
 
         case "$review_choice" in
@@ -594,7 +594,11 @@ If you're unsure about something:
 - For unknown tech, use "[Technology TBD]" in the label
 - If relationships are unclear, add "?" to the label: "calls? (verify)"
 
-Always output SYNTACTICALLY valid DOT even if the content needs refinement.
+## Output Format
+
+Return ONLY valid DOT code with no additional text, explanation, or markdown formatting.
+Start directly with the digraph line.
+Do not include markdown fences, explanatory text, or comments before the digraph declaration.
 EOF
 
     # Use atomic_invoke if available, otherwise create template

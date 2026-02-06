@@ -140,7 +140,7 @@ task_905_release_confirmation() {
     echo ""
 
     atomic_drain_stdin
-    read -e -p "  Choice [confirm]: " confirm_choice || true
+    read -e -p "  Choice (default: confirm): " confirm_choice || true
     confirm_choice=${confirm_choice:-confirm}
 
     case "$confirm_choice" in

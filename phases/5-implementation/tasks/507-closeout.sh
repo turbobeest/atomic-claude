@@ -17,6 +17,74 @@ task_507_closeout() {
 
     atomic_step "Phase Closeout"
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # UAT MODE BYPASS
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    if [[ "${ATOMIC_UAT_MODE:-false}" == "true" ]]; then
+        echo ""
+        echo -e "  ${YELLOW}⚡${NC} UAT Mode: Auto-approving closeout, creating minimal artifacts"
+        echo ""
+        
+        mkdir -p "$closeout_dir"
+        
+        # Create minimal closeout markdown
+        cat > "$closeout_file" << 'CLOSEOUT_EOF'
+# Phase 5: Implementation - Closeout (UAT Mode)
+
+## Summary
+Phase 5 completed in UAT mode with stub implementation files.
+
+## Metrics
+- Tasks: 3/3 complete
+- Test Coverage: 80% (stub)
+- Security Issues: 0 critical
+
+## Status
+COMPLETE (UAT Mode)
+
+## Next Phase
+Phase 6: Code Review
+CLOSEOUT_EOF
+        
+        # Create minimal closeout JSON
+        jq -n '{
+            "phase": 5,
+            "status": "complete",
+            "mode": "uat",
+            "completion": {
+                "tasks_completed": 3,
+                "tasks_total": 3,
+                "completion_rate": 100
+            },
+            "coverage": {
+                "unit": 80
+            },
+            "security": {
+                "critical_issues": 0
+            },
+            "tdd_records": 3,
+            "checklist": ["uat-stub-files", "uat-mock-tests"],
+            "artifacts": {
+                "testing": ".claude/testing/",
+                "validation": ".claude/testing/validation-report.json"
+            },
+            "completed_at": (now | todate),
+            "next_phase": 6
+        }' > "$closeout_json"
+        
+        echo -e "  ${GREEN}✓${NC} Generated phase-05-closeout.md (UAT mode)"
+        echo -e "  ${GREEN}✓${NC} Generated phase-05-closeout.json (UAT mode)"
+        echo ""
+        
+        atomic_context_artifact "phase5_closeout_md" "$closeout_file" "Phase 5 closeout summary (UAT mode)"
+        atomic_context_artifact "phase5_closeout_json" "$closeout_json" "Phase 5 closeout data (UAT mode)"
+        atomic_context_decision "Phase 5 closeout completed in UAT mode" "closeout"
+        
+        atomic_success "Phase 5 closeout complete (UAT mode)"
+        return 0
+    fi
+
     mkdir -p "$closeout_dir"
 
     echo ""
@@ -164,7 +232,7 @@ task_507_closeout() {
     while read -t 0.01 -n 1 _discard 2>/dev/null; do :; done
 
     # Handle EOF gracefully - default to approve
-    read -e -p "  Choice [approve]: " closeout_choice || true
+    read -e -p "  Choice (default: approve): " closeout_choice || true
     closeout_choice=${closeout_choice:-approve}
 
     case "$closeout_choice" in

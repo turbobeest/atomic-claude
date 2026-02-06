@@ -108,7 +108,7 @@ task_602_agent_selection() {
     echo -e "    ${DIM}[c]${NC} Custom agent name"
     echo ""
 
-    read -e -p "    Selection [1]: " deep_choice || true
+    read -e -p "    Selection (default: 1): " deep_choice || true
     deep_choice=${deep_choice:-1}
     case "$deep_choice" in
         2) deep_agent="senior-engineer" ;;
@@ -128,7 +128,7 @@ task_602_agent_selection() {
     echo -e "    ${DIM}[c]${NC} Custom agent name"
     echo ""
 
-    read -e -p "    Selection [1]: " arch_choice || true
+    read -e -p "    Selection (default: 1): " arch_choice || true
     arch_choice=${arch_choice:-1}
     case "$arch_choice" in
         2) arch_agent="system-architect" ;;
@@ -148,7 +148,7 @@ task_602_agent_selection() {
     echo -e "    ${DIM}[c]${NC} Custom agent name"
     echo ""
 
-    read -e -p "    Selection [1]: " perf_choice || true
+    read -e -p "    Selection (default: 1): " perf_choice || true
     perf_choice=${perf_choice:-1}
     case "$perf_choice" in
         2) perf_agent="performance-engineer" ;;
@@ -168,7 +168,7 @@ task_602_agent_selection() {
     echo -e "    ${DIM}[c]${NC} Custom agent name"
     echo ""
 
-    read -e -p "    Selection [1]: " doc_choice || true
+    read -e -p "    Selection (default: 1): " doc_choice || true
     doc_choice=${doc_choice:-1}
     case "$doc_choice" in
         2) doc_agent="technical-writer" ;;
@@ -188,7 +188,7 @@ task_602_agent_selection() {
     echo -e "    ${DIM}[c]${NC} Custom agent name"
     echo ""
 
-    read -e -p "    Selection [1]: " refiner_choice || true
+    read -e -p "    Selection (default: 1): " refiner_choice || true
     refiner_choice=${refiner_choice:-1}
     case "$refiner_choice" in
         2) refiner_agent="refactoring-specialist" ;;

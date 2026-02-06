@@ -11,12 +11,14 @@
 
 task_001_setup_validation() {
     local config_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/project-config.json"
-    local init_dir="$ATOMIC_ROOT/initialization"
+    # Look for initialization in project root (parent of ATOMIC-CLAUDE)
+    local project_root="$(dirname "$ATOMIC_ROOT")"
+    local init_dir="$project_root/initialization"
     local setup_file="$init_dir/setup.md"
     local orchestrator_template="$ROOT_DIR/initialization/setup.md"
     local file_exists=false
 
-    # Ensure initialization directory exists
+    # Ensure initialization directory exists in project root
     mkdir -p "$init_dir"
 
     # Check if setup.md already exists

@@ -49,7 +49,7 @@ task_702_integration_setup() {
     echo -e "  ${DIM}Is this the correct integration environment?${NC}"
     echo ""
 
-    read -e -p "  Confirm [y/n]: " env_confirm || true
+    read -e -p "  Confirm (default: y/n): " env_confirm || true
     env_confirm=${env_confirm:-y}
 
     if [[ "$env_confirm" != "y" && "$env_confirm" != "Y" ]]; then

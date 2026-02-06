@@ -16,7 +16,18 @@
 #
 
 task_208_phase_audit() {
-    source "$ATOMIC_ROOT/lib/audit.sh"
+    # Source the audit library (with fallback to library root)
+    local audit_lib="$ATOMIC_ROOT/lib/audit.sh"
+    if [[ ! -f "$audit_lib" && -n "${ATOMIC_LIB_ROOT:-}" ]]; then
+        audit_lib="$ATOMIC_LIB_ROOT/lib/audit.sh"
+    fi
+
+    if [[ ! -f "$audit_lib" ]]; then
+        atomic_error "audit.sh not found at $ATOMIC_ROOT/lib/ or $ATOMIC_LIB_ROOT/lib/"
+        return 1
+    fi
+
+    source "$audit_lib"
     audit_phase_wrapper 2 "PRD Validation" "_208_legacy_audit"
     return $?
 }
@@ -29,6 +40,39 @@ _208_legacy_audit() {
     local prompts_dir="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/prompts"
 
     mkdir -p "$audit_dir" "$prompts_dir"
+
+    # =========================================================================
+    # UAT MODE BYPASS
+    # =========================================================================
+    if [[ "${ATOMIC_UAT_MODE:-false}" == "true" ]]; then
+        atomic_info "UAT mode: Skipping audit..."
+
+        # Create minimal audit report
+        cat > "$audit_file" << EOF
+{
+  "audit_timestamp": "$(date -Iseconds)",
+  "audit_mode": "uat",
+  "profile": "minimal",
+  "dimensions_audited": 0,
+  "findings": {},
+  "summary": {
+    "passed": 10,
+    "warnings": 0,
+    "critical": 0
+  },
+  "overall_status": "PASS",
+  "proceed_recommendation": true,
+  "proceed_rationale": "UAT mode - audit bypassed for testing"
+}
+EOF
+
+        atomic_success "UAT mode: Audit bypassed"
+        return 0
+    fi
+
+    # -------------------------------------------------------------------------
+    # NORMAL MODE - Continue with full audit
+    # -------------------------------------------------------------------------
 
     echo ""
     echo -e "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
@@ -50,7 +94,7 @@ _208_legacy_audit() {
     echo -e "    ${GREEN}[exhaustive]${NC} 60 dimensions - Full audit"
     echo ""
 
-    read -e -p "  Profile [standard]: " profile || true
+    read -e -p "  Profile (default: standard): " profile || true
     profile=${profile:-standard}
 
     local dim_count=25
@@ -202,7 +246,8 @@ CRITICAL example (use sparingly):
 
 For EACH dimension listed above, provide a finding with specific evidence.
 
-Output as JSON:
+Return ONLY valid JSON with no additional text, explanation, or markdown formatting.
+Output raw JSON:
 {
   "audit_timestamp": "$(date -Iseconds)",
   "audit_mode": "legacy",
@@ -227,7 +272,6 @@ Output as JSON:
   "proceed_rationale": "Brief explanation of readiness for Phase 3"
 }
 
-Output ONLY valid JSON. No markdown, no explanation.
 EOF
 
     atomic_waiting "PRD auditor analyzing..."

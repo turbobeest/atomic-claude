@@ -324,6 +324,13 @@ task_state_complete() {
         .phases[$phase].tasks[$task].artifacts = $artifacts
     ' --arg phase "$phase_id" --arg task "$task_id" --arg name "$task_name" \
       --argjson artifacts "$artifacts_json"
+
+    # Organize task files after completion
+    if [[ -f "$ATOMIC_ROOT/lib/file-organization.sh" ]]; then
+        source "$ATOMIC_ROOT/lib/file-organization.sh"
+        local output_dir="${ATOMIC_OUTPUT_DIR:-$ATOMIC_ROOT/.outputs}/$phase_id"
+        organize_task_files "$phase_id" "$task_id" "$output_dir" 2>/dev/null || true
+    fi
 }
 
 # Mark a task as failed

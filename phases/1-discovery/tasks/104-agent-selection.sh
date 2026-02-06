@@ -114,7 +114,7 @@ EOF
         echo -e "    ${GREEN}[3]${NC} Continue with built-in defaults"
         echo ""
     atomic_drain_stdin
-        read -e -p "  Choice [3]: " repo_choice || true
+        read -e -p "  Choice (default: 3): " repo_choice || true
         repo_choice=${repo_choice:-3}
 
         case "$repo_choice" in
@@ -262,15 +262,14 @@ $available_pipeline_agents
 Review the defaults and suggest changes ONLY if strongly warranted by the project context.
 Be conservative - the defaults work well for most projects.
 
-Output JSON:
-\`\`\`json
+Return ONLY valid JSON with no additional text, explanation, or markdown formatting.
+Output raw JSON:
 {
     "recommendations": [
         {"phase": "phase-name", "action": "add|remove|swap", "agent": "agent-name", "reason": "brief reason"}
     ],
     "summary": "One sentence summary of changes, or 'Defaults are appropriate for this project'"
 }
-\`\`\`
 
 If no changes needed, return: {"recommendations": [], "summary": "Defaults are appropriate for this project"}
 EOF
@@ -316,7 +315,7 @@ EOF
     echo -e "    ${GREEN}[3]${NC} Use defaults only (ignore recommendations)"
     echo ""
     atomic_drain_stdin
-    read -e -p "  Choice [1]: " pipeline_choice || true
+    read -e -p "  Choice (default: 1): " pipeline_choice || true
     pipeline_choice=${pipeline_choice:-1}
 
     # Apply recommendations if accepted
@@ -892,7 +891,7 @@ _105_browse_categories() {
     done <<< "$categories"
 
     echo ""
-    read -e -p "    Select category [1-8]: " cat_choice || true
+    read -e -p "    Select category (default: 1-8): " cat_choice || true
 
     # Get the category key by index
     local cat_key=$(jq -r ".categories | keys[$((cat_choice - 1))]" "$AGENT_MANIFEST")

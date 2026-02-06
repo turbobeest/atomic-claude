@@ -118,7 +118,7 @@ EOF
         echo ""
 
     atomic_drain_stdin
-        read -e -p "  Choice [b]: " choice || true
+        read -e -p "  Choice (default: b): " choice || true
         choice=${choice:-b}
 
         case "$choice" in

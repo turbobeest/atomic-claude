@@ -22,14 +22,154 @@ task_504_tdd_execution() {
 
     atomic_step "TDD Execution"
 
-    mkdir -p "$testing_dir" "$prompts_dir" "$(dirname "$progress_file")"
+    # ═══════════════════════════════════════════════════════════════════════════
+    # UAT MODE BYPASS
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    if [[ "${ATOMIC_UAT_MODE:-false}" == "true" ]]; then
+        echo ""
+        echo -e "  ${YELLOW}⚡${NC} UAT Mode: Creating stub implementation files (no actual TDD cycles)"
+        echo ""
+        
+        # Create minimal testing directory and progress file
+        mkdir -p "$testing_dir" "$src_dir"
+        
+        # Create minimal TDD progress file
+        jq -n '{
+            "tasks_completed": 3,
+            "tasks_total": 3,
+            "subtasks_completed": 12,
+            "subtasks_total": 12,
+            "red_cycles": 3,
+            "green_cycles": 3,
+            "refactor_cycles": 3,
+            "verify_cycles": 3,
+            "mode": "uat",
+            "completed_at": (now | todate)
+        }' > "$progress_file"
+        
+        # Create stub test and implementation files for 3 tasks
+        for task_id in 1 2 3; do
+            local task_dir="$src_dir/task-${task_id}"
+            mkdir -p "$task_dir" "$testing_dir/task-${task_id}"
+            
+            echo "# Stub Implementation (UAT Mode)" > "$task_dir/implementation.py"
+            echo "def stub_function(): pass" >> "$task_dir/implementation.py"
+            
+            echo "# Stub Test (UAT Mode)" > "$testing_dir/task-${task_id}/test_stub.py"
+            echo "def test_stub(): assert True" >> "$testing_dir/task-${task_id}/test_stub.py"
+            
+            # Create minimal TDD record
+            jq -n --arg task_id "$task_id" '{
+                "task_id": $task_id,
+                "red": {"status": "complete"},
+                "green": {"status": "complete"},
+                "refactor": {"status": "complete"},
+                "verify": {"status": "complete"},
+                "mode": "uat"
+            }' > "$testing_dir/tdd-t${task_id}.json"
+        done
+        
+        echo -e "  ${GREEN}✓${NC} Created stub files for 3 tasks"
+        echo ""
+        
+        atomic_context_artifact "$progress_file" "tdd-progress" "TDD execution progress (UAT mode)"
+        atomic_context_decision "TDD execution completed in UAT mode with stub files" "tdd-execution"
+        
+        atomic_success "TDD Execution complete (UAT mode)"
+        return 0
+    fi
+
+    mkdir -p "$testing_dir" "$prompts_dir" "$(dirname "$progress_file")" "$src_dir"
 
     echo ""
     echo -e "  ${DIM}Executing TDD cycles with real LLM agents.${NC}"
     echo ""
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-    # LOAD SELECTED AGENTS
+    # FAST-PATH MODE: GENERATE STUB FILES
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    if [[ "${ATOMIC_MOCK_IMPLEMENTATION:-false}" == "true" ]]; then
+        echo -e "  ${YELLOW}⚡${NC} Fast-path mode: Generating file stubs (no code)"
+        echo ""
+
+        # Get task list
+        if [[ ! -f "$tasks_file" ]]; then
+            atomic_error "Tasks file not found: $tasks_file"
+            return 1
+        fi
+
+        local task_ids=$(jq -r '.tasks[].id' "$tasks_file" 2>/dev/null | sort -n)
+        local task_count=$(echo "$task_ids" | wc -w)
+
+        echo -e "  ${DIM}Creating stub files for $task_count tasks...${NC}"
+        echo ""
+
+        # Generate stub implementation and test files for each task
+        for task_id in $task_ids; do
+            local task_title=$(jq -r ".tasks[] | select(.id == $task_id) | .title" "$tasks_file")
+            local task_category=$(jq -r ".tasks[] | select(.id == $task_id) | .category" "$tasks_file")
+
+            # Create task directory
+            local task_dir="$src_dir/task-${task_id}"
+            mkdir -p "$task_dir" "$testing_dir/task-${task_id}"
+
+            # Generate stub implementation file
+            cat > "$task_dir/implementation.py" << 'EOF'
+# Stub Implementation for Pipeline Testing
+# TODO: Implement actual functionality
+
+def main():
+    """
+    Stub implementation placeholder.
+
+    In fast-path testing mode, this file serves as a structural
+    placeholder to validate file organization and task completion
+    tracking without actual code generation.
+    """
+    pass
+EOF
+
+            # Generate stub test file
+            cat > "$testing_dir/task-${task_id}/test_implementation.py" << 'EOF'
+# Stub Test for Pipeline Testing
+# TODO: Implement actual tests
+
+def test_main():
+    """
+    Stub test placeholder.
+
+    In fast-path testing mode, this test serves as a structural
+    placeholder to validate test organization without actual
+    test generation.
+    """
+    assert True  # Placeholder assertion
+EOF
+
+            # Create completion marker
+            cat > "$testing_dir/task-${task_id}/COMPLETED" << EOF
+Task: $task_title
+Category: $task_category
+Status: Stub generated (fast-path mode)
+Generated: $(date)
+EOF
+
+            echo -e "  ${GREEN}✓${NC} Created stubs: task-${task_id}/"
+        done
+
+        echo ""
+        echo -e "  ${GREEN}✓${NC} Generated stub files for $task_count tasks"
+        echo ""
+
+        # Create progress file
+        echo "{\"completed\": $task_count, \"total\": $task_count, \"mode\": \"stub\"}" > "$progress_file"
+
+        return 0
+    fi
+
+    # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    # LOAD SELECTED AGENTS (Normal mode)
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     # Agent prompts (loaded from agents repository if available)
@@ -41,7 +181,7 @@ task_504_tdd_execution() {
     # Check embedded repo first (monorepo deployment), then env var, then default
     local agent_repo="$ATOMIC_ROOT/repos/agents"
     [[ -f "$ATOMIC_ROOT/agents/agent-inventory.csv" ]] && agent_repo="$ATOMIC_ROOT/agents"
-    [[ -n "$ATOMIC_AGENT_REPO" ]] && agent_repo="$ATOMIC_AGENT_REPO"
+    [[ -n "${ATOMIC_AGENT_REPO:-}" ]] && agent_repo="$ATOMIC_AGENT_REPO"
 
     if [[ -f "$agents_file" ]]; then
         echo -e "  ${DIM}Loading TDD agents from selection...${NC}"
@@ -124,7 +264,7 @@ task_504_tdd_execution() {
     echo ""
 
     atomic_drain_stdin
-    read -e -p "  Choice [sequential]: " mode_choice || true
+    read -e -p "  Choice (default: sequential): " mode_choice || true
     mode_choice=${mode_choice:-sequential}
 
     # Handle parallel mode with optional worker count
