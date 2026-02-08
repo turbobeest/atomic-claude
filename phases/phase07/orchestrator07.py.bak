@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+"""
+Phase 7 Orchestrator (orchestrator07.py)
+
+Orchestrator for Phase 7: Integration - Integration testing and approval.
+
+Tasks:
+  701 - Entry initialization
+  702 - Integration setup
+  703 - Agent selection
+  704 - Testing execution
+  705 - Integration approval
+  706 - Phase audit
+  707 - Closeout
+"""
+
+import sys
+import json
+from pathlib import Path
+from datetime import datetime
+
+# Ensure atomic-claude2 root is in path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from core.state import StateManager, task_running
+from core.ui import phase_header, phase_complete
+from core.subprocess_runner import run_task_script_streaming
+from orchestration.pre_task_validation import validate_directory_pristine
+
+
+def run_phase(resume_at: str = None) -> bool:
+    """
+    Execute Phase 7: Integration
+
+    Args:
+        resume_at: Optional task ID to resume from (e.g., "704")
+
+    Returns:
+        bool: True if phase completed successfully
+    """
+    phase_header("Phase 7: Integration")
+
+    state = StateManager()
+    phase_id = "7-integration"
+
+    # Task list in execution order
+    tasks = [
+        ("701", "Entry initialization", task_701_entry_initialization),
+        ("702", "Integration setup", task_702_integration_setup),
+        ("703", "Agent selection", task_703_agent_selection),
+        ("704", "Testing execution", task_704_testing_execution),
+        ("705", "Integration approval", task_705_integration_approval),
+        ("706", "Phase audit", task_706_phase_audit),
+        ("707", "Closeout", task_707_closeout),
+    ]
+
+    # Determine starting point
+    start_index = 0
+    if resume_at:
+        for i, (task_id, _, _) in enumerate(tasks):
+            if task_id == resume_at:
+                start_index = i
+                break
+
+    # Execute tasks
+    for task_id, task_name, task_func in tasks[start_index:]:
+        # Skip if already completed
+        if state.is_task_complete(phase_id, task_id):
+            print(f"✓ Task {task_id} already complete, skipping")
+            continue
+
+        # PRE-TASK VALIDATION: Ensure directory is pristine (BLOCKER)
+        if not validate_directory_pristine(phase_id, task_id):
+            print(f"\n🛑 Cannot proceed to Task {task_id} - fix violations first")
+            return False
+
+        # Run task
+        print(f"\n⚡ Running Task {task_id}: {task_name}")
+
+        try:
+            success = task_func()
+            if not success:
+                print(f"\n❌ Task {task_id} failed")
+                return False
+
+            state.mark_task_complete(phase_id, task_id, task_name)
+
+        except Exception as e:
+            print(f"\n❌ Task {task_id} error: {e}")
+            return False
+
+    phase_complete("Phase 7: Integration")
+
+    # Create closeout file
+    create_closeout(phase_id, tasks)
+
+    return True
+
+
+# Task implementations (call bash scripts via subprocess)
+
+def task_701_entry_initialization() -> bool:
+    """Task 701: Entry initialization"""
+    script_path = Path(__file__).parent / "tasks" / "701-entry-initialization.sh"
+    exit_code = run_task_script_streaming(script_path, "7-integration", "701", timeout=300)
+    return exit_code == 0
+
+
+def task_702_integration_setup() -> bool:
+    """Task 702: Integration setup"""
+    script_path = Path(__file__).parent / "tasks" / "702-integration-setup.sh"
+    exit_code = run_task_script_streaming(script_path, "7-integration", "702", timeout=600)
+    return exit_code == 0
+
+
+def task_703_agent_selection() -> bool:
+    """Task 703: Agent selection"""
+    script_path = Path(__file__).parent / "tasks" / "703-agent-selection.sh"
+    exit_code = run_task_script_streaming(script_path, "7-integration", "703", timeout=300)
+    return exit_code == 0
+
+
+def task_704_testing_execution() -> bool:
+    """Task 704: Testing execution"""
+    script_path = Path(__file__).parent / "tasks" / "704-testing-execution.sh"
+    exit_code = run_task_script_streaming(script_path, "7-integration", "704", timeout=3600)
+    return exit_code == 0
+
+
+def task_705_integration_approval() -> bool:
+    """Task 705: Integration approval"""
+    script_path = Path(__file__).parent / "tasks" / "705-integration-approval.sh"
+    exit_code = run_task_script_streaming(script_path, "7-integration", "705", timeout=300)
+    return exit_code == 0
+
+
+def task_706_phase_audit() -> bool:
+    """Task 706: Phase audit"""
+    script_path = Path(__file__).parent / "tasks" / "706-phase-audit.sh"
+    exit_code = run_task_script_streaming(script_path, "7-integration", "706", timeout=300)
+    return exit_code == 0
+
+
+def task_707_closeout() -> bool:
+    """Task 707: Closeout"""
+    script_path = Path(__file__).parent / "tasks" / "707-closeout.sh"
+    exit_code = run_task_script_streaming(script_path, "7-integration", "707", timeout=300)
+    return exit_code == 0
+
+
+def create_closeout(phase_id: str, tasks: list):
+    """
+    Create phase closeout file.
+
+    Args:
+        phase_id: Phase identifier (e.g., "7-integration")
+        tasks: List of (task_id, task_name, task_func) tuples
+    """
+    from pathlib import Path
+    import json
+    from datetime import datetime
+
+    # Get atomic-claude2 root
+    atomic_root = Path(__file__).parent.parent.parent
+
+    # Closeout file path
+    closeout_dir = atomic_root / ".outputs" / phase_id
+    closeout_dir.mkdir(parents=True, exist_ok=True)
+    closeout_file = closeout_dir / "closeout.json"
+
+    # Build closeout data
+    closeout = {
+        "phase": phase_id,
+        "completed_at": datetime.now().isoformat(),
+        "tasks_completed": len(tasks),
+        "tasks": [
+            {
+                "id": task_id,
+                "name": task_name,
+                "status": "completed"
+            }
+            for task_id, task_name, _ in tasks
+        ],
+        "outputs": {
+            "integration_tests": "Integration tests complete",
+            "test_results": "All integration tests passing",
+            "agent_roster": "Selected integration agents"
+        }
+    }
+
+    # Write closeout file
+    with open(closeout_file, "w") as f:
+        json.dump(closeout, f, indent=2)
+
+    print(f"\n✓ Closeout file created: {closeout_file}")
+
+
+if __name__ == "__main__":
+    import sys
+
+    resume_at = None
+    if len(sys.argv) > 1:
+        resume_at = sys.argv[1]
+
+    success = run_phase(resume_at)
+    sys.exit(0 if success else 1)

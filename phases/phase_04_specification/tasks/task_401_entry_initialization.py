@@ -1,0 +1,260 @@
+"""
+Task 401: Entry & Initialization
+
+Verifies Phase 3 artifacts exist and initializes specification directory.
+"""
+
+import json
+import sys
+from pathlib import Path
+from typing import Dict, Any
+
+# Add project root to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
+from core.utils.cli_ui import (
+    print_bold, print_cyan, print_yellow, print_green,
+    print_red, print_dim, prompt_user, clear_input_buffer
+)
+from core.utils.file_ops import ensure_dir, read_file, write_file
+
+
+PHASE_BANNER = r"""━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PHASE 04 - SPECIFICATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       _______  _____  _______ __   _ _______ _____  _______  _______
+       |     | |_____] |______ | \  | |______ |_____] |______ |
+       |_____| |       |______ |  \_| ______| |       |______ |_____
+
+ _______ _____  _______ _______ _____  _______ _____  _______ _______ _____  _____  __   _
+ |______ |_____] |______ |         |   |______   |   |       |_____|   |   |     | | \  |
+ ______| |       |______ |_____  __|__ |       __|__ |_____  |     |   |   |_____| |  \_|
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Verifying Phase 3 artifacts and preparing for OpenSpec generation.
+"""
+
+
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+    """
+    Execute Task 401: Entry & Initialization.
+
+    Args:
+        atomic_root: Path to atomic-claude root directory
+        output_dir: Path to phase output directory
+        uat_mode: If True, bypass verification for testing
+
+    Returns:
+        True if task completed successfully, False otherwise
+    """
+    tasks_file = atomic_root / ".taskmaster" / "tasks" / "tasks.json"
+    packages_file = atomic_root / ".taskmaster" / "reports" / "work-packages.json"
+    specs_dir = atomic_root / ".claude" / "specs"
+    init_file = output_dir / "initialization.json"
+
+    # Display phase banner
+    print(PHASE_BANNER)
+
+    # UAT Mode: Skip Phase 3 verification
+    if uat_mode:
+        print()
+        print_yellow("⚡ UAT Mode: Bypassing Phase 3 verification")
+        print()
+        ensure_dir(output_dir)
+        write_file(init_file, json.dumps({
+            "phase3_verified": True,
+            "task_count": 3,
+            "mode": "uat"
+        }, indent=2))
+        print_green("✓ Entry initialization complete (UAT mode)")
+        return True
+
+    # Phase 3 Verification
+    print_dim("─" * 109)
+    print()
+    print_bold("PHASE 3 VERIFICATION")
+    print()
+
+    verification_passed = True
+
+    # Check Phase 3 closeout
+    phase3_closeout = atomic_root / ".claude" / "closeout" / "phase-03-closeout.json"
+    if phase3_closeout.exists():
+        try:
+            closeout_data = json.loads(read_file(phase3_closeout))
+            status = closeout_data.get("status", "unknown")
+            if status == "complete":
+                print_green("  ✓ Phase 3 closeout verified")
+            else:
+                print_yellow(f"  ! Phase 3 closeout status: {status}")
+        except Exception as e:
+            print_yellow(f"  ! Could not parse Phase 3 closeout: {e}")
+    else:
+        print_yellow("  ! Phase 3 closeout not found (continuing anyway)")
+
+    # Check tasks.json
+    if tasks_file.exists():
+        try:
+            tasks_data = json.loads(read_file(tasks_file))
+            task_count = len(tasks_data.get("tasks", []))
+            if task_count > 0:
+                print_green(f"  ✓ tasks.json found ({task_count} tasks)")
+            else:
+                print_red("  ✗ tasks.json is empty")
+                verification_passed = False
+        except Exception as e:
+            print_red(f"  ✗ tasks.json is invalid: {e}")
+            verification_passed = False
+    else:
+        print_red("  ✗ tasks.json not found")
+        verification_passed = False
+
+    # Check work packages
+    if packages_file.exists():
+        try:
+            packages_data = json.loads(read_file(packages_file))
+            pkg_count = len(packages_data.get("packages", []))
+            print_green(f"  ✓ work-packages.json found ({pkg_count} packages)")
+        except:
+            print_yellow("  ! work-packages.json found but invalid (optional)")
+    else:
+        print_yellow("  ! work-packages.json not found (optional)")
+
+    print()
+
+    if not verification_passed:
+        print_red("  Phase 3 artifacts missing. Cannot proceed.")
+        print()
+        print_dim("  Run Phase 3 (Tasking) first to generate tasks.json")
+        print()
+        return False
+
+    # Task Summary
+    print_dim("─" * 109)
+    print()
+    print_bold("TASK SUMMARY")
+    print()
+
+    tasks_data = json.loads(read_file(tasks_file))
+    tasks = tasks_data.get("tasks", [])
+
+    high_priority = len([t for t in tasks if t.get("priority") == "high"])
+    medium_priority = len([t for t in tasks if t.get("priority") == "medium"])
+    low_priority = len([t for t in tasks if t.get("priority") == "low"])
+
+    print(f"    Total tasks:     {task_count}")
+    print(f"    High priority:   {high_priority}")
+    print(f"    Medium priority: {medium_priority}")
+    print(f"    Low priority:    {low_priority}")
+    print()
+
+    # Show first few tasks
+    print_dim("  First 5 tasks:")
+    for i, task in enumerate(tasks[:5]):
+        task_id = task.get("id", i+1)
+        task_title = task.get("title", "Untitled")
+        print(f"    [{task_id}] {task_title}")
+    if len(tasks) > 5:
+        print_dim(f"    ... and {len(tasks) - 5} more")
+    print()
+
+    # Initialize Spec Directory
+    print_dim("─" * 109)
+    print()
+    print_bold("INITIALIZE SPEC DIRECTORY")
+    print()
+
+    ensure_dir(specs_dir)
+
+    # Check for existing specs
+    existing_specs = list(specs_dir.glob("spec-*.json"))
+    existing_count = len(existing_specs)
+
+    if existing_count > 0:
+        print_yellow(f"  ! Found {existing_count} existing spec files")
+        print()
+        print_cyan("Options:")
+        print()
+        print_green("  [keep]     Keep existing specs, generate missing")
+        print_yellow("  [replace]  Replace all specs")
+        print_red("  [abort]    Abort and review manually")
+        print()
+
+        clear_input_buffer()
+        spec_choice = prompt_user("  Choice (default: keep): ").strip().lower() or "keep"
+
+        if spec_choice == "replace":
+            for spec_file in existing_specs:
+                spec_file.unlink()
+            print_green("  ✓ Cleared existing specs")
+        elif spec_choice == "abort":
+            print_red("✗ Aborted by user")
+            return False
+        else:
+            print_green("  ✓ Keeping existing specs")
+    else:
+        print_green("  ✓ Spec directory initialized: .claude/specs/")
+    print()
+
+    # OpenSpec Introduction
+    print_dim("─" * 109)
+    print()
+    print_bold("WHAT IS OPENSPEC?")
+    print()
+    print_dim("  OpenSpec expands each task into a detailed specification containing:")
+    print()
+    print_cyan("    1. Test Strategy     - Unit tests, integration tests, Gherkin scenarios")
+    print_cyan("    2. Interface Contracts - Inputs, outputs, error conditions")
+    print_cyan("    3. Edge Cases        - Boundary conditions, error handling")
+    print_cyan("    4. Security Requirements - Auth, validation, data protection")
+    print()
+    print_dim("  Then it creates 4 TDD subtasks for each task:")
+    print()
+    print_red("    RED       → Write failing tests (tests exist and FAIL)")
+    print_green("    GREEN     → Minimal implementation (tests PASS)")
+    print_cyan("    REFACTOR  → Clean up code (linting passes, tests still pass)")
+    print("\033[35m    VERIFY    → Security scan (no critical issues)\033[0m")  # Magenta
+    print()
+    print_dim("  Each subtask depends on the previous: RED→GREEN→REFACTOR→VERIFY")
+    print()
+
+    prompt_user("  Press Enter to continue...")
+
+    # Save initialization state
+    ensure_dir(init_file.parent)
+
+    init_data = {
+        "phase3_verified": True,
+        "task_count": task_count,
+        "priority_breakdown": {
+            "high": high_priority,
+            "medium": medium_priority,
+            "low": low_priority
+        },
+        "existing_specs": existing_count,
+        "initialized_at": Path(__file__).stat().st_mtime
+    }
+
+    write_file(init_file, json.dumps(init_data, indent=2))
+
+    print_green("✓ Entry & Initialization complete")
+
+    return True
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Task 401: Entry & Initialization")
+    parser.add_argument('--atomic-root', type=Path, required=True,
+                       help='Path to atomic-claude root directory')
+    parser.add_argument('--output-dir', type=Path, required=True,
+                       help='Path to phase output directory')
+    parser.add_argument('--uat-mode', action='store_true',
+                       help='Run in UAT mode (skip verification)')
+
+    args = parser.parse_args()
+
+    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    sys.exit(0 if success else 1)

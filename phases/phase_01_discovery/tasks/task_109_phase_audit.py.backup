@@ -1,0 +1,361 @@
+"""
+Task 109: Phase Audit - Discovery
+
+AI-driven audit selection from turbobeest/audits repository.
+
+Features:
+  - AI recommends relevant audits based on phase context
+  - User reviews and approves audit selection
+  - Executes selected audits with dependency awareness
+  - Supports air-gapped environments via dependency manifests
+"""
+
+import json
+import sys
+import subprocess
+from pathlib import Path
+from datetime import datetime
+from typing import Dict, Any, List
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
+from core.config import Config
+from core.state import StateManager
+from core.llm import invoke_llm as invoke
+from core.ui import phase_header, success, error, warning, info, step
+
+
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+    """
+    Execute Task 109: Phase Audit.
+
+    Args:
+        atomic_root: Path to atomic-claude root directory
+        output_dir: Path to phase output directory
+        uat_mode: If True, skip interactive audit
+
+    Returns:
+        True if audit completed successfully, False otherwise
+    """
+    audit_dir = atomic_root / ".claude" / "audit"
+    prompts_dir = output_dir / "prompts"
+
+    step("Phase Audit")
+
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    prompts_dir.mkdir(parents=True, exist_ok=True)
+
+    # UAT Mode: Skip interactive audit
+    if uat_mode:
+        print()
+        print("  ⚡ UAT Mode: Skipping phase audit")
+        print()
+
+        _create_uat_audit(atomic_root, output_dir)
+        success("Phase audit complete (UAT mode)")
+        return True
+
+    print()
+    print("  ┌─────────────────────────────────────────────────────────────┐")
+    print("  │ PHASE AUDIT: DISCOVERY                                      │")
+    print("  │                                                             │")
+    print("  │ An AI-driven audit reviews Phase 1 outputs against the     │")
+    print("  │ comprehensive audit library (~2,200 audits).                │")
+    print("  └─────────────────────────────────────────────────────────────┘")
+    print()
+
+    # ═══════════════════════════════════════════════════════════════
+    # AUDIT MODE SELECTION
+    # ═══════════════════════════════════════════════════════════════
+
+    print("╔═══════════════════════════════════════════════════════════════╗")
+    print("║ AUDIT MODE SELECTION                                        ║")
+    print("╚═══════════════════════════════════════════════════════════════╝")
+    print()
+
+    print("  Select audit mode:")
+    print()
+    print("    [1] AI-Driven (recommended)")
+    print("        AI recommends audits from 2,200+ library based on context")
+    print()
+    print("    [2] Legacy Dimensions")
+    print("        Static 9-dimension audit for Phase 1 Discovery")
+    print()
+    print("    [3] Skip Audit")
+    print("        Proceed without audit (not recommended)")
+    print()
+
+    mode_choice = input("  Mode (default: 1): ").strip() or "1"
+
+    if mode_choice == "1":
+        return _ai_driven_audit(atomic_root, output_dir, prompts_dir, audit_dir)
+    elif mode_choice == "2":
+        return _legacy_audit(atomic_root, output_dir, prompts_dir, audit_dir)
+    else:
+        print("  ! Skipping audit for Phase 1")
+        return True
+
+
+def _ai_driven_audit(atomic_root: Path, output_dir: Path, prompts_dir: Path, audit_dir: Path) -> bool:
+    """Execute AI-driven audit using audit.sh library."""
+    # Source the audit library (with fallback to library root)
+    audit_lib = atomic_root / "lib" / "audit.sh"
+
+    if not audit_lib.exists():
+        error("audit.sh not found at lib/")
+        return False
+
+    # Run the AI-driven phase audit via bash
+    try:
+        result = subprocess.run(
+            ["bash", "-c", f"source {audit_lib} && audit_run_phase 1 'Discovery'"],
+            cwd=atomic_root,
+            capture_output=True,
+            text=True,
+            timeout=600
+        )
+        return result.returncode == 0
+    except Exception as e:
+        error(f"Audit execution failed: {e}")
+        return False
+
+
+def _legacy_audit(atomic_root: Path, output_dir: Path, prompts_dir: Path, audit_dir: Path) -> bool:
+    """Execute legacy dimension-based audit."""
+    audit_file = audit_dir / "phase-01-audit.json"
+
+    print()
+    print("╔═══════════════════════════════════════════════════════════════╗")
+    print("║ LEGACY AUDIT (9 Dimensions)                                 ║")
+    print("╚═══════════════════════════════════════════════════════════════╝")
+    print()
+
+    # Define dimensions
+    dimensions = {
+        "ID-01": ("Corpus Completeness", "Are all relevant materials collected?"),
+        "ID-02": ("Vision Clarity", "Is the project vision clear and actionable?"),
+        "ID-03": ("Constraint Definition", "Are constraints well-defined and realistic?"),
+        "ID-04": ("Approach Viability", "Is the selected approach feasible?"),
+        "ID-05": ("First Principles Validity", "Have assumptions been properly challenged?"),
+        "ID-06": ("Stakeholder Coverage", "Are all stakeholders identified?"),
+        "ID-07": ("Risk Awareness", "Are key risks identified and considered?"),
+        "ID-08": ("Deliberation Quality", "Was the multi-agent discussion productive?"),
+        "ID-09": ("Scope Boundaries", "Are scope boundaries clear?")
+    }
+
+    print("  Available Dimensions:")
+    print()
+    for dim_id, (name, desc) in dimensions.items():
+        print(f"    {dim_id}: {name}")
+        print(f"         {desc}")
+    print()
+
+    print("  Audit Profile:")
+    print("    [quick]  Top 5 dimensions (fast)")
+    print("    [custom] Select specific dimensions")
+    print("    [all]    All 9 dimensions (thorough)")
+    print()
+
+    audit_profile = input("  Profile (default: quick): ").strip().lower() or "quick"
+
+    selected_dims = []
+    if audit_profile == "quick":
+        selected_dims = ["ID-01", "ID-02", "ID-04", "ID-07", "ID-09"]
+    elif audit_profile == "custom":
+        print()
+        print("  Enter dimension IDs (space-separated):")
+        custom_selection = input("  > ").strip()
+        selected_dims = custom_selection.split()
+    elif audit_profile == "all":
+        selected_dims = list(dimensions.keys())
+
+    print()
+    print(f"  ✓ Selected {len(selected_dims)} dimensions")
+    print()
+
+    # Execute audit
+    print("╔═══════════════════════════════════════════════════════════════╗")
+    print("║ EXECUTING LEGACY AUDIT                                      ║")
+    print("╚═══════════════════════════════════════════════════════════════╝")
+    print()
+
+    # Gather phase artifacts
+    artifacts = _gather_artifacts(output_dir)
+
+    # Build audit prompt
+    prompt_file = prompts_dir / "phase-audit.md"
+    _build_audit_prompt(prompt_file, dimensions, selected_dims, artifacts)
+
+    print("  Auditor analyzing...")
+
+    # Invoke LLM for audit
+    audit_raw = prompts_dir / "audit-raw.json"
+    try:
+        invoke(
+            str(prompt_file),
+            str(audit_raw),
+            "Phase 1 audit",
+            model="sonnet"
+        )
+
+        # Validate and save
+        with open(audit_raw) as f:
+            audit_data = json.load(f)
+
+        with open(audit_file, 'w') as f:
+            json.dump(audit_data, f, indent=2)
+
+        success("Audit complete")
+    except Exception as e:
+        warning(f"Audit failed: {e}")
+        with open(audit_file, 'w') as f:
+            json.dump({
+                "overall_status": "WARNING",
+                "summary": {"passed": 0, "warnings": 1, "critical": 0},
+                "error": str(e)
+            }, f, indent=2)
+
+    # Display findings
+    _display_audit_findings(audit_file)
+
+    return True
+
+
+def _gather_artifacts(output_dir: Path) -> str:
+    """Gather phase artifacts for audit."""
+    artifacts = []
+
+    for artifact_file in output_dir.glob("*.json"):
+        if artifact_file.stat().st_size > 51200:  # > 50KB
+            artifacts.append(f"### {artifact_file.name}\n[Large file - showing structure only]\n")
+        else:
+            with open(artifact_file) as f:
+                content = f.read()
+            artifacts.append(f"### {artifact_file.name}\n{content}\n---\n")
+
+    for artifact_file in output_dir.glob("*.md"):
+        if artifact_file.stat().st_size > 51200:
+            with open(artifact_file) as f:
+                lines = f.readlines()[:20]
+            artifacts.append(f"### {artifact_file.name}\n{''.join(lines)}\n[TRUNCATED]\n---\n")
+        else:
+            with open(artifact_file) as f:
+                content = f.read()
+            artifacts.append(f"### {artifact_file.name}\n{content}\n---\n")
+
+    return '\n'.join(artifacts)
+
+
+def _build_audit_prompt(prompt_file: Path, dimensions: Dict, selected_dims: List[str], artifacts: str) -> None:
+    """Build the audit prompt."""
+    timestamp = datetime.now().isoformat()
+
+    dims_section = []
+    for dim_id in selected_dims:
+        name, desc = dimensions[dim_id]
+        dims_section.append(f"### {dim_id}: {name}\n{desc}\n")
+
+    content = f"""# Task: Phase 1 Discovery Audit (Legacy Mode)
+
+You are an **independent quality auditor** with expertise in SDLC gate reviews.
+
+## Artifacts to Review
+
+{artifacts}
+
+## Dimensions to Audit
+
+{''.join(dims_section)}
+
+## Scoring Criteria
+
+**PASS**: Clear evidence supporting the dimension
+**WARNING**: Partially met OR minor gaps exist
+**CRITICAL**: Would block PRD author
+
+## Output Format
+
+Return ONLY valid JSON with no additional text:
+{{
+  "audit_timestamp": "{timestamp}",
+  "audit_mode": "legacy",
+  "phase": "1-discovery",
+  "dimensions_audited": {len(selected_dims)},
+  "findings": {{
+    "ID-XX": {{
+      "name": "...",
+      "status": "PASS|WARNING|CRITICAL",
+      "finding": "...",
+      "evidence": "...",
+      "recommendation": "..."
+    }}
+  }},
+  "summary": {{
+    "passed": 0,
+    "warnings": 0,
+    "critical": 0
+  }},
+  "overall_status": "PASS|WARNING|CRITICAL",
+  "proceed_recommendation": true,
+  "proceed_rationale": "..."
+}}
+"""
+
+    prompt_file.write_text(content)
+
+
+def _display_audit_findings(audit_file: Path) -> None:
+    """Display audit findings."""
+    with open(audit_file) as f:
+        audit_data = json.load(f)
+
+    print()
+    print("╔═══════════════════════════════════════════════════════════════╗")
+    print("║ AUDIT FINDINGS                                               ║")
+    print("╚═══════════════════════════════════════════════════════════════╝")
+    print()
+
+    passed = audit_data.get('summary', {}).get('passed', 0)
+    warnings = audit_data.get('summary', {}).get('warnings', 0)
+    critical = audit_data.get('summary', {}).get('critical', 0)
+    overall = audit_data.get('overall_status', 'UNKNOWN')
+
+    print(f"  Overall Status: {overall}")
+    print()
+    print(f"  PASSED:   {passed}")
+    print(f"  WARNINGS: {warnings}")
+    print(f"  CRITICAL: {critical}")
+    print()
+
+    # Show individual findings
+    findings = audit_data.get('findings', {})
+    for dim_id, finding in findings.items():
+        status = finding.get('status', 'UNKNOWN')
+        message = finding.get('finding', '')
+        print(f"  {dim_id}: {status} - {message}")
+
+    print()
+
+
+def _create_uat_audit(atomic_root: Path, output_dir: Path) -> None:
+    """Create minimal audit output for UAT mode."""
+    audit_dir = atomic_root / ".outputs" / "audits"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+
+    audit_file = audit_dir / "phase-1-recommendations.json"
+    with open(audit_file, 'w') as f:
+        json.dump({
+            "phase": "1-discovery",
+            "audits_executed": [],
+            "recommendations": ["UAT mode: Audit skipped"],
+            "summary": "Phase audit skipped in UAT mode"
+        }, f, indent=2)
+
+
+if __name__ == "__main__":
+    # CLI execution support
+    atomic_root = Path.cwd()
+    output_dir = atomic_root / ".outputs" / "1-discovery"
+    uat_mode = "--uat" in sys.argv
+
+    sys.exit(0 if execute(atomic_root, output_dir, uat_mode) else 1)

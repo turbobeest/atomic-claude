@@ -1,0 +1,453 @@
+"""
+Task 105: Opening Dialogue (Conversation 3)
+
+Deep conversational exchange with human about vision, goals, and constraints.
+NOTE: Now runs AFTER agent selection so agents can participate.
+
+This is a TRUE CONVERSATION - not a form to fill out.
+
+Flow:
+  1. Agent reviews corpus (if available) and opens with observations
+  2. If greenfield: ask for initial vision
+  3. Back-and-forth dialogue until mutual understanding
+  4. Capture consensus on impact, audience, success criteria
+  5. Gather constraints through conversation
+
+The conversation continues until:
+  - Human says they're satisfied, OR
+  - Agent has gathered all critical information
+"""
+
+import json
+import sys
+from pathlib import Path
+from datetime import datetime
+from typing import Dict, Any, List
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
+from core.config import Config
+from core.state import StateManager
+from core.llm import invoke_llm as invoke
+from core.ui import phase_header, success, error, warning, info, step
+
+
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+    """
+    Execute Task 105: Opening Dialogue.
+
+    Args:
+        atomic_root: Path to atomic-claude root directory
+        output_dir: Path to phase output directory
+        uat_mode: If True, skip interactive conversation
+
+    Returns:
+        True if dialogue completed successfully, False otherwise
+    """
+    corpus_file = output_dir / "corpus.json"
+    dialogue_output = output_dir / "dialogue.json"
+    conversation_log = output_dir / "conversation-log.md"
+    prompts_dir = output_dir / "prompts"
+
+    step("Opening Dialogue")
+
+    prompts_dir.mkdir(parents=True, exist_ok=True)
+
+    # UAT Mode: Skip interactive conversation
+    if uat_mode:
+        print()
+        print("  ⚡ UAT Mode: Skipping interactive dialogue")
+        print()
+
+        _create_uat_dialogue(dialogue_output, conversation_log)
+        success("Opening dialogue complete (UAT mode)")
+        return True
+
+    print()
+    print("  ┌─────────────────────────────────────────────────────────┐")
+    print("  │ CONVERSATION 3: OPENING DIALOGUE                        │")
+    print("  │                                                         │")
+    print("  │ This is a real conversation, not a form.                │")
+    print("  │ We'll talk until we both understand the vision.        │")
+    print("  │                                                         │")
+    print("  │ Type 'done' when you feel we've covered enough.        │")
+    print("  └─────────────────────────────────────────────────────────┘")
+    print()
+
+    # Initialize dialogue tracking
+    dialogue = {
+        "conversation": [],
+        "synthesis": {},
+        "timestamp": datetime.now().isoformat(),
+        "turns": 0
+    }
+
+    # Start conversation log
+    conversation_log.write_text("# Opening Dialogue - Conversation Log\n\n")
+
+    # ═══════════════════════════════════════════════════════════════
+    # DETERMINE CONTEXT
+    # ═══════════════════════════════════════════════════════════════
+
+    has_corpus = False
+    corpus_summary = ""
+
+    if corpus_file.exists():
+        with open(corpus_file) as f:
+            corpus_data = json.load(f)
+        material_count = len(corpus_data.get("materials", []))
+        if material_count > 0:
+            has_corpus = True
+            corpus_summary = f"Found {material_count} materials collected"
+
+    # ═══════════════════════════════════════════════════════════════
+    # CONVERSATION LOOP
+    # ═══════════════════════════════════════════════════════════════
+
+    print("╔═══════════════════════════════════════════════════════════╗")
+    print("║ LET'S TALK                                                ║")
+    print("╚═══════════════════════════════════════════════════════════╝")
+    print()
+
+    turn = 0
+
+    # Generate opening based on context
+    if has_corpus:
+        agent_opening = f"I've reviewed your materials ({corpus_summary}). What's the core problem you're trying to solve?"
+    else:
+        agent_opening = "This looks like a fresh start! What are you trying to build, and why does it matter to you?"
+
+    print("  Agent:")
+    print()
+    for line in _wrap_text(agent_opening, 60):
+        print(f"    {line}")
+    print()
+
+    # Log opening
+    with open(conversation_log, 'a') as f:
+        f.write(f"## Turn 1\n\n**Agent:** {agent_opening}\n\n")
+
+    dialogue["conversation"].append({"role": "agent", "content": agent_opening})
+    turn += 1
+
+    conversation_complete = False
+    gathered_vision = False
+    gathered_impact = False
+    gathered_constraints = False
+
+    while not conversation_complete:
+        print("  You:")
+        human_response = input("    ").strip()
+
+        # Check for exit
+        if human_response.lower() in ('done', 'finished', 'exit', 'quit', 'skip'):
+            if turn < 3 and human_response.lower() != 'skip':
+                print("    (Talk a bit more, or type 'skip' to exit early)")
+                continue
+            conversation_complete = True
+            break
+
+        if not human_response:
+            continue
+
+        # Log human response
+        with open(conversation_log, 'a') as f:
+            f.write(f"**Human:** {human_response}\n\n")
+
+        dialogue["conversation"].append({"role": "human", "content": human_response})
+        turn += 1
+
+        # Determine what to probe for next
+        probe_focus = ""
+        if not gathered_vision:
+            probe_focus = "vision and core problem"
+            gathered_vision = True
+        elif not gathered_impact:
+            probe_focus = "desired impact and success metrics"
+            gathered_impact = True
+        elif not gathered_constraints:
+            probe_focus = "constraints (tech, timeline, team, compliance)"
+            gathered_constraints = True
+        else:
+            probe_focus = "anything unclear"
+
+        # Generate agent response
+        agent_response = _generate_response(prompts_dir, dialogue, probe_focus)
+
+        print()
+        print("  Agent:")
+        print()
+        for line in _wrap_text(agent_response, 60):
+            print(f"    {line}")
+        print()
+
+        # Log agent response
+        with open(conversation_log, 'a') as f:
+            f.write(f"## Turn {turn + 1}\n\n**Agent:** {agent_response}\n\n")
+
+        dialogue["conversation"].append({"role": "agent", "content": agent_response})
+        turn += 1
+
+        # Suggest wrapping up after several turns
+        if turn >= 10 and gathered_constraints:
+            print("    (We've covered a lot. Type 'done' if you're satisfied)")
+            print()
+
+    # ═══════════════════════════════════════════════════════════════
+    # SYNTHESIZE CONVERSATION
+    # ═══════════════════════════════════════════════════════════════
+
+    print()
+    print("╔═══════════════════════════════════════════════════════════╗")
+    print("║ SYNTHESIZING CONVERSATION                                 ║")
+    print("╚═══════════════════════════════════════════════════════════╝")
+    print()
+
+    synthesis = _synthesize_dialogue(prompts_dir, dialogue)
+    dialogue["synthesis"] = synthesis
+
+    # Display synthesis
+    print("  ✓ Conversation synthesized")
+    print()
+    print("  Summary:")
+    print()
+    print(f"    Vision: {synthesis.get('vision', {}).get('core_problem', 'Not captured')}")
+    print(f"    Impact: {synthesis.get('impact', {}).get('primary_impact', 'Not captured')}")
+    print(f"    Audience: {synthesis.get('audience', {}).get('primary', 'Not captured')}")
+    print()
+
+    # Confirm with human
+    confirm = input("  Does this capture our conversation accurately? [Y/n]: ").strip().lower()
+    if confirm == 'n':
+        print()
+        corrections = input("  What should be corrected? ").strip()
+        dialogue["synthesis"]["corrections"] = corrections
+        print("  ✓ Corrections noted")
+
+    # ═══════════════════════════════════════════════════════════════
+    # SAVE DIALOGUE
+    # ═══════════════════════════════════════════════════════════════
+
+    dialogue["turns"] = turn
+
+    with open(dialogue_output, 'w') as f:
+        json.dump(dialogue, f, indent=2)
+
+    print()
+    print("━" * 60)
+    print()
+    print("  Opening Dialogue Complete")
+    print(f"  Turns: {turn}")
+    print()
+
+    success("Opening dialogue complete")
+    return True
+
+
+def _generate_response(prompts_dir: Path, dialogue: Dict[str, Any], probe_focus: str) -> str:
+    """Generate agent response using LLM."""
+    conversation_text = '\n\n'.join(
+        f"{msg['role']}: {msg['content']}" for msg in dialogue["conversation"]
+    )
+
+    prompt = f"""# Task: Continue the Discovery Dialogue
+
+You are the discovery-facilitator in an ongoing conversation.
+
+## Conversation So Far
+{conversation_text}
+
+## Current Focus
+{probe_focus}
+
+## Guidelines
+- Keep responses to 2-4 sentences
+- Ask ONE question per turn
+- Be specific, not generic
+- If they're uncertain, offer concrete examples
+
+Output ONLY your response, no formatting.
+"""
+
+    prompt_file = prompts_dir / "dialogue-continue.md"
+    output_file = prompts_dir / "continue-response.txt"
+
+    prompt_file.write_text(prompt)
+
+    try:
+        invoke(str(prompt_file), str(output_file), "Continue dialogue", model="sonnet")
+
+        if output_file.exists():
+            return output_file.read_text().strip()
+    except Exception:
+        pass
+
+    # Fallback responses
+    fallbacks = {
+        "vision": "What would success look like for this project in 6 months?",
+        "impact": "Who benefits most from this, and how will we measure that impact?",
+        "constraints": "What constraints are we working within - technology, timeline, team size, compliance?"
+    }
+
+    for key, fallback in fallbacks.items():
+        if key in probe_focus.lower():
+            return fallback
+
+    return "That's clear. Is there anything else important I should know?"
+
+
+def _synthesize_dialogue(prompts_dir: Path, dialogue: Dict[str, Any]) -> Dict[str, Any]:
+    """Synthesize dialogue into structured output."""
+    conversation_text = '\n\n'.join(
+        f"{msg['role']}: {msg['content']}" for msg in dialogue["conversation"]
+    )
+
+    prompt = f"""# Task: Synthesize Dialogue into Structured Output
+
+Extract structured data from this natural conversation.
+
+## Conversation
+{conversation_text}
+
+## Output Format
+
+Return ONLY valid JSON with no additional text:
+
+{{
+    "vision": {{
+        "core_problem": "What problem are we solving?",
+        "solution_concept": "High-level approach",
+        "why_now": "Why is this important now?"
+    }},
+    "impact": {{
+        "primary_impact": "Main outcome",
+        "success_metrics": ["How we'll measure success"],
+        "timeline_to_value": "When will impact be realized?"
+    }},
+    "audience": {{
+        "primary": "Main beneficiary",
+        "secondary": ["Other stakeholders"],
+        "pain_points": ["What they struggle with today"]
+    }},
+    "constraints": {{
+        "tech_stack": "Required/preferred technologies",
+        "timeline": "Key milestones or deadlines",
+        "team_size": "Number of people",
+        "compliance": ["Regulatory requirements"]
+    }},
+    "non_negotiables": ["Things that must be true"],
+    "open_questions": ["Things still unclear"]
+}}
+"""
+
+    prompt_file = prompts_dir / "dialogue-synthesis.md"
+    output_file = prompts_dir / "synthesis.json"
+
+    prompt_file.write_text(prompt)
+
+    try:
+        invoke(str(prompt_file), str(output_file), "Synthesize dialogue", model="sonnet")
+
+        if output_file.exists():
+            content = output_file.read_text()
+            # Clean JSON (remove markdown fences)
+            if '```' in content:
+                lines = content.split('\n')
+                json_lines = []
+                in_json = False
+                for line in lines:
+                    if '```' in line:
+                        in_json = not in_json
+                        continue
+                    if in_json or line.strip().startswith('{'):
+                        json_lines.append(line)
+                content = '\n'.join(json_lines)
+
+            return json.loads(content)
+    except Exception:
+        pass
+
+    # Fallback synthesis
+    return {
+        "vision": {"core_problem": "Not fully captured", "solution_concept": "", "why_now": ""},
+        "impact": {"primary_impact": "Not discussed", "success_metrics": [], "timeline_to_value": ""},
+        "audience": {"primary": "Not specified", "secondary": [], "pain_points": []},
+        "constraints": {"tech_stack": "Flexible", "timeline": "Not specified", "team_size": "", "compliance": []},
+        "non_negotiables": [],
+        "open_questions": []
+    }
+
+
+def _create_uat_dialogue(dialogue_output: Path, conversation_log: Path) -> None:
+    """Create minimal dialogue for UAT mode."""
+    with open(dialogue_output, 'w') as f:
+        json.dump({
+            "conversation": [
+                {"role": "agent", "content": "UAT mode: Opening dialogue skipped"},
+                {"role": "human", "content": "This is a UAT test of Phase 00 and Phase 01."}
+            ],
+            "synthesis": {
+                "vision": {
+                    "core_problem": "Validate Phase 00 and Phase 01 functionality",
+                    "solution_concept": "User acceptance testing framework",
+                    "why_now": "Refactoring to atomic-claude2"
+                },
+                "impact": {
+                    "primary_impact": "Ensure phase transitions work correctly",
+                    "success_metrics": ["All tasks complete", "Closeout files created"],
+                    "timeline_to_value": "Immediate"
+                },
+                "audience": {
+                    "primary": "Development team",
+                    "secondary": ["QA engineers"],
+                    "pain_points": ["Manual testing"]
+                },
+                "constraints": {
+                    "tech_stack": "Python 3.11+, Bash",
+                    "timeline": "Ongoing refactoring",
+                    "team_size": "1-2 developers",
+                    "compliance": []
+                },
+                "non_negotiables": ["Phase 00 completion before Phase 01"],
+                "open_questions": []
+            }
+        }, f, indent=2)
+
+    conversation_log.write_text("""## UAT Mode
+
+Opening dialogue skipped in UAT mode.
+
+Vision: Validate Phase 00 and Phase 01 functionality through user acceptance testing.
+""")
+
+
+def _wrap_text(text: str, width: int) -> List[str]:
+    """Simple text wrapping."""
+    words = text.split()
+    lines = []
+    current = []
+    length = 0
+
+    for word in words:
+        if length + len(word) + len(current) > width:
+            if current:
+                lines.append(' '.join(current))
+            current = [word]
+            length = len(word)
+        else:
+            current.append(word)
+            length += len(word)
+
+    if current:
+        lines.append(' '.join(current))
+
+    return lines
+
+
+if __name__ == "__main__":
+    # CLI execution support
+    atomic_root = Path.cwd()
+    output_dir = atomic_root / ".outputs" / "1-discovery"
+    uat_mode = "--uat" in sys.argv
+
+    sys.exit(0 if execute(atomic_root, output_dir, uat_mode) else 1)
