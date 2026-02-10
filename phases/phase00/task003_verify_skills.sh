@@ -12,7 +12,7 @@ LIB_DIR="${ATOMIC_LIB_DIR:-$(dirname "$0")/../../lib}"
 source "$LIB_DIR/atomic.sh"
 
 task_003_verify_skills() {
-    local skills_dir="$ATOMIC_ROOT/.claude/skills"
+    local skills_dir="$ATOMIC_ROOT/skills"
     local output_file="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/skills-verified.json"
     local verification_log="$ATOMIC_OUTPUT_DIR/$CURRENT_PHASE/skills-verification.log"
 
@@ -151,13 +151,13 @@ task_003_verify_skills() {
   "status": "$status",
   "skills": {
     "tactical": {
-      "directory": ".claude/skills/tactical",
+      "directory": "skills/tactical",
       "count": $tactical_count,
       "expected": 20,
       "status": $([ "$tactical_count" -eq 20 ] && echo '"ok"' || echo '"mismatch"')
     },
     "community": {
-      "directory": ".claude/skills/community",
+      "directory": "skills/community",
       "count": $community_count,
       "expected": 65,
       "status": $([ "$community_count" -eq 65 ] && echo '"ok"' || echo '"mismatch"'),
