@@ -556,6 +556,14 @@ PROMPT
 3. **Security**: Input validation, injection vulnerabilities, auth checks, data exposure
 4. **Code Quality**: DRY violations, unclear naming, excessive complexity
 
+## Available Skills
+
+You may use these skills for deep security analysis:
+- **/audit-context-building** - Ultra-granular code analysis for security vulnerabilities
+- **/constant-time-analysis** - Detect timing side-channel vulnerabilities
+- **/requesting-code-review** - Structure formal code review requests
+- **/fix-review** - Review security fixes for completeness
+
 ## Severity Definitions
 
 - **critical**: Security vulnerability, data loss risk, crash in normal use

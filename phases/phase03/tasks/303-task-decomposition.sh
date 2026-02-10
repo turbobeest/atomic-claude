@@ -169,6 +169,13 @@ ${max_tasks_constraint:-Your output should be 50-150 tasks typically.} Keep desc
 
 Project Name: $project_name
 
+## Available Skills
+
+You may use these skills to assist with task decomposition:
+- **/writing-plans** - Structured planning and task breakdown guidance
+- **/executing-plans** - Plan execution and tracking patterns
+- **/subagent-driven-development** - Parallel task coordination strategies
+
 ## Task Generation Rules
 
 1. **Each Feature (F1, F2, ...)** → One top-level task

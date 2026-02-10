@@ -907,6 +907,12 @@ $test_strategy
 
 Use: $test_framework
 
+## Available Skills
+
+You may use these skills to assist with TDD:
+- **/test-driven-development** - RED-GREEN-REFACTOR workflow guidance
+- **/systematic-debugging** - Structured debugging when tests fail unexpectedly
+
 ## Requirements
 
 1. Write tests for ALL scenarios in the test strategy

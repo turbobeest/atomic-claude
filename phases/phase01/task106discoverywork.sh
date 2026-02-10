@@ -610,6 +610,13 @@ $final_context
 ## Deliberation Exchanges
 $final_exchanges
 
+## Available Skills
+
+You may use these skills for deeper analysis if needed:
+- **/audit-context-building** - Ultra-granular codebase analysis
+- **/entry-point-analyzer** - Identify code entry points and control flow
+- **/extract-todos** - Find action items and TODOs in codebase
+
 ## Your Task
 
 Synthesize the deliberation into:

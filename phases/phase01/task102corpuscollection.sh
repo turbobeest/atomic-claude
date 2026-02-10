@@ -389,6 +389,16 @@ $corpus_content
 - If the project scope is unclear, list the ambiguities
 - Focus on what will help the PRD author, not general observations
 
+## Available Skills
+
+You may use the following skills to assist with corpus analysis:
+- **/extract-todos** - Find TODO/FIXME/HACK markers in code (use if codebase is in corpus)
+- **/extract-functions** - List all function signatures (use for code structure understanding)
+- **/extract-imports** - Map dependencies and imports (use for technology detection)
+- **/audit-context-building** - Ultra-granular code analysis for deep understanding
+
+These skills are optional but can provide structured insights when analyzing codebases.
+
 ## Your Task
 
 Provide a concise analysis:
