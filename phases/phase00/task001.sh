@@ -114,6 +114,15 @@ task_001_setup_validation() {
                     # Check for .env file with credentials
                     _001_validate_env_file
 
+                    # Auto-launch dashboard for pipeline visibility
+                    if [[ "${ATOMIC_AUTO_DASHBOARD:-true}" == "true" ]]; then
+                        echo ""
+                        atomic_substep "Starting pipeline dashboard..."
+                        bash "$ATOMIC_ROOT/dashboard/start-dashboard.sh" &>/dev/null || true
+                        sleep 1
+                        atomic_ref_tasks "Monitor your pipeline progress"
+                    fi
+
                     break
                 else
                     echo ""
