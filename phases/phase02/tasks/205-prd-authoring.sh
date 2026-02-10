@@ -219,6 +219,10 @@ _205_detect_model_context_window() {
 
     # Model context window mappings (in tokens)
     case "$model_name" in
+        # Claude Opus 4.6 (1M context window - max mode)
+        *"opus-4"*|*"claude-opus-4"*)
+            echo "1000000"  # 1M
+            ;;
         # Claude models (large context)
         *"claude-sonnet"*|*"claude-opus"*|*"claude-3"*)
             echo "200000"  # 200K
@@ -660,6 +664,8 @@ _205_generate_with_retry() {
     local guardian_model="$7"
     local project_context="$8"
     local description="$9"
+    local prd_model="${10:-}"
+    local prd_provider="${11:-}"
 
     local max_retries=2
     local attempt=1
@@ -667,8 +673,12 @@ _205_generate_with_retry() {
     while [[ $attempt -le $max_retries ]]; do
         atomic_info "Generation $gen_num - Attempt $attempt/$max_retries"
 
-        # Generate section(s)
-        if ! atomic_invoke "$prompt_file" "$output_file" "$description" --timeout=1200; then
+        # Generate section(s) with configured PRD model
+        local invoke_args=(--timeout=1200)
+        [[ -n "$prd_model" ]] && invoke_args+=(--model="$prd_model")
+        [[ -n "$prd_provider" ]] && invoke_args+=(--provider="$prd_provider")
+
+        if ! atomic_invoke "$prompt_file" "$output_file" "$description" "${invoke_args[@]}"; then
             atomic_error "Generation $gen_num failed"
             return 1
         fi
@@ -952,6 +962,30 @@ EOF
     # -------------------------------------------------------------------------
 
     # -------------------------------------------------------------------------
+    # Model Configuration for PRD Authoring
+    # -------------------------------------------------------------------------
+
+    # Detect if Opus 4.6 with 1M context should be used
+    # Set ATOMIC_PRD_USE_MAX_CONTEXT=true to enable Claude Opus 4.6 with 1M context window
+    local prd_model=""
+    local prd_provider=""
+    local prd_model_note=""
+
+    if [[ "${ATOMIC_PRD_USE_MAX_CONTEXT:-false}" == "true" ]]; then
+        # Use Claude Opus 4.6 with 1M context window for PRD authoring
+        prd_model="claude-opus-4-6"
+        prd_provider="max"
+        prd_model_note=" (Opus 4.6 - 1M context)"
+        atomic_info "PRD authoring mode: MAX CONTEXT (Opus 4.6 with 1M context window)"
+    else
+        # Use default primary model from configuration
+        prd_model=$(atomic_get_primary_model 2>/dev/null || echo "$CLAUDE_MODEL")
+        prd_provider="$CLAUDE_PROVIDER"
+        prd_model_note=""
+        atomic_info "PRD authoring mode: Standard (model: $prd_model)"
+    fi
+
+    # -------------------------------------------------------------------------
     # Load project context
     # -------------------------------------------------------------------------
 
@@ -1087,7 +1121,7 @@ EOF_GEN1_4
 
     if ! _205_generate_with_retry 1 "$prompts_dir/gen-1-prompt.md" "$gen1_output" "$gen1_prior" \
         "$gen1_guardian_prompt" "$gen1_guardian_report" "$guardian_model" "$project_context" \
-        "PRD Gen 1: Vision + Executive"; then
+        "PRD Gen 1: Vision + Executive$prd_model_note" "$prd_model" "$prd_provider"; then
         atomic_error "Generation 1 failed"
         return 1
     fi
@@ -1172,7 +1206,7 @@ EOF_GEN2_3
 
     if ! _205_generate_with_retry 2 "$prompts_dir/gen-2-prompt.md" "$gen2_output" "$gen2_prior" \
         "$gen2_guardian_prompt" "$gen2_guardian_report" "$guardian_model" "$project_context" \
-        "PRD Gen 2: Technical Architecture"; then
+        "PRD Gen 2: Technical Architecture$prd_model_note" "$prd_model" "$prd_provider"; then
         atomic_error "Generation 2 failed"
         return 1
     fi
@@ -1286,7 +1320,7 @@ EOF_GEN3_3
 
     if ! _205_generate_with_retry 3 "$prompts_dir/gen-3-prompt.md" "$gen3_output" "$gen3_prior" \
         "$gen3_guardian_prompt" "$gen3_guardian_report" "$guardian_model" "$project_context" \
-        "PRD Gen 3: Feature Requirements"; then
+        "PRD Gen 3: Feature Requirements$prd_model_note" "$prd_model" "$prd_provider"; then
         atomic_error "Generation 3 failed"
         return 1
     fi
@@ -1377,7 +1411,7 @@ EOF_GEN4_3
 
     if ! _205_generate_with_retry 4 "$prompts_dir/gen-4-prompt.md" "$gen4_output" "$gen4_prior" \
         "$gen4_guardian_prompt" "$gen4_guardian_report" "$guardian_model" "$project_context" \
-        "PRD Gen 4: Non-Functional Requirements"; then
+        "PRD Gen 4: Non-Functional Requirements$prd_model_note" "$prd_model" "$prd_provider"; then
         atomic_error "Generation 4 failed"
         return 1
     fi
@@ -1481,7 +1515,7 @@ EOF
 
     if ! _205_generate_with_retry 5 "$prompts_dir/gen-5-prompt.md" "$gen5_output" "$gen5_prior" \
         "$gen5_guardian_prompt" "$gen5_guardian_report" "$guardian_model" "$gen5_project_context" \
-        "PRD Gen 5: Logical Dependency Chain"; then
+        "PRD Gen 5: Logical Dependency Chain$prd_model_note" "$prd_model" "$prd_provider"; then
         atomic_error "Generation 5 failed - CRITICAL section incomplete"
         return 1
     fi
@@ -1558,7 +1592,7 @@ EOF_GEN6_3
 
     if ! _205_generate_with_retry 6 "$prompts_dir/gen-6-prompt.md" "$gen6_output" "$gen6_prior" \
         "$gen6_guardian_prompt" "$gen6_guardian_report" "$guardian_model" "$project_context" \
-        "PRD Gen 6: Development Phases"; then
+        "PRD Gen 6: Development Phases$prd_model_note" "$prd_model" "$prd_provider"; then
         atomic_error "Generation 6 failed"
         return 1
     fi
@@ -1633,7 +1667,7 @@ EOF_GEN7_3
 
     if ! _205_generate_with_retry 7 "$prompts_dir/gen-7-prompt.md" "$gen7_output" "$gen7_prior" \
         "$gen7_guardian_prompt" "$gen7_guardian_report" "$guardian_model" "$project_context" \
-        "PRD Gen 7: Code Structure"; then
+        "PRD Gen 7: Code Structure$prd_model_note" "$prd_model" "$prd_provider"; then
         atomic_error "Generation 7 failed"
         return 1
     fi
@@ -1708,7 +1742,7 @@ EOF_GEN8_3
 
     if ! _205_generate_with_retry 8 "$prompts_dir/gen-8-prompt.md" "$gen8_output" "$gen8_prior" \
         "$gen8_guardian_prompt" "$gen8_guardian_report" "$guardian_model" "$project_context" \
-        "PRD Gen 8: TDD Strategy"; then
+        "PRD Gen 8: TDD Strategy$prd_model_note" "$prd_model" "$prd_provider"; then
         atomic_error "Generation 8 failed"
         return 1
     fi
@@ -1783,7 +1817,7 @@ EOF_GEN9_3
 
     if ! _205_generate_with_retry 9 "$prompts_dir/gen-9-prompt.md" "$gen9_output" "$gen9_prior" \
         "$gen9_guardian_prompt" "$gen9_guardian_report" "$guardian_model" "$project_context" \
-        "PRD Gen 9: Integration Testing"; then
+        "PRD Gen 9: Integration Testing$prd_model_note" "$prd_model" "$prd_provider"; then
         atomic_error "Generation 9 failed"
         return 1
     fi
@@ -1867,7 +1901,7 @@ EOF_GEN10_3
 
     if ! _205_generate_with_retry 10 "$prompts_dir/gen-10-prompt.md" "$gen10_output" "$gen10_prior" \
         "$gen10_guardian_prompt" "$gen10_guardian_report" "$guardian_model" "$project_context" \
-        "PRD Gen 10: Documentation + Operations"; then
+        "PRD Gen 10: Documentation + Operations$prd_model_note" "$prd_model" "$prd_provider"; then
         atomic_error "Generation 10 failed"
         return 1
     fi
@@ -1951,7 +1985,7 @@ EOF_GEN11_3
 
     if ! _205_generate_with_retry 11 "$prompts_dir/gen-11-prompt.md" "$gen11_output" "$gen11_prior" \
         "$gen11_guardian_prompt" "$gen11_guardian_report" "$guardian_model" "$project_context" \
-        "PRD Gen 11: Risks + Metrics"; then
+        "PRD Gen 11: Risks + Metrics$prd_model_note" "$prd_model" "$prd_provider"; then
         atomic_error "Generation 11 failed"
         return 1
     fi
@@ -2036,7 +2070,7 @@ EOF_GEN12_4
 
     if ! _205_generate_with_retry 12 "$prompts_dir/gen-12-prompt.md" "$gen12_output" "$gen12_prior" \
         "$gen12_guardian_prompt" "$gen12_guardian_report" "$guardian_model" "$project_context" \
-        "PRD Gen 12: Approval"; then
+        "PRD Gen 12: Approval$prd_model_note" "$prd_model" "$prd_provider"; then
         atomic_error "Generation 12 failed"
         return 1
     fi
