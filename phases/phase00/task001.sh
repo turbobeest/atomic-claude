@@ -86,6 +86,10 @@ task_001_setup_validation() {
     echo -e "     Location: ${BOLD}$ATOMIC_ROOT/.env${NC}"
     echo -e "     See setup.md for .env template"
     echo ""
+    echo -e "  ${CYAN}6.${NC} ${YELLOW}Install MCP servers${NC} (recommended)"
+    echo -e "     Run: ${BOLD}./scripts/setup-mcp.sh${NC}"
+    echo -e "     See: ${BOLD}docs/MCP.md${NC} for details"
+    echo ""
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 

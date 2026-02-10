@@ -2096,6 +2096,150 @@ atomic_invoke_api() {
     atomic_invoke "$@" --provider=api --model="$model"
 }
 
+# ============================================================================
+# PARALLEL SUBAGENTS - Execute multiple tasks simultaneously
+# ============================================================================
+
+# atomic_invoke_parallel - Execute multiple Claude invocations in parallel
+# Enforces PREMIUM MODELS ONLY (never Haiku) for quality assurance
+#
+# Usage:
+#   atomic_invoke_parallel "description" \
+#     "task1:prompt1.md:output1.json" \
+#     "task2:prompt2.md:output2.json" \
+#     "task3:prompt3.md:output3.json"
+#
+# Arguments:
+#   $1 - Overall description (e.g., "Corpus Collection")
+#   $2+ - Task specs in format: "name:prompt_file:output_file"
+#
+# Returns:
+#   0 if all tasks succeed
+#   N where N = number of failed tasks
+#
+# Example:
+#   atomic_invoke_parallel "Phase 1 Corpus Collection" \
+#     "source:prompts/collect-source.md:.outputs/corpus-source.json" \
+#     "tests:prompts/collect-tests.md:.outputs/corpus-tests.json" \
+#     "configs:prompts/collect-configs.md:.outputs/corpus-configs.json"
+#
+atomic_invoke_parallel() {
+    local overall_desc="$1"
+    shift
+    local task_specs=("$@")
+
+    # Validate we have tasks
+    if [[ ${#task_specs[@]} -eq 0 ]]; then
+        atomic_error "atomic_invoke_parallel: No tasks provided"
+        return 1
+    fi
+
+    # Determine subagent model - FORCE PREMIUM (never Haiku)
+    local subagent_model="${ATOMIC_SUBAGENT_MODEL:-${CLAUDE_MODEL:-sonnet}}"
+
+    # Safety: Block Haiku for subagents (quality requirement)
+    if [[ "$subagent_model" == "haiku"* ]]; then
+        atomic_warn "Subagents require premium models for quality assurance"
+        atomic_warn "Forcing sonnet (was: $subagent_model)"
+        subagent_model="sonnet"
+    fi
+
+    # Header
+    atomic_step "$overall_desc (Parallel Execution)"
+    atomic_info "Launching ${#task_specs[@]} subagents with model: $subagent_model"
+    echo ""
+
+    # Track PIDs and task names
+    local -a pids=()
+    local -a task_names=()
+    local -a output_files=()
+    local -a start_times=()
+
+    # Launch all tasks in parallel
+    local task_num=1
+    for task_spec in "${task_specs[@]}"; do
+        # Parse task spec: name:prompt_file:output_file
+        IFS=: read -r task_name prompt_file output_file <<< "$task_spec"
+
+        # Validate task spec
+        if [[ -z "$task_name" || -z "$prompt_file" || -z "$output_file" ]]; then
+            atomic_error "Invalid task spec: $task_spec"
+            atomic_error "Format: name:prompt_file:output_file"
+            return 1
+        fi
+
+        # Validate prompt file exists
+        if [[ ! -f "$prompt_file" ]]; then
+            atomic_error "Prompt file not found: $prompt_file"
+            return 1
+        fi
+
+        atomic_substep "[$task_num/${#task_specs[@]}] Launching: $task_name"
+
+        # Launch in background with premium model
+        (
+            atomic_invoke "$prompt_file" "$output_file" "$task_name" \
+                --model="$subagent_model" \
+                2>&1 | sed "s/^/    [$task_name] /" || echo "[$task_name] FAILED: exit code $?"
+        ) &
+
+        local pid=$!
+        pids+=("$pid")
+        task_names+=("$task_name")
+        output_files+=("$output_file")
+        start_times+=("$(date +%s)")
+
+        ((task_num++)) || true
+    done
+
+    echo ""
+    atomic_info "All ${#pids[@]} subagents launched, waiting for completion..."
+    echo ""
+
+    # Wait for all to complete and track results
+    local failed=0
+    local completed=0
+    local task_idx=0
+
+    for pid in "${pids[@]}"; do
+        local task_name="${task_names[$task_idx]}"
+        local output_file="${output_files[$task_idx]}"
+        local start_time="${start_times[$task_idx]}"
+
+        # Wait for this specific task
+        if wait "$pid" 2>/dev/null; then
+            local end_time
+            end_time=$(date +%s)
+            local duration=$((end_time - start_time))
+
+            # Validate output exists
+            if [[ -f "$output_file" && -s "$output_file" ]]; then
+                atomic_success "[$task_name] Complete (${duration}s)"
+                ((completed++)) || true
+            else
+                atomic_error "[$task_name] Failed: No output generated"
+                ((failed++)) || true
+            fi
+        else
+            atomic_error "[$task_name] Failed: Process error"
+            ((failed++)) || true
+        fi
+
+        ((task_idx++)) || true
+    done
+
+    echo ""
+
+    # Summary
+    if [[ $failed -eq 0 ]]; then
+        atomic_success "$overall_desc: All $completed subagents completed successfully"
+        return 0
+    else
+        atomic_error "$overall_desc: $failed/$((completed + failed)) subagents failed"
+        return $failed
+    fi
+}
+
 # atomic_llm_call - Simple LLM call that returns response via stdout
 # Usage: local response=$(atomic_llm_call "$prompt_file" "sonnet")
 # For: Quick LLM calls where only the response text is needed
