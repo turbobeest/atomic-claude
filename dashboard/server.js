@@ -526,6 +526,314 @@ app.get('/api/file', (req, res) => {
   }
 });
 
+// ============================================================================
+// NEW FEATURES - 2026-02-10
+// ============================================================================
+
+// API: Get token usage and cost tracking
+app.get('/api/tokens', (req, res) => {
+  try {
+    const tokenFile = path.join(STATE_DIR, 'session-tokens.json');
+    if (fs.existsSync(tokenFile)) {
+      const data = JSON.parse(fs.readFileSync(tokenFile, 'utf8'));
+      res.json(data);
+    } else {
+      res.json({
+        total_input_tokens: 0,
+        total_output_tokens: 0,
+        estimated_cost_usd: 0,
+        by_provider: {},
+        by_model: {}
+      });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get error log
+app.get('/api/errors', (req, res) => {
+  try {
+    const errorLog = path.join(ATOMIC_ROOT, '.logs', 'errors.json');
+    if (fs.existsSync(errorLog)) {
+      const errors = JSON.parse(fs.readFileSync(errorLog, 'utf8'));
+      res.json(errors);
+    } else {
+      res.json({ errors: [] });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get agent assignments
+app.get('/api/agents', (req, res) => {
+  try {
+    const agentFiles = [
+      path.join(ATOMIC_ROOT, '.outputs', '1-discovery', 'selected-agents.json'),
+      path.join(ATOMIC_ROOT, '.outputs', '3-tasking', 'selected-agents.json')
+    ];
+
+    const agents = [];
+    agentFiles.forEach(file => {
+      if (fs.existsSync(file)) {
+        const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+        if (data.discovery_agents) agents.push(...data.discovery_agents);
+        if (data.decomposition_agents) agents.push(...data.decomposition_agents);
+      }
+    });
+
+    res.json({ agents: [...new Set(agents)] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get timeline data
+app.get('/api/timeline', (req, res) => {
+  try {
+    const timeline = [];
+    const taskStateFile = path.join(STATE_DIR, 'task-state.json');
+
+    if (fs.existsSync(taskStateFile)) {
+      const state = JSON.parse(fs.readFileSync(taskStateFile, 'utf8'));
+
+      for (const [phaseId, phase] of Object.entries(state.phases || {})) {
+        for (const [taskId, task] of Object.entries(phase.tasks || {})) {
+          if (task.completed_at) {
+            const startTime = task.started_at || task.completed_at;
+            const endTime = task.completed_at;
+            const duration = new Date(endTime) - new Date(startTime);
+
+            timeline.push({
+              phase: phaseId,
+              task: taskId,
+              name: task.name || `Task ${taskId}`,
+              start: startTime,
+              end: endTime,
+              duration_ms: duration,
+              duration_seconds: Math.floor(duration / 1000),
+              status: task.status || 'completed'
+            });
+          }
+        }
+      }
+    }
+
+    timeline.sort((a, b) => new Date(a.start) - new Date(b.start));
+    res.json({ timeline });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get skills used
+app.get('/api/skills', (req, res) => {
+  try {
+    // Track skill invocations from current-task.json history
+    const skillsUsed = {};
+
+    // This would need to be tracked in atomic.sh when skills are invoked
+    // For now, return empty structure
+    res.json({
+      skills_used: skillsUsed,
+      total_invocations: 0,
+      available_skills: 85
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get audit suggestions based on current phase
+app.get('/api/audit-suggestions', (req, res) => {
+  try {
+    const currentPhase = req.query.phase || '0-setup';
+
+    const suggestions = {
+      '0-setup': [
+        'Configuration Validation',
+        'Environment Security Check',
+        'API Key Security Audit'
+      ],
+      '1-discovery': [
+        'Corpus Quality Analysis',
+        'Feature Extraction Audit',
+        'Requirements Completeness Check'
+      ],
+      '2-prd': [
+        'PRD Structure Validation',
+        'Requirements Traceability',
+        'Dependency Chain Analysis'
+      ],
+      '5-implementation': [
+        'Code Quality Audit',
+        'Security Vulnerability Scan',
+        'Test Coverage Analysis'
+      ]
+    };
+
+    res.json({
+      phase: currentPhase,
+      suggestions: suggestions[currentPhase] || [],
+      total_audits: 2186
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Proxy to claude-mem localhost (port 37777)
+app.get('/api/claude-mem/:endpoint(*)', async (req, res) => {
+  try {
+    const endpoint = req.params.endpoint;
+    const queryString = new URLSearchParams(req.query).toString();
+    const url = `http://localhost:37777/api/${endpoint}${queryString ? '?' + queryString : ''}`;
+
+    const response = await fetch(url);
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    res.status(503).json({
+      error: 'claude-mem not available',
+      message: 'Make sure claude-mem is running on localhost:37777'
+    });
+  }
+});
+
+// API: Get AI progress narrative
+app.get('/api/narrative', (req, res) => {
+  try {
+    const statusFile = path.join(STATE_DIR, 'current-task.json');
+    if (!fs.existsSync(statusFile)) {
+      return res.json({
+        narrative: 'No active task. Pipeline is idle.',
+        phase: null,
+        task: null
+      });
+    }
+
+    const status = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
+
+    // Generate narrative based on task
+    let narrative = `Claude is currently working on ${status.description || 'a task'}. `;
+
+    if (status.provider && status.model) {
+      narrative += `Using ${status.provider}/${status.model} for this operation. `;
+    }
+
+    narrative += `This task is part of the pipeline's ongoing work.`;
+
+    res.json({
+      narrative,
+      phase: status.phase || null,
+      task: status.task_id || null,
+      model: status.model || null
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Get confidence scores (would need to be tracked in outputs)
+app.get('/api/confidence', (req, res) => {
+  try {
+    // This would need to be implemented in task outputs
+    // For now, return structure
+    res.json({
+      overall: 85,
+      by_section: {},
+      warnings: []
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Export pipeline report
+app.get('/api/export/report', async (req, res) => {
+  try {
+    const format = req.query.format || 'json';
+
+    // Gather all data
+    const report = {
+      generated_at: new Date().toISOString(),
+      project: {
+        name: 'Unknown Project',
+        root: ATOMIC_ROOT
+      },
+      phases: {},
+      metrics: {
+        total_tasks: 0,
+        completed_tasks: 0,
+        failed_tasks: 0
+      }
+    };
+
+    // Load task state
+    const taskStateFile = path.join(STATE_DIR, 'task-state.json');
+    if (fs.existsSync(taskStateFile)) {
+      const state = JSON.parse(fs.readFileSync(taskStateFile, 'utf8'));
+      report.phases = state.phases || {};
+
+      // Calculate metrics
+      for (const phase of Object.values(state.phases || {})) {
+        for (const task of Object.values(phase.tasks || {})) {
+          report.metrics.total_tasks++;
+          if (task.status === 'completed') report.metrics.completed_tasks++;
+          if (task.status === 'failed') report.metrics.failed_tasks++;
+        }
+      }
+    }
+
+    // Load project name
+    const projectConfig = path.join(ATOMIC_ROOT, '.outputs', '0-setup', 'project-config.json');
+    if (fs.existsSync(projectConfig)) {
+      const config = JSON.parse(fs.readFileSync(projectConfig, 'utf8'));
+      report.project.name = config.extracted?.project?.name || config.project?.name || report.project.name;
+    }
+
+    // Return based on format
+    if (format === 'json') {
+      res.json(report);
+    } else if (format === 'markdown') {
+      const md = generateMarkdownReport(report);
+      res.setHeader('Content-Type', 'text/plain');
+      res.setHeader('Content-Disposition', 'attachment; filename="pipeline-report.md"');
+      res.send(md);
+    } else {
+      res.status(400).json({ error: 'Unsupported format. Use json or markdown.' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Helper: Generate markdown report
+function generateMarkdownReport(report) {
+  let md = `# Pipeline Report: ${report.project.name}\n\n`;
+  md += `**Generated:** ${report.generated_at}\n\n`;
+  md += `## Metrics\n\n`;
+  md += `- Total Tasks: ${report.metrics.total_tasks}\n`;
+  md += `- Completed: ${report.metrics.completed_tasks}\n`;
+  md += `- Failed: ${report.metrics.failed_tasks}\n`;
+  md += `- Success Rate: ${((report.metrics.completed_tasks / report.metrics.total_tasks) * 100).toFixed(1)}%\n\n`;
+
+  md += `## Phases\n\n`;
+  for (const [phaseId, phase] of Object.entries(report.phases)) {
+    md += `### ${phaseId}\n\n`;
+    const tasks = Object.entries(phase.tasks || {});
+    md += `Tasks: ${tasks.length}\n\n`;
+    for (const [taskId, task] of tasks) {
+      const status = task.status === 'completed' ? '✓' : task.status === 'failed' ? '✗' : '○';
+      md += `- ${status} Task ${taskId}: ${task.name || 'Unknown'}\n`;
+    }
+    md += `\n`;
+  }
+
+  return md;
+}
+
 // Serve index.html for all other routes
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
