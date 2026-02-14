@@ -74,21 +74,21 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # UAT mode bypass
     if uat_mode:
-        print_yellow("  UAT mode: Auto-passing validation...")
+        print(print_yellow("  UAT mode: Auto-passing validation..."))
         create_passing_validation(validation_file, prd_file)
-        print_green("✓ UAT mode: Validation passed (auto-approved)")
+        print(print_green("✓ UAT mode: Validation passed (auto-approved)"))
         return True
 
     print()
-    print_dim("  ┌─────────────────────────────────────────────────────────┐")
-    print_dim("  │ Validating PRD for completeness and testability.       │")
-    print_dim("  │ Revision loop: validate -> review -> revise -> re-validate│")
-    print_dim("  └─────────────────────────────────────────────────────────┘")
+    print(print_dim("  ┌─────────────────────────────────────────────────────────┐"))
+    print(print_dim("  │ Validating PRD for completeness and testability.       │"))
+    print(print_dim("  │ Revision loop: validate -> review -> revise -> re-validate│"))
+    print(print_dim("  └─────────────────────────────────────────────────────────┘"))
     print()
 
     # Check PRD exists
     if not prd_file.exists():
-        print_red(f"  ✗ PRD file not found: {prd_file}")
+        print(print_red(f"  ✗ PRD file not found: {prd_file}"))
         return False
 
     # Validate-revise loop
@@ -100,9 +100,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
         if iteration > 1:
             print()
-            print_cyan("┌─────────────────────────────────────────────────────────┐")
-            print_cyan("│ " + print_bold(f"RE-VALIDATION (pass {iteration})") + "                                     │")
-            print_cyan("└─────────────────────────────────────────────────────────┘")
+            print(print_cyan("┌─────────────────────────────────────────────────────────┐"))
+            print(print_cyan("│ " + print_bold(f"RE-VALIDATION (pass {iteration})") + "                                     │"))
+            print(print_cyan("└─────────────────────────────────────────────────────────┘"))
             print()
 
         # Structural validation
@@ -111,9 +111,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         # Structural gate
         if sections_found < 10 or count_lines(prd_file) < 100:
             print()
-            print_red("  ┌─────────────────────────────────────────────────────────┐")
-            print_red("  │ " + print_bold("STRUCTURAL GATE FAILED") + "                                    │")
-            print_red("  └─────────────────────────────────────────────────────────┘")
+            print(print_red("  ┌─────────────────────────────────────────────────────────┐"))
+            print(print_red("  │ " + print_bold("STRUCTURAL GATE FAILED") + "                                    │"))
+            print(print_red("  └─────────────────────────────────────────────────────────┘"))
             print()
 
             if not handle_structural_failure(prd_file, sections_missing):
@@ -125,7 +125,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         validation_result = validate_content(prd_file, prompts_dir, atomic_root, output_dir)
 
         if not validation_result:
-            print_red("  ✗ Content validation failed")
+            print(print_red("  ✗ Content validation failed"))
             return False
 
         # Save validation results
@@ -136,11 +136,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
         if overall_status == "PASS":
             print()
-            print_green("✓ PRD validation passed")
+            print(print_green("✓ PRD validation passed"))
             return True
         elif overall_status == "WARNING":
             print()
-            print_yellow("  ! PRD validation has warnings")
+            print(print_yellow("  ! PRD validation has warnings"))
             print()
             print("    " + print_green("[approve]") + " Approve despite warnings")
             print("    " + print_yellow("[revise]") + "  Revise PRD to address warnings")
@@ -150,15 +150,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             choice = prompt_user("  Choice (default: approve): ").strip().lower() or "approve"
 
             if choice == "approve":
-                print_green("✓ PRD approved with warnings")
+                print(print_green("✓ PRD approved with warnings"))
                 return True
             else:
                 # TODO: Implement revision flow (task 206b)
-                print_yellow("  Revision flow not yet implemented")
+                print(print_yellow("  Revision flow not yet implemented"))
                 return True
         else:
             print()
-            print_red("  ✗ PRD validation failed with critical issues")
+            print(print_red("  ✗ PRD validation failed with critical issues"))
             print()
             print("    " + print_yellow("[revise]") + " Revise PRD to address issues")
             print("    " + print_red("[abort]") + "  Abort validation")
@@ -171,10 +171,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
                 return False
             else:
                 # TODO: Implement revision flow (task 206b)
-                print_yellow("  Revision flow not yet implemented")
+                print(print_yellow("  Revision flow not yet implemented"))
                 return False
 
-    print_red("  ✗ Maximum validation iterations reached")
+    print(print_red("  ✗ Maximum validation iterations reached"))
     return False
 
 
@@ -250,9 +250,9 @@ def validate_structure(prd_file: Path) -> Tuple[int, List[str]]:
     Returns:
         Tuple of (sections_found, sections_missing)
     """
-    print_cyan("┌─────────────────────────────────────────────────────────┐")
-    print_cyan("│ " + print_bold("STRUCTURAL VALIDATION") + "                                   │")
-    print_cyan("└─────────────────────────────────────────────────────────┘")
+    print(print_cyan("┌─────────────────────────────────────────────────────────┐"))
+    print(print_cyan("│ " + print_bold("STRUCTURAL VALIDATION") + "                                   │"))
+    print(print_cyan("└─────────────────────────────────────────────────────────┘"))
     print()
 
     content = read_file(prd_file)
@@ -270,7 +270,7 @@ def validate_structure(prd_file: Path) -> Tuple[int, List[str]]:
     prd_lines = count_lines(prd_file)
 
     print()
-    print_dim(f"  Sections: {sections_found}/{len(EXPECTED_SECTIONS)} found | PRD: {prd_lines} lines")
+    print(print_dim(f"  Sections: {sections_found}/{len(EXPECTED_SECTIONS)} found | PRD: {prd_lines} lines"))
     print()
 
     return sections_found, sections_missing
@@ -295,17 +295,17 @@ def handle_structural_failure(prd_file: Path, sections_missing: List[str]) -> bo
     Returns:
         True to retry validation, False to abort
     """
-    print_red("  The PRD does not meet minimum structural requirements.")
-    print_red("  LLM content validation is blocked to avoid wasting resources.")
+    print(print_red("  The PRD does not meet minimum structural requirements."))
+    print(print_red("  LLM content validation is blocked to avoid wasting resources."))
     print()
 
     if sections_missing:
-        print_yellow("  Missing sections:")
+        print(print_yellow("  Missing sections:"))
         for section in sections_missing:
             print(f"    {print_yellow('○')} {section}")
         print()
 
-    print_cyan("  Options:")
+    print(print_cyan("  Options:"))
     print("    " + print_yellow("[back]") + "     Return to PRD authoring (task 205)")
     print("    " + print_cyan("[path]") + "     Provide path to real PRD file")
     print("    " + print_dim("[skip]") + "     Skip gate and run LLM validation anyway")
@@ -320,16 +320,16 @@ def handle_structural_failure(prd_file: Path, sections_missing: List[str]) -> bo
             # Copy to expected location
             content = read_file(Path(new_path))
             write_file(prd_file, content)
-            print_green(f"  ✓ PRD replaced. Re-validating...")
+            print(print_green(f"  ✓ PRD replaced. Re-validating..."))
             return True
         else:
-            print_red(f"  ✗ File not found: {new_path}")
+            print(print_red(f"  ✗ File not found: {new_path}"))
             return False
     elif choice == "skip":
-        print_yellow("  Skipping structural gate...")
+        print(print_yellow("  Skipping structural gate..."))
         return True
     else:
-        print_yellow("  Returning to PRD authoring")
+        print(print_yellow("  Returning to PRD authoring"))
         return False
 
 
@@ -351,9 +351,9 @@ def validate_content(
     Returns:
         Validation result dictionary or None on failure
     """
-    print_cyan("┌─────────────────────────────────────────────────────────┐")
-    print_cyan("│ " + print_bold("CONTENT VALIDATION") + "                                      │")
-    print_cyan("└─────────────────────────────────────────────────────────┘")
+    print(print_cyan("┌─────────────────────────────────────────────────────────┐"))
+    print(print_cyan("│ " + print_bold("CONTENT VALIDATION") + "                                      │"))
+    print(print_cyan("└─────────────────────────────────────────────────────────┘"))
     print()
 
     # Build validation prompt
@@ -380,13 +380,13 @@ def validate_content(
             # Extract JSON if wrapped in code fence
             content = extract_json(content)
             validation_result = json.loads(content)
-            print_green("  ✓ Content validation complete")
+            print(print_green("  ✓ Content validation complete"))
             return validation_result
         else:
             return None
 
     except Exception as e:
-        print_red(f"  ✗ Error during content validation: {e}")
+        print(print_red(f"  ✗ Error during content validation: {e}"))
         return None
 
 

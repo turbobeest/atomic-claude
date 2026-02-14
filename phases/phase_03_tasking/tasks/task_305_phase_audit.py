@@ -34,16 +34,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         phase_num = int(phase_name.split('-')[0])
         phase_id = phase_name
     else:
-        print_yellow("⚠️  Could not determine phase number from output directory")
+        print(print_yellow("⚠️  Could not determine phase number from output directory"))
         return True  # Non-blocking
 
     # Run audit (non-blocking - returns True even if audit fails)
     result = run_phase_audit(phase_num, phase_id, output_dir, uat_mode)
 
     if result:
-        print_green("✓ Phase audit complete")
+        print(print_green("✓ Phase audit complete"))
     else:
-        print_yellow("⚠️  Phase audit had issues (non-blocking)")
+        print(print_yellow("⚠️  Phase audit had issues (non-blocking)"))
 
     return True  # Always return True - audits are non-blocking
 

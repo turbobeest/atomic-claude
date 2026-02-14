@@ -92,71 +92,71 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # UAT Mode: Skip TDD injection
     if uat_mode:
         print()
-        print_yellow("⚡ UAT Mode: Skipping TDD subtask injection")
+        print(print_yellow("⚡ UAT Mode: Skipping TDD subtask injection"))
         print()
         ensure_dir(output_dir)
         write_file(injection_report, json.dumps({
             "subtasks_injected": 0,
             "mode": "uat"
         }, indent=2))
-        print_green("✓ TDD subtask injection complete (UAT mode)")
+        print(print_green("✓ TDD subtask injection complete (UAT mode)"))
         return True
 
     ensure_dir(injection_report.parent)
 
     print()
-    print_dim("  Injecting TDD subtasks (RED/GREEN/REFACTOR/VERIFY) into tasks.json.")
+    print(print_dim("  Injecting TDD subtasks (RED/GREEN/REFACTOR/VERIFY) into tasks.json."))
     print()
 
     # TDD Cycle Education
-    print_dim("─" * 109)
+    print(print_dim("─" * 109))
     print()
-    print_bold("THE TDD CYCLE")
+    print(print_bold("THE TDD CYCLE"))
     print()
-    print_dim("  Each task will receive 4 subtasks forming a dependency chain:")
+    print(print_dim("  Each task will receive 4 subtasks forming a dependency chain:"))
     print()
     print(TDD_CYCLE_BANNER)
     print()
-    print_bold("Subtask Details:")
+    print(print_bold("Subtask Details:"))
     print()
-    print_red("    1. RED - Write Failing Tests")
-    print_dim("       Acceptance: Tests exist AND fail")
-    print_dim("       Tools: pytest, jest, etc.")
+    print(print_red("    1. RED - Write Failing Tests"))
+    print(print_dim("       Acceptance: Tests exist AND fail"))
+    print(print_dim("       Tools: pytest, jest, etc."))
     print()
-    print_green("    2. GREEN - Minimal Implementation")
-    print_dim("       Acceptance: All tests pass")
-    print_dim("       Focus: Simplest code that works")
+    print(print_green("    2. GREEN - Minimal Implementation"))
+    print(print_dim("       Acceptance: All tests pass"))
+    print(print_dim("       Focus: Simplest code that works"))
     print()
-    print_cyan("    3. REFACTOR - Code Cleanup")
-    print_dim("       Acceptance: Linting passes, tests still pass")
-    print_dim("       Tools: ruff, black, mypy, eslint")
+    print(print_cyan("    3. REFACTOR - Code Cleanup"))
+    print(print_dim("       Acceptance: Linting passes, tests still pass"))
+    print(print_dim("       Tools: ruff, black, mypy, eslint"))
     print()
     print("\033[35m    4. VERIFY - Security Scan\033[0m")  # Magenta
-    print_dim("       Acceptance: No critical/high issues")
-    print_dim("       Tools: bandit, safety, npm audit")
+    print(print_dim("       Acceptance: No critical/high issues"))
+    print(print_dim("       Tools: bandit, safety, npm audit"))
     print()
 
     prompt_user("  Press Enter to continue...")
     print()
 
     # Pre-injection Backup
-    print_dim("─" * 109)
+    print(print_dim("─" * 109))
     print()
-    print_bold("PRE-INJECTION BACKUP")
+    print(print_bold("PRE-INJECTION BACKUP"))
     print()
 
     if not tasks_file.exists():
-        print_red("✗ tasks.json not found")
+        print(print_red("✗ tasks.json not found"))
         return False
 
     shutil.copy(tasks_file, backup_file)
-    print_green("  ✓ Backed up tasks.json → tasks.json.pre-tdd-backup")
+    print(print_green("  ✓ Backed up tasks.json → tasks.json.pre-tdd-backup"))
     print()
 
     # Injection Mode
-    print_dim("─" * 109)
+    print(print_dim("─" * 109))
     print()
-    print_bold("INJECTION MODE")
+    print(print_bold("INJECTION MODE"))
     print()
 
     tasks_data = json.loads(read_file(tasks_file))
@@ -165,35 +165,35 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     tasks_with_subtasks = len([t for t in tasks if len(t.get("subtasks", [])) > 0])
 
-    print_dim("  Current state:")
+    print(print_dim("  Current state:"))
     print(f"    Tasks with subtasks: {tasks_with_subtasks} / {total_tasks}")
     print()
 
     inject_mode = "inject"
 
     if tasks_with_subtasks > 0:
-        print_yellow("  ! Some tasks already have subtasks.")
+        print(print_yellow("  ! Some tasks already have subtasks."))
         print()
-        print_cyan("Options:")
+        print(print_cyan("Options:"))
         print()
-        print_green("  [skip]       Skip tasks that already have subtasks")
-        print_yellow("  [replace]   Replace existing subtasks")
-        print_red("  [abort]     Abort and review manually")
+        print(print_green("  [skip]       Skip tasks that already have subtasks"))
+        print(print_yellow("  [replace]   Replace existing subtasks"))
+        print(print_red("  [abort]     Abort and review manually"))
         print()
 
         clear_input_buffer()
         inject_mode = prompt_user("  Choice (default: skip): ").strip().lower() or "skip"
 
         if inject_mode == "abort":
-            print_red("✗ Aborted by user")
+            print(print_red("✗ Aborted by user"))
             return False
 
     print()
 
     # Subtask Injection
-    print_dim("─" * 109)
+    print(print_dim("─" * 109))
     print()
-    print_bold("INJECTING TDD SUBTASKS")
+    print(print_bold("INJECTING TDD SUBTASKS"))
     print()
 
     injected = 0
@@ -206,16 +206,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
         # Skip if has subtasks and mode is skip
         if inject_mode == "skip" and existing_subtasks > 0:
-            print_dim(f"  [{task_id}] Skipping (has subtasks): {task_title[:50]}")
+            print(print_dim(f"  [{task_id}] Skipping (has subtasks): {task_title[:50]}"))
             skipped += 1
             continue
 
-        print_cyan(f"  [{task_id}] Injecting: {task_title[:60]}")
+        print(print_cyan(f"  [{task_id}] Injecting: {task_title[:60]}"))
 
         # Create TDD subtasks
         task["subtasks"] = create_tdd_subtasks(task_id, task_title)
 
-        print_green(f"       ✓ Injected 4 TDD subtasks")
+        print(print_green(f"       ✓ Injected 4 TDD subtasks"))
         injected += 1
 
     # Write updated tasks back
@@ -224,17 +224,17 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     print()
 
     # Injection Summary
-    print_dim("─" * 109)
+    print(print_dim("─" * 109))
     print()
-    print_bold("INJECTION SUMMARY")
+    print(print_bold("INJECTION SUMMARY"))
     print()
 
-    print_green(f"    Tasks injected: {injected}")
-    print_yellow(f"    Tasks skipped:  {skipped}")
+    print(print_green(f"    Tasks injected: {injected}"))
+    print(print_yellow(f"    Tasks skipped:  {skipped}"))
     print()
 
     total_subtasks = injected * 4
-    print_bold(f"    Total subtasks created: {total_subtasks}")
+    print(print_bold(f"    Total subtasks created: {total_subtasks}"))
     print()
 
     # Verify injection
@@ -242,14 +242,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     tasks = tasks_data.get("tasks", [])
     final_with_subtasks = len([t for t in tasks if len(t.get("subtasks", [])) >= 4])
 
-    print_dim("  Verification:")
+    print(print_dim("  Verification:"))
     print(f"    Tasks with TDD subtasks: {final_with_subtasks} / {total_tasks}")
     print()
 
     # Sample Output
-    print_dim("─" * 109)
+    print(print_dim("─" * 109))
     print()
-    print_bold("SAMPLE TASK STRUCTURE")
+    print(print_bold("SAMPLE TASK STRUCTURE"))
     print()
 
     if tasks:
@@ -284,7 +284,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     write_file(injection_report, json.dumps(injection_data, indent=2))
 
-    print_green("✓ TDD Subtask Injection complete")
+    print(print_green("✓ TDD Subtask Injection complete"))
 
     return True
 

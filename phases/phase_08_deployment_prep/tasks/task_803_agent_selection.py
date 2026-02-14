@@ -34,12 +34,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     """
     agents_file = output_dir / "deployment-agents.json"
 
-    print_bold("Agent Selection")
+    print(print_bold("Agent Selection"))
     print()
 
     # UAT Mode Bypass
     if uat_mode:
-        print_dim("  UAT Mode: Creating minimal valid output")
+        print(print_dim("  UAT Mode: Creating minimal valid output"))
         agents_data = {
             "agents": [
                 "release-packager-phd:sonnet",
@@ -51,41 +51,41 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         }
         output_dir.mkdir(parents=True, exist_ok=True)
         write_json(agents_file, agents_data)
-        print_green("✓ UAT bypass complete")
+        print(print_green("✓ UAT bypass complete"))
         return True
 
     print()
-    print_dim("  Select agents for deployment preparation.")
+    print(print_dim("  Select agents for deployment preparation."))
     print()
 
     # DEPLOYMENT PREP WORKFLOW
     print()
-    print_bold("  - DEPLOYMENT PREP WORKFLOW")
+    print(print_bold("  - DEPLOYMENT PREP WORKFLOW"))
     print()
 
     print("    Release Packager ────────┐")
-    print_dim("        (build artifacts)    │")
+    print(print_dim("        (build artifacts)    │"))
     print("    Changelog Writer ────────┤")
-    print_dim("        (version notes)      ├→  Deployment Approval")
+    print(print_dim("        (version notes)      ├→  Deployment Approval"))
     print("    Documentation Gen ───────┤       (human gate)")
-    print_dim("        (user guides)        │")
+    print(print_dim("        (user guides)        │"))
     print("    Install Guide Writer ────┘")
-    print_dim("        (setup instructions)")
+    print(print_dim("        (setup instructions)"))
     print()
 
     # AVAILABLE AGENTS
     print()
-    print_bold("  - AVAILABLE AGENTS")
+    print(print_bold("  - AVAILABLE AGENTS"))
     print()
 
     _display_agent_options()
 
     # AGENT SELECTION
     print()
-    print_bold("  - AGENT SELECTION")
+    print(print_bold("  - AGENT SELECTION"))
     print()
 
-    print_dim("  Select agents for each role:")
+    print(print_dim("  Select agents for each role:"))
     print()
 
     selected_agents = []
@@ -132,11 +132,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # SELECTION SUMMARY
     print()
-    print_bold("  - SELECTION SUMMARY")
+    print(print_bold("  - SELECTION SUMMARY"))
     print()
 
     print("  " + "─" * 110)
-    print_bold("  SELECTED AGENTS")
+    print(print_bold("  SELECTED AGENTS"))
     print()
     for agent in selected_agents:
         agent_name, model = agent.split(":")
@@ -154,7 +154,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     output_dir.mkdir(parents=True, exist_ok=True)
     write_json(agents_file, agents_data)
 
-    print_green("✓ Agent Selection complete")
+    print(print_green("✓ Agent Selection complete"))
 
     return True
 
@@ -162,43 +162,43 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 def _display_agent_options():
     """Display available agent options."""
     # Release Packager
-    print_cyan("  " + "─" * 110)
-    print_bold("  RELEASE PACKAGER")
+    print(print_cyan("  " + "─" * 110))
+    print(print_bold("  RELEASE PACKAGER"))
     print()
     print("    Prepares release package (setup.py, pyproject.toml, etc.).")
     print("    Builds distribution artifacts for selected channels.")
     print("    Recommended: release-packager-phd (sonnet)")
-    print_cyan("  " + "─" * 110)
+    print(print_cyan("  " + "─" * 110))
     print()
 
     # Changelog Writer
-    print_magenta("  " + "─" * 110)
-    print_bold("  CHANGELOG WRITER")
+    print(print_magenta("  " + "─" * 110))
+    print(print_bold("  CHANGELOG WRITER"))
     print()
     print("    Generates changelog from commits and PRD.")
     print("    Follows Keep a Changelog format.")
     print("    Recommended: changelog-writer-phd (sonnet)")
-    print_magenta("  " + "─" * 110)
+    print(print_magenta("  " + "─" * 110))
     print()
 
     # Documentation Generator
-    print_yellow("  " + "─" * 110)
-    print_bold("  DOCUMENTATION GENERATOR")
+    print(print_yellow("  " + "─" * 110))
+    print(print_bold("  DOCUMENTATION GENERATOR"))
     print()
     print("    Generates comprehensive user documentation.")
     print("    Creates API references and usage guides.")
     print("    Recommended: documentation-generator-phd (opus)")
-    print_yellow("  " + "─" * 110)
+    print(print_yellow("  " + "─" * 110))
     print()
 
     # Installation Guide Writer
-    print_blue("  " + "─" * 110)
-    print_bold("  INSTALLATION GUIDE WRITER")
+    print(print_blue("  " + "─" * 110))
+    print(print_bold("  INSTALLATION GUIDE WRITER"))
     print()
     print("    Creates installation and quick-start guide.")
     print("    Platform-specific instructions and troubleshooting.")
     print("    Recommended: installation-guide-writer-phd (sonnet)")
-    print_blue("  " + "─" * 110)
+    print(print_blue("  " + "─" * 110))
     print()
 
 

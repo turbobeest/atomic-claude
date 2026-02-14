@@ -50,8 +50,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     global SEEN_PATHS
     SEEN_PATHS.clear()
 
-    project_root = atomic_root  # Could be overridden by ATOMIC_ORCHESTRATOR env var
-    corpus_dir = atomic_root / "docs" / "corpus"
+    project_root = atomic_root.parent  # Project lives one level above the tool directory
+    corpus_dir = project_root / "docs" / "corpus"
     corpus_index = corpus_dir / "CORPUS-INDEX.md"
     corpus_json = output_dir / "corpus.json"
     prompts_dir = output_dir / "prompts"

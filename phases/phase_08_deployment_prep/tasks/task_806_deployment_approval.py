@@ -35,12 +35,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     artifacts_file = deployment_dir / "artifacts.json"
     approval_file = deployment_dir / "approval.json"
 
-    print_bold("Deployment Approval")
+    print(print_bold("Deployment Approval"))
     print()
 
     # UAT Mode Bypass
     if uat_mode:
-        print_dim("  UAT Mode: Creating minimal valid output")
+        print(print_dim("  UAT Mode: Creating minimal valid output"))
         deployment_dir.mkdir(parents=True, exist_ok=True)
         approval_data = {
             "approved": True,
@@ -48,16 +48,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             "approver": "UAT"
         }
         write_json(approval_file, approval_data)
-        print_green("✓ UAT bypass complete")
+        print(print_green("✓ UAT bypass complete"))
         return True
 
     print()
-    print_dim("  Human gate: Review and approve deployment artifacts.")
+    print(print_dim("  Human gate: Review and approve deployment artifacts."))
     print()
 
     # ARTIFACTS REVIEW
     print()
-    print_bold("  - ARTIFACTS REVIEW")
+    print(print_bold("  - ARTIFACTS REVIEW"))
     print()
 
     # Load artifact data
@@ -76,7 +76,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         install_status = artifacts_data.get("artifacts", {}).get("installation_guide", {}).get("status", "unknown")
 
     print("  " + "─" * 110)
-    print_bold("  RELEASE ARTIFACTS")
+    print(print_bold("  RELEASE ARTIFACTS"))
     print()
     print(f"    Version: {version}")
     print()
@@ -92,7 +92,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # APPROVAL CRITERIA
     print()
-    print_bold("  - APPROVAL CRITERIA")
+    print(print_bold("  - APPROVAL CRITERIA"))
     print()
 
     all_criteria_met = True
@@ -125,20 +125,20 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # HUMAN GATE
     print()
-    print_bold("  - HUMAN GATE: DEPLOYMENT APPROVAL")
+    print(print_bold("  - HUMAN GATE: DEPLOYMENT APPROVAL"))
     print()
 
     if all_criteria_met:
-        print_green("  " + "━" * 110)
-        print_green("  Release artifacts ready for review.")
-        print_green("  " + "━" * 110)
+        print(print_green("  " + "━" * 110))
+        print(print_green("  Release artifacts ready for review."))
+        print(print_green("  " + "━" * 110))
     else:
-        print_yellow("  " + "━" * 110)
-        print_yellow("  Some artifacts need attention before approval.")
-        print_yellow("  " + "━" * 110)
+        print(print_yellow("  " + "━" * 110))
+        print(print_yellow("  Some artifacts need attention before approval."))
+        print(print_yellow("  " + "━" * 110))
 
     print()
-    print_dim("  What would you like to do?")
+    print(print_dim("  What would you like to do?"))
     print()
     print("    [approve]  Approve and proceed to Release")
     print("    [revise]   Make changes to artifacts")
@@ -149,7 +149,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     if approval_choice == "discuss":
         print()
-        print_dim("  Artifact locations:")
+        print(print_dim("  Artifact locations:"))
         print("    dist/                      - Release packages")
         print("    CHANGELOG.md               - Version changelog")
         print("    docs/README.md             - Project documentation")
@@ -158,13 +158,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         print()
         prompt_user("  Press Enter after review to continue...")
         print()
-        print_dim("  Returning to approval...")
+        print(print_dim("  Returning to approval..."))
         return execute(atomic_root, output_dir, uat_mode)
 
     elif approval_choice == "revise":
         print()
-        print_yellow("⚠  Make revisions and re-run artifact generation")
-        print_dim("  After revisions, run: ./orchestrator/pipeline resume")
+        print(print_yellow("⚠  Make revisions and re-run artifact generation"))
+        print(print_dim("  After revisions, run: ./orchestrator/pipeline resume"))
         print()
         return False
 
@@ -184,12 +184,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     write_json(approval_file, approval_data)
 
-    print_green("  " + "━" * 110)
-    print_green(f"  ✓ DEPLOYMENT APPROVED by {approver_name}")
-    print_green("  " + "━" * 110)
+    print(print_green("  " + "━" * 110))
+    print(print_green(f"  ✓ DEPLOYMENT APPROVED by {approver_name}"))
+    print(print_green("  " + "━" * 110))
     print()
 
-    print_green("✓ Deployment Approval complete")
+    print(print_green("✓ Deployment Approval complete"))
 
     return True
 

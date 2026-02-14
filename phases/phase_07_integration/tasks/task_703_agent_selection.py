@@ -34,7 +34,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     agents_file = output_dir / "integration-agents.json"
 
     print()
-    print_dim("Select agents for integration testing.")
+    print(print_dim("Select agents for integration testing."))
     print()
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -42,14 +42,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # ─────────────────────────────────────────────────────────────────────────
 
     print()
-    print_bold("  - INTEGRATION WORKFLOW")
+    print(print_bold("  - INTEGRATION WORKFLOW"))
     print()
 
     print("  E2E Test Runner ────────┐")
-    print_dim("      (test flows)        │")
+    print(print_dim("      (test flows)        │"))
     print("                          ├→  Acceptance Validator  →  Integration Reporter")
     print("  Performance Tester ─────┘      " + print_dim("(all criteria)") + "          " + print_dim("(consolidate)"))
-    print_dim("      (benchmark NFRs)")
+    print(print_dim("      (benchmark NFRs)"))
     print()
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -57,47 +57,47 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # ─────────────────────────────────────────────────────────────────────────
 
     print()
-    print_bold("  - AVAILABLE AGENTS")
+    print(print_bold("  - AVAILABLE AGENTS"))
     print()
 
     # E2E Test Runner
-    print_cyan("─" * 118)
-    print_bold("E2E TEST RUNNER")
+    print(print_cyan("─" * 118))
+    print(print_bold("E2E TEST RUNNER"))
     print()
     print("  Executes end-to-end test suites across all user flows.")
     print("  Validates complete system behavior from input to output.")
-    print_green("  Recommended: ") + "e2e-test-runner-phd (sonnet)"
-    print_cyan("─" * 118)
+    print(print_green("  Recommended: ") + "e2e-test-runner-phd (sonnet)")
+    print(print_cyan("─" * 118))
     print()
 
     # Acceptance Validator
-    print_magenta("─" * 118)
-    print_bold("ACCEPTANCE VALIDATOR")
+    print(print_magenta("─" * 118))
+    print(print_bold("ACCEPTANCE VALIDATOR"))
     print()
     print("  Validates each acceptance criterion from PRD.")
     print("  Maps requirements to test evidence.")
-    print_green("  Recommended: ") + "acceptance-validator-phd (sonnet)"
-    print_magenta("─" * 118)
+    print(print_green("  Recommended: ") + "acceptance-validator-phd (sonnet)")
+    print(print_magenta("─" * 118))
     print()
 
     # Performance Tester
-    print_yellow("─" * 118)
-    print_bold("PERFORMANCE TESTER")
+    print(print_yellow("─" * 118))
+    print(print_bold("PERFORMANCE TESTER"))
     print()
     print("  Benchmarks system against NFR targets.")
     print("  Measures response times, memory, throughput.")
-    print_green("  Recommended: ") + "performance-tester-phd (haiku)"
-    print_yellow("─" * 118)
+    print(print_green("  Recommended: ") + "performance-tester-phd (haiku)")
+    print(print_yellow("─" * 118))
     print()
 
     # Integration Reporter
-    print_blue("─" * 118)
-    print_bold("INTEGRATION REPORTER")
+    print(print_blue("─" * 118))
+    print(print_bold("INTEGRATION REPORTER"))
     print()
     print("  Generates comprehensive integration report.")
     print("  Consolidates results from all testing agents.")
-    print_green("  Recommended: ") + "integration-reporter-phd (haiku)"
-    print_blue("─" * 118)
+    print(print_green("  Recommended: ") + "integration-reporter-phd (haiku)")
+    print(print_blue("─" * 118))
     print()
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -105,7 +105,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # ─────────────────────────────────────────────────────────────────────────
 
     print()
-    print_bold("  - AGENT SELECTION")
+    print(print_bold("  - AGENT SELECTION"))
     print()
 
     if uat_mode:
@@ -116,20 +116,20 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             "performance-tester-phd:haiku",
             "integration-reporter-phd:haiku"
         ]
-        print_yellow("UAT Mode: Using default agents")
+        print(print_yellow("UAT Mode: Using default agents"))
         print()
     else:
-        print_dim("Select agents for each role:")
+        print(print_dim("Select agents for each role:"))
         print()
 
         clear_input_buffer()
         selected_agents = []
 
         # E2E Test Runner selection
-        print_cyan("E2E Test Runner:")
-        print_green("  [1] ") + "e2e-test-runner-phd (sonnet) - Recommended"
-        print_dim("  [2] ") + "e2e-test-runner (haiku) - Fast, standard"
-        print_yellow("  [c] ") + "Custom agent"
+        print(print_cyan("E2E Test Runner:"))
+        print(print_green("  [1] ") + "e2e-test-runner-phd (sonnet) - Recommended")
+        print(print_dim("  [2] ") + "e2e-test-runner (haiku) - Fast, standard")
+        print(print_yellow("  [c] ") + "Custom agent")
         print()
         e2e_choice = prompt_user("Select (default: 1): ").strip() or "1"
 
@@ -144,10 +144,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         print()
 
         # Acceptance Validator selection
-        print_magenta("Acceptance Validator:")
-        print_green("  [1] ") + "acceptance-validator-phd (sonnet) - Recommended"
-        print_dim("  [2] ") + "acceptance-validator (haiku) - Fast, standard"
-        print_yellow("  [c] ") + "Custom agent"
+        print(print_magenta("Acceptance Validator:"))
+        print(print_green("  [1] ") + "acceptance-validator-phd (sonnet) - Recommended")
+        print(print_dim("  [2] ") + "acceptance-validator (haiku) - Fast, standard")
+        print(print_yellow("  [c] ") + "Custom agent")
         print()
         accept_choice = prompt_user("Select (default: 1): ").strip() or "1"
 
@@ -162,10 +162,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         print()
 
         # Performance Tester selection
-        print_yellow("Performance Tester:")
-        print_green("  [1] ") + "performance-tester-phd (haiku) - Recommended"
-        print_dim("  [2] ") + "performance-tester-deep (sonnet) - Thorough"
-        print_yellow("  [c] ") + "Custom agent"
+        print(print_yellow("Performance Tester:"))
+        print(print_green("  [1] ") + "performance-tester-phd (haiku) - Recommended")
+        print(print_dim("  [2] ") + "performance-tester-deep (sonnet) - Thorough")
+        print(print_yellow("  [c] ") + "Custom agent")
         print()
         perf_choice = prompt_user("Select (default: 1): ").strip() or "1"
 
@@ -180,10 +180,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         print()
 
         # Integration Reporter selection
-        print_blue("Integration Reporter:")
-        print_green("  [1] ") + "integration-reporter-phd (haiku) - Recommended"
-        print_dim("  [2] ") + "integration-reporter-detailed (sonnet) - Comprehensive"
-        print_yellow("  [c] ") + "Custom agent"
+        print(print_blue("Integration Reporter:"))
+        print(print_green("  [1] ") + "integration-reporter-phd (haiku) - Recommended")
+        print(print_dim("  [2] ") + "integration-reporter-detailed (sonnet) - Comprehensive")
+        print(print_yellow("  [c] ") + "Custom agent")
         print()
         report_choice = prompt_user("Select (default: 1): ").strip() or "1"
 
@@ -202,16 +202,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # ─────────────────────────────────────────────────────────────────────────
 
     print()
-    print_bold("  - SELECTION SUMMARY")
+    print(print_bold("  - SELECTION SUMMARY"))
     print()
 
-    print_dim("─" * 118)
-    print_bold("SELECTED AGENTS")
+    print(print_dim("─" * 118))
+    print(print_bold("SELECTED AGENTS"))
     print()
     for agent in selected_agents:
         name, model = agent.split(":", 1)
-        print_green("  ✓ ") + f"{name} ({model})"
-    print_dim("─" * 118)
+        print(print_green("  ✓ ") + f"{name} ({model})")
+    print(print_dim("─" * 118))
     print()
 
     # Save agent selection
@@ -223,7 +223,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     write_json(agents_file, agents_data)
 
-    print_green("✓ Agent Selection complete")
+    print(print_green("✓ Agent Selection complete"))
     return True
 
 

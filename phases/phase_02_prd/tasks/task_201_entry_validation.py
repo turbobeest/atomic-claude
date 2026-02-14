@@ -47,9 +47,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     _show_phase_welcome()
 
     print()
-    print_dim("  ┌─────────────────────────────────────────────────────────┐")
-    print_dim("  │ Validating Phase 1 artifacts before proceeding...      │")
-    print_dim("  └─────────────────────────────────────────────────────────┘")
+    print(print_dim("  ┌─────────────────────────────────────────────────────────┐"))
+    print(print_dim("  │ Validating Phase 1 artifacts before proceeding...      │"))
+    print(print_dim("  └─────────────────────────────────────────────────────────┘"))
     print()
 
     # Validate artifacts
@@ -58,16 +58,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # Handle missing artifacts
     if not all_valid:
         print()
-        print_red("  Missing required artifacts:")
+        print(print_red("  Missing required artifacts:"))
         for item in missing:
             print(f"    • {item}")
         print()
 
         # UAT mode bypass
         if uat_mode:
-            print_yellow("  UAT mode: Continuing with missing artifacts")
+            print(print_yellow("  UAT mode: Continuing with missing artifacts"))
         else:
-            print_yellow("  Options:")
+            print(print_yellow("  Options:"))
             print("    " + print_dim("[b]") + " Go back to Phase 1")
             print("    " + print_dim("[c]") + " Continue anyway (not recommended)")
             print()
@@ -76,9 +76,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             choice = prompt_user("  Choice (default: b): ").strip().lower() or "b"
 
             if choice in ["c"]:
-                print_yellow("  ⚠ Continuing with missing artifacts")
+                print(print_yellow("  ⚠ Continuing with missing artifacts"))
             else:
-                print_cyan("  → Returning to complete Phase 1 first")
+                print(print_cyan("  → Returning to complete Phase 1 first"))
                 return False
 
     # Load context from Phase 1
@@ -88,15 +88,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     context_file = output_dir / "phase1-context.json"
     write_file(context_file, json.dumps(context, indent=2))
 
-    print_green("✓ Entry validation passed")
+    print(print_green("✓ Entry validation passed"))
     return True
 
 
 def _show_phase_welcome() -> None:
     """Display Phase 2 welcome banner."""
     print()
-    print_dim("━" * 90)
-    print_cyan(r"""
+    print(print_dim("━" * 90))
+    print(print_cyan(r"""
                     _____   ______  _____  ______  _     _ _______ _______
                    |_____] |_____/ |     | |     \ |     | |          |
                    |       |    \_ |_____| |_____/ |_____| |_____     |
@@ -108,8 +108,8 @@ def _show_phase_welcome() -> None:
                   ______   _____  _______ _     _ _______ _______ __   _ _______
                  |     \ |     | |       |     | |  |  | |______ | \  |    |
                  |_____/ |_____| |_____  |_____| |  |  | |______ |  \_|    |
-    """)
-    print_dim("━" * 90)
+    """))
+    print(print_dim("━" * 90))
     print("                                   " + print_bold("[ PHASE 02 - PRD ]"))
     print()
 
@@ -244,7 +244,7 @@ def load_phase1_context(phase1_dir: Path) -> Dict[str, Any]:
     Returns:
         Dictionary containing Phase 1 context
     """
-    print_dim("  Loading context from Phase 1...")
+    print(print_dim("  Loading context from Phase 1..."))
 
     context = {
         "loaded_at": datetime.now().isoformat(),
@@ -267,7 +267,7 @@ def load_phase1_context(phase1_dir: Path) -> Dict[str, Any]:
             }
             print("    • Selected approach: " + approach_data.get('name', 'unnamed'))
         except Exception as e:
-            print_yellow(f"    ⚠ Error loading approach: {e}")
+            print(print_yellow(f"    ⚠ Error loading approach: {e}"))
 
     # Extract direction/vision information
     direction_file = phase1_dir / "direction-confirmed.json"
@@ -280,7 +280,7 @@ def load_phase1_context(phase1_dir: Path) -> Dict[str, Any]:
             constraint_count = len(context["constraints"])
             print(f"    • Vision confirmed with {constraint_count} constraints")
         except Exception as e:
-            print_yellow(f"    ⚠ Error loading direction: {e}")
+            print(print_yellow(f"    ⚠ Error loading direction: {e}"))
 
     # Extract corpus information
     corpus_file = phase1_dir / "corpus.json"

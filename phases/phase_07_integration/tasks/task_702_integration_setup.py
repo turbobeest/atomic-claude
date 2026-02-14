@@ -37,7 +37,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     ensure_dir(integration_dir)
 
     print()
-    print_dim("Configuring integration environment and reviewing acceptance criteria.")
+    print(print_dim("Configuring integration environment and reviewing acceptance criteria."))
     print()
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -45,7 +45,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # ─────────────────────────────────────────────────────────────────────────
 
     print()
-    print_bold("  - INTEGRATION ENVIRONMENT")
+    print(print_bold("  - INTEGRATION ENVIRONMENT"))
     print()
 
     # Load project config
@@ -57,21 +57,21 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         project_name = config_data.get("project", {}).get("name", "Unknown")
         env_type = config_data.get("environment", {}).get("type", "development")
 
-    print_dim("─" * 118)
-    print_bold("ENVIRONMENT CONFIGURATION")
+    print(print_dim("─" * 118))
+    print(print_bold("ENVIRONMENT CONFIGURATION"))
     print()
     print(f"  Project:        {project_name}")
     print(f"  Environment:    {env_type}")
     print(f"  Test Mode:      Full E2E")
     print()
-    print_dim("─" * 118)
+    print(print_dim("─" * 118))
     print()
 
     env_confirm = "y"
     env_notes = ""
 
     if not uat_mode:
-        print_dim("Is this the correct integration environment?")
+        print(print_dim("Is this the correct integration environment?"))
         print()
         env_confirm = prompt_user("Confirm (default: y/n): ").strip() or "y"
 
@@ -85,19 +85,19 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # ─────────────────────────────────────────────────────────────────────────
 
     print()
-    print_bold("  - ACCEPTANCE CRITERIA REVIEW")
+    print(print_bold("  - ACCEPTANCE CRITERIA REVIEW"))
     print()
 
-    print_dim("Loading acceptance criteria from PRD and specifications...")
+    print(print_dim("Loading acceptance criteria from PRD and specifications..."))
     print()
 
     # Simulated acceptance criteria (in real implementation, would parse PRD)
     criteria_count = 17
 
-    print_dim("─" * 118)
-    print_bold("ACCEPTANCE CRITERIA TO VALIDATE")
+    print(print_dim("─" * 118))
+    print(print_bold("ACCEPTANCE CRITERIA TO VALIDATE"))
     print()
-    print_cyan("  Functional Requirements:")
+    print(print_cyan("  Functional Requirements:"))
     print("    FR-1   Core functionality implemented")
     print("    FR-2   Data persistence working")
     print("    FR-3   User interface responsive")
@@ -105,14 +105,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     print("    FR-5   Offline capability (if applicable)")
     print("    ...    (additional criteria from PRD)")
     print()
-    print_cyan("  Non-Functional Requirements:")
+    print(print_cyan("  Non-Functional Requirements:"))
     print("    NFR-1  Response time < target threshold")
     print("    NFR-2  Memory usage within bounds")
     print("    NFR-3  Error rate < acceptable limit")
     print("    ...    (additional NFRs)")
     print()
     print(f"  Total Criteria:  {criteria_count}")
-    print_dim("─" * 118)
+    print(print_dim("─" * 118))
     print()
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -120,17 +120,17 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # ─────────────────────────────────────────────────────────────────────────
 
     print()
-    print_bold("  - NFR TARGETS")
+    print(print_bold("  - NFR TARGETS"))
     print()
 
-    print_dim("─" * 118)
-    print_bold("PERFORMANCE TARGETS")
+    print(print_dim("─" * 118))
+    print(print_bold("PERFORMANCE TARGETS"))
     print()
     print("  Response Time:     < 100ms for local operations")
     print("  Startup Time:      < 3s")
     print("  Memory Usage:      < 100MB baseline")
     print("  Error Rate:        < 0.1%")
-    print_dim("─" * 118)
+    print(print_dim("─" * 118))
     print()
 
     if not uat_mode:
@@ -154,7 +154,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     setup_file = integration_dir / "setup.json"
     write_json(setup_file, setup_data)
 
-    print_green("✓ Integration Setup complete")
+    print(print_green("✓ Integration Setup complete"))
     return True
 
 

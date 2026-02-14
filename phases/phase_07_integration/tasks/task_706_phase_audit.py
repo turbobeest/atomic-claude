@@ -28,7 +28,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         True if task completed successfully, False otherwise
     """
     if uat_mode:
-        print_yellow("UAT Mode: Skipping phase audit")
+        print(print_yellow("UAT Mode: Skipping phase audit"))
         return True
 
     # Delegate to audit system

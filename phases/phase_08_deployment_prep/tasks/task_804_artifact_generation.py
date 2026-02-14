@@ -18,7 +18,6 @@ from core.utils.cli_ui import (
     print_red, print_dim, print_magenta, print_blue
 )
 from core.utils.file_ops import read_json, write_json
-from core.llm import invoke_llm
 
 
 def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
@@ -38,7 +37,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     setup_file = deployment_dir / "setup.json"
     artifacts_file = deployment_dir / "artifacts.json"
 
-    print_bold("Artifact Generation")
+    print(print_bold("Artifact Generation"))
     print()
 
     deployment_dir.mkdir(parents=True, exist_ok=True)
@@ -46,7 +45,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # UAT Mode Bypass
     if uat_mode:
-        print_dim("  UAT Mode: Creating minimal valid output")
+        print(print_dim("  UAT Mode: Creating minimal valid output"))
         artifacts_data = {
             "artifacts": [
                 {"name": "release-package", "status": "generated"},
@@ -58,11 +57,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             "uat_mode": True
         }
         write_json(artifacts_file, artifacts_data)
-        print_green("✓ UAT bypass complete")
+        print(print_green("✓ UAT bypass complete"))
         return True
 
     print()
-    print_dim("  Generating deployment artifacts.")
+    print(print_dim("  Generating deployment artifacts."))
     print()
 
     # Load setup configuration
@@ -89,11 +88,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # ARTIFACTS SUMMARY
     print()
-    print_bold("  - ARTIFACTS SUMMARY")
+    print(print_bold("  - ARTIFACTS SUMMARY"))
     print()
 
     print("  " + "─" * 110)
-    print_bold("  ARTIFACTS PREPARED")
+    print(print_bold("  ARTIFACTS PREPARED"))
     print()
     print(f"    [ok] Package: dist/{package_result['package_name']}.tar.gz")
     print("    [ok] CHANGELOG.md generated")
@@ -141,7 +140,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     write_json(artifacts_file, artifacts_data)
 
-    print_green("✓ Artifact Generation complete")
+    print(print_green("✓ Artifact Generation complete"))
 
     return True
 
@@ -149,7 +148,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 def _generate_package(prompts_dir: Path, version: str, release_type: str, context: str) -> Dict[str, Any]:
     """Generate release package."""
     print()
-    print_bold("  - RELEASE PACKAGING")
+    print(print_bold("  - RELEASE PACKAGING"))
     print()
 
     prompt = f"""# Release Packaging
@@ -179,20 +178,20 @@ Output raw JSON:
 }}
 """
 
-    print_dim("  [release-packager] Building release package...")
+    print(print_dim("  [release-packager] Building release package..."))
     print()
 
     # Simulate LLM call for now (would use invoke_llm in real implementation)
     package_name = f"project-{version}"
 
     print("  " + "─" * 110)
-    print_bold("  PACKAGE BUILD")
+    print(print_bold("  PACKAGE BUILD"))
     print()
     print(f"    Package Name:    {package_name}")
     print(f"    Version:         {version}")
     print("    Build Status:    SUCCESS")
     print()
-    print_dim("    Artifacts:")
+    print(print_dim("    Artifacts:"))
     print(f"      ✓ dist/{package_name}.tar.gz")
     print(f"      ✓ dist/{package_name}-py3-none-any.whl")
     print("      ✓ pyproject.toml updated")
@@ -206,14 +205,14 @@ Output raw JSON:
 def _generate_changelog(prompts_dir: Path, version: str, release_type: str, context: str) -> Dict[str, Any]:
     """Generate changelog."""
     print()
-    print_bold("  - CHANGELOG GENERATION")
+    print(print_bold("  - CHANGELOG GENERATION"))
     print()
 
-    print_dim("  [changelog-writer] Generating changelog...")
+    print(print_dim("  [changelog-writer] Generating changelog..."))
     print()
 
     print("  " + "─" * 110)
-    print_bold("  CHANGELOG")
+    print(print_bold("  CHANGELOG"))
     print()
     print(f"    ## [{version}] - {datetime.now().strftime('%Y-%m-%d')}")
     print()
@@ -234,16 +233,16 @@ def _generate_changelog(prompts_dir: Path, version: str, release_type: str, cont
 def _generate_documentation(prompts_dir: Path, version: str, context: str) -> Dict[str, Any]:
     """Generate documentation."""
     print()
-    print_bold("  - DOCUMENTATION GENERATION")
+    print(print_bold("  - DOCUMENTATION GENERATION"))
     print()
 
-    print_dim("  [documentation-generator] Creating user documentation...")
+    print(print_dim("  [documentation-generator] Creating user documentation..."))
     print()
 
     print("  " + "─" * 110)
-    print_bold("  DOCUMENTATION")
+    print(print_bold("  DOCUMENTATION"))
     print()
-    print_dim("    Generated files:")
+    print(print_dim("    Generated files:"))
     print("      ✓ docs/README.md          - Project overview")
     print("      ✓ docs/USAGE.md           - Usage guide")
     print("      ✓ docs/API.md             - API reference")
@@ -260,16 +259,16 @@ def _generate_documentation(prompts_dir: Path, version: str, context: str) -> Di
 def _generate_installation_guide(prompts_dir: Path, version: str, context: str) -> Dict[str, Any]:
     """Generate installation guide."""
     print()
-    print_bold("  - INSTALLATION GUIDE")
+    print(print_bold("  - INSTALLATION GUIDE"))
     print()
 
-    print_dim("  [installation-guide-writer] Creating installation guide...")
+    print(print_dim("  [installation-guide-writer] Creating installation guide..."))
     print()
 
     print("  " + "─" * 110)
-    print_bold("  INSTALLATION GUIDE")
+    print(print_bold("  INSTALLATION GUIDE"))
     print()
-    print_dim("    Sections:")
+    print(print_dim("    Sections:"))
     print("      ✓ Prerequisites")
     print("      ✓ Quick Start (pip install)")
     print("      ✓ Manual Installation")

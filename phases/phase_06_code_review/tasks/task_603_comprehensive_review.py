@@ -44,12 +44,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     src_dir = atomic_root / "src"
 
     print()
-    print_dim("Executing parallel code review across all dimensions.")
+    print(print_dim("Executing parallel code review across all dimensions."))
     print()
 
     # UAT Mode Bypass
     if uat_mode:
-        print_yellow("UAT Mode: Creating minimal valid output")
+        print(print_yellow("UAT Mode: Creating minimal valid output"))
         ensure_dir(review_dir)
         ensure_dir(prompts_dir)
 
@@ -78,7 +78,7 @@ None (UAT stub)
             "reviewed_at": datetime.now().isoformat()
         }, indent=2))
 
-        print_green("✓ UAT bypass complete")
+        print(print_green("✓ UAT bypass complete"))
         return True
 
     ensure_dir(review_dir)
@@ -91,7 +91,7 @@ None (UAT stub)
     # Discover review scope
     source_files, test_files = _discover_review_scope(atomic_root, src_dir)
     print()
-    print_dim(f"Review scope: {len(source_files)} source files, {len(test_files)} test files")
+    print(print_dim(f"Review scope: {len(source_files)} source files, {len(test_files)} test files"))
     print()
 
     # Gather code context
@@ -100,9 +100,9 @@ None (UAT stub)
 
     # Execute parallel review
     print()
-    print_bold("- PARALLEL REVIEW EXECUTION")
+    print(print_bold("- PARALLEL REVIEW EXECUTION"))
     print()
-    print_dim("Launching review agents...")
+    print(print_dim("Launching review agents..."))
     print()
 
     results = {}
@@ -114,7 +114,7 @@ None (UAT stub)
     # Display and save results
     _display_and_save_results(results, findings_file)
 
-    print_green("✓ Comprehensive Review complete")
+    print(print_green("✓ Comprehensive Review complete"))
     return True
 
 
@@ -444,10 +444,10 @@ def _execute_review(prompt: str, output_file: Path, model: str) -> Dict[str, Any
         result = json.loads(response)
         write_file(output_file, json.dumps(result, indent=2))
 
-        print_green("████████████████████████████████████████  Complete")
+        print(print_green("████████████████████████████████████████  Complete"))
         return result
     except Exception as e:
-        print_yellow(f"████████████████████████████████████████  Fallback ({e})")
+        print(print_yellow(f"████████████████████████████████████████  Fallback ({e})"))
         # Return empty result on error
         empty = {"critical": 0, "major": 0, "minor": 0, "suggestions": 0, "findings": []}
         write_file(output_file, json.dumps(empty, indent=2))
@@ -489,10 +489,10 @@ def _display_and_save_results(results: Dict[str, Dict], findings_file: Path) -> 
 
     # Display summary
     print()
-    print_bold("- REVIEW SUMMARY")
+    print(print_bold("- REVIEW SUMMARY"))
     print()
     print("  ─" * 50)
-    print_bold("TOTAL FINDINGS")
+    print(print_bold("TOTAL FINDINGS"))
     print()
 
     if total_critical == 0:

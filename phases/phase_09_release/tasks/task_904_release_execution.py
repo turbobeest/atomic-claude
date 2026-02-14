@@ -15,7 +15,7 @@ from typing import Dict, Any, Optional
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.ui import success, error, warning, info, step
-from core.llm.invoke import invoke_llm
+from core.llm import invoke_llm
 
 
 # ANSI color codes for formatted output

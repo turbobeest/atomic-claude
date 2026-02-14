@@ -88,40 +88,40 @@ def build_checklist(
 
     # TDD completion
     if completed_tasks >= total_tasks and total_tasks > 0:
-        print_green(f"  [CRIT] ✓ All TDD cycles complete ({completed_tasks} tasks)")
+        print(print_green(f"  [CRIT] ✓ All TDD cycles complete ({completed_tasks} tasks)"))
         checklist.append("TDD cycles complete:PASS")
     else:
-        print_red(f"  [CRIT] ✗ TDD cycles incomplete ({completed_tasks} / {total_tasks})")
+        print(print_red(f"  [CRIT] ✗ TDD cycles incomplete ({completed_tasks} / {total_tasks})"))
         checklist.append("TDD cycles complete:FAIL")
         all_passed = False
 
     # Coverage
     if unit_coverage >= 80:
-        print_green(f"  [CRIT] ✓ Coverage >= 80% ({unit_coverage}%)")
+        print(print_green(f"  [CRIT] ✓ Coverage >= 80% ({unit_coverage}%)"))
         checklist.append("Coverage:PASS")
     elif unit_coverage >= 70:
-        print_yellow(f"  [CRIT] ! Coverage {unit_coverage}% (target: 80%)")
+        print(print_yellow(f"  [CRIT] ! Coverage {unit_coverage}% (target: 80%)"))
         checklist.append("Coverage:WARN")
     else:
-        print_red(f"  [CRIT] ✗ Coverage below 70% ({unit_coverage}%)")
+        print(print_red(f"  [CRIT] ✗ Coverage below 70% ({unit_coverage}%)"))
         checklist.append("Coverage:FAIL")
         all_passed = False
 
     # All tests passing
     if passing_tests == total_tests and total_tests > 0:
-        print_green(f"  [CRIT] ✓ All tests passing ({passing_tests} tests)")
+        print(print_green(f"  [CRIT] ✓ All tests passing ({passing_tests} tests)"))
         checklist.append("All tests passing:PASS")
     else:
-        print_red(f"  [CRIT] ✗ Tests failing ({total_tests - passing_tests} of {total_tests})")
+        print(print_red(f"  [CRIT] ✗ Tests failing ({total_tests - passing_tests} of {total_tests})"))
         checklist.append("All tests passing:FAIL")
         all_passed = False
 
     # VERIFY scans
     if critical_issues == 0:
-        print_green("  [BLCK] ✓ VERIFY scans clean")
+        print(print_green("  [BLCK] ✓ VERIFY scans clean"))
         checklist.append("VERIFY scans:PASS")
     else:
-        print_red(f"  [BLCK] ✗ {critical_issues} critical security issues")
+        print(print_red(f"  [BLCK] ✗ {critical_issues} critical security issues"))
         checklist.append("VERIFY scans:FAIL")
 
     # Audit
@@ -140,36 +140,36 @@ def build_checklist(
             # Try legacy format
             audit_status = audit_data.get("overall_status", "UNKNOWN")
             if audit_status == "PASS":
-                print_green("  [BLCK] ✓ Audit passed")
+                print(print_green("  [BLCK] ✓ Audit passed"))
                 checklist.append("Audit:PASS")
             elif audit_status in ["WARNING", "DEFERRED"]:
-                print_yellow(f"  [BLCK] ! Audit: {audit_status}")
+                print(print_yellow(f"  [BLCK] ! Audit: {audit_status}"))
                 checklist.append("Audit:WARN")
             else:
-                print_red("  [BLCK] ✗ Audit failed")
+                print(print_red("  [BLCK] ✗ Audit failed"))
                 checklist.append("Audit:FAIL")
         elif failed == 0 and warnings == 0:
-            print_green(f"  [BLCK] ✓ Audit passed ({passed} passed)")
+            print(print_green(f"  [BLCK] ✓ Audit passed ({passed} passed)"))
             checklist.append("Audit:PASS")
         elif failed == 0:
-            print_yellow(f"  [BLCK] ! Audit has warnings ({warnings} warnings)")
+            print(print_yellow(f"  [BLCK] ! Audit has warnings ({warnings} warnings)"))
             checklist.append("Audit:WARN")
         else:
-            print_red(f"  [BLCK] ✗ Audit has failures ({failed} failed)")
+            print(print_red(f"  [BLCK] ✗ Audit has failures ({failed} failed)"))
             checklist.append("Audit:FAIL")
     else:
-        print_yellow("  [BLCK] ! Audit not completed")
+        print(print_yellow("  [BLCK] ! Audit not completed"))
         checklist.append("Audit:SKIP")
 
     # No flaky tests
     if flaky_tests == 0:
-        print_green("  [BLCK] ✓ No flaky tests")
+        print(print_green("  [BLCK] ✓ No flaky tests"))
         checklist.append("No flaky tests:PASS")
     else:
-        print_yellow(f"  [BLCK] ! {flaky_tests} flaky tests detected")
+        print(print_yellow(f"  [BLCK] ! {flaky_tests} flaky tests detected"))
         checklist.append("No flaky tests:WARN")
 
-    print_green("  [PASS] ✓ Ready for Code Review")
+    print(print_green("  [PASS] ✓ Ready for Code Review"))
 
     return checklist, all_passed
 
@@ -202,7 +202,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # UAT Mode Bypass
     if uat_mode:
         print()
-        print_yellow("⚡ UAT Mode: Auto-approving closeout, creating minimal artifacts")
+        print(print_yellow("⚡ UAT Mode: Auto-approving closeout, creating minimal artifacts"))
         print()
 
         ensure_dir(closeout_dir)
@@ -253,17 +253,17 @@ Phase 6: Code Review
         }
         write_file(closeout_json, json.dumps(closeout_data, indent=2))
 
-        print_green("✓ Generated phase-05-closeout.md (UAT mode)")
-        print_green("✓ Generated phase-05-closeout.json (UAT mode)")
+        print(print_green("✓ Generated phase-05-closeout.md (UAT mode)"))
+        print(print_green("✓ Generated phase-05-closeout.json (UAT mode)"))
         print()
 
-        print_green("✓ Phase 5 closeout complete (UAT mode)")
+        print(print_green("✓ Phase 5 closeout complete (UAT mode)"))
         return True
 
     ensure_dir(closeout_dir)
 
     print()
-    print_dim("  Final review before moving to Phase 6 (Code Review).")
+    print(print_dim("  Final review before moving to Phase 6 (Code Review)."))
     print()
 
     # Get metrics
@@ -273,9 +273,9 @@ Phase 6: Code Review
     )
 
     # Closeout Checklist
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("CLOSEOUT CHECKLIST")
+    print(print_bold("CLOSEOUT CHECKLIST"))
     print()
 
     checklist, all_passed = build_checklist(
@@ -286,18 +286,18 @@ Phase 6: Code Review
     print()
 
     # Closeout Approval
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
 
     if not all_passed:
-        print_yellow("  Some critical items need attention before closeout.")
+        print(print_yellow("  Some critical items need attention before closeout."))
         print()
 
-    print_cyan("  Closeout options:")
+    print(print_cyan("  Closeout options:"))
     print()
-    print_green("    [approve]") + " Approve closeout and proceed"
-    print_yellow("    [review]") + "  Review specific artifacts"
-    print_red("    [hold]") + "    Hold closeout for now"
+    print(print_green("    [approve]") + " Approve closeout and proceed")
+    print(print_yellow("    [review]") + "  Review specific artifacts")
+    print(print_red("    [hold]") + "    Hold closeout for now")
     print()
 
     closeout_choice = prompt_user("  Choice (default: approve): ").strip()
@@ -305,7 +305,7 @@ Phase 6: Code Review
 
     if closeout_choice == "review":
         print()
-        print_dim("  Key artifacts:")
+        print(print_dim("  Key artifacts:"))
         print("    .claude/testing/                     - TDD execution records")
         print("    .claude/testing/validation-report.json - Validation report")
         print("    .claude/audit/phase-05-audit.json    - Audit results")
@@ -314,13 +314,13 @@ Phase 6: Code Review
         prompt_user("  Press Enter to continue to closeout...")
     elif closeout_choice == "hold":
         print()
-        print_yellow("✗ Closeout held - phase not complete")
+        print(print_yellow("✗ Closeout held - phase not complete"))
         return False
 
     # Generate Closeout Document
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("GENERATING CLOSEOUT")
+    print(print_bold("GENERATING CLOSEOUT"))
     print()
 
     # Generate markdown closeout
@@ -424,33 +424,33 @@ In the next phase, we will:
     }
     write_file(closeout_json, json.dumps(closeout_data, indent=2))
 
-    print_green("✓ Generated phase-05-closeout.md")
-    print_green("✓ Generated phase-05-closeout.json")
+    print(print_green("✓ Generated phase-05-closeout.md"))
+    print(print_green("✓ Generated phase-05-closeout.json"))
     print()
 
     # Session End
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("SESSION END")
+    print(print_bold("SESSION END"))
     print()
     print("  Closeout saved to:")
-    print_dim("    .claude/closeout/phase-05-closeout.md")
+    print(print_dim("    .claude/closeout/phase-05-closeout.md"))
     print()
     print("  Testing artifacts at:")
-    print_dim("    .claude/testing/")
+    print(print_dim("    .claude/testing/"))
     print()
-    print_bold("  Next: PHASE 6 - CODE REVIEW")
+    print(print_bold("  Next: PHASE 6 - CODE REVIEW"))
     print()
     print("  To continue:")
-    print_cyan("    ./orchestrator/pipeline resume")
+    print(print_cyan("    ./orchestrator/pipeline resume"))
     print()
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_green("  Phase 5 Complete!")
-    print_dim("  TDD cycles executed. Tests passing. Ready for Code Review.")
+    print(print_green("  Phase 5 Complete!"))
+    print(print_dim("  TDD cycles executed. Tests passing. Ready for Code Review."))
     print()
 
-    print_green("✓ Phase 5 closeout complete")
+    print(print_green("✓ Phase 5 closeout complete"))
     return True
 
 

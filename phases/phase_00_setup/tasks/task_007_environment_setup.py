@@ -59,7 +59,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     config_file = output_dir / "project-config.json"
 
     print()
-    print_cyan("Environment Setup")
+    print(print_cyan("Environment Setup"))
     print()
 
     # Reset counters
@@ -73,7 +73,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # Detect OS
     os_type = _detect_os()
-    print_dim(f"  Detected OS: {os_type}")
+    print(print_dim(f"  Detected OS: {os_type}"))
     print()
 
     # Core required tools
@@ -92,21 +92,21 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # Summary
     _show_summary()
 
-    print_dim("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print(print_dim("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"))
     print()
 
     # Check if required tools are missing
     missing = REQUIRED_TOTAL - REQUIRED_INSTALLED
 
     if missing > 0:
-        print_red(f"  Cannot proceed with {missing} missing required tool(s).")
+        print(print_red(f"  Cannot proceed with {missing} missing required tool(s)."))
         print()
         if uat_mode:
-            print_yellow("  UAT Mode: Continuing despite missing tools")
+            print(print_yellow("  UAT Mode: Continuing despite missing tools"))
             return True
 
-        print_yellow("  Open another terminal to install missing tools.")
-        print_yellow("  When ready, return here and press Enter to re-check.")
+        print(print_yellow("  Open another terminal to install missing tools."))
+        print(print_yellow("  When ready, return here and press Enter to re-check."))
         print()
 
         # Loop until all required tools are installed
@@ -122,13 +122,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
             missing = REQUIRED_TOTAL - REQUIRED_INSTALLED
             if missing > 0:
-                print_red(f"  Still missing {missing} required tool(s).")
+                print(print_red(f"  Still missing {missing} required tool(s)."))
                 print()
 
-        print_green("  All required tools now installed.")
+        print(print_green("  All required tools now installed."))
         print()
     else:
-        print_green("  All required tools installed.")
+        print(print_green("  All required tools installed."))
         print()
         if not uat_mode:
             clear_input_buffer()
@@ -137,18 +137,18 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # Record to context
     _record_context(config_file)
 
-    print_green("✓ Environment validated")
+    print(print_green("✓ Environment validated"))
     return True
 
 
 def _show_info_box() -> None:
     """Show informational box."""
-    print_dim("  ┌─────────────────────────────────────────────────────────┐")
-    print_dim("  │ Before proceeding, ensure you have the required tools.  │")
-    print_dim("  │                                                         │")
-    print_dim("  │ Open another terminal to install any missing tools,     │")
-    print_dim("  │ then return here and press Enter to continue.           │")
-    print_dim("  └─────────────────────────────────────────────────────────┘")
+    print(print_dim("  ┌─────────────────────────────────────────────────────────┐"))
+    print(print_dim("  │ Before proceeding, ensure you have the required tools.  │"))
+    print(print_dim("  │                                                         │"))
+    print(print_dim("  │ Open another terminal to install any missing tools,     │"))
+    print(print_dim("  │ then return here and press Enter to continue.           │"))
+    print(print_dim("  └─────────────────────────────────────────────────────────┘"))
     print()
 
 
@@ -280,7 +280,7 @@ def _show_required_tools(os_type: str) -> None:
     """Show required tools and their status."""
     global REQUIRED_TOTAL, REQUIRED_INSTALLED
 
-    print_cyan("  REQUIRED TOOLS:")
+    print(print_cyan("  REQUIRED TOOLS:"))
     print()
 
     tools = [
@@ -301,18 +301,18 @@ def _show_required_tools(os_type: str) -> None:
             if min_version and tool == "node":
                 major = int(version.split('.')[0])
                 if major >= min_version:
-                    print_green(f"    ✓ {tool} (v{version})")
+                    print(print_green(f"    ✓ {tool} (v{version})"))
                     REQUIRED_INSTALLED += 1
                 else:
-                    print_yellow(f"    ! {tool} (v{version}) - v{min_version}+ required")
-                    print_dim(f"      {_get_install_cmd(tool, os_type)}")
+                    print(print_yellow(f"    ! {tool} (v{version}) - v{min_version}+ required"))
+                    print(print_dim(f"      {_get_install_cmd(tool, os_type)}"))
             else:
-                print_green(f"    ✓ {tool} ({version})")
+                print(print_green(f"    ✓ {tool} ({version})"))
                 REQUIRED_INSTALLED += 1
         else:
             tool_name = "graphviz" if tool == "dot" else tool
-            print_red(f"    ✗ {tool_name} - REQUIRED")
-            print_dim(f"      {_get_install_cmd(tool, os_type)}")
+            print(print_red(f"    ✗ {tool_name} - REQUIRED"))
+            print(print_dim(f"      {_get_install_cmd(tool, os_type)}"))
 
     print()
 
@@ -342,7 +342,7 @@ def _show_recommended_tools(os_type: str) -> None:
     """Show recommended tools and their status."""
     global RECOMMENDED_TOTAL, RECOMMENDED_INSTALLED
 
-    print_cyan("  RECOMMENDED TOOLS:")
+    print(print_cyan("  RECOMMENDED TOOLS:"))
     print()
 
     tools = ["gh", "docker"]
@@ -352,71 +352,71 @@ def _show_recommended_tools(os_type: str) -> None:
         version = _check_tool(tool)
 
         if version:
-            print_green(f"    ✓ {tool} ({version})")
+            print(print_green(f"    ✓ {tool} ({version})"))
             RECOMMENDED_INSTALLED += 1
         else:
             desc = "GitHub CLI" if tool == "gh" else "Containerized deployment"
-            print_yellow(f"    ○ {tool} - {desc}")
-            print_dim(f"      {_get_install_cmd(tool, os_type)}")
+            print(print_yellow(f"    ○ {tool} - {desc}"))
+            print(print_dim(f"      {_get_install_cmd(tool, os_type)}"))
 
     print()
 
 
 def _show_quick_install(os_type: str) -> None:
     """Show quick install commands for missing tools."""
-    print_cyan("  QUICK INSTALL:")
+    print(print_cyan("  QUICK INSTALL:"))
     print()
 
     if os_type == "macos":
-        print_dim("    # All required tools:")
-        print_bold("    brew install git jq node graphviz")
-        print_bold("    npm install -g @anthropic-ai/claude-code task-master-ai")
+        print(print_dim("    # All required tools:"))
+        print(print_bold("    brew install git jq node graphviz"))
+        print(print_bold("    npm install -g @anthropic-ai/claude-code task-master-ai"))
     elif os_type == "debian":
-        print_dim("    # All required tools:")
-        print_bold("    sudo apt update && sudo apt install -y git jq graphviz")
-        print_bold("    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -")
-        print_bold("    sudo apt install -y nodejs")
-        print_bold("    npm install -g @anthropic-ai/claude-code task-master-ai")
+        print(print_dim("    # All required tools:"))
+        print(print_bold("    sudo apt update && sudo apt install -y git jq graphviz"))
+        print(print_bold("    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -"))
+        print(print_bold("    sudo apt install -y nodejs"))
+        print(print_bold("    npm install -g @anthropic-ai/claude-code task-master-ai"))
     elif os_type == "windows":
-        print_dim("    # All required tools (PowerShell as Admin):")
-        print_bold("    winget install Git.Git jqlang.jq OpenJS.NodeJS.LTS Graphviz.Graphviz")
-        print_bold("    npm install -g @anthropic-ai/claude-code task-master-ai")
+        print(print_dim("    # All required tools (PowerShell as Admin):"))
+        print(print_bold("    winget install Git.Git jqlang.jq OpenJS.NodeJS.LTS Graphviz.Graphviz"))
+        print(print_bold("    npm install -g @anthropic-ai/claude-code task-master-ai"))
     else:
-        print_dim("    See tool-specific install commands above")
+        print(print_dim("    See tool-specific install commands above"))
 
     print()
 
 
 def _show_airgap_note() -> None:
     """Show airgapped environment note."""
-    print_dim("  ┌─────────────────────────────────────────────────────────┐")
-    print_dim("  │ Airgapped Environment?                                  │")
-    print_dim("  │                                                         │")
-    print_dim("  │ Download these packages on a connected machine:         │")
-    print_dim("  │   npm pack @anthropic-ai/claude-code                    │")
-    print_dim("  │   npm pack task-master-ai                               │")
-    print_dim("  │                                                         │")
-    print_dim("  │ Transfer .tgz files and install with:                   │")
-    print_dim("  │   npm install -g ./anthropic-ai-claude-code-*.tgz       │")
-    print_dim("  │   npm install -g ./task-master-ai-*.tgz                 │")
-    print_dim("  └─────────────────────────────────────────────────────────┘")
+    print(print_dim("  ┌─────────────────────────────────────────────────────────┐"))
+    print(print_dim("  │ Airgapped Environment?                                  │"))
+    print(print_dim("  │                                                         │"))
+    print(print_dim("  │ Download these packages on a connected machine:         │"))
+    print(print_dim("  │   npm pack @anthropic-ai/claude-code                    │"))
+    print(print_dim("  │   npm pack task-master-ai                               │"))
+    print(print_dim("  │                                                         │"))
+    print(print_dim("  │ Transfer .tgz files and install with:                   │"))
+    print(print_dim("  │   npm install -g ./anthropic-ai-claude-code-*.tgz       │"))
+    print(print_dim("  │   npm install -g ./task-master-ai-*.tgz                 │"))
+    print(print_dim("  └─────────────────────────────────────────────────────────┘"))
     print()
 
 
 def _show_summary() -> None:
     """Show status summary."""
-    print_dim("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print(print_dim("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"))
     print()
 
     # Required status
     if REQUIRED_INSTALLED == REQUIRED_TOTAL:
-        print_green(f"  ✓ Required: {REQUIRED_INSTALLED}/{REQUIRED_TOTAL} installed")
+        print(print_green(f"  ✓ Required: {REQUIRED_INSTALLED}/{REQUIRED_TOTAL} installed"))
     else:
         missing = REQUIRED_TOTAL - REQUIRED_INSTALLED
-        print_red(f"  ✗ Required: {REQUIRED_INSTALLED}/{REQUIRED_TOTAL} installed ({missing} missing)")
+        print(print_red(f"  ✗ Required: {REQUIRED_INSTALLED}/{REQUIRED_TOTAL} installed ({missing} missing)"))
 
     # Recommended status
-    print_dim(f"  ○ Recommended: {RECOMMENDED_INSTALLED}/{RECOMMENDED_TOTAL} installed")
+    print(print_dim(f"  ○ Recommended: {RECOMMENDED_INSTALLED}/{RECOMMENDED_TOTAL} installed"))
     print()
 
 

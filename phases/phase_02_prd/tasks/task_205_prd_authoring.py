@@ -68,16 +68,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     ensure_dir(prompts_dir)
 
     print()
-    print_cyan("╔═══════════════════════════════════════════════════════════╗")
-    print_cyan("║ " + print_bold("PRD AUTHORING") + "                                             ║")
-    print_cyan("╚═══════════════════════════════════════════════════════════╝")
+    print(print_cyan("╔═══════════════════════════════════════════════════════════╗"))
+    print(print_cyan("║ " + print_bold("PRD AUTHORING") + "                                             ║"))
+    print(print_cyan("╚═══════════════════════════════════════════════════════════╝"))
     print()
 
     # UAT mode bypass - create minimal PRD
     if uat_mode:
-        print_yellow("  UAT mode: Creating minimal PRD...")
+        print(print_yellow("  UAT mode: Creating minimal PRD..."))
         create_minimal_prd(prd_file, atomic_root, output_dir)
-        print_green("✓ Minimal PRD created for UAT")
+        print(print_green("✓ Minimal PRD created for UAT"))
         return True
 
     # Load context from previous tasks
@@ -85,7 +85,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # Check if PRD already exists
     if prd_file.exists():
-        print_yellow(f"  PRD already exists: {prd_file}")
+        print(print_yellow(f"  PRD already exists: {prd_file}"))
         print()
         print("    " + print_cyan("[continue]") + "  Continue with existing PRD")
         print("    " + print_yellow("[regenerate]") + " Regenerate from scratch")
@@ -98,13 +98,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             # Backup existing PRD
             backup_file = prd_file.parent / f"PRD.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
             prd_file.rename(backup_file)
-            print_dim(f"  Backed up to: {backup_file}")
+            print(print_dim(f"  Backed up to: {backup_file}"))
         else:
-            print_green("✓ Using existing PRD")
+            print(print_green("✓ Using existing PRD"))
             return True
 
     print()
-    print_cyan("  Generating PRD in 12 generations...")
+    print(print_cyan("  Generating PRD in 12 generations..."))
     print()
 
     # Generate PRD section by section
@@ -128,16 +128,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
         if section_content:
             prd_content += section_content + "\n\n"
-            print_green(f"    ✓ {section_name} complete")
+            print(print_green(f"    ✓ {section_name} complete"))
         else:
-            print_red(f"    ✗ Failed to generate {section_name}")
+            print(print_red(f"    ✗ Failed to generate {section_name}"))
             return False
 
         # Save incremental progress
         write_file(prd_file, prd_content)
 
     print()
-    print_green(f"✓ PRD authoring complete: {prd_file}")
+    print(print_green(f"✓ PRD authoring complete: {prd_file}"))
     return True
 
 
@@ -355,7 +355,7 @@ def generate_section(
             return ""
 
     except Exception as e:
-        print_red(f"      Error generating section: {e}")
+        print(print_red(f"      Error generating section: {e}"))
         return ""
 
 

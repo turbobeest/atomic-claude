@@ -35,14 +35,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     deployment_dir = atomic_root / ".claude" / "deployment"
     setup_file = deployment_dir / "setup.json"
 
-    print_bold("Deployment Setup")
+    print(print_bold("Deployment Setup"))
     print()
 
     deployment_dir.mkdir(parents=True, exist_ok=True)
 
     # UAT Mode Bypass
     if uat_mode:
-        print_dim("  UAT Mode: Creating minimal valid output")
+        print(print_dim("  UAT Mode: Creating minimal valid output"))
         setup_data = {
             "release_type": "internal",
             "version": "0.1.0",
@@ -50,19 +50,19 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             "config_confirmed": True
         }
         write_json(setup_file, setup_data)
-        print_green("✓ UAT bypass complete")
+        print(print_green("✓ UAT bypass complete"))
         return True
 
     print()
-    print_dim("  Configuring release type and distribution channels.")
+    print(print_dim("  Configuring release type and distribution channels."))
     print()
 
     # RELEASE TYPE
     print()
-    print_bold("  - RELEASE TYPE")
+    print(print_bold("  - RELEASE TYPE"))
     print()
 
-    print_dim("  Select the type of release:")
+    print(print_dim("  Select the type of release:"))
     print()
     print("    [1] Major (x.0.0) - Breaking changes, new architecture")
     print("    [2] Minor (0.x.0) - New features, backward compatible")
@@ -78,13 +78,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # VERSION NUMBER
     print()
-    print_bold("  - VERSION NUMBER")
+    print(print_bold("  - VERSION NUMBER"))
     print()
 
     version_map = {"major": "1.0.0", "minor": "0.1.0", "patch": "0.0.1"}
     default_version = version_map.get(release_type, "0.1.0")
 
-    print_dim("  Enter version number (SemVer format):")
+    print(print_dim("  Enter version number (SemVer format):"))
     print()
     version_number = prompt_user(f"  Version (default: {default_version}): ") or default_version
 
@@ -92,10 +92,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # DISTRIBUTION CHANNELS
     print()
-    print_bold("  - DISTRIBUTION CHANNELS")
+    print(print_bold("  - DISTRIBUTION CHANNELS"))
     print()
 
-    print_dim("  Select distribution channel:")
+    print(print_dim("  Select distribution channel:"))
     print()
     print("    [1] Internal only")
     print()
@@ -110,11 +110,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # RELEASE CONFIGURATION SUMMARY
     print()
-    print_bold("  - RELEASE CONFIGURATION")
+    print(print_bold("  - RELEASE CONFIGURATION"))
     print()
 
     print("  " + "─" * 110)
-    print_bold("  RELEASE SETTINGS")
+    print(print_bold("  RELEASE SETTINGS"))
     print()
     print(f"    Release Type:    {release_type}")
     print(f"    Version:         {version_number}")
@@ -122,13 +122,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     print("  " + "─" * 110)
     print()
 
-    print_dim("  Confirm this configuration?")
+    print(print_dim("  Confirm this configuration?"))
     print()
     config_confirm = prompt_user("  Confirm (default: y/n): ") or "y"
 
     if config_confirm.lower() not in ["y", "yes"]:
         print()
-        print_dim("  Re-running setup...")
+        print(print_dim("  Re-running setup..."))
         return execute(atomic_root, output_dir, uat_mode)
 
     print()
@@ -147,7 +147,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     write_json(setup_file, setup_data)
 
-    print_green("✓ Deployment Setup complete")
+    print(print_green("✓ Deployment Setup complete"))
 
     return True
 

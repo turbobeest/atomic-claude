@@ -53,7 +53,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # UAT Mode: Auto-approve closeout
     if uat_mode:
         print()
-        print_yellow("⚡ UAT Mode: Auto-approving closeout")
+        print(print_yellow("⚡ UAT Mode: Auto-approving closeout"))
         print()
 
         write_file(closeout_file, """# Phase 3: Tasking - Closeout
@@ -75,17 +75,17 @@ Phase 3 closeout auto-approved in UAT mode.
         }
         write_file(closeout_json, json.dumps(closeout_data, indent=2))
 
-        print_green("✓ Phase closeout complete (UAT mode)")
+        print(print_green("✓ Phase closeout complete (UAT mode)"))
         return True
 
     print()
-    print_dim("Final review before moving to Phase 4 (Specification).")
+    print(print_dim("Final review before moving to Phase 4 (Specification)."))
     print()
 
     # Closeout Checklist
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("CLOSEOUT CHECKLIST")
+    print(print_bold("CLOSEOUT CHECKLIST"))
     print()
 
     checklist, all_passed = _run_checklist(
@@ -98,18 +98,18 @@ Phase 3 closeout auto-approved in UAT mode.
     print()
 
     # Closeout Approval
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
 
     if not all_passed:
-        print_yellow("Some critical items need attention before closeout.")
+        print(print_yellow("Some critical items need attention before closeout."))
         print()
 
-    print_cyan("Closeout options:")
+    print(print_cyan("Closeout options:"))
     print()
-    print_green("  [approve]") + " Approve closeout and proceed"
-    print_yellow("  [review] ") + " Review specific artifacts"
-    print_red("  [hold]   ") + " Hold closeout for now"
+    print(print_green("  [approve]") + " Approve closeout and proceed")
+    print(print_yellow("  [review] ") + " Review specific artifacts")
+    print(print_red("  [hold]   ") + " Hold closeout for now")
     print()
 
     clear_input_buffer()
@@ -122,13 +122,13 @@ Phase 3 closeout auto-approved in UAT mode.
         input("Press Enter to continue to closeout...")
     elif closeout_choice == "hold":
         print()
-        print_yellow("⚠ Closeout held - phase not complete")
+        print(print_yellow("⚠ Closeout held - phase not complete"))
         return False
 
     # Generate Closeout Document
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("GENERATING CLOSEOUT")
+    print(print_bold("GENERATING CLOSEOUT"))
     print()
 
     # Gather metrics
@@ -140,8 +140,8 @@ Phase 3 closeout auto-approved in UAT mode.
     # Generate JSON closeout
     _generate_json_closeout(closeout_json, checklist, metrics)
 
-    print_green("✓ Generated phase-03-closeout.md")
-    print_green("✓ Generated phase-03-closeout.json")
+    print(print_green("✓ Generated phase-03-closeout.md"))
+    print(print_green("✓ Generated phase-03-closeout.json"))
     print()
 
     # Memory Checkpoint
@@ -150,7 +150,7 @@ Phase 3 closeout auto-approved in UAT mode.
     # Session End
     _show_session_end(closeout_file, tasks_file)
 
-    print_green("✓ Phase 3 closeout complete")
+    print(print_green("✓ Phase 3 closeout complete"))
     return True
 
 
@@ -170,18 +170,18 @@ def _run_checklist(
             tasks_data = json.loads(read_file(tasks_file))
             task_count = len(tasks_data.get("tasks", []))
             if task_count >= 3:
-                print_green("[CRIT] ✓") + f" Tasks decomposed ({task_count} tasks)"
+                print(print_green("[CRIT] ✓") + f" Tasks decomposed ({task_count} tasks)")
                 checklist.append(("Tasks decomposed", "PASS"))
             else:
-                print_red(f"[CRIT] ✗ Insufficient tasks ({task_count})")
+                print(print_red(f"[CRIT] ✗ Insufficient tasks ({task_count})"))
                 checklist.append(("Tasks decomposed", "FAIL"))
                 all_passed = False
         except:
-            print_red("[CRIT] ✗ Tasks file invalid")
+            print(print_red("[CRIT] ✗ Tasks file invalid"))
             checklist.append(("Tasks decomposed", "FAIL"))
             all_passed = False
     else:
-        print_red("[CRIT] ✗ Tasks file missing")
+        print(print_red("[CRIT] ✗ Tasks file missing"))
         checklist.append(("Tasks decomposed", "FAIL"))
         all_passed = False
 
@@ -192,16 +192,16 @@ def _run_checklist(
             analysis = json.loads(read_file(dep_analysis))
             dep_valid = analysis.get("validation", {}).get("passed", False)
             if dep_valid:
-                print_green("[CRIT] ✓") + " Dependencies validated"
+                print(print_green("[CRIT] ✓") + " Dependencies validated")
                 checklist.append(("Dependencies mapped", "PASS"))
             else:
-                print_yellow("[CRIT] !") + " Dependency issues found"
+                print(print_yellow("[CRIT] !") + " Dependency issues found")
                 checklist.append(("Dependencies mapped", "WARN"))
         except:
-            print_yellow("[CRIT] !") + " Dependency analysis invalid"
+            print(print_yellow("[CRIT] !") + " Dependency analysis invalid")
             checklist.append(("Dependencies mapped", "WARN"))
     else:
-        print_yellow("[CRIT] !") + " Dependency analysis not found"
+        print(print_yellow("[CRIT] !") + " Dependency analysis not found")
         checklist.append(("Dependencies mapped", "SKIP"))
 
     # Check audit
@@ -217,19 +217,19 @@ def _run_checklist(
             warnings = audit_data.get("summary", {}).get("warnings", 0)
 
             if failed == 0 and warnings == 0 and passed > 0:
-                print_green(f"[BLCK] ✓ Audit passed ({passed} passed)")
+                print(print_green(f"[BLCK] ✓ Audit passed ({passed} passed)"))
                 checklist.append(("Audit", "PASS"))
             elif failed == 0 and warnings > 0:
-                print_yellow(f"[BLCK] ! Audit has warnings ({warnings} warnings)")
+                print(print_yellow(f"[BLCK] ! Audit has warnings ({warnings} warnings)"))
                 checklist.append(("Audit", "WARN"))
             else:
-                print_red(f"[BLCK] ✗ Audit has failures ({failed} failed)")
+                print(print_red(f"[BLCK] ✗ Audit has failures ({failed} failed)"))
                 checklist.append(("Audit", "FAIL"))
         except:
-            print_green("[BLCK] ✓ Audit completed")
+            print(print_green("[BLCK] ✓ Audit completed"))
             checklist.append(("Audit", "PASS"))
     else:
-        print_yellow("[BLCK] ! Audit not completed")
+        print(print_yellow("[BLCK] ! Audit not completed"))
         checklist.append(("Audit", "SKIP"))
 
     # Check work packages
@@ -237,13 +237,13 @@ def _run_checklist(
         try:
             packages_data = json.loads(read_file(packages_file))
             pkg_count = len(packages_data.get("packages", []))
-            print_green(f"[BLCK] ✓ Work packages created ({pkg_count} packages)")
+            print(print_green(f"[BLCK] ✓ Work packages created ({pkg_count} packages)"))
             checklist.append(("Work packages", "PASS"))
         except:
-            print_yellow("[BLCK] ! Work packages invalid")
+            print(print_yellow("[BLCK] ! Work packages invalid"))
             checklist.append(("Work packages", "SKIP"))
     else:
-        print_yellow("[BLCK] ! Work packages not created")
+        print(print_yellow("[BLCK] ! Work packages not created"))
         checklist.append(("Work packages", "SKIP"))
 
     # Check complexity
@@ -260,13 +260,13 @@ def _run_checklist(
             pass
 
     if has_complexity:
-        print_green("[PASS] ✓ Complexity analysis complete")
+        print(print_green("[PASS] ✓ Complexity analysis complete"))
         checklist.append(("Complexity", "PASS"))
     else:
-        print_yellow("[PASS] ! Complexity analysis not found")
+        print(print_yellow("[PASS] ! Complexity analysis not found"))
         checklist.append(("Complexity", "SKIP"))
 
-    print_green("[PASS] ✓ Ready for Specification")
+    print(print_green("[PASS] ✓ Ready for Specification"))
 
     return checklist, all_passed
 
@@ -274,7 +274,7 @@ def _run_checklist(
 def _show_review(output_dir: Path, project_root: Path) -> None:
     """Show review of artifacts."""
     print()
-    print_dim("Key artifacts:")
+    print(print_dim("Key artifacts:"))
     print("  .taskmaster/tasks/tasks.json")
     print("  .taskmaster/reports/work-packages.json")
     print("  .taskmaster/reports/dependency-graph.json")
@@ -432,32 +432,32 @@ KEY ARTIFACTS:
 READY FOR: Phase 4 (Specification) - OpenSpec generation and TDD planning"""
 
     print()
-    print_dim("Memory checkpoint created for Phase 4")
-    print_dim(f"Summary: {metrics['task_count']} tasks, {metrics['package_count']} packages")
+    print(print_dim("Memory checkpoint created for Phase 4"))
+    print(print_dim(f"Summary: {metrics['task_count']} tasks, {metrics['package_count']} packages"))
     print()
 
 
 def _show_session_end(closeout_file: Path, tasks_file: Path) -> None:
     """Show session end summary."""
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("SESSION END")
+    print(print_bold("SESSION END"))
     print()
     print("Closeout saved to:")
-    print_dim(f"  .claude/closeout/phase-03-closeout.md")
+    print(print_dim(f"  .claude/closeout/phase-03-closeout.md"))
     print()
     print("Tasks saved to:")
-    print_dim(f"  .taskmaster/tasks/tasks.json")
+    print(print_dim(f"  .taskmaster/tasks/tasks.json"))
     print()
-    print_bold("Next: PHASE 4 - SPECIFICATION")
+    print(print_bold("Next: PHASE 4 - SPECIFICATION"))
     print()
     print("To continue:")
-    print_cyan("  ./orchestrator/pipeline resume")
+    print(print_cyan("  ./orchestrator/pipeline resume"))
     print()
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_green("Phase 3 Complete!")
-    print_dim("Tasks ready. See you in Specification.")
+    print(print_green("Phase 3 Complete!"))
+    print(print_dim("Tasks ready. See you in Specification."))
     print()
 
 

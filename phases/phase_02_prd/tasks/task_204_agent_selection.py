@@ -68,12 +68,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     agents_file = output_dir / "selected-agents.json"
 
     print()
-    print_dim("  ┌─────────────────────────────────────────────────────────┐")
-    print_dim("  │ Select agents for PRD authoring and validation.        │")
-    print_dim("  │                                                         │")
-    print_dim("  │ Tip: Custom agents can be created in the agent repo's  │")
-    print_dim("  │ custom/ directory for project-specific needs.          │")
-    print_dim("  └─────────────────────────────────────────────────────────┘")
+    print(print_dim("  ┌─────────────────────────────────────────────────────────┐"))
+    print(print_dim("  │ Select agents for PRD authoring and validation.        │"))
+    print(print_dim("  │                                                         │"))
+    print(print_dim("  │ Tip: Custom agents can be created in the agent repo's  │"))
+    print(print_dim("  │ custom/ directory for project-specific needs.          │"))
+    print(print_dim("  └─────────────────────────────────────────────────────────┘"))
     print()
 
     # Display core agents
@@ -94,15 +94,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # Save selection
     save_agent_selection(agents_file, selected_agents, additional)
 
-    print_green("✓ Agent selection complete")
+    print(print_green("✓ Agent selection complete"))
     return True
 
 
 def display_core_agents() -> None:
     """Display core PRD agents."""
-    print_cyan("╔═══════════════════════════════════════════════════════════╗")
-    print_cyan("║ " + print_bold("CORE PRD AGENTS") + "                                           ║")
-    print_cyan("╚═══════════════════════════════════════════════════════════╝")
+    print(print_cyan("╔═══════════════════════════════════════════════════════════╗"))
+    print(print_cyan("║ " + print_bold("CORE PRD AGENTS") + "                                           ║"))
+    print(print_cyan("╚═══════════════════════════════════════════════════════════╝"))
     print()
 
     print("  " + print_bold("Authoring Agents:"))
@@ -121,12 +121,12 @@ def display_core_agents() -> None:
 
 def display_additional_agents() -> None:
     """Display suggested additional agents."""
-    print_cyan("╔═══════════════════════════════════════════════════════════╗")
-    print_cyan("║ " + print_bold("SUGGESTED ADDITIONAL AGENTS") + "                               ║")
-    print_cyan("╚═══════════════════════════════════════════════════════════╝")
+    print(print_cyan("╔═══════════════════════════════════════════════════════════╗"))
+    print(print_cyan("║ " + print_bold("SUGGESTED ADDITIONAL AGENTS") + "                               ║"))
+    print(print_cyan("╚═══════════════════════════════════════════════════════════╝"))
     print()
 
-    print_dim("  Based on your project, consider adding:")
+    print(print_dim("  Based on your project, consider adding:"))
     print()
 
     for num, agent_info in ADDITIONAL_AGENTS.items():
@@ -145,9 +145,9 @@ def select_agents(uat_mode: bool) -> tuple:
     Returns:
         Tuple of (selected_agents_list, additional_agents_list)
     """
-    print_dim("━" * 60)
+    print(print_dim("━" * 60))
     print()
-    print_cyan("  How would you like to proceed?")
+    print(print_cyan("  How would you like to proceed?"))
     print()
     print("    " + print_green("[approve]") + "   Use core agents only (recommended)")
     print("    " + print_yellow("[add]") + "       Add suggested agents")
@@ -157,7 +157,7 @@ def select_agents(uat_mode: bool) -> tuple:
 
     if uat_mode:
         agent_choice = "approve"
-        print_dim(f"  UAT mode: Using '{agent_choice}'")
+        print(print_dim(f"  UAT mode: Using '{agent_choice}'"))
     else:
         clear_input_buffer()
         agent_choice = prompt_user("  Choice (default: approve): ").strip().lower() or "approve"
@@ -171,7 +171,7 @@ def select_agents(uat_mode: bool) -> tuple:
             pass
         else:
             print()
-            print_dim("  Select additional agents (space-separated numbers):")
+            print(print_dim("  Select additional agents (space-separated numbers):"))
             print("    1. security-requirements-analyst")
             print("    2. api-requirements-engineer")
             print("    3. ux-requirements-analyst")
@@ -190,7 +190,7 @@ def select_agents(uat_mode: bool) -> tuple:
             pass
         else:
             print()
-            print_dim("  Enter agent names (one per line, empty to finish):")
+            print(print_dim("  Enter agent names (one per line, empty to finish):"))
             selected_agents = []
             while True:
                 agent_name = prompt_user("    > ").strip()
@@ -223,9 +223,9 @@ def select_agents(uat_mode: bool) -> tuple:
 def list_available_agents() -> None:
     """List available agents from repository."""
     print()
-    print_cyan("╔═══════════════════════════════════════════════════════════╗")
-    print_cyan("║ " + print_bold("AVAILABLE AGENTS") + "                                          ║")
-    print_cyan("╚═══════════════════════════════════════════════════════════╝")
+    print(print_cyan("╔═══════════════════════════════════════════════════════════╗"))
+    print(print_cyan("║ " + print_bold("AVAILABLE AGENTS") + "                                          ║"))
+    print(print_cyan("╚═══════════════════════════════════════════════════════════╝"))
     print()
 
     # Try to find agent repository
@@ -236,7 +236,7 @@ def list_available_agents() -> None:
         agent_repo = Path.cwd() / ".." / "atomic-claude" / "agents"
 
     if agent_repo.exists():
-        print_dim("  Using built-in agents (external repository not configured)")
+        print(print_dim("  Using built-in agents (external repository not configured)"))
         print()
         print("  " + print_bold("PRD-related built-in agents:"))
         print("    • requirements-engineer")
@@ -256,10 +256,10 @@ def list_available_agents() -> None:
                     agent_name = agent_file.stem
                     print(f"    • {agent_name}")
             except Exception as e:
-                print_yellow(f"    ⚠ Error reading pipeline agents: {e}")
+                print(print_yellow(f"    ⚠ Error reading pipeline agents: {e}"))
             print()
     else:
-        print_dim("  Using built-in agents (external repository not configured)")
+        print(print_dim("  Using built-in agents (external repository not configured)"))
         print()
         print("  " + print_bold("PRD-related built-in agents:"))
         print("    • requirements-engineer")
@@ -293,7 +293,7 @@ def save_agent_selection(
 
     write_file(agents_file, json.dumps(agents_data, indent=2))
     print()
-    print_dim(f"  Agent selection saved: {agents_file}")
+    print(print_dim(f"  Agent selection saved: {agents_file}"))
 
 
 if __name__ == "__main__":

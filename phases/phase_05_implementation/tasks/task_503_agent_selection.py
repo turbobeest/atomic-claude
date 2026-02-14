@@ -115,7 +115,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # UAT Mode Bypass
     if uat_mode:
         print()
-        print_yellow("⚡ UAT Mode: Auto-selecting default implementation agents")
+        print(print_yellow("⚡ UAT Mode: Auto-selecting default implementation agents"))
         print()
 
         ensure_dir(agents_file.parent)
@@ -134,26 +134,26 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         }
         write_file(agents_file, json.dumps(agents_data, indent=2))
 
-        print_green("✓ Agent Selection complete (UAT mode)")
+        print(print_green("✓ Agent Selection complete (UAT mode)"))
         return True
 
     ensure_dir(agents_file.parent)
 
     print()
-    print_dim("  Selecting specialized agents for each TDD phase from agent-inventory.csv.")
+    print(print_dim("  Selecting specialized agents for each TDD phase from agent-inventory.csv."))
     print()
 
     # Load Available Agents from CSV
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("AVAILABLE IMPLEMENTATION AGENTS") + " (from agent-inventory.csv)"
+    print(print_bold("AVAILABLE IMPLEMENTATION AGENTS") + " (from agent-inventory.csv)")
     print()
 
     agent_repo = find_agent_repo(atomic_root)
     csv_path = agent_repo / "agent-inventory.csv" if agent_repo else None
 
     if csv_path and csv_path.exists():
-        print_dim("  Agents in 06-09-implementation category:")
+        print(print_dim("  Agents in 06-09-implementation category:"))
         print()
 
         try:
@@ -168,98 +168,98 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
                         role = row[10]
                         print(f"    {name:<28} [{tier:<6} {model:<6} {role}]")
         except Exception as e:
-            print_yellow(f"  ! Error reading agent inventory: {e}")
+            print(print_yellow(f"  ! Error reading agent inventory: {e}"))
 
         print()
     else:
-        print_yellow("  ! Agent inventory not found - using defaults")
+        print(print_yellow("  ! Agent inventory not found - using defaults"))
         print()
 
     # Project Analysis
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("PROJECT ANALYSIS")
+    print(print_bold("PROJECT ANALYSIS"))
     print()
 
     patterns = analyze_project_patterns(specs_dir)
 
-    print_dim("  Detected project patterns:")
+    print(print_dim("  Detected project patterns:"))
     print()
     if patterns["has_api"]:
-        print_green("    ✓ API endpoints")
+        print(print_green("    ✓ API endpoints"))
     if patterns["has_db"]:
-        print_green("    ✓ Database operations")
+        print(print_green("    ✓ Database operations"))
     if patterns["has_frontend"]:
-        print_green("    ✓ Frontend components")
+        print(print_green("    ✓ Frontend components"))
     if patterns["has_cli"]:
-        print_green("    ✓ CLI interface")
+        print(print_green("    ✓ CLI interface"))
     if patterns["has_async"]:
-        print_green("    ✓ Async/concurrent code")
+        print(print_green("    ✓ Async/concurrent code"))
     print()
 
     # TDD Agent Roles
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("TDD AGENT ROLES")
+    print(print_bold("TDD AGENT ROLES"))
     print()
 
-    print_dim("  Four agents are needed for the TDD cycle (using agents from inventory):")
+    print(print_dim("  Four agents are needed for the TDD cycle (using agents from inventory):"))
     print()
 
     # RED phase agent
-    print_red("  " + "─" * 118)
-    print_bold("  RED: Test Strategist")
+    print(print_red("  " + "─" * 118))
+    print(print_bold("  RED: Test Strategist"))
     print()
     print("    Writes failing tests based on OpenSpec test strategy.")
     print("    Must understand testing frameworks, mocking, fixtures.")
     print()
-    print_cyan("    Recommended:") + " test-strategist (expert, opus)"
-    print_red("  " + "─" * 118)
+    print(print_cyan("    Recommended:") + " test-strategist (expert, opus)")
+    print(print_red("  " + "─" * 118))
     print()
 
     # GREEN phase agent
-    print_green("  " + "─" * 118)
-    print_bold("  GREEN: TDD Implementation")
+    print(print_green("  " + "─" * 118))
+    print(print_bold("  GREEN: TDD Implementation"))
     print()
     print("    Writes minimal implementation to make tests pass.")
     print("    Focus on correctness, not optimization.")
     print()
-    print_cyan("    Recommended:") + " tdd-implementation-agent (phd, opus)"
-    print_green("  " + "─" * 118)
+    print(print_cyan("    Recommended:") + " tdd-implementation-agent (phd, opus)")
+    print(print_green("  " + "─" * 118))
     print()
 
     # REFACTOR phase agent
-    print_cyan("  " + "─" * 118)
-    print_bold("  REFACTOR: Code Review Gate")
+    print(print_cyan("  " + "─" * 118))
+    print(print_bold("  REFACTOR: Code Review Gate"))
     print()
     print("    Improves code quality while maintaining test passage.")
     print("    Runs linters, formatters, type checkers.")
     print()
-    print_cyan("    Recommended:") + " code-review-gate (expert, opus)"
-    print_cyan("  " + "─" * 118)
+    print(print_cyan("    Recommended:") + " code-review-gate (expert, opus)")
+    print(print_cyan("  " + "─" * 118))
     print()
 
     # VERIFY phase agent
-    print_magenta("  " + "─" * 118)
-    print_bold("  VERIFY: Plan Guardian")
+    print(print_magenta("  " + "─" * 118))
+    print(print_bold("  VERIFY: Plan Guardian"))
     print()
     print("    Verifies implementation against PRD and spec drift.")
     print("    Computes alignment scores and triggers gates.")
     print()
-    print_cyan("    Recommended:") + " plan-guardian (phd, opus)"
-    print_magenta("  " + "─" * 118)
+    print(print_cyan("    Recommended:") + " plan-guardian (phd, opus)")
+    print(print_magenta("  " + "─" * 118))
     print()
 
     # Agent Selection
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("SELECT AGENTS")
+    print(print_bold("SELECT AGENTS"))
     print()
 
     # RED agent
-    print_red("  RED: Test Strategy")
-    print_green("    [1]") + " test-strategist (recommended - from inventory)"
-    print_dim("    [2]") + " specification-agent"
+    print(print_red("  RED: Test Strategy"))
+    print(print_green("    [1]") + " test-strategist (recommended - from inventory)")
+    print(print_dim("    [2]") + " specification-agent")
     print()
 
     red_choice = prompt_user("    Selection (default: 1): ").strip()
@@ -269,9 +269,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     print()
 
     # GREEN agent
-    print_green("  GREEN: TDD Implementation")
-    print_green("    [1]") + " tdd-implementation-agent (recommended - from inventory)"
-    print_dim("    [2]") + " specification-agent"
+    print(print_green("  GREEN: TDD Implementation"))
+    print(print_green("    [1]") + " tdd-implementation-agent (recommended - from inventory)")
+    print(print_dim("    [2]") + " specification-agent")
     print()
 
     green_choice = prompt_user("    Selection (default: 1): ").strip()
@@ -281,9 +281,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     print()
 
     # REFACTOR agent
-    print_cyan("  REFACTOR: Code Review")
-    print_green("    [1]") + " code-review-gate (recommended - from inventory)"
-    print_dim("    [2]") + " plan-guardian"
+    print(print_cyan("  REFACTOR: Code Review"))
+    print(print_green("    [1]") + " code-review-gate (recommended - from inventory)")
+    print(print_dim("    [2]") + " plan-guardian")
     print()
 
     refactor_choice = prompt_user("    Selection (default: 1): ").strip()
@@ -293,9 +293,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     print()
 
     # VERIFY agent
-    print_magenta("  VERIFY: Drift Monitor")
-    print_green("    [1]") + " plan-guardian (recommended - from inventory)"
-    print_dim("    [2]") + " code-review-gate"
+    print(print_magenta("  VERIFY: Drift Monitor"))
+    print(print_green("    [1]") + " plan-guardian (recommended - from inventory)")
+    print(print_dim("    [2]") + " code-review-gate")
     print()
 
     verify_choice = prompt_user("    Selection (default: 1): ").strip()
@@ -305,25 +305,25 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     print()
 
     # Optional: Expert Agents
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("OPTIONAL: EXPERT AGENTS")
+    print(print_bold("OPTIONAL: EXPERT AGENTS"))
     print()
 
-    print_dim("  Based on project patterns, consider adding expert agents from inventory:")
+    print(print_dim("  Based on project patterns, consider adding expert agents from inventory:"))
     print()
 
     if patterns["has_api"]:
-        print_cyan("    [api]") + "      api-tester - API testing specialist"
+        print(print_cyan("    [api]") + "      api-tester - API testing specialist")
     if patterns["has_db"]:
-        print_cyan("    [db]") + "       database-optimizer - Database operations"
+        print(print_cyan("    [db]") + "       database-optimizer - Database operations")
     if patterns["has_frontend"]:
-        print_cyan("    [ui]") + "       frontend-developer - UI components"
+        print(print_cyan("    [ui]") + "       frontend-developer - UI components")
     if patterns["has_async"]:
-        print_cyan("    [async]") + "    debugger - Async debugging"
+        print(print_cyan("    [async]") + "    debugger - Async debugging")
 
     print()
-    print_dim("  Enter comma-separated list of specialists (or Enter to skip):")
+    print(print_dim("  Enter comma-separated list of specialists (or Enter to skip):"))
     specialist_input = prompt_user("    Specialists: ").strip()
 
     specialists = []
@@ -339,21 +339,21 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             specialists.append(mapping.get(key, key))
 
         print()
-        print_green(f"  ✓ Added {len(specialists)} specialist(s): {', '.join(specialists)}")
+        print(print_green(f"  ✓ Added {len(specialists)} specialist(s): {', '.join(specialists)}"))
     print()
 
     # Selection Summary
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("AGENT SELECTION SUMMARY") + " (from agent-inventory.csv)"
+    print(print_bold("AGENT SELECTION SUMMARY") + " (from agent-inventory.csv)")
     print()
 
-    print_red("    RED:") + f"       {red_agent} ({red_model})"
-    print_green("    GREEN:") + f"     {green_agent} ({green_model})"
-    print_cyan("    REFACTOR:") + f"  {refactor_agent} ({refactor_model})"
-    print_magenta("    VERIFY:") + f"    {verify_agent} ({verify_model})"
+    print(print_red("    RED:") + f"       {red_agent} ({red_model})")
+    print(print_green("    GREEN:") + f"     {green_agent} ({green_model})")
+    print(print_cyan("    REFACTOR:") + f"  {refactor_agent} ({refactor_model})")
+    print(print_magenta("    VERIFY:") + f"    {verify_agent} ({verify_model})")
     if specialists:
-        print_dim("    Specialists:") + f" {', '.join(specialists)}"
+        print(print_dim("    Specialists:") + f" {', '.join(specialists)}")
     print()
 
     # Save agent selection
@@ -370,7 +370,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     }
     write_file(agents_file, json.dumps(agents_data, indent=2))
 
-    print_green("✓ Agent Selection complete")
+    print(print_green("✓ Agent Selection complete"))
     return True
 
 

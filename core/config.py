@@ -54,6 +54,7 @@ class Provider(str, Enum):
     API = "api"  # Anthropic API
     BEDROCK = "bedrock"  # AWS Bedrock
     OLLAMA = "ollama"  # Ollama local
+    CLAUDE_CODE = "claude-code"  # Claude Code CLI
 
 
 class ModelRole(str, Enum):

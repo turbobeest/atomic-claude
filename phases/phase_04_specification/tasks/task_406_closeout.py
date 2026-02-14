@@ -43,13 +43,13 @@ def check_closeout_items(
         spec_count = len(list(specs_dir.glob("spec-*.json")))
 
         if spec_count >= task_count and task_count > 0:
-            print_green(f"  [CRIT] ✓ OpenSpecs created ({spec_count} specs)")
+            print(print_green(f"  [CRIT] ✓ OpenSpecs created ({spec_count} specs)"))
             checklist.append(("OpenSpecs created", "PASS"))
         elif spec_count > 0:
-            print_yellow(f"  [CRIT] ! Partial OpenSpecs ({spec_count} / {task_count})")
+            print(print_yellow(f"  [CRIT] ! Partial OpenSpecs ({spec_count} / {task_count})"))
             checklist.append(("OpenSpecs created", "WARN"))
         else:
-            print_red("  [CRIT] ✗ No OpenSpecs created")
+            print(print_red("  [CRIT] ✗ No OpenSpecs created"))
             checklist.append(("OpenSpecs created", "FAIL"))
             all_passed = False
 
@@ -57,13 +57,13 @@ def check_closeout_items(
         tasks_with_tdd = len([t for t in tasks if len(t.get("subtasks", [])) >= 4])
 
         if tasks_with_tdd >= task_count and task_count > 0:
-            print_green(f"  [CRIT] ✓ TDD subtasks injected ({tasks_with_tdd} tasks)")
+            print(print_green(f"  [CRIT] ✓ TDD subtasks injected ({tasks_with_tdd} tasks)"))
             checklist.append(("TDD subtasks", "PASS"))
         elif tasks_with_tdd > 0:
-            print_yellow(f"  [CRIT] ! Partial TDD subtasks ({tasks_with_tdd} / {task_count})")
+            print(print_yellow(f"  [CRIT] ! Partial TDD subtasks ({tasks_with_tdd} / {task_count})"))
             checklist.append(("TDD subtasks", "WARN"))
         else:
-            print_red("  [CRIT] ✗ No TDD subtasks")
+            print(print_red("  [CRIT] ✗ No TDD subtasks"))
             checklist.append(("TDD subtasks", "FAIL"))
             all_passed = False
 
@@ -80,28 +80,28 @@ def check_closeout_items(
                     # Try legacy format
                     audit_status = audit_data.get("overall_status", "UNKNOWN")
                     if audit_status == "PASS":
-                        print_green("  [BLCK] ✓ Audit passed")
+                        print(print_green("  [BLCK] ✓ Audit passed"))
                         checklist.append(("Audit", "PASS"))
                     elif audit_status in ["WARNING", "DEFERRED"]:
-                        print_yellow(f"  [BLCK] ! Audit: {audit_status}")
+                        print(print_yellow(f"  [BLCK] ! Audit: {audit_status}"))
                         checklist.append(("Audit", "WARN"))
                     else:
-                        print_red("  [BLCK] ✗ Audit failed")
+                        print(print_red("  [BLCK] ✗ Audit failed"))
                         checklist.append(("Audit", "FAIL"))
                 elif failed == 0 and warnings == 0:
-                    print_green(f"  [BLCK] ✓ Audit passed ({passed} passed)")
+                    print(print_green(f"  [BLCK] ✓ Audit passed ({passed} passed)"))
                     checklist.append(("Audit", "PASS"))
                 elif failed == 0:
-                    print_yellow(f"  [BLCK] ! Audit has warnings ({warnings} warnings)")
+                    print(print_yellow(f"  [BLCK] ! Audit has warnings ({warnings} warnings)"))
                     checklist.append(("Audit", "WARN"))
                 else:
-                    print_red(f"  [BLCK] ✗ Audit has failures ({failed} failed)")
+                    print(print_red(f"  [BLCK] ✗ Audit has failures ({failed} failed)"))
                     checklist.append(("Audit", "FAIL"))
             except Exception as e:
-                print_yellow(f"  [BLCK] ! Could not parse audit: {e}")
+                print(print_yellow(f"  [BLCK] ! Could not parse audit: {e}"))
                 checklist.append(("Audit", "WARN"))
         else:
-            print_yellow("  [BLCK] ! Audit not completed")
+            print(print_yellow("  [BLCK] ! Audit not completed"))
             checklist.append(("Audit", "SKIP"))
 
         # Check spec quality
@@ -115,10 +115,10 @@ def check_closeout_items(
                 pass
 
         if specs_with_tests >= spec_count and spec_count > 0:
-            print_green("  [BLCK] ✓ Test strategies defined")
+            print(print_green("  [BLCK] ✓ Test strategies defined"))
             checklist.append(("Test strategies", "PASS"))
         else:
-            print_yellow("  [BLCK] ! Some specs lack test strategies")
+            print(print_yellow("  [BLCK] ! Some specs lack test strategies"))
             checklist.append(("Test strategies", "WARN"))
 
         # TDD chain integrity
@@ -133,16 +133,16 @@ def check_closeout_items(
                     valid_chains += 1
 
         if valid_chains >= tasks_with_tdd and tasks_with_tdd > 0:
-            print_green("  [PASS] ✓ TDD chains valid (RED→GREEN→REFACTOR→VERIFY)")
+            print(print_green("  [PASS] ✓ TDD chains valid (RED→GREEN→REFACTOR→VERIFY)"))
             checklist.append(("TDD chains", "PASS"))
         else:
-            print_yellow("  [PASS] ! Some TDD chains may be invalid")
+            print(print_yellow("  [PASS] ! Some TDD chains may be invalid"))
             checklist.append(("TDD chains", "WARN"))
 
-        print_green("  [PASS] ✓ Ready for TDD Implementation")
+        print(print_green("  [PASS] ✓ Ready for TDD Implementation"))
 
     except Exception as e:
-        print_red(f"✗ Error checking closeout items: {e}")
+        print(print_red(f"✗ Error checking closeout items: {e}"))
         all_passed = False
 
     return checklist, all_passed
@@ -289,26 +289,26 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # UAT Mode: Auto-approve closeout
     if uat_mode:
         print()
-        print_yellow("⚡ UAT Mode: Auto-approving closeout")
+        print(print_yellow("⚡ UAT Mode: Auto-approving closeout"))
         print()
         ensure_dir(output_dir)
         write_file(output_dir / "closeout.json", json.dumps({
             "approved": True,
             "mode": "uat"
         }, indent=2))
-        print_green("✓ Phase closeout complete (UAT mode)")
+        print(print_green("✓ Phase closeout complete (UAT mode)"))
         return True
 
     ensure_dir(closeout_dir)
 
     print()
-    print_dim("  Final review before moving to Phase 5 (TDD Implementation).")
+    print(print_dim("  Final review before moving to Phase 5 (TDD Implementation)."))
     print()
 
     # Closeout Checklist
-    print_dim("─" * 109)
+    print(print_dim("─" * 109))
     print()
-    print_bold("CLOSEOUT CHECKLIST")
+    print(print_bold("CLOSEOUT CHECKLIST"))
     print()
 
     checklist, all_passed = check_closeout_items(tasks_file, specs_dir, audit_file)
@@ -316,18 +316,18 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     print()
 
     # Closeout Approval
-    print_dim("─" * 109)
+    print(print_dim("─" * 109))
     print()
 
     if not all_passed:
-        print_yellow("  Some critical items need attention before closeout.")
+        print(print_yellow("  Some critical items need attention before closeout."))
         print()
 
-    print_cyan("Closeout options:")
+    print(print_cyan("Closeout options:"))
     print()
-    print_green("  [approve] Approve closeout and proceed")
-    print_yellow("  [review]  Review specific artifacts")
-    print_red("  [hold]    Hold closeout for now")
+    print(print_green("  [approve] Approve closeout and proceed"))
+    print(print_yellow("  [review]  Review specific artifacts"))
+    print(print_red("  [hold]    Hold closeout for now"))
     print()
 
     clear_input_buffer()
@@ -335,36 +335,36 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     if closeout_choice == "review":
         print()
-        print_dim("  Key artifacts:")
+        print(print_dim("  Key artifacts:"))
         print("    .claude/specs/                    - OpenSpec definitions")
         print("    .taskmaster/tasks/tasks.json      - Tasks with TDD subtasks")
         print("    .claude/audit/phase-04-audit.json - Audit results")
         print()
         if specs_dir.exists():
-            print_dim("  Spec files:")
+            print(print_dim("  Spec files:"))
             for spec_file in list(specs_dir.glob("spec-*.json"))[:10]:
                 print(f"    {spec_file.name}")
             if len(list(specs_dir.glob("spec-*.json"))) > 10:
-                print_dim("    ... and more")
+                print(print_dim("    ... and more"))
         print()
         prompt_user("  Press Enter to continue to closeout...")
     elif closeout_choice == "hold":
         print()
-        print_yellow("⚠  Closeout held - phase not complete")
+        print(print_yellow("⚠  Closeout held - phase not complete"))
         return False
 
     # Generate Closeout Document
-    print_dim("─" * 109)
+    print(print_dim("─" * 109))
     print()
-    print_bold("GENERATING CLOSEOUT")
+    print(print_bold("GENERATING CLOSEOUT"))
     print()
 
     closeout_md, closeout_json = generate_closeout_documents(
         closeout_dir, tasks_file, specs_dir, checklist
     )
 
-    print_green(f"  ✓ Generated {closeout_md.name}")
-    print_green(f"  ✓ Generated {closeout_json.name}")
+    print(print_green(f"  ✓ Generated {closeout_md.name}"))
+    print(print_green(f"  ✓ Generated {closeout_json.name}"))
     print()
 
     # Memory Checkpoint (placeholder for future memory.py integration)
@@ -374,35 +374,35 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     tasks_with_tdd = len([t for t in tasks if len(t.get("subtasks", [])) >= 4])
     total_subtasks = sum(len(t.get("subtasks", [])) for t in tasks)
 
-    print_dim("  Memory checkpoint would save here...")
+    print(print_dim("  Memory checkpoint would save here..."))
     print()
 
     # Session End
-    print_dim("─" * 109)
+    print(print_dim("─" * 109))
     print()
-    print_bold("SESSION END")
+    print(print_bold("SESSION END"))
     print()
     print("  Closeout saved to:")
-    print_dim("    .claude/closeout/phase-04-closeout.md")
+    print(print_dim("    .claude/closeout/phase-04-closeout.md"))
     print()
     print("  Specifications saved to:")
-    print_dim("    .claude/specs/spec-*.json")
+    print(print_dim("    .claude/specs/spec-*.json"))
     print()
     print("  Tasks updated at:")
-    print_dim("    .taskmaster/tasks/tasks.json")
+    print(print_dim("    .taskmaster/tasks/tasks.json"))
     print()
-    print_bold("  Next: PHASE 5 - TDD IMPLEMENTATION")
+    print(print_bold("  Next: PHASE 5 - TDD IMPLEMENTATION"))
     print()
     print("  To continue:")
-    print_cyan("    ./orchestrator/pipeline resume")
+    print(print_cyan("    ./orchestrator/pipeline resume"))
     print()
-    print_dim("─" * 109)
+    print(print_dim("─" * 109))
     print()
-    print_green("  Phase 4 Complete!")
-    print_dim("  Specifications ready. TDD structure in place. See you in Implementation.")
+    print(print_green("  Phase 4 Complete!"))
+    print(print_dim("  Specifications ready. TDD structure in place. See you in Implementation."))
     print()
 
-    print_green("✓ Phase 4 closeout complete")
+    print(print_green("✓ Phase 4 closeout complete"))
 
     return True
 

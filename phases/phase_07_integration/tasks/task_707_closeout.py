@@ -42,7 +42,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     ensure_dir(closeout_dir)
 
     print()
-    print_dim("Final review before moving to Phase 8 (Deployment Prep).")
+    print(print_dim("Final review before moving to Phase 8 (Deployment Prep)."))
     print()
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -50,7 +50,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # ─────────────────────────────────────────────────────────────────────────
 
     print()
-    print_bold("  - CLOSEOUT CHECKLIST")
+    print(print_bold("  - CLOSEOUT CHECKLIST"))
     print()
 
     checklist = []
@@ -83,57 +83,57 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # Check E2E tests
     if e2e_passed == e2e_total:
-        print_green(f"  [CRIT] ✓ E2E tests passing ({e2e_passed}/{e2e_total})")
+        print(print_green(f"  [CRIT] ✓ E2E tests passing ({e2e_passed}/{e2e_total})"))
         checklist.append("E2E tests passing:PASS")
     else:
-        print_red(f"  [CRIT] ✗ E2E tests failing ({e2e_passed}/{e2e_total})")
+        print(print_red(f"  [CRIT] ✗ E2E tests failing ({e2e_passed}/{e2e_total})"))
         checklist.append("E2E tests passing:FAIL")
         all_passed = False
 
     # Check acceptance criteria
     if criteria_passed == criteria_total:
-        print_green(f"  [CRIT] ✓ Acceptance criteria validated ({criteria_passed}/{criteria_total})")
+        print(print_green(f"  [CRIT] ✓ Acceptance criteria validated ({criteria_passed}/{criteria_total})"))
         checklist.append("Acceptance criteria validated:PASS")
     else:
-        print_red(f"  [CRIT] ✗ Acceptance criteria not met ({criteria_passed}/{criteria_total})")
+        print(print_red(f"  [CRIT] ✗ Acceptance criteria not met ({criteria_passed}/{criteria_total})"))
         checklist.append("Acceptance criteria validated:FAIL")
         all_passed = False
 
     # Check performance
-    print_green("  [BLCK] ✓ Performance benchmarks met")
+    print(print_green("  [BLCK] ✓ Performance benchmarks met"))
     checklist.append("Performance benchmarks met:PASS")
 
     # Check integration report
     if report_file.exists():
-        print_green("  [BLCK] ✓ Integration report generated")
+        print(print_green("  [BLCK] ✓ Integration report generated"))
         checklist.append("Integration report generated:PASS")
     else:
-        print_red("  [BLCK] ✗ Integration report not found")
+        print(print_red("  [BLCK] ✗ Integration report not found"))
         checklist.append("Integration report generated:FAIL")
         all_passed = False
 
     # Check approval
     if approval_status == "approved":
-        print_green("  [BLCK] ✓ Integration approved")
+        print(print_green("  [BLCK] ✓ Integration approved"))
         checklist.append("Integration approved:PASS")
     else:
-        print_red("  [BLCK] ✗ Integration not approved")
+        print(print_red("  [BLCK] ✗ Integration not approved"))
         checklist.append("Integration approved:FAIL")
         all_passed = False
 
     # Check audit
     if audit_file.exists():
         if audit_status == "PASS":
-            print_green("  [BLCK] ✓ Integration audit passed")
+            print(print_green("  [BLCK] ✓ Integration audit passed"))
             checklist.append("Integration audit:PASS")
         elif audit_status in ["WARNING", "DEFERRED"]:
-            print_yellow(f"  [BLCK] ! Integration audit: {audit_status}")
+            print(print_yellow(f"  [BLCK] ! Integration audit: {audit_status}"))
             checklist.append("Integration audit:WARN")
         else:
-            print_red("  [BLCK] ✗ Integration audit failed")
+            print(print_red("  [BLCK] ✗ Integration audit failed"))
             checklist.append("Integration audit:FAIL")
     else:
-        print_yellow("  [BLCK] ! Integration audit not completed")
+        print(print_yellow("  [BLCK] ! Integration audit not completed"))
         checklist.append("Integration audit:SKIP")
 
     print()
@@ -143,22 +143,22 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # ─────────────────────────────────────────────────────────────────────────
 
     print()
-    print_bold("  - CLOSEOUT APPROVAL")
+    print(print_bold("  - CLOSEOUT APPROVAL"))
     print()
 
     if not all_passed:
-        print_yellow("Some critical items need attention before closeout.")
+        print(print_yellow("Some critical items need attention before closeout."))
         print()
 
     if uat_mode:
-        print_yellow("UAT Mode: Auto-approving closeout")
+        print(print_yellow("UAT Mode: Auto-approving closeout"))
         closeout_choice = "approve"
     else:
-        print_cyan("Closeout options:")
+        print(print_cyan("Closeout options:"))
         print()
-        print_green("  [approve] ") + "Approve closeout and proceed"
-        print_yellow("  [review]  ") + "Review specific artifacts"
-        print_red("  [hold]    ") + "Hold closeout for now"
+        print(print_green("  [approve] ") + "Approve closeout and proceed")
+        print(print_yellow("  [review]  ") + "Review specific artifacts")
+        print(print_red("  [hold]    ") + "Hold closeout for now")
         print()
 
         clear_input_buffer()
@@ -166,7 +166,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
         if closeout_choice == "review":
             print()
-            print_dim("Key artifacts:")
+            print(print_dim("Key artifacts:"))
             print("  .claude/integration/e2e-results.json         - E2E test results")
             print("  .claude/integration/acceptance-results.json  - Acceptance validation")
             print("  .claude/integration/performance-results.json - Performance benchmarks")
@@ -182,7 +182,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
         elif closeout_choice == "hold":
             print()
-            print_yellow("⚠  Closeout held - phase not complete")
+            print(print_yellow("⚠  Closeout held - phase not complete"))
             return False
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -190,7 +190,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # ─────────────────────────────────────────────────────────────────────────
 
     print()
-    print_bold("  - GENERATING CLOSEOUT")
+    print(print_bold("  - GENERATING CLOSEOUT"))
     print()
 
     # Generate markdown closeout
@@ -296,8 +296,8 @@ python main.py run 8
 
     write_json(closeout_json, closeout_data)
 
-    print_green("  ✓ Generated phase-07-closeout.md")
-    print_green("  ✓ Generated phase-07-closeout.json")
+    print(print_green("  ✓ Generated phase-07-closeout.md"))
+    print(print_green("  ✓ Generated phase-07-closeout.json"))
     print()
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -305,24 +305,24 @@ python main.py run 8
     # ─────────────────────────────────────────────────────────────────────────
 
     print()
-    print_bold("  - SESSION END")
+    print(print_bold("  - SESSION END"))
     print()
     print("  Closeout saved to:")
-    print_dim("    .claude/closeout/phase-07-closeout.md")
+    print(print_dim("    .claude/closeout/phase-07-closeout.md"))
     print()
     print("  Integration artifacts at:")
-    print_dim("    .claude/integration/")
+    print(print_dim("    .claude/integration/"))
     print()
-    print_bold("  Next: PHASE 8 - DEPLOYMENT PREP")
+    print(print_bold("  Next: PHASE 8 - DEPLOYMENT PREP"))
     print()
     print("  To continue:")
-    print_cyan("    python main.py run 8")
+    print(print_cyan("    python main.py run 8"))
     print()
-    print_green("  Phase 7 Complete!")
-    print_dim("  Fully integrated. Deployment Prep next.")
+    print(print_green("  Phase 7 Complete!"))
+    print(print_dim("  Fully integrated. Deployment Prep next."))
     print()
 
-    print_green("✓ Phase 7 closeout complete")
+    print(print_green("✓ Phase 7 closeout complete"))
     return True
 
 

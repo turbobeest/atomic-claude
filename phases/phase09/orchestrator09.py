@@ -22,9 +22,15 @@ from datetime import datetime
 # Ensure atomic-claude2 root is in path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+import traceback
+
 from core.state import StateManager
 from core.ui import phase_header, phase_complete
+from core.memory import memory_save, MemoryEntryType
 from orchestration.pre_task_validation import validate_directory_pristine
+from orchestration.dashboard_sync import write_current_task, clear_current_task, log_error
+from orchestration.task_display import display_task_roster, resolve_agent_roster
+from core.llm.resolver import resolve_model, get_resolver
 
 # Import Python task modules
 from phases.phase_09_release.tasks import (
@@ -89,22 +95,57 @@ def run_phase(resume_at: str = None) -> bool:
 
         # Run task
         print(f"\n⚡ Running Task {task_id}: {task_name}")
+        roster = resolve_agent_roster(phase_id, task_id, OUTPUT_DIR)
+        roster = display_task_roster(task_id, task_name, roster, uat_mode=UAT_MODE)
+        write_current_task(phase_id, task_id, task_name, resolved=roster[0][1],
+                           agent_roster=roster)
 
         try:
             success = task_func()
             if not success:
                 state.mark_task_failed(phase_id, task_id, task_name)
                 print(f"\n❌ Task {task_id} failed")
+                clear_current_task()
+                get_resolver().clear_task_overrides()
                 return False
 
             state.mark_task_complete(phase_id, task_id, task_name)
+            clear_current_task()
+            get_resolver().clear_task_overrides()
+
+            # Save task completion to memory
+            try:
+                memory_save(
+                    phase=phase_id,
+                    task_id=task_id,
+                    content=f"Task {task_id} ({task_name}) completed",
+                    tags=["task-complete", phase_id, f"task-{task_id}"],
+                    entry_type=MemoryEntryType.TASK_END,
+                )
+            except Exception:
+                pass  # Memory save failure is non-blocking
 
         except Exception as e:
             state.mark_task_failed(phase_id, task_id, task_name, str(e))
+            log_error(phase_id, task_id, str(e), traceback.format_exc())
             print(f"\n❌ Task {task_id} error: {e}")
+            clear_current_task()
+            get_resolver().clear_task_overrides()
             return False
 
     phase_complete("Phase 9: Release")
+
+    # Save phase completion to memory
+    try:
+        memory_save(
+            phase=phase_id,
+            task_id=None,
+            content=f"Phase {phase_id} completed. Tasks: {', '.join(t[0] for t in tasks)}",
+            tags=["phase-complete", phase_id],
+            entry_type=MemoryEntryType.PHASE_CLOSEOUT,
+        )
+    except Exception:
+        pass
 
     # Create closeout file
     create_closeout(phase_id, tasks)

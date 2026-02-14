@@ -64,7 +64,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     report_file = output_dir / "env-validation.json"
 
     print()
-    print_cyan("Environment Validation")
+    print(print_cyan("Environment Validation"))
     print()
 
     # Reset counters
@@ -82,7 +82,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # Detect OS upfront
     os_type = _detect_os()
-    print_dim(f"  Platform: {os_type}")
+    print(print_dim(f"  Platform: {os_type}"))
     print()
 
     # Core tool validation (synced with Task 007)
@@ -116,9 +116,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         return _handle_validation_failure()
 
     if CHECKS_WARN > 0:
-        print_green(f"✓ Environment validated with {CHECKS_WARN} warnings")
+        print(print_green(f"✓ Environment validated with {CHECKS_WARN} warnings"))
     else:
-        print_green("✓ Environment validated - all checks passed")
+        print(print_green("✓ Environment validated - all checks passed"))
 
     return True
 
@@ -140,7 +140,7 @@ def _validate_tools(report_file: Path) -> None:
     """Validate required tools (synced with Task 007)."""
     global CHECKS_PASS, CHECKS_FAIL, CHECKS_WARN
 
-    print_cyan("  Required Tools:")
+    print(print_cyan("  Required Tools:"))
 
     tools = [
         ("git", None),
@@ -160,40 +160,40 @@ def _validate_tools(report_file: Path) -> None:
                 try:
                     major = int(version.split('.')[0])
                     if major >= min_version:
-                        print_green(f"    ✓ {tool} ({version})")
+                        print(print_green(f"    ✓ {tool} ({version})"))
                         _add_check(report_file, tool, "pass", "critical", version)
                         CHECKS_PASS += 1
                     else:
-                        print_yellow(f"    ! {tool} (v{version}) - v{min_version}+ required")
+                        print(print_yellow(f"    ! {tool} (v{version}) - v{min_version}+ required"))
                         _add_check(report_file, tool, "warn", "critical", version)
                         CHECKS_WARN += 1
                 except:
-                    print_green(f"    ✓ {tool} ({version})")
+                    print(print_green(f"    ✓ {tool} ({version})"))
                     _add_check(report_file, tool, "pass", "critical", version)
                     CHECKS_PASS += 1
             else:
-                print_green(f"    ✓ {tool} ({version})")
+                print(print_green(f"    ✓ {tool} ({version})"))
                 _add_check(report_file, tool, "pass", "critical", version)
                 CHECKS_PASS += 1
         else:
             tool_name = "graphviz" if tool == "dot" else tool
-            print_red(f"    ✗ {tool_name} - NOT FOUND")
+            print(print_red(f"    ✗ {tool_name} - NOT FOUND"))
             _add_check(report_file, tool, "fail", "critical", "")
             CHECKS_FAIL += 1
 
     print()
 
     # Recommended tools
-    print_cyan("  Recommended Tools:")
+    print(print_cyan("  Recommended Tools:"))
 
     for tool in ["gh", "docker"]:
         version = _check_tool_version(tool)
         if version:
-            print_green(f"    ✓ {tool} ({version})")
+            print(print_green(f"    ✓ {tool} ({version})"))
             _add_check(report_file, tool, "pass", "recommended", version)
             CHECKS_PASS += 1
         else:
-            print_dim(f"    ○ {tool} (not installed)")
+            print(print_dim(f"    ○ {tool} (not installed)"))
             _add_check(report_file, tool, "missing", "recommended", "")
 
     print()
@@ -247,14 +247,14 @@ def _validate_api_keys(secrets_file: Path, report_file: Path) -> None:
     """Validate API keys."""
     global CHECKS_PASS, CHECKS_WARN
 
-    print_cyan("  API Credentials:")
+    print(print_cyan("  API Credentials:"))
 
     secrets = json.loads(read_file(secrets_file))
 
     # Check Anthropic API key
     anthropic_key = secrets.get('anthropic_api_key')
     if anthropic_key:
-        print_green("    ✓ Anthropic API key configured")
+        print(print_green("    ✓ Anthropic API key configured"))
         _add_check(report_file, "anthropic_api", "pass", "optional", "")
         CHECKS_PASS += 1
 
@@ -262,13 +262,13 @@ def _validate_api_keys(secrets_file: Path, report_file: Path) -> None:
     if secrets.get('bedrock_enabled'):
         aws_region = secrets.get('aws_region', 'us-east-1')
         aws_profile = secrets.get('aws_profile', 'default')
-        print_green(f"    ✓ AWS Bedrock configured (region: {aws_region}, profile: {aws_profile})")
+        print(print_green(f"    ✓ AWS Bedrock configured (region: {aws_region}, profile: {aws_profile})"))
         _add_check(report_file, "aws_bedrock", "pass", "optional", aws_region)
         CHECKS_PASS += 1
 
     # Check if any provider is configured
     if not anthropic_key and not secrets.get('bedrock_enabled'):
-        print_yellow("    ! No API credentials configured")
+        print(print_yellow("    ! No API credentials configured"))
         _add_check(report_file, "api_credentials", "warn", "critical", "")
         CHECKS_WARN += 1
 
@@ -279,7 +279,7 @@ def _validate_git(report_file: Path) -> None:
     """Validate Git configuration."""
     global CHECKS_PASS, CHECKS_WARN
 
-    print_cyan("  Git Configuration:")
+    print(print_cyan("  Git Configuration:"))
 
     # Check git user
     try:
@@ -293,15 +293,15 @@ def _validate_git(report_file: Path) -> None:
         ).stdout.strip()
 
         if git_name and git_email:
-            print_green(f"    ✓ User: {git_name} <{git_email}>")
+            print(print_green(f"    ✓ User: {git_name} <{git_email}>"))
             _add_check(report_file, "git_user", "pass", "recommended", "")
             CHECKS_PASS += 1
         else:
-            print_yellow("    ! Git user not configured")
+            print(print_yellow("    ! Git user not configured"))
             _add_check(report_file, "git_user", "warn", "recommended", "")
             CHECKS_WARN += 1
     except:
-        print_yellow("    ! Git user not configured")
+        print(print_yellow("    ! Git user not configured"))
         _add_check(report_file, "git_user", "warn", "recommended", "")
         CHECKS_WARN += 1
 
@@ -317,15 +317,15 @@ def _validate_git(report_file: Path) -> None:
                 capture_output=True, text=True, timeout=5
             )
             branch = branch_result.stdout.strip() if branch_result.returncode == 0 else "unknown"
-            print_green(f"    ✓ Git repository (branch: {branch})")
+            print(print_green(f"    ✓ Git repository (branch: {branch})"))
             _add_check(report_file, "git_repo", "pass", "recommended", "")
             CHECKS_PASS += 1
         else:
-            print_yellow("    ! Not a git repository")
+            print(print_yellow("    ! Not a git repository"))
             _add_check(report_file, "git_repo", "warn", "recommended", "")
             CHECKS_WARN += 1
     except:
-        print_yellow("    ! Not a git repository")
+        print(print_yellow("    ! Not a git repository"))
         _add_check(report_file, "git_repo", "warn", "recommended", "")
         CHECKS_WARN += 1
 
@@ -336,7 +336,7 @@ def _validate_agents(config_file: Path, report_file: Path, atomic_root: Path) ->
     """Validate agent repository."""
     global CHECKS_PASS, CHECKS_WARN
 
-    print_cyan("  Agent Repository:")
+    print(print_cyan("  Agent Repository:"))
 
     # Check for agents in atomic-claude2
     agents_dir = atomic_root / "agents"
@@ -346,15 +346,15 @@ def _validate_agents(config_file: Path, report_file: Path, atomic_root: Path) ->
         try:
             manifest = json.loads(read_file(manifest_file))
             agent_count = sum(len(phase.get('agents', [])) for phase in manifest.get('phases', []))
-            print_green(f"    ✓ Manifest valid ({agent_count} agents)")
+            print(print_green(f"    ✓ Manifest valid ({agent_count} agents)"))
             _add_check(report_file, "agent_manifest", "pass", "recommended", str(agent_count))
             CHECKS_PASS += 1
         except:
-            print_yellow("    ! Manifest invalid")
+            print(print_yellow("    ! Manifest invalid"))
             _add_check(report_file, "agent_manifest", "warn", "recommended", "")
             CHECKS_WARN += 1
     else:
-        print_yellow("    ! Agent manifest not found")
+        print(print_yellow("    ! Agent manifest not found"))
         _add_check(report_file, "agent_manifest", "warn", "recommended", "")
         CHECKS_WARN += 1
 
@@ -363,7 +363,7 @@ def _validate_agents(config_file: Path, report_file: Path, atomic_root: Path) ->
 
 def _assess_cpu(report_file: Path, os_type: str) -> None:
     """Assess CPU capabilities."""
-    print_cyan("  CPU:")
+    print(print_cyan("  CPU:"))
 
     cpu_model = "Unknown"
     cpu_cores = os.cpu_count() or 0
@@ -395,11 +395,11 @@ def _assess_cpu(report_file: Path, os_type: str) -> None:
 
     # Recommendation based on cores
     if cpu_cores >= 8:
-        print_green("    ✓ Suitable for parallel workers")
+        print(print_green("    ✓ Suitable for parallel workers"))
     elif cpu_cores >= 4:
-        print_yellow("    ○ Limited parallelization (4-7 cores)")
+        print(print_yellow("    ○ Limited parallelization (4-7 cores)"))
     else:
-        print_yellow("    ! Low core count - sequential processing recommended")
+        print(print_yellow("    ! Low core count - sequential processing recommended"))
 
     # Update report
     _update_report_capability(report_file, "cpu", {
@@ -413,7 +413,7 @@ def _assess_cpu(report_file: Path, os_type: str) -> None:
 
 def _assess_gpu(report_file: Path, os_type: str) -> None:
     """Assess GPU capabilities."""
-    print_cyan("  GPU:")
+    print(print_cyan("  GPU:"))
 
     gpu_name = ""
     has_cuda = False
@@ -433,11 +433,11 @@ def _assess_gpu(report_file: Path, os_type: str) -> None:
                         break
             has_metal = True
             print(f"    GPU:   {gpu_name or 'Integrated'}")
-            print_green("    ✓ Metal support (Apple Silicon / macOS)")
+            print(print_green("    ✓ Metal support (Apple Silicon / macOS)"))
         except:
             gpu_name = "Unknown"
             has_metal = True
-            print_dim("    ○ GPU detection unavailable")
+            print(print_dim("    ○ GPU detection unavailable"))
     elif os_type == "linux":
         # Check for NVIDIA
         if shutil.which("nvidia-smi"):
@@ -450,19 +450,19 @@ def _assess_gpu(report_file: Path, os_type: str) -> None:
                     gpu_name = result.stdout.strip().split('\n')[0]
                     has_cuda = True
                     print(f"    GPU:   {gpu_name}")
-                    print_green("    ✓ CUDA support")
+                    print(print_green("    ✓ CUDA support"))
             except:
                 pass
         else:
-            print_dim("    ○ No dedicated GPU detected")
+            print(print_dim("    ○ No dedicated GPU detected"))
     else:
-        print_dim("    ○ GPU detection unavailable on Windows")
+        print(print_dim("    ○ GPU detection unavailable on Windows"))
 
     # Local LLM recommendation
     if has_cuda or has_metal:
-        print_green("    ✓ Suitable for local LLM inference (Ollama)")
+        print(print_green("    ✓ Suitable for local LLM inference (Ollama)"))
     else:
-        print_dim("    ○ CPU-only inference available")
+        print(print_dim("    ○ CPU-only inference available"))
 
     # Update report
     _update_report_capability(report_file, "gpu", {
@@ -476,7 +476,7 @@ def _assess_gpu(report_file: Path, os_type: str) -> None:
 
 def _assess_memory(report_file: Path, os_type: str) -> None:
     """Assess memory capabilities."""
-    print_cyan("  Memory:")
+    print(print_cyan("  Memory:"))
 
     total_mb = 0
     avail_mb = 0
@@ -512,13 +512,13 @@ def _assess_memory(report_file: Path, os_type: str) -> None:
 
         # Recommendations
         if total_gb >= 32:
-            print_green("    ✓ Excellent for large LLM models")
+            print(print_green("    ✓ Excellent for large LLM models"))
         elif total_gb >= 16:
-            print_green("    ✓ Good for medium LLM models")
+            print(print_green("    ✓ Good for medium LLM models"))
         elif total_gb >= 8:
-            print_yellow("    ○ Limited - small models only")
+            print(print_yellow("    ○ Limited - small models only"))
         else:
-            print_yellow("    ! Low memory - API-only recommended")
+            print(print_yellow("    ! Low memory - API-only recommended"))
 
     # Update report
     _update_report_capability(report_file, "memory", {
@@ -531,7 +531,7 @@ def _assess_memory(report_file: Path, os_type: str) -> None:
 
 def _assess_storage(report_file: Path, os_type: str) -> None:
     """Assess storage capabilities."""
-    print_cyan("  Storage:")
+    print(print_cyan("  Storage:"))
 
     local_avail = 0
     local_total = 0
@@ -558,11 +558,11 @@ def _assess_storage(report_file: Path, os_type: str) -> None:
         print(f"      Total: {local_total} GB, Available: {local_avail} GB")
 
         if local_avail >= 50:
-            print_green("      ✓ Sufficient space")
+            print(print_green("      ✓ Sufficient space"))
         elif local_avail >= 10:
-            print_yellow("      ○ Limited space")
+            print(print_yellow("      ○ Limited space"))
         else:
-            print_yellow("      ! Low disk space")
+            print(print_yellow("      ! Low disk space"))
 
     # Update report
     _update_report_capability(report_file, "storage", {
@@ -578,8 +578,8 @@ def _assess_storage(report_file: Path, os_type: str) -> None:
 
 def _assess_network(report_file: Path) -> None:
     """Assess network connectivity."""
-    print_cyan("  Network:")
-    print_dim("    Testing WAN connectivity...")
+    print(print_cyan("  Network:"))
+    print(print_dim("    Testing WAN connectivity..."))
 
     # Simple connectivity test to Cloudflare
     try:
@@ -594,11 +594,11 @@ def _assess_network(report_file: Path) -> None:
             print(f"    WAN latency:  {latency_ms}ms (Cloudflare)")
 
             if latency_ms < 50:
-                print_green("    ✓ Excellent connection")
+                print(print_green("    ✓ Excellent connection"))
             elif latency_ms < 150:
-                print_green("    ✓ Good connection")
+                print(print_green("    ✓ Good connection"))
             else:
-                print_yellow("    ○ Moderate connection")
+                print(print_yellow("    ○ Moderate connection"))
 
             # Update report
             _update_report_capability(report_file, "network", {
@@ -607,27 +607,27 @@ def _assess_network(report_file: Path) -> None:
                 }
             })
         else:
-            print_yellow("    ! Network connectivity test failed")
+            print(print_yellow("    ! Network connectivity test failed"))
     except:
-        print_yellow("    ! Network connectivity test failed")
+        print(print_yellow("    ! Network connectivity test failed"))
 
     print()
 
 
 def _show_summary(report_file: Path) -> None:
     """Show validation summary."""
-    print_dim("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print(print_dim("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"))
     print()
 
     total = CHECKS_PASS + CHECKS_FAIL + CHECKS_WARN
 
     if CHECKS_FAIL == 0:
-        print_green(f"  ✓ Validation: {CHECKS_PASS}/{total} checks passed")
+        print(print_green(f"  ✓ Validation: {CHECKS_PASS}/{total} checks passed"))
     else:
-        print_red(f"  ✗ Validation: {CHECKS_PASS}/{total} passed, {CHECKS_FAIL} failed")
+        print(print_red(f"  ✗ Validation: {CHECKS_PASS}/{total} passed, {CHECKS_FAIL} failed"))
 
     if CHECKS_WARN > 0:
-        print_yellow(f"  ! Warnings: {CHECKS_WARN}")
+        print(print_yellow(f"  ! Warnings: {CHECKS_WARN}"))
 
     # System capability summary
     report = json.loads(read_file(report_file))
@@ -641,7 +641,7 @@ def _show_summary(report_file: Path) -> None:
     gpu_info = ""
     if caps.get('gpu', {}).get('cuda') or caps.get('gpu', {}).get('metal'):
         gpu_info = ", GPU"
-    print_dim(f"  System: {cores} cores, {mem_gb}GB RAM{gpu_info}")
+    print(print_dim(f"  System: {cores} cores, {mem_gb}GB RAM{gpu_info}"))
 
     # Update report with summary
     report['summary'] = {
@@ -657,11 +657,11 @@ def _show_summary(report_file: Path) -> None:
 def _handle_validation_failure() -> bool:
     """Handle validation failure with retry option."""
     print()
-    print_red(f"  Validation failed with {CHECKS_FAIL} critical issues.")
+    print(print_red(f"  Validation failed with {CHECKS_FAIL} critical issues."))
     print()
-    print_yellow("  Options:")
-    print_dim("    [r] Retry validation")
-    print_dim("    [c] Continue anyway (not recommended)")
+    print(print_yellow("  Options:"))
+    print(print_dim("    [r] Retry validation"))
+    print(print_dim("    [c] Continue anyway (not recommended)"))
     print()
 
     clear_input_buffer()
@@ -673,10 +673,10 @@ def _handle_validation_failure() -> bool:
             # Note: In real implementation, would recursively call execute()
             return False
         elif choice == 'c':
-            print_yellow("Continuing with validation failures")
+            print(print_yellow("Continuing with validation failures"))
             return True
         else:
-            print_red("Invalid choice")
+            print(print_red("Invalid choice"))
 
 
 def _add_check(report_file: Path, name: str, status: str, level: str, version: str) -> None:

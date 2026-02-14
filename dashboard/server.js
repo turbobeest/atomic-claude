@@ -54,7 +54,7 @@ app.get('/api/status', (req, res) => {
 
       // Add staleness metadata
       status.file_age_seconds = ageSeconds;
-      status.is_stale = ageSeconds > 60; // No update in 60+ seconds
+      status.is_stale = ageSeconds > 300; // No update in 5+ minutes (interactive prompts can take time)
       status.last_modified = new Date(mostRecentTime).toISOString();
 
       res.json(status);
@@ -266,7 +266,7 @@ app.get('/api/stream', (req, res) => {
         const ageSeconds = Math.floor((Date.now() - mostRecentTime) / 1000);
 
         status.file_age_seconds = ageSeconds;
-        status.is_stale = ageSeconds > 60; // No update in 60+ seconds
+        status.is_stale = ageSeconds > 300; // No update in 5+ minutes (interactive prompts can take time)
         status.last_modified = new Date(mostRecentTime).toISOString();
 
         res.write(`data: ${JSON.stringify(status)}\n\n`);
@@ -825,7 +825,7 @@ app.get('/api/narrative', (req, res) => {
     res.json({
       narrative,
       phase: status.phase || null,
-      task: status.task_id || null,
+      task: status.task || status.task_id || null,
       model: status.model || null
     });
   } catch (error) {

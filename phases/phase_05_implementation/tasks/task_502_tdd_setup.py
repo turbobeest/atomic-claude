@@ -72,7 +72,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # UAT Mode Bypass
     if uat_mode:
         print()
-        print_yellow("⚡ UAT Mode: Skipping TDD configuration, creating minimal setup")
+        print(print_yellow("⚡ UAT Mode: Skipping TDD configuration, creating minimal setup"))
         print()
 
         ensure_dir(setup_file.parent)
@@ -94,65 +94,65 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         }
         write_file(setup_file, json.dumps(setup_data, indent=2))
 
-        print_green("✓ TDD Setup complete (UAT mode)")
+        print(print_green("✓ TDD Setup complete (UAT mode)"))
         return True
 
     ensure_dir(setup_file.parent)
     ensure_dir(config_file.parent)
 
     print()
-    print_dim("  Configuring TDD execution parameters.")
+    print(print_dim("  Configuring TDD execution parameters."))
     print()
 
     # Coverage Targets
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("COVERAGE TARGETS")
-    print()
-
-    print_dim("  Coverage measures how much of your code is exercised by tests. But coverage")
-    print_dim("  is a means, not an end—100% coverage doesn't guarantee bug-free code.")
+    print(print_bold("COVERAGE TARGETS"))
     print()
 
-    print_bold("  Strategic Considerations:")
+    print(print_dim("  Coverage measures how much of your code is exercised by tests. But coverage"))
+    print(print_dim("  is a means, not an end—100% coverage doesn't guarantee bug-free code."))
     print()
-    print_cyan("    Unit Coverage") + " measures function/method-level testing."
-    print_dim("    Higher coverage catches more edge cases but has diminishing returns.")
-    print_dim("    The last 10% often requires mocking internals, which creates brittle tests.")
+
+    print(print_bold("  Strategic Considerations:"))
     print()
-    print_cyan("    Integration Coverage") + " measures how components work together."
-    print_dim("    Lower targets are acceptable because integration tests are more expensive")
-    print_dim("    to write and maintain, but they catch real-world interaction bugs.")
+    print(print_cyan("    Unit Coverage") + " measures function/method-level testing.")
+    print(print_dim("    Higher coverage catches more edge cases but has diminishing returns."))
+    print(print_dim("    The last 10% often requires mocking internals, which creates brittle tests."))
+    print()
+    print(print_cyan("    Integration Coverage") + " measures how components work together.")
+    print(print_dim("    Lower targets are acceptable because integration tests are more expensive"))
+    print(print_dim("    to write and maintain, but they catch real-world interaction bugs."))
     print()
 
     print("  " + "─" * 114)
-    print_bold("  Coverage Philosophy")
+    print(print_bold("  Coverage Philosophy"))
     print()
-    print_green("    90%+ Unit") + "     Critical paths, financial calculations, security logic"
-    print_yellow("    80% Unit") + "      Most production systems—good balance of safety and velocity"
-    print_dim("    70% Unit") + "      Prototypes, internal tools, rapidly evolving code"
+    print(print_green("    90%+ Unit") + "     Critical paths, financial calculations, security logic")
+    print(print_yellow("    80% Unit") + "      Most production systems—good balance of safety and velocity")
+    print(print_dim("    70% Unit") + "      Prototypes, internal tools, rapidly evolving code")
     print()
-    print_dim("    Rule of thumb: Cover what matters, not what's easy to cover.")
-    print_dim("    Focus on business logic, error paths, and boundary conditions.")
+    print(print_dim("    Rule of thumb: Cover what matters, not what's easy to cover."))
+    print(print_dim("    Focus on business logic, error paths, and boundary conditions."))
     print("  " + "─" * 114)
     print()
 
-    print_cyan("    Unit Test Coverage Target")
+    print(print_cyan("    Unit Test Coverage Target"))
     print()
-    print_green("      [90]") + "  Strict   " + print_dim("- Financial, security, compliance systems")
-    print_yellow("      [80]") + "  Standard " + print_dim("- Production applications (recommended)")
-    print_dim("      [70]") + "  Relaxed  " + print_dim("- Prototypes, internal tools, MVPs")
+    print(print_green("      [90]") + "  Strict   " + print_dim("- Financial, security, compliance systems"))
+    print(print_yellow("      [80]") + "  Standard " + print_dim("- Production applications (recommended)"))
+    print(print_dim("      [70]") + "  Relaxed  " + print_dim("- Prototypes, internal tools, MVPs"))
     print()
 
     unit_coverage = prompt_user("    Unit test coverage target (default: 80): ").strip()
     unit_coverage = int(unit_coverage) if unit_coverage else 80
 
     print()
-    print_cyan("    Integration Test Coverage Target")
+    print(print_cyan("    Integration Test Coverage Target"))
     print()
-    print_green("      [80]") + "  Strict   " + print_dim("- Microservices, distributed systems")
-    print_yellow("      [70]") + "  Standard " + print_dim("- Most applications (recommended)")
-    print_dim("      [60]") + "  Relaxed  " + print_dim("- Monoliths with strong unit tests")
+    print(print_green("      [80]") + "  Strict   " + print_dim("- Microservices, distributed systems"))
+    print(print_yellow("      [70]") + "  Standard " + print_dim("- Most applications (recommended)"))
+    print(print_dim("      [60]") + "  Relaxed  " + print_dim("- Monoliths with strong unit tests"))
     print()
 
     integration_coverage = prompt_user("    Integration test coverage target (default: 70): ").strip()
@@ -161,13 +161,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     print()
 
     # Test Pyramid Strategy
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("TEST PYRAMID STRATEGY")
+    print(print_bold("TEST PYRAMID STRATEGY"))
     print()
 
-    print_dim("  The test pyramid is a mental model for balancing test types. Each layer")
-    print_dim("  trades off between speed, cost, and confidence.")
+    print(print_dim("  The test pyramid is a mental model for balancing test types. Each layer"))
+    print(print_dim("  trades off between speed, cost, and confidence."))
     print()
 
     print("""                      ▲
@@ -181,30 +181,30 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
               ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔""")
     print()
 
-    print_bold("  Strategic Tradeoffs:")
+    print(print_bold("  Strategic Tradeoffs:"))
     print()
     print("  " + "─" * 114)
     print()
-    print_green("    Unit-Heavy (70/25/5)")
-    print_dim("    Best for: Libraries, algorithms, pure business logic")
-    print_dim("    Fast feedback loops, easy to debug, but may miss integration bugs")
+    print(print_green("    Unit-Heavy (70/25/5)"))
+    print(print_dim("    Best for: Libraries, algorithms, pure business logic"))
+    print(print_dim("    Fast feedback loops, easy to debug, but may miss integration bugs"))
     print()
-    print_yellow("    Balanced (50/35/15)")
-    print_dim("    Best for: Full-stack applications, CRUD systems")
-    print_dim("    Good coverage across layers, balanced maintenance cost")
+    print(print_yellow("    Balanced (50/35/15)"))
+    print(print_dim("    Best for: Full-stack applications, CRUD systems"))
+    print(print_dim("    Good coverage across layers, balanced maintenance cost"))
     print()
-    print_cyan("    Integration-Heavy (40/45/15)")
-    print_dim("    Best for: Microservices, APIs, systems with many external dependencies")
-    print_dim("    Catches boundary issues, but slower test suites")
+    print(print_cyan("    Integration-Heavy (40/45/15)"))
+    print(print_dim("    Best for: Microservices, APIs, systems with many external dependencies"))
+    print(print_dim("    Catches boundary issues, but slower test suites"))
     print()
     print("  " + "─" * 114)
     print()
 
-    print_cyan("  Select pyramid profile:")
+    print(print_cyan("  Select pyramid profile:"))
     print()
-    print_green("    [unit-heavy]") + "     70% unit, 25% integration, 5% E2E"
-    print_yellow("    [balanced]") + "       50% unit, 35% integration, 15% E2E"
-    print_cyan("    [integration]") + "    40% unit, 45% integration, 15% E2E"
+    print(print_green("    [unit-heavy]") + "     70% unit, 25% integration, 5% E2E")
+    print(print_yellow("    [balanced]") + "       50% unit, 35% integration, 15% E2E")
+    print(print_cyan("    [integration]") + "    40% unit, 45% integration, 15% E2E")
     print()
 
     pyramid_profile = prompt_user("  Pyramid profile (default: unit-heavy): ").strip()
@@ -213,9 +213,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     print()
 
     # Parallel Execution
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("PARALLEL EXECUTION")
+    print(print_bold("PARALLEL EXECUTION"))
     print()
 
     # Get task count
@@ -225,8 +225,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             tasks_data = json.load(f)
         task_count = sum(1 for task in tasks_data.get("tasks", []) if len(task.get("subtasks", [])) >= 4)
 
-    print_dim("  TDD cycles execute in parallel using git worktrees, just like the DAG")
-    print_dim("  execution in previous phases. Independent tasks run simultaneously.")
+    print(print_dim("  TDD cycles execute in parallel using git worktrees, just like the DAG"))
+    print(print_dim("  execution in previous phases. Independent tasks run simultaneously."))
     print()
 
     # Calculate optimal worker count
@@ -237,14 +237,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     blocked = False  # In real implementation, analyze task dependencies
 
     if blocked:
-        print_yellow("  ! Cross-task dependencies detected. Falling back to sequential execution.")
+        print(print_yellow("  ! Cross-task dependencies detected. Falling back to sequential execution."))
         optimal_workers = 1
     else:
-        print_green("  ✓ No blockers detected. Parallel execution enabled.")
+        print(print_green("  ✓ No blockers detected. Parallel execution enabled."))
 
     print()
     print("  " + "─" * 114)
-    print_bold("  Execution Plan")
+    print(print_bold("  Execution Plan"))
     print()
     print(f"    Tasks to execute:    {task_count}")
     print(f"    Parallel workers:    {optimal_workers}")
@@ -253,83 +253,83 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     if optimal_workers > 1:
         tasks_per_worker = (task_count + optimal_workers - 1) // optimal_workers
-        print_dim(f"    Each worker handles ~{tasks_per_worker} tasks in its own git worktree.")
-        print_dim("    Workers merge results back to main branch on completion.")
+        print(print_dim(f"    Each worker handles ~{tasks_per_worker} tasks in its own git worktree."))
+        print(print_dim("    Workers merge results back to main branch on completion."))
     else:
-        print_dim("    Tasks will execute sequentially in the main worktree.")
+        print(print_dim("    Tasks will execute sequentially in the main worktree."))
 
     print("  " + "─" * 114)
     print()
 
     # Testing Tools
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("TESTING TOOLS")
+    print(print_bold("TESTING TOOLS"))
     print()
 
-    print_dim("  Tools are auto-detected from your project configuration files.")
+    print(print_dim("  Tools are auto-detected from your project configuration files."))
     print()
 
     # Detect project type
     detected_stack = detect_tech_stack(atomic_root)
 
     print("  " + "─" * 114)
-    print_bold("  Detected Tools")
+    print(print_bold("  Detected Tools"))
     print()
 
     if detected_stack == "python":
-        print_red("    RED (Testing):") + "       pytest, coverage.py"
-        print_cyan("    REFACTOR (Linting):") + "  ruff, black, mypy"
+        print(print_red("    RED (Testing):") + "       pytest, coverage.py")
+        print(print_cyan("    REFACTOR (Linting):") + "  ruff, black, mypy")
         print("    " + print_magenta("VERIFY (Security):") + "   bandit, safety, pip-audit")
     elif detected_stack == "node":
-        print_red("    RED (Testing):") + "       jest, vitest, nyc"
-        print_cyan("    REFACTOR (Linting):") + "  eslint, prettier, tsc"
+        print(print_red("    RED (Testing):") + "       jest, vitest, nyc")
+        print(print_cyan("    REFACTOR (Linting):") + "  eslint, prettier, tsc")
         print("    " + print_magenta("VERIFY (Security):") + "   npm audit, snyk")
     elif detected_stack == "go":
-        print_red("    RED (Testing):") + "       go test -cover"
-        print_cyan("    REFACTOR (Linting):") + "  gofmt, golint, staticcheck"
+        print(print_red("    RED (Testing):") + "       go test -cover")
+        print(print_cyan("    REFACTOR (Linting):") + "  gofmt, golint, staticcheck")
         print("    " + print_magenta("VERIFY (Security):") + "   gosec, govulncheck")
     else:
-        print_yellow("    ! No project files detected. Configure tools manually.")
+        print(print_yellow("    ! No project files detected. Configure tools manually."))
 
     print("  " + "─" * 114)
     print()
 
-    print_bold("  Customizing Tools:")
+    print(print_bold("  Customizing Tools:"))
     print()
-    print_dim("  To use different tools, create or edit:")
-    print_cyan("    .claude/config/tdd-tools.json")
+    print(print_dim("  To use different tools, create or edit:"))
+    print(print_cyan("    .claude/config/tdd-tools.json"))
     print()
-    print_dim("  Example configuration:")
+    print(print_dim("  Example configuration:"))
     print()
-    print_dim('    {')
-    print_dim('      "red": {')
-    print_dim('        "test_command": "pytest -v",')
-    print_dim('        "coverage_command": "pytest --cov=src --cov-report=json"')
-    print_dim('      },')
-    print_dim('      "refactor": {')
-    print_dim('        "lint_command": "ruff check . --fix",')
-    print_dim('        "format_command": "black ."')
-    print_dim('      },')
-    print_dim('      "verify": {')
-    print_dim('        "security_command": "bandit -r src/"')
-    print_dim('      }')
-    print_dim('    }')
+    print(print_dim('    {'))
+    print(print_dim('      "red": {'))
+    print(print_dim('        "test_command": "pytest -v",'))
+    print(print_dim('        "coverage_command": "pytest --cov=src --cov-report=json"'))
+    print(print_dim('      },'))
+    print(print_dim('      "refactor": {'))
+    print(print_dim('        "lint_command": "ruff check . --fix",'))
+    print(print_dim('        "format_command": "black ."'))
+    print(print_dim('      },'))
+    print(print_dim('      "verify": {'))
+    print(print_dim('        "security_command": "bandit -r src/"'))
+    print(print_dim('      }'))
+    print(print_dim('    }'))
     print()
 
     if config_file.exists():
-        print_green("  ✓ Custom tool configuration found at .claude/config/tdd-tools.json")
+        print(print_green("  ✓ Custom tool configuration found at .claude/config/tdd-tools.json"))
     else:
-        print_dim("  No custom configuration found. Using detected defaults.")
+        print(print_dim("  No custom configuration found. Using detected defaults."))
     print()
 
     prompt_user("  Press Enter to continue (or edit tdd-tools.json first)...")
     print()
 
     # Setup Summary
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("SETUP SUMMARY")
+    print(print_bold("SETUP SUMMARY"))
     print()
 
     print("    Coverage Targets:")
@@ -358,7 +358,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     }
     write_file(setup_file, json.dumps(setup_data, indent=2))
 
-    print_green("✓ TDD Setup complete")
+    print(print_green("✓ TDD Setup complete"))
     return True
 
 

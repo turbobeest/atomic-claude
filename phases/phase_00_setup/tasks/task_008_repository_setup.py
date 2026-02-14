@@ -42,7 +42,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     secrets_file = output_dir / "secrets.json"
 
     print()
-    print_cyan("Repository & Provider Setup")
+    print(print_cyan("Repository & Provider Setup"))
     print()
 
     # Show info box
@@ -74,17 +74,17 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         audit_count, ollama_configured
     )
 
-    print_green("✓ Repository setup complete")
+    print(print_green("✓ Repository setup complete"))
     return True
 
 
 def _show_info_box() -> None:
     """Show informational box."""
-    print_dim("  ┌─────────────────────────────────────────────────────────────┐")
-    print_dim("  │ ATOMIC CLAUDE includes embedded resources:                  │")
-    print_dim("  │   • Agents - Specialized AI agents per phase/domain         │")
-    print_dim("  │   • Audits - Quality audits across multiple categories      │")
-    print_dim("  └─────────────────────────────────────────────────────────────┘")
+    print(print_dim("  ┌─────────────────────────────────────────────────────────────┐"))
+    print(print_dim("  │ ATOMIC CLAUDE includes embedded resources:                  │"))
+    print(print_dim("  │   • Agents - Specialized AI agents per phase/domain         │"))
+    print(print_dim("  │   • Audits - Quality audits across multiple categories      │"))
+    print(print_dim("  └─────────────────────────────────────────────────────────────┘"))
     print()
 
 
@@ -99,7 +99,7 @@ def _verify_agents(agents_dir: Path, agents_manifest: Path) -> tuple[int, int]:
     Returns:
         Tuple of (total_agents, total_categories)
     """
-    print_cyan("  AGENTS")
+    print(print_cyan("  AGENTS"))
     print()
 
     if agents_manifest.exists():
@@ -109,16 +109,16 @@ def _verify_agents(agents_dir: Path, agents_manifest: Path) -> tuple[int, int]:
             total_categories = len(manifest.get('phases', []))
             manifest_version = manifest.get('version', 'unknown')
 
-            print_green(f"  ✓ Agents available (v{manifest_version})")
+            print(print_green(f"  ✓ Agents available (v{manifest_version})"))
             print(f"    Total agents:     {total_agents}")
             print(f"    Phase categories: {total_categories}")
         except:
-            print_yellow(f"  ! Agent manifest corrupt: {agents_manifest}")
-            print_dim("    Using built-in defaults")
+            print(print_yellow(f"  ! Agent manifest corrupt: {agents_manifest}"))
+            print(print_dim("    Using built-in defaults"))
             total_agents, total_categories = 0, 0
     else:
-        print_yellow(f"  ! Agent manifest not found at: {agents_manifest}")
-        print_dim("    Using built-in defaults")
+        print(print_yellow(f"  ! Agent manifest not found at: {agents_manifest}"))
+        print(print_dim("    Using built-in defaults"))
         total_agents, total_categories = 0, 0
 
     print()
@@ -136,7 +136,7 @@ def _verify_audits(audits_dir: Path, audits_menu: Path) -> int:
     Returns:
         Total audit count
     """
-    print_cyan("  AUDITS")
+    print(print_cyan("  AUDITS"))
     print()
 
     if audits_menu.exists():
@@ -151,12 +151,12 @@ def _verify_audits(audits_dir: Path, audits_menu: Path) -> int:
         else:
             category_count = 0
 
-        print_green("  ✓ Audits available")
+        print(print_green("  ✓ Audits available"))
         print(f"    Total audits:  ~{audit_count}")
         print(f"    Categories:    {category_count}")
     else:
-        print_yellow(f"  ! Audit menu not found at: {audits_menu}")
-        print_dim("    AI audits disabled")
+        print(print_yellow(f"  ! Audit menu not found at: {audits_menu}"))
+        print(print_dim("    AI audits disabled"))
         audit_count = 0
 
     print()
@@ -194,25 +194,25 @@ def _configure_routing(ollama_configured: bool) -> Dict[str, str]:
     Returns:
         Routing configuration dictionary
     """
-    print_cyan("  TASK ROUTING")
+    print(print_cyan("  TASK ROUTING"))
     print()
 
     if ollama_configured:
-        print_green("  ✓ Ollama hosts configured - hybrid routing available")
+        print(print_green("  ✓ Ollama hosts configured - hybrid routing available"))
         print()
-        print_dim("  Task routing determines which provider handles different task types:")
+        print(print_dim("  Task routing determines which provider handles different task types:"))
         print()
-        print_cyan("    Critical")
+        print(print_cyan("    Critical"))
         print("   PRD generation, architecture decisions")
-        print_dim("              → Uses primary provider (highest quality)")
+        print(print_dim("              → Uses primary provider (highest quality)"))
         print()
-        print_cyan("    Bulk")
+        print(print_cyan("    Bulk"))
         print("       File scanning, audit runs, code analysis")
-        print_dim("              → Can use Ollama (high volume, parallelizable)")
+        print(print_dim("              → Can use Ollama (high volume, parallelizable)"))
         print()
-        print_cyan("    Background")
+        print(print_cyan("    Background"))
         print(" Indexing, validation, health checks")
-        print_dim("              → Can use smaller/faster models")
+        print(print_dim("              → Can use smaller/faster models"))
         print()
 
         routing_config = {
@@ -222,14 +222,14 @@ def _configure_routing(ollama_configured: bool) -> Dict[str, str]:
             "background_model": "same"
         }
 
-        print_bold("  Current Routing:")
+        print(print_bold("  Current Routing:"))
         print()
         print("    Critical tasks:   primary")
         print("    Bulk tasks:       ollama")
         print("    Background tasks: ollama")
     else:
-        print_dim("  ○ No Ollama hosts configured - all tasks use primary provider")
-        print_dim("    (Configure Ollama in Task 004 for hybrid routing)")
+        print(print_dim("  ○ No Ollama hosts configured - all tasks use primary provider"))
+        print(print_dim("    (Configure Ollama in Task 004 for hybrid routing)"))
 
         routing_config = {
             "critical": "primary",
@@ -263,7 +263,7 @@ def _save_configuration(
         routing_config: Routing configuration
         ollama_configured: Whether Ollama is configured
     """
-    print_dim("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print(print_dim("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"))
     print()
 
     # Build configuration
@@ -292,7 +292,7 @@ def _save_configuration(
     config['providers'] = providers_config
     write_file(config_file, json.dumps(config, indent=2))
 
-    print_green("  ✓ Configuration saved")
+    print(print_green("  ✓ Configuration saved"))
     print()
 
 
@@ -304,23 +304,23 @@ def _show_summary(
     ollama_configured: bool
 ) -> None:
     """Show summary of configuration."""
-    print_bold("  Summary:")
+    print(print_bold("  Summary:"))
     print()
 
     if agents_manifest.exists():
-        print_green(f"    ✓ Agents:  embedded ({total_agents} available)")
+        print(print_green(f"    ✓ Agents:  embedded ({total_agents} available)"))
     else:
-        print_yellow("    ○ Agents:  using defaults")
+        print(print_yellow("    ○ Agents:  using defaults"))
 
     if audits_menu.exists():
-        print_green(f"    ✓ Audits:  embedded (~{audit_count} available)")
+        print(print_green(f"    ✓ Audits:  embedded (~{audit_count} available)"))
     else:
-        print_yellow("    ○ Audits:  disabled")
+        print(print_yellow("    ○ Audits:  disabled"))
 
     if ollama_configured:
-        print_green("    ✓ Routing: hybrid (Ollama + primary)")
+        print(print_green("    ✓ Routing: hybrid (Ollama + primary)"))
     else:
-        print_dim("    ○ Routing: primary provider only")
+        print(print_dim("    ○ Routing: primary provider only"))
 
     print()
 

@@ -58,7 +58,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # UAT Mode: Auto-select core agents
     if uat_mode:
         print()
-        print_yellow("⚡ UAT Mode: Using core agents only")
+        print(print_yellow("⚡ UAT Mode: Using core agents only"))
         print()
 
         agents_data = {
@@ -68,52 +68,52 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             "selection_method": "uat_defaults"
         }
         write_file(agents_file, json.dumps(agents_data, indent=2))
-        print_green("✓ Agent selection complete (UAT mode)")
+        print(print_green("✓ Agent selection complete (UAT mode)"))
         return True
 
     print()
-    print_dim("Analyzing your PRD to recommend the best agent composition.")
+    print(print_dim("Analyzing your PRD to recommend the best agent composition."))
     print()
 
     # PRD Analysis
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("PRD ANALYSIS")
+    print(print_bold("PRD ANALYSIS"))
     print()
 
     # Analyze PRD characteristics
     analysis = _analyze_prd(prd_file)
 
-    print_dim("Scanned PRD for project characteristics...")
+    print(print_dim("Scanned PRD for project characteristics..."))
     print()
-    print_bold("Project Profile:")
+    print(print_bold("Project Profile:"))
     print()
     print(f"  Features:     {analysis['feature_count']} defined")
     print(f"  NFRs:         {analysis['nfr_count']} defined")
     print()
-    print_bold("Detected Patterns:")
+    print(print_bold("Detected Patterns:"))
     print()
 
     patterns = analysis['patterns']
     if patterns['api']:
-        print_green("  ✓ API/Endpoints")
+        print(print_green("  ✓ API/Endpoints"))
     if patterns['auth']:
-        print_green("  ✓ Authentication/Authorization")
+        print(print_green("  ✓ Authentication/Authorization"))
     if patterns['database']:
-        print_green("  ✓ Database/Data Layer")
+        print(print_green("  ✓ Database/Data Layer"))
     if patterns['ui']:
-        print_green("  ✓ User Interface")
+        print(print_green("  ✓ User Interface"))
     if patterns['testing']:
-        print_green("  ✓ Testing Emphasis")
+        print(print_green("  ✓ Testing Emphasis"))
     if patterns['security']:
-        print_green("  ✓ Security Requirements")
+        print(print_green("  ✓ Security Requirements"))
     if patterns['integration']:
-        print_green("  ✓ External Integrations")
+        print(print_green("  ✓ External Integrations"))
     if patterns['performance']:
-        print_green("  ✓ Performance Requirements")
+        print(print_green("  ✓ Performance Requirements"))
 
     if not any(patterns.values()):
-        print_dim("  (No specific patterns detected - using core agents)")
+        print(print_dim("  (No specific patterns detected - using core agents)"))
     print()
 
     # Save analysis
@@ -128,9 +128,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     _show_recommendations(recommendations)
 
     # Selection
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("SELECTION")
+    print(print_bold("SELECTION"))
     print()
 
     decomposition_agents = ["task-decomposer", "dependency-mapper", "work-packager"]
@@ -138,9 +138,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     additional_agents: List[str] = []
 
     if recommendations:
-        print_green("  approve     ") + f"Use core agents + recommendations ({len(recommendations)} suggested)"
-        print_cyan("  core        ") + "Use core agents only"
-        print_yellow("  custom      ") + "Customize agent selection"
+        print(print_green("  approve     ") + f"Use core agents + recommendations ({len(recommendations)} suggested)")
+        print(print_cyan("  core        ") + "Use core agents only")
+        print(print_yellow("  custom      ") + "Customize agent selection")
         print()
 
         agent_choice = ""
@@ -150,15 +150,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             if not agent_choice:
                 agent_choice = "approve"
             if agent_choice not in ["approve", "core", "custom"]:
-                print_red("Invalid choice. Enter: approve, core, or custom")
+                print(print_red("Invalid choice. Enter: approve, core, or custom"))
 
         if agent_choice == "approve":
             additional_agents = [rec[0] for rec in recommendations]
         elif agent_choice == "custom":
             additional_agents = _custom_selection(recommendations)
     else:
-        print_green("  approve     ") + "Use core agents"
-        print_yellow("  custom      ") + "Add custom agents"
+        print(print_green("  approve     ") + "Use core agents")
+        print(print_yellow("  custom      ") + "Add custom agents")
         print()
 
         agent_choice = ""
@@ -168,7 +168,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             if not agent_choice:
                 agent_choice = "approve"
             if agent_choice not in ["approve", "custom"]:
-                print_red("Invalid choice. Enter: approve or custom")
+                print(print_red("Invalid choice. Enter: approve or custom"))
 
         if agent_choice == "custom":
             additional_agents = _custom_selection_from_all()
@@ -196,7 +196,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     ensure_dir(agents_file.parent)
     write_file(agents_file, json.dumps(selection_data, indent=2))
 
-    print_green("✓ Agent selection complete")
+    print(print_green("✓ Agent selection complete"))
     return True
 
 
@@ -243,35 +243,35 @@ def _analyze_prd(prd_file: Path) -> Dict[str, Any]:
 
 def _show_core_agents() -> None:
     """Display core agents that are always included."""
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("CORE AGENTS ") + print_dim("(always included)")
+    print(print_bold("CORE AGENTS ") + print_dim("(always included)"))
     print()
     print("These agents form the backbone of task decomposition. They transform your")
     print("PRD into a structured task graph following the DAG (Directed Acyclic Graph)")
     print("pattern, enabling parallel execution in git worktrees.")
     print()
-    print_green("  task-decomposer") + " (opus)"
-    print_dim("    Parses PRD Section 4 (Features) and Section 10 (Task Decomposition).")
-    print_dim("    Generates atomic tasks with acceptance criteria from EARS requirements.")
-    print_dim("    Maps RFC 2119 keywords (SHALL/SHOULD/MAY) to task priorities.")
+    print(print_green("  task-decomposer") + " (opus)")
+    print(print_dim("    Parses PRD Section 4 (Features) and Section 10 (Task Decomposition)."))
+    print(print_dim("    Generates atomic tasks with acceptance criteria from EARS requirements."))
+    print(print_dim("    Maps RFC 2119 keywords (SHALL/SHOULD/MAY) to task priorities."))
     print()
-    print_green("  dependency-mapper") + " (sonnet)"
-    print_dim("    Builds the DAG from PRD dependency tables and task relationships.")
-    print_dim("    Detects cycles, validates ordering, identifies critical path.")
-    print_dim("    Enables parallel worktree execution for independent tasks.")
+    print(print_green("  dependency-mapper") + " (sonnet)")
+    print(print_dim("    Builds the DAG from PRD dependency tables and task relationships."))
+    print(print_dim("    Detects cycles, validates ordering, identifies critical path."))
+    print(print_dim("    Enables parallel worktree execution for independent tasks."))
     print()
-    print_green("  work-packager") + " (sonnet)"
-    print_dim("    Groups tasks into parallel execution packages based on DAG analysis.")
-    print_dim("    Assigns tasks to worktrees, respects dependency constraints.")
+    print(print_green("  work-packager") + " (sonnet)")
+    print(print_dim("    Groups tasks into parallel execution packages based on DAG analysis."))
+    print(print_dim("    Assigns tasks to worktrees, respects dependency constraints."))
     print()
-    print_green("  task-validator") + " (sonnet)"
-    print_dim("    Validates task clarity, completeness, and actionability.")
-    print_dim("    Ensures acceptance criteria are testable.")
+    print(print_green("  task-validator") + " (sonnet)")
+    print(print_dim("    Validates task clarity, completeness, and actionability."))
+    print(print_dim("    Ensures acceptance criteria are testable."))
     print()
-    print_green("  coverage-checker") + " (haiku)"
-    print_dim("    Verifies all PRD features have corresponding tasks.")
-    print_dim("    Maps tasks back to requirements for traceability.")
+    print(print_green("  coverage-checker") + " (haiku)")
+    print(print_dim("    Verifies all PRD features have corresponding tasks."))
+    print(print_dim("    Maps tasks back to requirements for traceability."))
     print()
 
 
@@ -316,25 +316,25 @@ def _get_recommendations(analysis: Dict[str, Any]) -> List[Tuple[str, str]]:
 
 def _show_recommendations(recommendations: List[Tuple[str, str]]) -> None:
     """Display recommended agents."""
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("RECOMMENDED ADDITIONS ") + print_dim("(based on your PRD)")
+    print(print_bold("RECOMMENDED ADDITIONS ") + print_dim("(based on your PRD)"))
     print()
 
     if not recommendations:
-        print_dim("No specific additions recommended - core agents are sufficient for this project.")
+        print(print_dim("No specific additions recommended - core agents are sufficient for this project."))
         print()
     else:
         for agent_name, reason in recommendations:
-            print_yellow(f"  {agent_name}") + " (sonnet)"
-            print_dim(f"    {reason}")
+            print(print_yellow(f"  {agent_name}") + " (sonnet)")
+            print(print_dim(f"    {reason}"))
             print()
 
 
 def _custom_selection(recommendations: List[Tuple[str, str]]) -> List[str]:
     """Handle custom agent selection from recommendations."""
     print()
-    print_dim("Select additional agents (space-separated numbers, or 'none'):")
+    print(print_dim("Select additional agents (space-separated numbers, or 'none'):"))
     for i, (agent_name, _) in enumerate(recommendations, 1):
         print(f"  {i}. {agent_name}")
     print()
@@ -357,7 +357,7 @@ def _custom_selection(recommendations: List[Tuple[str, str]]) -> List[str]:
 def _custom_selection_from_all() -> List[str]:
     """Handle custom agent selection from all available agents."""
     print()
-    print_dim("Available additional agents:")
+    print(print_dim("Available additional agents:"))
     print("  1. api-task-specialist")
     print("  2. security-task-analyst")
     print("  3. test-strategy-planner")
@@ -389,20 +389,20 @@ def _show_final_roster(
     additional: List[str]
 ) -> None:
     """Display final agent roster."""
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("FINAL AGENT ROSTER")
+    print(print_bold("FINAL AGENT ROSTER"))
     print()
-    print_dim("Decomposition Pipeline (sequential):")
+    print(print_dim("Decomposition Pipeline (sequential):"))
     for agent in decomposition:
         print(f"  • {agent}")
     print()
-    print_dim("Validation (parallel):")
+    print(print_dim("Validation (parallel):"))
     for agent in validation:
         print(f"  • {agent}")
     if additional:
         print()
-        print_dim("Additional Specialists:")
+        print(print_dim("Additional Specialists:"))
         for agent in additional:
             print(f"  • {agent}")
     print()

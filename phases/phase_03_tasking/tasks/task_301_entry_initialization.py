@@ -52,7 +52,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # UAT Mode: Auto-pass validation
     if uat_mode:
         print()
-        print_yellow("⚡ UAT Mode: Auto-passing entry validation")
+        print(print_yellow("⚡ UAT Mode: Auto-passing entry validation"))
         print()
 
         ensure_dir(taskmaster_dir / "tasks")
@@ -65,7 +65,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             "mode": "uat"
         }
         write_file(validation_file, json.dumps(validation_data, indent=2))
-        print_green("✓ Entry validation complete (UAT mode)")
+        print(print_green("✓ Entry validation complete (UAT mode)"))
         return True
 
     # Phase 3 Welcome
@@ -77,52 +77,52 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     validation_data: Dict[str, Any] = {}
 
     # Phase 2 Closeout Check
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("PHASE 2 CLOSEOUT")
+    print(print_bold("PHASE 2 CLOSEOUT"))
     print()
 
     if closeout_file.exists():
         closeout = json.loads(read_file(closeout_file))
         phase2_status = closeout.get("status", "unknown")
         if phase2_status == "complete":
-            print_green(f"✓ Phase 2 closeout found (status: complete)")
+            print(print_green(f"✓ Phase 2 closeout found (status: complete)"))
             checks_passed += 1
             validation_data["phase2_closeout"] = "pass"
         else:
-            print_yellow(f"! Phase 2 closeout status: {phase2_status}")
+            print(print_yellow(f"! Phase 2 closeout status: {phase2_status}"))
             checks_warned += 1
             validation_data["phase2_closeout"] = phase2_status
     else:
-        print_red("✗ Phase 2 closeout not found")
-        print_dim(f"  Expected: {closeout_file}")
+        print(print_red("✗ Phase 2 closeout not found"))
+        print(print_dim(f"  Expected: {closeout_file}"))
         checks_failed += 1
         validation_data["phase2_closeout"] = "missing"
     print()
 
     # PRD Document Check
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("PRD DOCUMENT")
+    print(print_bold("PRD DOCUMENT"))
     print()
 
     if prd_file.exists():
         prd_lines = len(read_file(prd_file).splitlines())
-        print_green(f"✓ PRD document found ({prd_lines} lines)")
-        print_dim("  Task decomposition follows PRD-TEMPLATE v3.0 structure")
+        print(print_green(f"✓ PRD document found ({prd_lines} lines)"))
+        print(print_dim("  Task decomposition follows PRD-TEMPLATE v3.0 structure"))
         checks_passed += 1
         validation_data["prd_document"] = {"status": "pass", "lines": prd_lines}
     else:
-        print_red("✗ PRD document not found")
-        print_dim(f"  Expected: {prd_file}")
+        print(print_red("✗ PRD document not found"))
+        print(print_dim(f"  Expected: {prd_file}"))
         checks_failed += 1
         validation_data["prd_document"] = {"status": "missing"}
     print()
 
     # PRD Approval Check
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("PRD APPROVAL")
+    print(print_bold("PRD APPROVAL"))
     print()
 
     if approval_file.exists():
@@ -132,49 +132,49 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         approved_at = approval.get("approved_at", "unknown")
 
         if approval_status == "approved":
-            print_green("✓ PRD approved")
-            print_dim(f"  Approver: {approver}")
-            print_dim(f"  Date: {approved_at}")
+            print(print_green("✓ PRD approved"))
+            print(print_dim(f"  Approver: {approver}"))
+            print(print_dim(f"  Date: {approved_at}"))
             checks_passed += 1
             validation_data["prd_approval"] = {"status": "approved", "approver": approver}
         else:
-            print_yellow(f"! PRD approval status: {approval_status}")
+            print(print_yellow(f"! PRD approval status: {approval_status}"))
             checks_warned += 1
             validation_data["prd_approval"] = {"status": approval_status}
     else:
-        print_red("✗ PRD approval record not found")
-        print_dim(f"  Expected: {approval_file}")
+        print(print_red("✗ PRD approval record not found"))
+        print(print_dim(f"  Expected: {approval_file}"))
         checks_failed += 1
         validation_data["prd_approval"] = {"status": "missing"}
     print()
 
     # TaskMaster Initialization
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("TASKMASTER INITIALIZATION")
+    print(print_bold("TASKMASTER INITIALIZATION"))
     print()
 
     if taskmaster_dir.exists():
-        print_green("✓ TaskMaster directory exists")
-        print_dim(f"  {taskmaster_dir}")
+        print(print_green("✓ TaskMaster directory exists"))
+        print(print_dim(f"  {taskmaster_dir}"))
     else:
-        print_dim("Creating TaskMaster directory structure...")
+        print(print_dim("Creating TaskMaster directory structure..."))
         ensure_dir(taskmaster_dir / "tasks")
         ensure_dir(taskmaster_dir / "reports")
         ensure_dir(taskmaster_dir / "history")
-        print_green("✓ Created .taskmaster/")
-        print_dim("  ├── tasks/")
-        print_dim("  ├── reports/")
-        print_dim("  └── history/")
+        print(print_green("✓ Created .taskmaster/"))
+        print(print_dim("  ├── tasks/"))
+        print(print_dim("  ├── reports/"))
+        print(print_dim("  └── history/"))
 
     # Configure TaskMaster for Bedrock if enabled
     _configure_taskmaster_provider(taskmaster_dir, output_dir, atomic_root)
     print()
 
     # Summary
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("SUMMARY")
+    print(print_bold("SUMMARY"))
     print()
     print(f"  Passed:   {print_green(str(checks_passed))}")
     if checks_warned > 0:
@@ -203,12 +203,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # Decision Point
     if checks_failed > 0:
-        print_dim("─" * 100)
+        print(print_dim("─" * 100))
         print()
-        print_red("Entry validation failed.")
+        print(print_red("Entry validation failed."))
         print()
-        print_yellow("  continue  ") + "Proceed anyway (not recommended)"
-        print_red("  abort     ") + "Return to Phase 2"
+        print(print_yellow("  continue  ") + "Proceed anyway (not recommended)")
+        print(print_red("  abort     ") + "Return to Phase 2")
         print()
 
         clear_input_buffer()
@@ -217,23 +217,23 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             entry_choice = "abort"
 
         if entry_choice != "continue":
-            print_red("✗ Entry validation failed - returning to Phase 2")
+            print(print_red("✗ Entry validation failed - returning to Phase 2"))
             return False
 
-        print_yellow("⚠ Proceeding despite failed validation")
+        print(print_yellow("⚠ Proceeding despite failed validation"))
         print()
 
-    print_green("✓ Entry and initialization complete")
+    print(print_green("✓ Entry and initialization complete"))
     return True
 
 
 def _show_phase_welcome() -> None:
     """Display Phase 3 welcome banner."""
     print()
-    print_dim("━" * 100)
-    print_cyan("  PHASE 03 - TASKING")
-    print_dim("━" * 100)
-    print_cyan("""
+    print(print_dim("━" * 100))
+    print(print_cyan("  PHASE 03 - TASKING"))
+    print(print_dim("━" * 100))
+    print(print_cyan("""
                       _______ _______ _______ _     _
                          |    |_____| |______ |____/
                          |    |     | ______| |    \\_
@@ -241,10 +241,10 @@ def _show_phase_welcome() -> None:
      ______  _______ _______  _____  _______  _____   _____  _______ _____ _______ _____  _____  __   _
      |     \\ |______ |       |     | |  |  | |_____] |     | |______   |      |      |   |     | | \\  |
      |_____/ |______ |_____  |_____| |  |  | |       |_____| ______| __|__    |    __|__ |_____| |  \\_|
-    """)
-    print_dim("━" * 100)
+    """))
+    print(print_dim("━" * 100))
     print()
-    print_dim("Verifying Phase 2 artifacts and initializing TaskMaster.")
+    print(print_dim("Verifying Phase 2 artifacts and initializing TaskMaster."))
     print()
 
 
@@ -266,13 +266,13 @@ def _configure_taskmaster_provider(
 
     # Check if secrets exist
     if not secrets_file.exists():
-        print_dim("No provider configuration found - TaskMaster will use defaults")
+        print(print_dim("No provider configuration found - TaskMaster will use defaults"))
         return
 
     try:
         secrets = json.loads(read_file(secrets_file))
     except Exception:
-        print_dim("Could not read secrets.json - TaskMaster will use defaults")
+        print(print_dim("Could not read secrets.json - TaskMaster will use defaults"))
         return
 
     # Check if Bedrock is enabled
@@ -292,7 +292,7 @@ def _configure_taskmaster_provider(
             if match:
                 model_id = re.sub(r'-v\d+$', '', match.group(1))
 
-        print_dim("Configuring TaskMaster for AWS Bedrock...")
+        print(print_dim("Configuring TaskMaster for AWS Bedrock..."))
 
         # Create TaskMaster config for Bedrock
         config = {
@@ -326,9 +326,9 @@ def _configure_taskmaster_provider(
         }
 
         write_file(config_file, json.dumps(config, indent=2))
-        print_green("✓ TaskMaster configured for AWS Bedrock")
-        print_dim(f"  Region: {aws_region} | Profile: {aws_profile}")
-        print_dim(f"  Model: {model_id}")
+        print(print_green("✓ TaskMaster configured for AWS Bedrock"))
+        print(print_dim(f"  Region: {aws_region} | Profile: {aws_profile}"))
+        print(print_dim(f"  Model: {model_id}"))
 
         # Create .env file for TaskMaster
         env_file = atomic_root.parent / ".env"
@@ -343,7 +343,7 @@ def _configure_taskmaster_provider(
             else:
                 write_file(env_file, env_content)
 
-            print_green("✓ Created .env with AWS credentials")
+            print(print_green("✓ Created .env with AWS credentials"))
 
             # Add .env to .gitignore
             gitignore = atomic_root.parent / ".gitignore"
@@ -354,7 +354,7 @@ def _configure_taskmaster_provider(
             else:
                 write_file(gitignore, ".env\n")
     else:
-        print_dim("Using TaskMaster default provider configuration")
+        print(print_dim("Using TaskMaster default provider configuration"))
 
 
 if __name__ == "__main__":

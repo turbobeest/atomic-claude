@@ -152,26 +152,31 @@ def find_violations() -> List[Dict[str, Any]]:
     Returns:
         List of violations with path, correct location, and reason
     """
+    import os as _os
+
     violations = []
     acp_root = Path(__file__).parent.parent
 
-    # Scan all files
-    for item in acp_root.rglob("*"):
-        # Skip directories
-        if item.is_dir():
-            continue
+    # Prune directories we never need to scan (fast: avoids traversing them at all)
+    _PRUNE_DIRS = {".git", ".venv", ".outputs", ".state", ".logs", ".claude",
+                   ".vscode", ".idea", "__pycache__", "node_modules", "htmlcov"}
 
-        # Skip hidden files and Python cache
-        if any(part.startswith(".") for part in item.parts) or "__pycache__" in str(item):
-            # But check these specific hidden files
-            if item.name not in [".gitignore", ".DS_Store"]:
+    for dirpath, dirnames, filenames in _os.walk(acp_root):
+        # Prune in-place so os.walk won't descend into them
+        dirnames[:] = [d for d in dirnames if d not in _PRUNE_DIRS and not d.startswith(".")]
+
+        for fname in filenames:
+            item = Path(dirpath) / fname
+
+            # Skip dotfiles (except .gitignore, .DS_Store)
+            if fname.startswith(".") and fname not in (".gitignore", ".DS_Store"):
                 continue
 
-        # Check if file is allowed
-        if not is_allowed_file(item, acp_root):
-            violation = classify_violation(item, acp_root)
-            if violation:
-                violations.append(violation)
+            # Check if file is allowed
+            if not is_allowed_file(item, acp_root):
+                violation = classify_violation(item, acp_root)
+                if violation:
+                    violations.append(violation)
 
     return violations
 
@@ -191,31 +196,37 @@ def is_allowed_file(file_path: Path, acp_root: Path) -> bool:
 
     # Check against allowed patterns
     allowed_dirs = {
-        "core", "phases", "orchestration", "dashboard", "config", "docs",
-        ".outputs", ".state", ".logs", "reports", ".git", ".vscode", ".idea"
+        # Tool source code
+        "core", "phases", "orchestration", "dashboard", "lib",
+        # Tool assets
+        "agents", "audits", "skills", "scripts", "examples",
+        # Tool testing
+        "tests", "test",
+        # Tool config and docs
+        "config", "docs", "initialization",
+        # Runtime artifacts
+        ".outputs", ".state", ".logs", "reports",
+        # Environment and IDE
+        ".git", ".venv", ".claude", ".vscode", ".idea",
     }
 
     # Check if in allowed top-level directory
     if rel_path.parts[0] in allowed_dirs:
-        # Additional checks for specific directories
-        if rel_path.parts[0] == "dashboard":
-            # Only dashboard tool files allowed
-            if file_path.suffix in [".js", ".html", ".css", ".json"]:
-                return True
-        elif rel_path.parts[0] in ["core", "phases", "orchestration"]:
-            # Only Python and shell scripts
-            if file_path.suffix in [".py", ".sh"]:
-                return True
-        elif rel_path.parts[0] == "config":
-            # Only YAML config
-            if file_path.suffix in [".yaml", ".yml"]:
-                return True
-        else:
-            # Runtime artifacts - anything goes
-            return True
+        return True
 
     # Check if it's a root-level allowed file
-    if str(rel_path) in ["main.py", "README.md", ".gitignore", ".DS_Store"]:
+    allowed_root_files = {
+        "main.py", "README.md", "CLAUDE.md", ".gitignore", ".DS_Store",
+        ".claudeignore", ".env.example",
+        "setup.py", "MANIFEST.in",
+        "pytest.ini", "coverage.xml",
+        "requirements.txt", "requirements-dev.txt", "requirements-llm.txt",
+    }
+    if str(rel_path) in allowed_root_files:
+        return True
+
+    # Allow log files at root (e.g., excalidraw.log)
+    if len(rel_path.parts) == 1 and file_path.suffix == ".log":
         return True
 
     # Check for __init__.py anywhere

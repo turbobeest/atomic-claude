@@ -41,12 +41,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     fixes_dir = prompts_dir / "fixes"
 
     print()
-    print_dim("Addressing review findings and applying code improvements.")
+    print(print_dim("Addressing review findings and applying code improvements."))
     print()
 
     # UAT Mode Bypass
     if uat_mode:
-        print_yellow("UAT Mode: Creating minimal valid output")
+        print(print_yellow("UAT Mode: Creating minimal valid output"))
         ensure_dir(review_dir)
         ensure_dir(fixes_dir)
 
@@ -68,15 +68,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             "refined_at": datetime.now().isoformat()
         }, indent=2))
 
-        print_green("✓ UAT bypass complete")
+        print(print_green("✓ UAT bypass complete"))
         return True
 
     ensure_dir(fixes_dir)
 
     # Load findings
     if not findings_file.exists():
-        print_yellow("! No findings file found")
-        print_yellow("Run task 603 (Comprehensive Review) first")
+        print(print_yellow("! No findings file found"))
+        print(print_yellow("Run task 603 (Comprehensive Review) first"))
         return False
 
     findings_data = json.loads(read_file(findings_file))
@@ -92,8 +92,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     refinement_scope = _get_refinement_scope(total_critical, total_major, uat_mode)
 
     if refinement_scope == "skip":
-        print_yellow("! Skipping refinement - no changes will be made")
-        print_green("✓ Refinement skipped by user choice")
+        print(print_yellow("! Skipping refinement - no changes will be made"))
+        print(print_green("✓ Refinement skipped by user choice"))
         return True
 
     # Display refinement strategy
@@ -105,7 +105,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # Execute refinement
     print()
-    print_bold("- REFINEMENT EXECUTION")
+    print(print_bold("- REFINEMENT EXECUTION"))
     print()
 
     fixed_critical = 0
@@ -114,21 +114,21 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # Process critical issues
     if total_critical > 0:
-        print_red("Addressing Critical Issues")
+        print(print_red("Addressing Critical Issues"))
         print()
         fixed_critical = _address_issues(findings_data, "critical", fixes_dir, atomic_root)
         print()
 
     # Process major issues
     if total_major > 0 and refinement_scope in ["major", "minor", "all"]:
-        print_yellow("Addressing Major Issues")
+        print(print_yellow("Addressing Major Issues"))
         print()
         fixed_major = _address_issues(findings_data, "major", fixes_dir, atomic_root)
         print()
 
     # Process minor issues
     if total_minor > 0 and refinement_scope in ["minor", "all"]:
-        print_cyan("Addressing Minor Issues")
+        print(print_cyan("Addressing Minor Issues"))
         print()
         fixed_minor = _address_issues(findings_data, "minor", fixes_dir, atomic_root)
         print()
@@ -162,18 +162,18 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     write_file(refinement_file, json.dumps(refinement_data, indent=2))
 
-    print_green("✓ Refinement complete")
+    print(print_green("✓ Refinement complete"))
     return True
 
 
 def _display_findings_summary(critical: int, major: int, minor: int) -> None:
     """Display findings summary."""
     print()
-    print_bold("- FINDINGS TO ADDRESS")
+    print(print_bold("- FINDINGS TO ADDRESS"))
     print()
 
     print("  ─" * 50)
-    print_bold("REFINEMENT QUEUE")
+    print(print_bold("REFINEMENT QUEUE"))
     print()
 
     if critical > 0:
@@ -197,10 +197,10 @@ def _get_refinement_scope(critical: int, major: int, uat_mode: bool) -> str:
         return "major"
 
     print()
-    print_bold("- REFINEMENT STRATEGY")
+    print(print_bold("- REFINEMENT STRATEGY"))
     print()
 
-    print_dim("What would you like the code-refiner agent to address?")
+    print(print_dim("What would you like the code-refiner agent to address?"))
     print()
     print(print_green("  [critical]") + "    Address critical issues only (fastest)")
     print(print_yellow("  [major]") + "       Address critical + major issues (recommended)")
@@ -216,7 +216,7 @@ def _get_refinement_scope(critical: int, major: int, uat_mode: bool) -> str:
 def _display_refinement_strategy(scope: str) -> None:
     """Display refinement strategy."""
     print()
-    print_dim("The code-refiner agent will:")
+    print(print_dim("The code-refiner agent will:"))
     print()
 
     if scope == "critical":
@@ -251,13 +251,13 @@ def _address_issues(findings_data: Dict, severity: str, fixes_dir: Path, atomic_
     fixed_count = 0
     for i, finding in enumerate(all_findings[:10], 1):  # Limit to 10 issues
         desc = finding.get("description", "No description")
-        print_dim(f"    [{i}/{len(all_findings)}] {desc}")
+        print(print_dim(f"    [{i}/{len(all_findings)}] {desc}"))
 
         if _apply_fix(finding, fixes_dir / f"{severity}-{i}", atomic_root):
-            print_green("             ✓ Fixed")
+            print(print_green("             ✓ Fixed"))
             fixed_count += 1
         else:
-            print_yellow("             ! Manual fix recommended")
+            print(print_yellow("             ! Manual fix recommended"))
 
     return fixed_count
 
@@ -325,9 +325,9 @@ If you cannot safely generate a fix, set can_fix to false and explain why.
 def _run_test_verification(atomic_root: Path) -> tuple:
     """Run test verification."""
     print()
-    print_bold("- TEST VERIFICATION")
+    print(print_bold("- TEST VERIFICATION"))
     print()
-    print_dim("Running full test suite to verify refinements...")
+    print(print_dim("Running full test suite to verify refinements..."))
     print()
 
     # Detect and run tests
@@ -359,16 +359,16 @@ def _run_test_verification(atomic_root: Path) -> tuple:
         pass
 
     print("  ─" * 50)
-    print_bold("TEST RESULTS")
+    print(print_bold("TEST RESULTS"))
     print()
 
     if tests_passing:
         print(print_green(f"  Passing:  {tests_passed or 'all'}"))
         print(print_green("  Failing:  0"))
         print()
-        print_green("  ✓ All tests passing after refinements")
+        print(print_green("  ✓ All tests passing after refinements"))
     else:
-        print_yellow("  ! Some tests may need attention")
+        print(print_yellow("  ! Some tests may need attention"))
 
     print()
 
@@ -383,11 +383,11 @@ def _display_refinement_summary(
 ) -> None:
     """Display refinement summary."""
     print()
-    print_bold("- REFINEMENT SUMMARY")
+    print(print_bold("- REFINEMENT SUMMARY"))
     print()
 
     print("  ─" * 50)
-    print_bold("ISSUES RESOLVED")
+    print(print_bold("ISSUES RESOLVED"))
     print()
     print(print_green(f"  Critical Fixed:  {fixed_critical} / {total_critical}"))
     print(print_green(f"  Major Fixed:     {fixed_major} / {total_major}"))
@@ -396,13 +396,13 @@ def _display_refinement_summary(
     print()
 
     if fixed_critical >= total_critical and fixed_major >= total_major:
-        print_green("━" * 100)
-        print_green("✓ ALL CRITICAL AND MAJOR ISSUES RESOLVED")
-        print_green("━" * 100)
+        print(print_green("━" * 100))
+        print(print_green("✓ ALL CRITICAL AND MAJOR ISSUES RESOLVED"))
+        print(print_green("━" * 100))
     else:
-        print_yellow("━" * 100)
-        print_yellow("! Some issues remain - review before proceeding")
-        print_yellow("━" * 100)
+        print(print_yellow("━" * 100))
+        print(print_yellow("! Some issues remain - review before proceeding"))
+        print(print_yellow("━" * 100))
 
     print()
 

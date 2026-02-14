@@ -46,31 +46,31 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     secrets_file = output_dir / "secrets.json"
 
     print()
-    print_cyan("API Credentials")
+    print(print_cyan("API Credentials"))
     print()
 
-    print_dim("  Credentials loaded from .env in Task 001")
+    print(print_dim("  Credentials loaded from .env in Task 001"))
     print()
 
     # Check if already configured by Task 001
     if secrets_file.exists():
         existing_keys = list(json.loads(read_file(secrets_file)).keys())
         if existing_keys:
-            print_green("  ✓ Credentials already configured by Task 001")
+            print(print_green("  ✓ Credentials already configured by Task 001"))
             print()
 
             # Show what was configured
             _show_configured_providers(secrets_file)
 
-            print_dim(f"  To reconfigure, delete: {secrets_file}")
+            print(print_dim(f"  To reconfigure, delete: {secrets_file}"))
             print()
             return True
 
     # If secrets.json doesn't exist or is empty, this is an error
     # Task 001 should have created it
-    print_red("✗ No credentials configured - Task 001 should have created secrets.json")
+    print(print_red("✗ No credentials configured - Task 001 should have created secrets.json"))
     print()
-    print_bold("Troubleshooting:")
+    print(print_bold("Troubleshooting:"))
     print("  1. Ensure .env file exists with credentials")
     print("  2. Re-run Phase 0 from Task 001")
     print()
@@ -91,7 +91,7 @@ def _show_configured_providers(secrets_file: Path) -> None:
         aws_profile = secrets.get('aws_profile', 'default')
         aws_region = secrets.get('aws_region', 'us-east-1')
         bedrock_model = secrets.get('bedrock_model', '')
-        print_cyan("  AWS Bedrock:")
+        print(print_cyan("  AWS Bedrock:"))
         print(f"    Profile: {aws_profile}")
         print(f"    Region: {aws_region}")
         print(f"    Model: {bedrock_model}")
@@ -101,13 +101,13 @@ def _show_configured_providers(secrets_file: Path) -> None:
     anthropic_key = secrets.get('anthropic_api_key')
     if anthropic_key:
         masked_key = _mask_key(anthropic_key)
-        print_cyan("  Anthropic API:")
+        print(print_cyan("  Anthropic API:"))
         print(f"    Key: {masked_key}")
         print()
 
     # Ollama
     if secrets.get('ollama_enabled'):
-        print_cyan("  Ollama:")
+        print(print_cyan("  Ollama:"))
         print("    localhost:11434")
         print()
 

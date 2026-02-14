@@ -57,8 +57,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     ensure_dir(taskmaster_dir / "tasks")
 
     print()
-    print_dim("Breaking PRD into atomic, implementable tasks using TaskMaster format.")
-    print_dim("Output: .taskmaster/tasks/tasks.json")
+    print(print_dim("Breaking PRD into atomic, implementable tasks using TaskMaster format."))
+    print(print_dim("Output: .taskmaster/tasks/tasks.json"))
     print()
 
     # Load Selected Agents
@@ -74,27 +74,27 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
                 agent_file = _find_agent_file(agent, agent_repo)
                 if agent_file and agent_file.exists():
                     decomposer_prompt = _strip_frontmatter(read_file(agent_file))
-                    print_green(f"✓ Loaded agent: {agent}")
+                    print(print_green(f"✓ Loaded agent: {agent}"))
             elif "dependency-mapper" in agent:
-                print_green(f"✓ Found agent: {agent} (for Task 304)")
+                print(print_green(f"✓ Found agent: {agent} (for Task 304)"))
 
         validation_agents = agents_data.get("validation_agents", [])
         for agent in validation_agents:
             if "task-validator" in agent:
-                print_green(f"✓ Loaded agent: {agent}")
+                print(print_green(f"✓ Loaded agent: {agent}"))
         print()
     else:
-        print_dim("No agent selection found - using built-in decomposition logic")
+        print(print_dim("No agent selection found - using built-in decomposition logic"))
         print()
 
     # PRD Extraction
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("PRD EXTRACTION")
+    print(print_bold("PRD EXTRACTION"))
     print()
 
     if not prd_file.exists():
-        print_red(f"✗ PRD file not found: {prd_file}")
+        print(print_red(f"✗ PRD file not found: {prd_file}"))
         return False
 
     prd_content = read_file(prd_file)
@@ -104,14 +104,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     sections = _extract_prd_sections(prd_content)
     project_name = _extract_project_name(prd_content)
 
-    print_green(f"✓ PRD loaded ({prd_lines} lines)")
-    print_dim("  Extracted: Feature Requirements, Dependencies, Phases, Tech Stack")
+    print(print_green(f"✓ PRD loaded ({prd_lines} lines)"))
+    print(print_dim("  Extracted: Feature Requirements, Dependencies, Phases, Tech Stack"))
     print()
 
     # Task Generation
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("TASK GENERATION")
+    print(print_bold("TASK GENERATION"))
     print()
 
     # Build prompt
@@ -124,7 +124,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     prompt_file = prompts_dir / "task-decomposition.md"
     write_file(prompt_file, prompt_content)
 
-    print_dim("Invoking task-decomposer agent...")
+    print(print_dim("Invoking task-decomposer agent..."))
     print()
 
     # Invoke LLM
@@ -141,16 +141,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             try:
                 tasks_data = json.loads(read_file(raw_tasks_file))
                 task_count = len(tasks_data.get("tasks", []))
-                print_green(f"✓ Generated {task_count} tasks")
+                print(print_green(f"✓ Generated {task_count} tasks"))
             except json.JSONDecodeError:
-                print_yellow("⚠ Invalid JSON output - attempting repair")
+                print(print_yellow("⚠ Invalid JSON output - attempting repair"))
                 if not _repair_json(raw_tasks_file):
                     _create_template_tasks(raw_tasks_file)
         else:
-            print_yellow("⚠ Task decomposition failed - creating template")
+            print(print_yellow("⚠ Task decomposition failed - creating template"))
             _create_template_tasks(raw_tasks_file)
     except Exception as e:
-        print_yellow(f"⚠ Task decomposition error: {e}")
+        print(print_yellow(f"⚠ Task decomposition error: {e}"))
         _create_template_tasks(raw_tasks_file)
 
     print()
@@ -159,20 +159,20 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     _show_task_validation(raw_tasks_file)
 
     # TaskMaster Integration
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("TASKMASTER INTEGRATION")
+    print(print_bold("TASKMASTER INTEGRATION"))
     print()
 
     # Copy to tasks file
     write_file(tasks_file, read_file(raw_tasks_file))
-    print_green("✓ Tasks written to .taskmaster/tasks/tasks.json")
+    print(print_green("✓ Tasks written to .taskmaster/tasks/tasks.json"))
     print()
 
     # Task Preview
     _show_task_preview(tasks_file)
 
-    print_green("✓ Task decomposition complete")
+    print(print_green("✓ Task decomposition complete"))
     return True
 
 
@@ -372,9 +372,9 @@ Start with `{` and end with `}`.
 
 def _show_task_validation(tasks_file: Path) -> None:
     """Display task validation statistics."""
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("TASK VALIDATION")
+    print(print_bold("TASK VALIDATION"))
     print()
 
     try:
@@ -387,13 +387,13 @@ def _show_task_validation(tasks_file: Path) -> None:
         medium_priority = sum(1 for t in tasks if t.get("priority") == "medium")
         low_priority = sum(1 for t in tasks if t.get("priority") == "low")
 
-        print_bold("Task Statistics:")
+        print(print_bold("Task Statistics:"))
         print()
         print(f"  Total tasks:         {task_count}")
         print(f"  With criteria:       {with_criteria}")
         print(f"  With dependencies:   {with_deps}")
         print()
-        print_bold("Priority Distribution:")
+        print(print_bold("Priority Distribution:"))
         print()
         print(f"  High (SHALL/MUST):   {high_priority}")
         print(f"  Medium (SHOULD):     {medium_priority}")
@@ -402,26 +402,26 @@ def _show_task_validation(tasks_file: Path) -> None:
 
         issues = 0
         if with_criteria < task_count:
-            print_yellow(f"! {task_count - with_criteria} tasks missing acceptance criteria")
+            print(print_yellow(f"! {task_count - with_criteria} tasks missing acceptance criteria"))
             issues += 1
 
         if task_count > 0 and with_deps == 0:
-            print_yellow("! No dependencies defined (verify PRD dependency tables)")
+            print(print_yellow("! No dependencies defined (verify PRD dependency tables)"))
 
         if issues == 0:
-            print_green("✓ All validation checks passed")
+            print(print_green("✓ All validation checks passed"))
         print()
 
     except Exception as e:
-        print_yellow(f"⚠ Could not validate tasks: {e}")
+        print(print_yellow(f"⚠ Could not validate tasks: {e}"))
         print()
 
 
 def _show_task_preview(tasks_file: Path) -> None:
     """Display preview of generated tasks."""
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("TASK PREVIEW")
+    print(print_bold("TASK PREVIEW"))
     print()
 
     try:
@@ -437,10 +437,10 @@ def _show_task_preview(tasks_file: Path) -> None:
 
         print()
         if len(tasks) > preview_count:
-            print_dim(f"  ... and {len(tasks) - preview_count} more")
+            print(print_dim(f"  ... and {len(tasks) - preview_count} more"))
             print()
     except Exception as e:
-        print_dim("  (Unable to preview tasks)")
+        print(print_dim("  (Unable to preview tasks)"))
         print()
 
 
@@ -456,7 +456,7 @@ def _repair_json(file_path: Path) -> bool:
             try:
                 json.loads(json_content)
                 write_file(file_path, json_content)
-                print_green("✓ JSON repaired from markdown")
+                print(print_green("✓ JSON repaired from markdown"))
                 return True
             except:
                 pass
@@ -468,7 +468,7 @@ def _repair_json(file_path: Path) -> bool:
         try:
             json.loads(json_content)
             write_file(file_path, json_content)
-            print_green("✓ JSON extracted from output")
+            print(print_green("✓ JSON extracted from output"))
             return True
         except:
             pass
@@ -532,7 +532,7 @@ def _create_template_tasks(file_path: Path) -> None:
     }
 
     write_file(file_path, json.dumps(template, indent=2))
-    print_yellow("⚠ Created template tasks - manual refinement required")
+    print(print_yellow("⚠ Created template tasks - manual refinement required"))
 
 
 if __name__ == "__main__":

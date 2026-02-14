@@ -45,11 +45,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     ensure_dir(closeout_dir)
 
     print()
-    print_dim("  ┌─────────────────────────────────────────────────────────┐")
-    print_dim("  │ PHASE CLOSEOUT                                          │")
-    print_dim("  │                                                         │")
-    print_dim("  │ Final review before moving to Phase 3 (Tasking).       │")
-    print_dim("  └─────────────────────────────────────────────────────────┘")
+    print(print_dim("  ┌─────────────────────────────────────────────────────────┐"))
+    print(print_dim("  │ PHASE CLOSEOUT                                          │"))
+    print(print_dim("  │                                                         │"))
+    print(print_dim("  │ Final review before moving to Phase 3 (Tasking).       │"))
+    print(print_dim("  └─────────────────────────────────────────────────────────┘"))
     print()
 
     # Closeout checklist
@@ -59,20 +59,20 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # UAT mode bypass
     if uat_mode:
-        print_yellow("  UAT mode: Auto-approving closeout...")
+        print(print_yellow("  UAT mode: Auto-approving closeout..."))
         generate_closeout_documents(closeout_file, closeout_json, prd_file, checklist)
-        print_green("✓ UAT mode: Closeout auto-approved")
+        print(print_green("✓ UAT mode: Closeout auto-approved"))
         return True
 
     # Closeout approval
-    print_dim("━" * 60)
+    print(print_dim("━" * 60))
     print()
 
     if not all_passed:
-        print_yellow("  Some critical items need attention before closeout.")
+        print(print_yellow("  Some critical items need attention before closeout."))
         print()
 
-    print_cyan("  Closeout options:")
+    print(print_cyan("  Closeout options:"))
     print()
     print("    " + print_green("[approve]") + " Approve closeout and proceed")
     print("    " + print_yellow("[review]") + "  Review specific artifacts")
@@ -84,7 +84,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     if closeout_choice == "review":
         print()
-        print_dim("  Artifacts in this phase:")
+        print(print_dim("  Artifacts in this phase:"))
         try:
             for item in sorted(output_dir.iterdir()):
                 if item.is_file():
@@ -92,27 +92,27 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         except Exception:
             pass
         print()
-        print_dim(f"  PRD location: {prd_file}")
+        print(print_dim(f"  PRD location: {prd_file}"))
         print()
         prompt_user("  Press Enter to continue to closeout...")
     elif closeout_choice == "hold":
         print()
-        print_yellow("  Closeout held - phase not complete")
+        print(print_yellow("  Closeout held - phase not complete"))
         return False
 
     # Generate closeout documents
     print()
-    print_cyan("╔═══════════════════════════════════════════════════════════╗")
-    print_cyan("║ " + print_bold("GENERATING CLOSEOUT") + "                                       ║")
-    print_cyan("╚═══════════════════════════════════════════════════════════╝")
+    print(print_cyan("╔═══════════════════════════════════════════════════════════╗"))
+    print(print_cyan("║ " + print_bold("GENERATING CLOSEOUT") + "                                       ║"))
+    print(print_cyan("╚═══════════════════════════════════════════════════════════╝"))
     print()
 
     generate_closeout_documents(closeout_file, closeout_json, prd_file, checklist)
 
     print()
-    print_green("✓ Phase 2 closeout complete")
+    print(print_green("✓ Phase 2 closeout complete"))
     print()
-    print_cyan("  → Ready to proceed to Phase 3: Tasking")
+    print(print_cyan("  → Ready to proceed to Phase 3: Tasking"))
     return True
 
 
@@ -132,9 +132,9 @@ def run_closeout_checklist(
     Returns:
         Tuple of (checklist_results, all_passed)
     """
-    print_cyan("╔═══════════════════════════════════════════════════════════╗")
-    print_cyan("║ " + print_bold("CLOSEOUT CHECKLIST") + "                                        ║")
-    print_cyan("╚═══════════════════════════════════════════════════════════╝")
+    print(print_cyan("╔═══════════════════════════════════════════════════════════╗"))
+    print(print_cyan("║ " + print_bold("CLOSEOUT CHECKLIST") + "                                        ║"))
+    print(print_cyan("╚═══════════════════════════════════════════════════════════╝"))
     print()
 
     checklist = []
@@ -325,9 +325,9 @@ Phase 3: Tasking (Task Decomposition)
 
     write_file(closeout_json, json.dumps(json_content, indent=2))
 
-    print_green(f"  ✓ Closeout documents generated:")
-    print_dim(f"    • {closeout_file}")
-    print_dim(f"    • {closeout_json}")
+    print(print_green(f"  ✓ Closeout documents generated:"))
+    print(print_dim(f"    • {closeout_file}"))
+    print(print_dim(f"    • {closeout_json}"))
 
 
 if __name__ == "__main__":

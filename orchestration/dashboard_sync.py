@@ -3,12 +3,196 @@ Dashboard Sync Module
 
 Validates state files and ensures dashboard shows accurate information.
 Triggers dashboard refresh after task completion.
+Writes current-task.json, session-tokens.json, and errors.json for dashboard consumption.
 """
 
 import json
 from pathlib import Path
+from datetime import datetime
 import requests
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
+
+
+def write_current_task(phase_id: str, task_id: str, task_name: str,
+                       resolved=None, provider: str = None, model: str = None,
+                       agent_roster=None):
+    """Write current-task.json for dashboard status display.
+
+    Args:
+        phase_id: Phase identifier (e.g. "0-setup")
+        task_id: Task identifier (e.g. "001")
+        task_name: Human-readable task name
+        resolved: Optional ResolvedModel from core.llm.resolver
+        provider: Optional provider override (fallback if no resolved)
+        model: Optional model tier override (fallback if no resolved)
+        agent_roster: Optional list of (AgentEntry, ResolvedModel) tuples
+    """
+    state_dir = Path(".state")
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    effort_level = None
+
+    if resolved is not None:
+        provider = resolved.provider
+        model = resolved.model_id
+        phase_weight = resolved.role
+        context_window = resolved.context_window
+        max_output = resolved.max_output
+        effort_level = resolved.effort_level
+    elif provider is None or model is None:
+        cfg_provider, cfg_model = _resolve_phase_model(phase_id)
+        provider = provider or cfg_provider
+        model = model or cfg_model
+        context_window, max_output = _get_model_limits(model)
+        phase_weight = None
+    else:
+        context_window, max_output = _get_model_limits(model)
+        phase_weight = None
+
+    data = {
+        "active": True,
+        "phase": phase_id,
+        "task": task_id,
+        "description": task_name,
+        "started_at": datetime.now().isoformat(),
+        "provider": provider,
+        "model": model,
+        "phase_weight": phase_weight,
+        "effort_level": effort_level,
+        "online": provider is not None,
+        "context_window": context_window,
+        "max_output": max_output,
+    }
+
+    # Add agent roster if provided
+    if agent_roster:
+        data["agents"] = [
+            {
+                "name": entry.name,
+                "label": entry.label,
+                "provider": rm.provider,
+                "model": rm.model_id,
+                "context_window": rm.context_window,
+                "effort_level": rm.effort_level,
+            }
+            for entry, rm in agent_roster
+            if entry.name != "\u2014"  # Skip placeholder entries
+        ]
+
+    with open(state_dir / "current-task.json", "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def update_current_task_provider(provider: str, model: str = None,
+                                 phase_id: str = None):
+    """Update provider/model in current-task.json without replacing other fields.
+
+    Called by task_001 once credentials are detected, before config exists.
+    """
+    ct = Path(".state/current-task.json")
+    if not ct.exists():
+        return
+    try:
+        data = json.loads(ct.read_text())
+        data["provider"] = provider
+        if model:
+            data["model"] = model
+        data["online"] = True
+
+        # Use resolver for context_window (respects provider overrides)
+        context_window = None
+        max_output = None
+        if phase_id:
+            try:
+                from core.llm.resolver import resolve_model
+                rm = resolve_model(phase_id)
+                context_window = rm.context_window
+                max_output = rm.max_output
+                data["effort_level"] = rm.effort_level
+            except Exception:
+                pass
+
+        if not context_window:
+            context_window, max_output = _get_model_limits(model)
+
+        if context_window:
+            data["context_window"] = context_window
+        if max_output:
+            data["max_output"] = max_output
+
+        ct.write_text(json.dumps(data, indent=2))
+    except (json.JSONDecodeError, OSError):
+        pass
+
+
+def init_session_tokens():
+    """Initialize session-tokens.json at pipeline start so the dashboard has data immediately."""
+    state_dir = Path(".state")
+    state_dir.mkdir(parents=True, exist_ok=True)
+    tokens_file = state_dir / "session-tokens.json"
+    if not tokens_file.exists():
+        data = {
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "estimated_cost_usd": 0,
+            "by_provider": {},
+            "by_model": {},
+            "started_at": datetime.now().isoformat(),
+        }
+        tokens_file.write_text(json.dumps(data, indent=2))
+
+
+def _resolve_phase_model(phase_id: str) -> Tuple[Optional[str], Optional[str]]:
+    """Resolve the provider and full model ID for a given phase.
+
+    Delegates to core.llm.resolver for the full resolution hierarchy.
+
+    Returns:
+        (provider, model_id) tuple, either may be None.
+    """
+    try:
+        from core.llm.resolver import resolve_model
+        result = resolve_model(phase_id)
+        return result.provider, result.model_id
+    except Exception:
+        return None, None
+
+
+def _get_model_limits(model: Optional[str]) -> Tuple[Optional[int], Optional[int]]:
+    """Look up context window and max output for a model tier."""
+    if not model:
+        return None, None
+    try:
+        from core.llm.capabilities import get_model_context_window, get_model_max_output
+        return get_model_context_window(model), get_model_max_output(model)
+    except ImportError:
+        return None, None
+
+
+def clear_current_task():
+    """Clear current-task.json when task completes."""
+    ct = Path(".state/current-task.json")
+    if ct.exists():
+        ct.unlink()
+
+
+def log_error(phase_id: str, task_id: str, error: str, traceback_str: str = None):
+    """Append error to .logs/errors.json."""
+    logs_dir = Path(".logs")
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    errors_file = logs_dir / "errors.json"
+    try:
+        errors = json.loads(errors_file.read_text()) if errors_file.exists() else {"errors": []}
+    except json.JSONDecodeError:
+        errors = {"errors": []}
+    errors["errors"].append({
+        "timestamp": datetime.now().isoformat(),
+        "phase": phase_id,
+        "task": task_id,
+        "error": error,
+        "traceback": traceback_str,
+    })
+    errors_file.write_text(json.dumps(errors, indent=2))
 
 
 def sync_dashboard(phase_id: Optional[str] = None, task_id: Optional[str] = None):

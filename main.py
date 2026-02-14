@@ -13,6 +13,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from core.state import StateManager
+from orchestration.pipeline import PhasePipeline, TransitionMode, PHASE_REGISTRY
+from orchestration.backtrack import backtrack_to
 
 # Phase names for display
 PHASE_NAMES = {
@@ -30,9 +32,9 @@ PHASE_NAMES = {
 
 
 def run_phase(phase_num: int, resume_at: str = None):
-    """Run a specific phase."""
+    """Run a specific phase using PhasePipeline for transitions."""
     if phase_num not in PHASE_NAMES:
-        print(f"❌ Invalid phase number: {phase_num}")
+        print(f"Invalid phase number: {phase_num}")
         print("   Valid phases: 0-9")
         print()
         print("   Available phases:")
@@ -43,36 +45,15 @@ def run_phase(phase_num: int, resume_at: str = None):
         print("   Example: python main.py run 0")
         sys.exit(1)
 
-    phase_name = PHASE_NAMES[phase_num]
-    print(f"\n{'='*80}")
-    print(f"  ATOMIC CLAUDE 2.0 - Phase {phase_num}: {phase_name.upper()}")
-    print(f"{'='*80}\n")
+    pipeline = PhasePipeline(atomic_root=Path(__file__).parent)
+    success = pipeline.run_phase(
+        phase_num,
+        resume_at=resume_at,
+        transition_mode=TransitionMode.PROMPT,
+    )
 
-    try:
-        # Import phase orchestrator dynamically
-        phase_module = __import__(
-            f"phases.phase{phase_num:02d}.orchestrator{phase_num:02d}",
-            fromlist=["run_phase"]
-        )
-
-        # Execute
-        success = phase_module.run_phase(resume_at=resume_at)
-
-        if not success:
-            print(f"\n⚠️  Phase {phase_num} stopped.")
-            print(f"To resume:")
-            print(f"   python main.py run {phase_num} --resume-at=<task>")
-            sys.exit(1)
-
-        print(f"\n✅ Phase {phase_num} complete!")
-
-    except ImportError as e:
-        print(f"❌ Could not load Phase {phase_num} orchestrator")
-        print(f"   Error: {e}")
-        print(f"   Expected: phases/phase{phase_num:02d}/orchestrator{phase_num:02d}.py")
-        sys.exit(1)
-    except Exception as e:
-        print(f"❌ Phase {phase_num} error: {e}")
+    if not success:
+        print(f"\nTo resume: python main.py run {phase_num} --resume-at=<task>")
         sys.exit(1)
 
 
@@ -87,15 +68,51 @@ def show_status():
     state.display_status()
 
 
+def do_backtrack(phase_num: int, task: str = None):
+    """Backtrack to a specific phase/task."""
+    if phase_num not in PHASE_NAMES:
+        print(f"Invalid phase number: {phase_num}")
+        print("   Valid phases: 0-9")
+        sys.exit(1)
+
+    backtrack_to(phase_num, task)
+
+
+def do_reset():
+    """Full pipeline reset."""
+    import shutil
+
+    print("\n" + "="*80)
+    print("  FULL PIPELINE RESET")
+    print("="*80)
+    print("\n  This will delete ALL state, outputs, and memory.")
+
+    confirm = input("\n  Type 'yes' to confirm: ")
+    if confirm.lower() != "yes":
+        print("  Cancelled.")
+        return
+
+    root = Path(__file__).parent
+    for d in [root / ".state", root / ".outputs", root / ".logs"]:
+        if d.exists():
+            shutil.rmtree(d)
+            print(f"  Cleared {d.name}/")
+
+    print("\n  Reset complete. Start fresh with: python main.py run 0")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Atomic Claude 2.0 - SDLC Pipeline Orchestrator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main.py run 0              # Run Phase 0 (Setup)
-  python main.py run 2 --resume-at=205  # Resume Phase 2 from Task 205
-  python main.py status             # Show pipeline status
+  python main.py run 0                   # Run Phase 0 (Setup)
+  python main.py run 2 --resume-at=205   # Resume Phase 2 from Task 205
+  python main.py status                  # Show pipeline status
+  python main.py backtrack 1             # Reset to Phase 1, clear Phase 2+
+  python main.py backtrack 0 005         # Reset Phase 0 to Task 005
+  python main.py reset                   # Full reset (clears everything)
         """
     )
 
@@ -112,6 +129,14 @@ Examples:
     # Status command
     subparsers.add_parser("status", help="Show pipeline status")
 
+    # Backtrack command
+    backtrack_parser = subparsers.add_parser("backtrack", help="Reset to an earlier phase/task")
+    backtrack_parser.add_argument("phase", type=int, help="Phase number to reset to (0-9)")
+    backtrack_parser.add_argument("task", nargs="?", default=None, help="Optional task ID (e.g., 005)")
+
+    # Reset command
+    subparsers.add_parser("reset", help="Full pipeline reset")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -122,6 +147,10 @@ Examples:
         run_phase(args.phase, args.resume_at)
     elif args.command == "status":
         show_status()
+    elif args.command == "backtrack":
+        do_backtrack(args.phase, args.task)
+    elif args.command == "reset":
+        do_reset()
 
 
 if __name__ == "__main__":

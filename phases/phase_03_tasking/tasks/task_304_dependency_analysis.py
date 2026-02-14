@@ -53,7 +53,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # UAT Mode: Auto-approve
     if uat_mode:
         print()
-        print_yellow("⚡ UAT Mode: Auto-approving dependency analysis")
+        print(print_yellow("⚡ UAT Mode: Auto-approving dependency analysis"))
         print()
 
         analysis_data = {
@@ -63,15 +63,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             "mode": "uat"
         }
         write_file(analysis_file, json.dumps(analysis_data, indent=2))
-        print_green("✓ Dependency analysis complete (UAT mode)")
+        print(print_green("✓ Dependency analysis complete (UAT mode)"))
         return True
 
     print()
-    print_dim("Validating DAG structure, computing execution levels, and generating work packages.")
+    print(print_dim("Validating DAG structure, computing execution levels, and generating work packages."))
     print()
 
     if not tasks_file.exists():
-        print_red(f"✗ Tasks file not found: {tasks_file}")
+        print(print_red(f"✗ Tasks file not found: {tasks_file}"))
         return False
 
     tasks_data = json.loads(read_file(tasks_file))
@@ -79,41 +79,41 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     task_count = len(tasks)
 
     if task_count == 0:
-        print_red("✗ No tasks found in tasks.json")
+        print(print_red("✗ No tasks found in tasks.json"))
         return False
 
     # Dependency Validation
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("DEPENDENCY VALIDATION")
+    print(print_bold("DEPENDENCY VALIDATION"))
     print()
 
     validation_result = _validate_dependencies(tasks)
 
     if validation_result["invalid_refs"] > 0:
-        print_red(f"✗ Found {validation_result['invalid_refs']} invalid dependency references")
+        print(print_red(f"✗ Found {validation_result['invalid_refs']} invalid dependency references"))
         validation_result["passed"] = False
     else:
-        print_green("✓ All dependency references valid")
+        print(print_green("✓ All dependency references valid"))
 
     if validation_result["self_refs"] > 0:
-        print_red(f"✗ Found {validation_result['self_refs']} self-referencing tasks")
+        print(print_red(f"✗ Found {validation_result['self_refs']} self-referencing tasks"))
         validation_result["passed"] = False
 
     if validation_result["root_count"] == 0 and task_count > 0:
-        print_red("✗ No root tasks found - possible circular dependency")
+        print(print_red("✗ No root tasks found - possible circular dependency"))
         validation_result["passed"] = False
     else:
-        print_green("✓ No circular dependencies")
+        print(print_green("✓ No circular dependencies"))
 
-    print_green("✓ DAG structure verified")
+    print(print_green("✓ DAG structure verified"))
     print()
 
     if not validation_result["passed"]:
-        print_red("Dependency validation failed.")
+        print(print_red("Dependency validation failed."))
         print()
-        print_yellow("  [fix]      ") + "Edit tasks.json to fix issues"
-        print_red("  [abort]    ") + "Return to task decomposition"
+        print(print_yellow("  [fix]      ") + "Edit tasks.json to fix issues")
+        print(print_red("  [abort]    ") + "Return to task decomposition")
         print()
 
         clear_input_buffer()
@@ -122,12 +122,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             fix_choice = "fix"
 
         if fix_choice == "abort":
-            print_red("✗ Aborting due to dependency issues")
+            print(print_red("✗ Aborting due to dependency issues"))
             return False
 
         print()
-        print_dim("Edit .taskmaster/tasks/tasks.json to fix dependency issues.")
-        print_dim("Press Enter when ready to re-validate...")
+        print(print_dim("Edit .taskmaster/tasks/tasks.json to fix dependency issues."))
+        print(print_dim("Press Enter when ready to re-validate..."))
         input()
         return execute(atomic_root, output_dir, uat_mode)
 
@@ -144,11 +144,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     packages = _generate_work_packages(tasks, levels)
     write_file(packages_file, json.dumps(packages, indent=2))
 
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("WORK PACKAGES")
+    print(print_bold("WORK PACKAGES"))
     print()
-    print_green(f"✓ Generated {len(packages['packages'])} work packages (waves)")
+    print(print_green(f"✓ Generated {len(packages['packages'])} work packages (waves)"))
     print()
 
     for package in packages["packages"]:
@@ -174,7 +174,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     }
     write_file(graph_file, json.dumps(graph_data, indent=2))
 
-    print_green("✓ Dependency analysis complete")
+    print(print_green("✓ Dependency analysis complete"))
     return True
 
 
@@ -267,9 +267,9 @@ def _compute_levels(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def _show_complexity_distribution(tasks: List[Dict[str, Any]]) -> None:
     """Display complexity distribution."""
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("COMPLEXITY DISTRIBUTION")
+    print(print_bold("COMPLEXITY DISTRIBUTION"))
     print()
 
     simple_count = sum(1 for t in tasks if t.get("estimated_complexity") == "simple")
@@ -289,19 +289,19 @@ def _show_complexity_distribution(tasks: List[Dict[str, Any]]) -> None:
 
     # Estimate time
     estimated_sessions = simple_count * 1 + moderate_count * 3 + complex_count * 5
-    print_dim(f"Estimated implementation sessions: ~{estimated_sessions}")
-    print_dim("(Simple=1, Moderate=3, Complex=5 sessions per task)")
+    print(print_dim(f"Estimated implementation sessions: ~{estimated_sessions}"))
+    print(print_dim("(Simple=1, Moderate=3, Complex=5 sessions per task)"))
     print()
 
 
 def _show_execution_dag(tasks: List[Dict[str, Any]], levels: List[Dict[str, Any]]) -> None:
     """Display execution DAG visualization."""
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("EXECUTION DAG")
+    print(print_bold("EXECUTION DAG"))
     print()
-    print_dim("Tasks grouped by dependency level. Tasks at the same level can execute")
-    print_dim("in parallel git worktrees. Each level must complete before the next begins.")
+    print(print_dim("Tasks grouped by dependency level. Tasks at the same level can execute"))
+    print(print_dim("in parallel git worktrees. Each level must complete before the next begins."))
     print()
 
     for level_data in levels:
@@ -309,8 +309,8 @@ def _show_execution_dag(tasks: List[Dict[str, Any]], levels: List[Dict[str, Any]
         level_tasks = level_data["tasks"]
         task_count = len(level_tasks)
 
-        print_cyan(f"LEVEL {level}") + print_dim(" " + "─" * 70)
-        print_dim("│")
+        print(print_cyan(f"LEVEL {level}") + print_dim(" " + "─" * 70))
+        print(print_dim("│"))
 
         for task in level_tasks:
             task_id = task["id"]
@@ -336,15 +336,15 @@ def _show_execution_dag(tasks: List[Dict[str, Any]], levels: List[Dict[str, Any]
             else:
                 complexity_indicator = print_dim("?")
 
-            print_dim("├── ") + print_bold(f"[{task_id}]") + f" {title}  {priority_indicator} {complexity_indicator}"
+            print(print_dim("├── ") + print_bold(f"[{task_id}]") + f" {title}  {priority_indicator} {complexity_indicator}")
 
         if task_count > 1:
-            print_dim("│   ") + print_green(f"↑ {task_count} parallel worktrees")
+            print(print_dim("│   ") + print_green(f"↑ {task_count} parallel worktrees"))
 
-        print_dim("│")
+        print(print_dim("│"))
 
-    print_dim(f"Legend: Priority ■ ({print_red('high')}/{print_yellow('med')}/{print_dim('low')})  "
-              f"Complexity ({print_green('S')}imple/{print_yellow('M')}oderate/{print_red('C')}omplex)")
+    print(print_dim(f"Legend: Priority ■ ({print_red('high')}/{print_yellow('med')}/{print_dim('low')})  ")
+              + f"Complexity ({print_green('S')}imple/{print_yellow('M')}oderate/{print_red('C')}omplex)")
     print()
 
 
@@ -408,22 +408,22 @@ def _compute_critical_path(tasks: List[Dict[str, Any]], levels: List[Dict[str, A
 
 def _show_critical_path(tasks: List[Dict[str, Any]], levels: List[Dict[str, Any]]) -> None:
     """Display critical path."""
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("CRITICAL PATH")
+    print(print_bold("CRITICAL PATH"))
     print()
 
     critical_path = _compute_critical_path(tasks, levels)
-    print_dim("Longest path through highest complexity:")
+    print(print_dim("Longest path through highest complexity:"))
     print(f"  {critical_path}")
     print()
 
 
 def _show_summary(tasks: List[Dict[str, Any]], levels: List[Dict[str, Any]], packages: Dict[str, Any]) -> None:
     """Display summary statistics."""
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("SUMMARY")
+    print(print_bold("SUMMARY"))
     print()
 
     task_count = len(tasks)

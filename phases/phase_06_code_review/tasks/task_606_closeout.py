@@ -45,14 +45,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         audit_file = atomic_root / ".claude" / "audit" / "phase-06-audit.json"
 
     print()
-    print_dim("Final review before moving to Phase 7 (Integration Testing).")
+    print(print_dim("Final review before moving to Phase 7 (Integration Testing)."))
     print()
 
     # UAT Mode Bypass
     if uat_mode:
-        print_yellow("UAT Mode: Creating minimal valid output")
+        print(print_yellow("UAT Mode: Creating minimal valid output"))
         # Orchestrator will create closeout.json automatically
-        print_green("✓ UAT bypass complete")
+        print(print_green("✓ UAT bypass complete"))
         return True
 
     ensure_dir(closeout_dir)
@@ -78,7 +78,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # Display session end
     _display_session_end(closeout_file, review_dir)
 
-    print_green("✓ Phase 6 closeout complete")
+    print(print_green("✓ Phase 6 closeout complete"))
     return True
 
 
@@ -89,7 +89,7 @@ def _run_closeout_checklist(
 ) -> Tuple[List[Tuple[str, str]], bool]:
     """Run closeout checklist."""
     print()
-    print_bold("- CLOSEOUT CHECKLIST")
+    print(print_bold("- CLOSEOUT CHECKLIST"))
     print()
 
     checklist = []
@@ -214,14 +214,14 @@ def _get_closeout_approval(all_passed: bool, review_dir: Path, uat_mode: bool) -
         return True
 
     print()
-    print_bold("- CLOSEOUT APPROVAL")
+    print(print_bold("- CLOSEOUT APPROVAL"))
     print()
 
     if not all_passed:
-        print_yellow("Some critical items need attention before closeout.")
+        print(print_yellow("Some critical items need attention before closeout."))
         print()
 
-    print_cyan("Closeout options:")
+    print(print_cyan("Closeout options:"))
     print()
     print(print_green("  [approve]") + " Approve closeout and proceed")
     print(print_yellow("  [review]") + "  Review specific artifacts")
@@ -233,7 +233,7 @@ def _get_closeout_approval(all_passed: bool, review_dir: Path, uat_mode: bool) -
 
     if choice == "review":
         print()
-        print_dim("Key artifacts:")
+        print(print_dim("Key artifacts:"))
         print("    .claude/reviews/findings.json         - Review findings")
         print("    .claude/reviews/refinement-report.json - Refinement report")
         print("    .claude/audit/phase-06-audit.json     - Audit results")
@@ -242,7 +242,7 @@ def _get_closeout_approval(all_passed: bool, review_dir: Path, uat_mode: bool) -
         return True
     elif choice == "hold":
         print()
-        print_yellow("! Closeout held - phase not complete")
+        print(print_yellow("! Closeout held - phase not complete"))
         return False
 
     return True
@@ -257,7 +257,7 @@ def _generate_closeout_documents(
 ) -> None:
     """Generate closeout markdown and JSON documents."""
     print()
-    print_bold("- GENERATING CLOSEOUT")
+    print(print_bold("- GENERATING CLOSEOUT"))
     print()
 
     # Load metrics
@@ -385,8 +385,8 @@ In the next phase, we will:
 
     write_file(closeout_json, json.dumps(json_content, indent=2))
 
-    print_green("  ✓ Generated phase-06-closeout.md")
-    print_green("  ✓ Generated phase-06-closeout.json")
+    print(print_green("  ✓ Generated phase-06-closeout.md"))
+    print(print_green("  ✓ Generated phase-06-closeout.json"))
     print()
 
 
@@ -430,13 +430,13 @@ KEY ARTIFACTS:
 READY FOR: Phase 7 (Integration) - Integration and acceptance testing"""
 
     # Note: In a full implementation, this would call memory system
-    print_dim(f"Memory checkpoint: {len(memory_summary)} chars")
+    print(print_dim(f"Memory checkpoint: {len(memory_summary)} chars"))
 
 
 def _display_session_end(closeout_file: Path, review_dir: Path) -> None:
     """Display session end message."""
     print()
-    print_bold("- SESSION END")
+    print(print_bold("- SESSION END"))
     print()
     print("  Closeout saved to:")
     print(print_dim(f"    {closeout_file}"))
@@ -444,13 +444,13 @@ def _display_session_end(closeout_file: Path, review_dir: Path) -> None:
     print("  Review artifacts at:")
     print(print_dim(f"    {review_dir}/"))
     print()
-    print_bold("  Next: PHASE 7 - INTEGRATION TESTING")
+    print(print_bold("  Next: PHASE 7 - INTEGRATION TESTING"))
     print()
     print("  To continue:")
     print(print_cyan("    ./orchestrator/pipeline resume"))
     print()
-    print_green("  Phase 6 Complete!")
-    print_dim("  Code reviewed and refined. Ready for Integration Testing.")
+    print(print_green("  Phase 6 Complete!"))
+    print(print_dim("  Code reviewed and refined. Ready for Integration Testing."))
     print()
 
 

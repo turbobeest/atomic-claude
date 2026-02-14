@@ -3,7 +3,10 @@
 import pytest
 from core.features.flags import Feature, FeatureConfig, FeatureFlags, get_feature_flags, set_feature_flags
 from core.features.profiles import EnvironmentProfile
-from core.llm.capabilities import ModelCapability, provider_supports, get_provider_capabilities
+from core.llm.capabilities import (
+    ModelCapability, provider_supports, get_provider_capabilities,
+    get_model_context_window, get_model_max_output,
+)
 
 
 class TestFeatureFlags:
@@ -130,6 +133,34 @@ class TestProviderCapabilities:
         assert caps is not None
         assert ModelCapability.STREAMING in caps.capabilities
         assert ModelCapability.COMPUTER_USE not in caps.capabilities
+
+    def test_claude_code_provider(self):
+        """Test claude-code provider has full capabilities."""
+        caps = get_provider_capabilities("claude-code")
+        assert caps is not None
+        assert caps.max_tokens == 1_000_000
+        assert ModelCapability.EXTENDED_THINKING in caps.capabilities
+
+    def test_opus_context_window(self):
+        """Test Opus 4.6 has 1M context window."""
+        assert get_model_context_window("opus") == 1_000_000
+        assert get_model_context_window("claude-opus-4-6") == 1_000_000
+
+    def test_sonnet_context_window(self):
+        """Test Sonnet has 200K context window."""
+        assert get_model_context_window("sonnet") == 200_000
+        assert get_model_context_window("claude-sonnet-4-5") == 200_000
+
+    def test_model_max_output(self):
+        """Test per-model max output tokens."""
+        assert get_model_max_output("opus") == 32_000
+        assert get_model_max_output("sonnet") == 16_000
+        assert get_model_max_output("haiku") == 8_192
+
+    def test_unknown_model_defaults(self):
+        """Test unknown models get safe defaults."""
+        assert get_model_context_window("unknown-model") == 200_000
+        assert get_model_max_output("unknown-model") == 4_096
 
 
 class TestFeatureFlagIntegration:

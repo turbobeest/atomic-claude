@@ -40,10 +40,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # Phase 5 Welcome Banner
     print()
-    print_dim("━" * 120)
-    print_cyan("  PHASE 05 - IMPLEMENTATION")
-    print_dim("━" * 120)
-    print_cyan("""
+    print(print_dim("━" * 120))
+    print(print_cyan("  PHASE 05 - IMPLEMENTATION"))
+    print(print_dim("━" * 120))
+    print(print_cyan("""
                                 _______ ______  ______
                                    |    |     \ |     \\
                                    |    |_____/ |_____/
@@ -51,16 +51,17 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
       _____ _______  _____         _______ _______ _______ __   _ _______ _______ _______ _____  _____  __   _
         |   |  |  | |_____] |      |______ |  |  | |______ | \  |    |    |_____|    |      |   |     | | \  |
       __|__ |  |  | |       |_____ |______ |  |  | |______ |  \_|    |    |     |    |    __|__ |_____| |  \_|
-""")
-    print_dim("━" * 120)
+"""))
+
+    print(print_dim("━" * 120))
     print()
-    print_dim("  Executing RED/GREEN/REFACTOR/VERIFY cycles for all tasks.")
+    print(print_dim("  Executing RED/GREEN/REFACTOR/VERIFY cycles for all tasks."))
     print()
 
     # UAT Mode Bypass
     if uat_mode:
         print()
-        print_yellow("⚡ UAT Mode: Skipping Phase 4 verification, creating minimal initialization")
+        print(print_yellow("⚡ UAT Mode: Skipping Phase 4 verification, creating minimal initialization"))
         print()
 
         ensure_dir(init_file.parent)
@@ -75,13 +76,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         }
         write_file(init_file, json.dumps(init_data, indent=2))
 
-        print_green("✓ Entry & Initialization complete (UAT mode)")
+        print(print_green("✓ Entry & Initialization complete (UAT mode)"))
         return True
 
     # Phase 4 Verification
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("PHASE 4 VERIFICATION")
+    print(print_bold("PHASE 4 VERIFICATION"))
     print()
 
     verification_passed = True
@@ -92,11 +93,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             closeout_data = json.load(f)
         phase4_status = closeout_data.get("status", "unknown")
         if phase4_status == "complete":
-            print_green(f"✓ Phase 4 closeout verified")
+            print(print_green(f"✓ Phase 4 closeout verified"))
         else:
-            print_yellow(f"! Phase 4 closeout status: {phase4_status}")
+            print(print_yellow(f"! Phase 4 closeout status: {phase4_status}"))
     else:
-        print_yellow("! Phase 4 closeout not found (continuing anyway)")
+        print(print_yellow("! Phase 4 closeout not found (continuing anyway)"))
 
     # Check tasks.json has TDD subtasks
     tasks_with_tdd = 0
@@ -109,12 +110,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         tasks_with_tdd = sum(1 for task in tasks if len(task.get("subtasks", [])) >= 4)
 
         if tasks_with_tdd > 0:
-            print_green(f"✓ TDD subtasks found ({tasks_with_tdd} / {total_tasks} tasks)")
+            print(print_green(f"✓ TDD subtasks found ({tasks_with_tdd} / {total_tasks} tasks)"))
         else:
-            print_red("✗ No TDD subtasks found")
+            print(print_red("✗ No TDD subtasks found"))
             verification_passed = False
     else:
-        print_red("✗ tasks.json not found")
+        print(print_red("✗ tasks.json not found"))
         verification_passed = False
 
     # Check OpenSpec files
@@ -123,27 +124,27 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         spec_files = list(specs_dir.glob("spec-*.json"))
         spec_count = len(spec_files)
         if spec_count > 0:
-            print_green(f"✓ OpenSpec files found ({spec_count} specs)")
+            print(print_green(f"✓ OpenSpec files found ({spec_count} specs)"))
         else:
-            print_red("✗ No OpenSpec files found")
+            print(print_red("✗ No OpenSpec files found"))
             verification_passed = False
     else:
-        print_red("✗ Specs directory not found")
+        print(print_red("✗ Specs directory not found"))
         verification_passed = False
 
     print()
 
     if not verification_passed:
-        print_red("Phase 4 artifacts missing. Cannot proceed.")
+        print(print_red("Phase 4 artifacts missing. Cannot proceed."))
         print()
-        print_dim("Run Phase 4 (Specification) first to generate OpenSpecs and TDD subtasks.")
+        print(print_dim("Run Phase 4 (Specification) first to generate OpenSpecs and TDD subtasks."))
         print()
         return False
 
     # TDD Summary
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("TDD SUMMARY")
+    print(print_bold("TDD SUMMARY"))
     print()
 
     # Calculate total subtasks
@@ -160,41 +161,41 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     print()
 
     # Show TDD cycle structure
-    print_dim("  Each task will go through:")
+    print(print_dim("  Each task will go through:"))
     print()
-    print_red("    RED       → Write failing tests")
-    print_green("    GREEN     → Minimal implementation")
-    print_cyan("    REFACTOR  → Clean up code")
-    print_magenta("    VERIFY    → Security scan")
+    print(print_red("    RED       → Write failing tests"))
+    print(print_green("    GREEN     → Minimal implementation"))
+    print(print_cyan("    REFACTOR  → Clean up code"))
+    print(print_magenta("    VERIFY    → Security scan"))
     print()
 
     # Initialize Testing Directory
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("INITIALIZE TESTING DIRECTORY")
+    print(print_bold("INITIALIZE TESTING DIRECTORY"))
     print()
 
     ensure_dir(testing_dir)
-    print_green("✓ Testing directory initialized: .claude/testing/")
+    print(print_green("✓ Testing directory initialized: .claude/testing/"))
     print()
 
     # TDD Introduction
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("TDD METHODOLOGY")
+    print(print_bold("TDD METHODOLOGY"))
     print()
-    print_dim("  Test-Driven Development ensures code quality through:")
+    print(print_dim("  Test-Driven Development ensures code quality through:"))
     print()
     print("    ─────────────────────────────────────────────────────────────────")
     print()
-    print_red("    RED  ────────►  ") + print_green("GREEN  ────────►  ") + print_cyan("REFACTOR  ────────►  ") + print_magenta("VERIFY")
+    print(print_red("    RED  ────────►  ") + print_green("GREEN  ────────►  ") + print_cyan("REFACTOR  ────────►  ") + print_magenta("VERIFY"))
     print()
     print("    Write tests    Implement      Clean up        Security")
     print("    (must FAIL)    (tests PASS)   (still PASS)    scan")
     print()
     print("    ─────────────────────────────────────────────────────────────────")
     print()
-    print_bold("  Key Principles:")
+    print(print_bold("  Key Principles:"))
     print()
     print("    1. Never write implementation code without a failing test")
     print("    2. Write only enough code to pass the test")
@@ -216,7 +217,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     }
     write_file(init_file, json.dumps(init_data, indent=2))
 
-    print_green("✓ Entry & Initialization complete")
+    print(print_green("✓ Entry & Initialization complete"))
     return True
 
 

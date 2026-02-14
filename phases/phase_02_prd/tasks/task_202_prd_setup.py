@@ -46,9 +46,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     ensure_dir(setup_file.parent)
 
     print()
-    print_dim("  ┌─────────────────────────────────────────────────────────┐")
-    print_dim("  │ Before writing the PRD, let's confirm scope and focus. │")
-    print_dim("  └─────────────────────────────────────────────────────────┘")
+    print(print_dim("  ┌─────────────────────────────────────────────────────────┐"))
+    print(print_dim("  │ Before writing the PRD, let's confirm scope and focus. │"))
+    print(print_dim("  └─────────────────────────────────────────────────────────┘"))
     print()
 
     # Recap selected approach
@@ -75,7 +75,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         focus_areas
     )
 
-    print_green("✓ PRD setup complete")
+    print(print_green("✓ PRD setup complete"))
     return True
 
 
@@ -89,9 +89,9 @@ def recap_selected_approach(phase1_dir: Path) -> tuple:
     Returns:
         Tuple of (approach_name, approach_summary, approach_rationale)
     """
-    print_cyan("╔═══════════════════════════════════════════════════════════╗")
-    print_cyan("║ " + print_bold("SELECTED APPROACH (from Phase 1)") + "                          ║")
-    print_cyan("╚═══════════════════════════════════════════════════════════╝")
+    print(print_cyan("╔═══════════════════════════════════════════════════════════╗"))
+    print(print_cyan("║ " + print_bold("SELECTED APPROACH (from Phase 1)") + "                          ║"))
+    print(print_cyan("╚═══════════════════════════════════════════════════════════╝"))
     print()
 
     approach_file = phase1_dir / "selected-approach.json"
@@ -117,9 +117,9 @@ def recap_selected_approach(phase1_dir: Path) -> tuple:
             if approach_rationale:
                 print("  " + print_dim(f"Rationale: {approach_rationale}"))
         except Exception as e:
-            print_yellow(f"  ⚠ Error reading approach file: {e}")
+            print(print_yellow(f"  ⚠ Error reading approach file: {e}"))
     else:
-        print_yellow("  No approach file found - proceeding with general PRD")
+        print(print_yellow("  No approach file found - proceeding with general PRD"))
 
     return approach_name, approach_summary, approach_rationale
 
@@ -134,12 +134,12 @@ def confirm_scope(uat_mode: bool) -> tuple:
     Returns:
         Tuple of (scope_type, scope_description)
     """
-    print_cyan("╔═══════════════════════════════════════════════════════════╗")
-    print_cyan("║ " + print_bold("CONFIRM SCOPE") + "                                             ║")
-    print_cyan("╚═══════════════════════════════════════════════════════════╝")
+    print(print_cyan("╔═══════════════════════════════════════════════════════════╗"))
+    print(print_cyan("║ " + print_bold("CONFIRM SCOPE") + "                                             ║"))
+    print(print_cyan("╚═══════════════════════════════════════════════════════════╝"))
     print()
 
-    print_dim("  What should this PRD focus on?")
+    print(print_dim("  What should this PRD focus on?"))
     print()
     print("    " + print_green("[full]") + "      Full product/feature (comprehensive)")
     print("    " + print_yellow("[mvp]") + "       MVP scope only (minimal viable)")
@@ -150,7 +150,7 @@ def confirm_scope(uat_mode: bool) -> tuple:
     # UAT mode bypass
     if uat_mode:
         scope_choice = "mvp"
-        print_dim(f"  UAT mode: Using default scope '{scope_choice}'")
+        print(print_dim(f"  UAT mode: Using default scope '{scope_choice}'"))
     else:
         scope_choice = prompt_user("  Scope (default: mvp): ").strip().lower() or "mvp"
 
@@ -164,7 +164,7 @@ def confirm_scope(uat_mode: bool) -> tuple:
     elif scope_choice == "component":
         if uat_mode:
             component_name = "core-component"
-            print_dim(f"  UAT mode: Using default component '{component_name}'")
+            print(print_dim(f"  UAT mode: Using default component '{component_name}'"))
         else:
             print()
             component_name = prompt_user("  Component name: ").strip()
@@ -172,7 +172,7 @@ def confirm_scope(uat_mode: bool) -> tuple:
     elif scope_choice == "custom":
         if uat_mode:
             custom_scope = "Custom scope for testing"
-            print_dim(f"  UAT mode: Using default custom scope")
+            print(print_dim(f"  UAT mode: Using default custom scope"))
         else:
             print()
             custom_scope = prompt_user("  Describe scope: ").strip()
@@ -198,13 +198,13 @@ def identify_focus_areas(uat_mode: bool) -> List[str]:
     Returns:
         List of focus area identifiers
     """
-    print_cyan("╔═══════════════════════════════════════════════════════════╗")
-    print_cyan("║ " + print_bold("FOCUS AREAS") + "                                               ║")
-    print_cyan("╚═══════════════════════════════════════════════════════════╝")
+    print(print_cyan("╔═══════════════════════════════════════════════════════════╗"))
+    print(print_cyan("║ " + print_bold("FOCUS AREAS") + "                                               ║"))
+    print(print_cyan("╚═══════════════════════════════════════════════════════════╝"))
     print()
 
-    print_dim("  Which areas need extra attention in the PRD?")
-    print_dim("  (Select multiple with spaces, e.g., '1 3 5')")
+    print(print_dim("  Which areas need extra attention in the PRD?"))
+    print(print_dim("  (Select multiple with spaces, e.g., '1 3 5')"))
     print()
     print("    " + print_dim("1.") + " Technical architecture")
     print("    " + print_dim("2.") + " API/interface design")
@@ -219,7 +219,7 @@ def identify_focus_areas(uat_mode: bool) -> List[str]:
     # UAT mode bypass
     if uat_mode:
         focus_input = "1 2 7"
-        print_dim(f"  UAT mode: Using default focus areas '{focus_input}'")
+        print(print_dim(f"  UAT mode: Using default focus areas '{focus_input}'"))
     else:
         focus_input = prompt_user("  Focus areas (default: 1 2 7): ").strip() or "1 2 7"
 
@@ -279,7 +279,7 @@ def save_setup(
 
     write_file(setup_file, json.dumps(setup_data, indent=2))
     print()
-    print_dim(f"  Setup saved: {setup_file}")
+    print(print_dim(f"  Setup saved: {setup_file}"))
 
 
 if __name__ == "__main__":

@@ -45,9 +45,9 @@ BEDROCK_CLAUDE_MODELS = [
 
 # Model tier mapping for Bedrock
 BEDROCK_TIER_MAP = {
-    "opus": "anthropic.claude-3-opus-20240229-v1:0",
-    "sonnet": "anthropic.claude-3-5-sonnet-20241022-v2:0",
-    "haiku": "anthropic.claude-3-haiku-20240307-v1:0",
+    "opus": "anthropic.claude-opus-4-6-20250219-v1:0",
+    "sonnet": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "haiku": "anthropic.claude-haiku-4-5-20251001-v1:0",
 }
 
 

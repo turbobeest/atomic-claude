@@ -50,12 +50,12 @@ def prd_revision_flow(
         True if revision completed, False if aborted
     """
     print()
-    print_cyan("┌─────────────────────────────────────────────────────────┐")
-    print_cyan("│ " + print_bold("PRD REVISION — GUIDED Q&A") + "                               │")
-    print_cyan("└─────────────────────────────────────────────────────────┘")
+    print(print_cyan("┌─────────────────────────────────────────────────────────┐"))
+    print(print_cyan("│ " + print_bold("PRD REVISION — GUIDED Q&A") + "                               │"))
+    print(print_cyan("└─────────────────────────────────────────────────────────┘"))
     print()
-    print_dim("  Walk through each issue and decide how to resolve it.")
-    print_dim("  Your decisions will be applied in one pass by the revision agent.")
+    print(print_dim("  Walk through each issue and decide how to resolve it."))
+    print(print_dim("  Your decisions will be applied in one pass by the revision agent."))
     print()
 
     # Load validation results
@@ -63,14 +63,14 @@ def prd_revision_flow(
         with open(validation_file, 'r') as f:
             validation_data = json.load(f)
     except Exception as e:
-        print_red(f"  ✗ Error loading validation results: {e}")
+        print(print_red(f"  ✗ Error loading validation results: {e}"))
         return False
 
     # Collect issues from validation
     issues = collect_issues(validation_data)
 
     if not issues:
-        print_yellow("  No issues found in validation results.")
+        print(print_yellow("  No issues found in validation results."))
         print()
         manual_input = prompt_user("  Enter revision instructions manually (or Enter to skip): ").strip()
         if not manual_input:
@@ -82,7 +82,7 @@ def prd_revision_flow(
     resolution_plan = conduct_qa_session(issues)
 
     if not resolution_plan:
-        print_yellow("  No resolutions to apply.")
+        print(print_yellow("  No resolutions to apply."))
         return False
 
     # Apply revisions
@@ -155,7 +155,7 @@ def conduct_qa_session(issues: List[Dict[str, str]]) -> str:
     print("    " + print_yellow("skip") + "        Skip this issue (don't fix)")
     print("    " + print_red("done") + "        Stop reviewing, apply what you've decided so far")
     print()
-    print_dim("─" * 60)
+    print(print_dim("─" * 60))
 
     resolution_plan = ""
     resolved_count = 0
@@ -181,29 +181,29 @@ def conduct_qa_session(issues: List[Dict[str, str]]) -> str:
 
         # Suggest resolution
         suggestion = suggest_resolution(issue_type, detail)
-        print_dim(f"  Suggested: {suggestion}")
+        print(print_dim(f"  Suggested: {suggestion}"))
 
         user_response = prompt_user("  Resolution (default: accept): ").strip()
 
         if user_response == "done":
             print()
-            print_dim(f"  Stopping review. {total - num} issues remaining.")
+            print(print_dim(f"  Stopping review. {total - num} issues remaining."))
             break
         elif user_response in ["skip", "s"]:
             skipped_count += 1
-            print_dim("    -> Skipped")
+            print(print_dim("    -> Skipped"))
             continue
         elif not user_response or user_response in ["accept", "a"]:
             resolution_plan += f"{resolved_count + 1}. [{issue_type}] {detail}\n   RESOLUTION: {suggestion}\n\n"
             resolved_count += 1
-            print_green(f"    -> {suggestion}")
+            print(print_green(f"    -> {suggestion}"))
         else:
             resolution_plan += f"{resolved_count + 1}. [{issue_type}] {detail}\n   RESOLUTION: {user_response}\n\n"
             resolved_count += 1
-            print_green(f"    -> {user_response}")
+            print(print_green(f"    -> {user_response}"))
 
     print()
-    print_dim("─" * 60)
+    print(print_dim("─" * 60))
     print()
     print(f"  {print_bold('Review complete:')} {resolved_count} resolved, {skipped_count} skipped")
     print()
@@ -240,7 +240,7 @@ def invoke_revision_agent(
         True if revision applied successfully
     """
     print()
-    print_cyan("  Invoking revision agent...")
+    print(print_cyan("  Invoking revision agent..."))
 
     # Build revision prompt
     prd_content = read_file(prd_file)
@@ -284,7 +284,7 @@ Return the complete revised PRD in markdown format.
 
             # Show diff and ask to apply
             print()
-            print_green("  ✓ Revision generated")
+            print(print_green("  ✓ Revision generated"))
             print()
             print("    " + print_green("[apply]") + "   Apply revision")
             print("    " + print_red("[discard]") + " Discard and keep current PRD")
@@ -299,17 +299,17 @@ Return the complete revised PRD in markdown format.
 
                 # Apply revision
                 write_file(prd_file, revised_content)
-                print_green(f"  ✓ Revision applied (backup: {backup_file.name})")
+                print(print_green(f"  ✓ Revision applied (backup: {backup_file.name})"))
                 return True
             else:
-                print_yellow("  Revision discarded")
+                print(print_yellow("  Revision discarded"))
                 return False
         else:
-            print_red("  ✗ Revision generation failed")
+            print(print_red("  ✗ Revision generation failed"))
             return False
 
     except Exception as e:
-        print_red(f"  ✗ Error during revision: {e}")
+        print(print_red(f"  ✗ Error during revision: {e}"))
         return False
 
 

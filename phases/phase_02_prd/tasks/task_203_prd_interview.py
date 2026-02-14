@@ -71,12 +71,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     interview_file = output_dir / "prd-interview.json"
 
     print()
-    print_dim("  ┌─────────────────────────────────────────────────────────┐")
-    print_dim("  │ Confirmatory interview to refine PRD inputs.           │")
-    print_dim("  │                                                         │")
-    print_dim("  │ You may answer as yourself, on behalf of stakeholders, │")
-    print_dim("  │ or use sensible defaults to proceed quickly.           │")
-    print_dim("  └─────────────────────────────────────────────────────────┘")
+    print(print_dim("  ┌─────────────────────────────────────────────────────────┐"))
+    print(print_dim("  │ Confirmatory interview to refine PRD inputs.           │"))
+    print(print_dim("  │                                                         │"))
+    print(print_dim("  │ You may answer as yourself, on behalf of stakeholders, │"))
+    print(print_dim("  │ or use sensible defaults to proceed quickly.           │"))
+    print(print_dim("  └─────────────────────────────────────────────────────────┘"))
     print()
 
     # Optional skip
@@ -85,11 +85,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     if skip_choice == "defaults":
         save_defaults(interview_file)
         print()
-        print_green("✓ PRD interview complete (defaults)")
+        print(print_green("✓ PRD interview complete (defaults)"))
         return True
     elif skip_choice == "skip":
         print()
-        print_yellow("  ! Interview skipped - no interview data will be available")
+        print(print_yellow("  ! Interview skipped - no interview data will be available"))
         return True
 
     # Conduct interview
@@ -116,7 +116,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         mvp_scope
     )
 
-    print_green("✓ PRD interview complete")
+    print(print_green("✓ PRD interview complete"))
     return True
 
 
@@ -130,7 +130,7 @@ def handle_optional_skip(uat_mode: bool) -> str:
     Returns:
         Choice: "continue", "defaults", or "skip"
     """
-    print_cyan("  This task is optional.")
+    print(print_cyan("  This task is optional."))
     print()
     print("    " + print_green("[continue]") + "  Conduct stakeholder interview")
     print("    " + print_yellow("[defaults]") + "  Use default values (skip interview)")
@@ -139,7 +139,7 @@ def handle_optional_skip(uat_mode: bool) -> str:
 
     if uat_mode:
         choice = "defaults"
-        print_dim(f"  UAT mode: Using '{choice}'")
+        print(print_dim(f"  UAT mode: Using '{choice}'"))
         return choice
 
     clear_input_buffer()
@@ -158,24 +158,24 @@ def collect_stakeholders(uat_mode: bool) -> List[str]:
     Returns:
         List of stakeholder descriptions
     """
-    print_cyan("╔═══════════════════════════════════════════════════════════╗")
-    print_cyan("║ " + print_bold("1. STAKEHOLDERS") + "                                           ║")
-    print_cyan("╚═══════════════════════════════════════════════════════════╝")
+    print(print_cyan("╔═══════════════════════════════════════════════════════════╗"))
+    print(print_cyan("║ " + print_bold("1. STAKEHOLDERS") + "                                           ║"))
+    print(print_cyan("╚═══════════════════════════════════════════════════════════╝"))
     print()
 
     # Propose default stakeholders
-    print_dim("  PROPOSED stakeholders:")
+    print(print_dim("  PROPOSED stakeholders:"))
     for stakeholder in DEFAULT_STAKEHOLDERS:
         print(f"    • {stakeholder}")
     print()
-    print_cyan("  Options:")
+    print(print_cyan("  Options:"))
     print("    " + print_green("[confirm]") + "  Accept proposed stakeholders")
     print("    " + print_yellow("[adjust]") + "   Add or modify stakeholders")
     print()
 
     if uat_mode:
         choice = "confirm"
-        print_dim(f"  UAT mode: Using '{choice}'")
+        print(print_dim(f"  UAT mode: Using '{choice}'"))
         return DEFAULT_STAKEHOLDERS
 
     clear_input_buffer()
@@ -183,7 +183,7 @@ def collect_stakeholders(uat_mode: bool) -> List[str]:
 
     if choice == "adjust":
         print()
-        print_dim("  Enter stakeholders (one per line, empty line to finish):")
+        print(print_dim("  Enter stakeholders (one per line, empty line to finish):"))
         stakeholders = []
         while True:
             stakeholder = prompt_user("    > ").strip()
@@ -210,23 +210,23 @@ def collect_success_criteria(uat_mode: bool) -> List[str]:
     Returns:
         List of success criteria
     """
-    print_cyan("╔═══════════════════════════════════════════════════════════╗")
-    print_cyan("║ " + print_bold("2. SUCCESS CRITERIA") + "                                       ║")
-    print_cyan("╚═══════════════════════════════════════════════════════════╝")
+    print(print_cyan("╔═══════════════════════════════════════════════════════════╗"))
+    print(print_cyan("║ " + print_bold("2. SUCCESS CRITERIA") + "                                       ║"))
+    print(print_cyan("╚═══════════════════════════════════════════════════════════╝"))
     print()
 
-    print_dim("  PROPOSED success criteria:")
+    print(print_dim("  PROPOSED success criteria:"))
     for criterion in DEFAULT_SUCCESS_CRITERIA:
         print(f"    • {criterion}")
     print()
-    print_cyan("  Options:")
+    print(print_cyan("  Options:"))
     print("    " + print_green("[confirm]") + "  Accept proposed criteria")
     print("    " + print_yellow("[adjust]") + "   Define specific metrics")
     print()
 
     if uat_mode:
         choice = "confirm"
-        print_dim(f"  UAT mode: Using '{choice}'")
+        print(print_dim(f"  UAT mode: Using '{choice}'"))
         return DEFAULT_SUCCESS_CRITERIA
 
     clear_input_buffer()
@@ -234,7 +234,7 @@ def collect_success_criteria(uat_mode: bool) -> List[str]:
 
     if choice == "adjust":
         print()
-        print_dim("  Enter success criteria (one per line, empty line to finish):")
+        print(print_dim("  Enter success criteria (one per line, empty line to finish):"))
         criteria = []
         while True:
             criterion = prompt_user("    > ").strip()
@@ -261,23 +261,23 @@ def collect_non_goals(uat_mode: bool) -> List[str]:
     Returns:
         List of non-goals
     """
-    print_cyan("╔═══════════════════════════════════════════════════════════╗")
-    print_cyan("║ " + print_bold("3. NON-GOALS (Out of Scope)") + "                               ║")
-    print_cyan("╚═══════════════════════════════════════════════════════════╝")
+    print(print_cyan("╔═══════════════════════════════════════════════════════════╗"))
+    print(print_cyan("║ " + print_bold("3. NON-GOALS (Out of Scope)") + "                               ║"))
+    print(print_cyan("╚═══════════════════════════════════════════════════════════╝"))
     print()
 
-    print_dim("  PROPOSED non-goals (explicitly out of scope):")
+    print(print_dim("  PROPOSED non-goals (explicitly out of scope):"))
     for non_goal in DEFAULT_NON_GOALS:
         print(f"    • {non_goal}")
     print()
-    print_cyan("  Options:")
+    print(print_cyan("  Options:"))
     print("    " + print_green("[confirm]") + "  Accept proposed non-goals")
     print("    " + print_yellow("[adjust]") + "   Define specific non-goals")
     print()
 
     if uat_mode:
         choice = "confirm"
-        print_dim(f"  UAT mode: Using '{choice}'")
+        print(print_dim(f"  UAT mode: Using '{choice}'"))
         return DEFAULT_NON_GOALS
 
     clear_input_buffer()
@@ -285,7 +285,7 @@ def collect_non_goals(uat_mode: bool) -> List[str]:
 
     if choice == "adjust":
         print()
-        print_dim("  Enter non-goals (one per line, empty line to finish):")
+        print(print_dim("  Enter non-goals (one per line, empty line to finish):"))
         non_goals = []
         while True:
             non_goal = prompt_user("    > ").strip()
@@ -312,18 +312,18 @@ def collect_mvp_scope(uat_mode: bool) -> List[str]:
     Returns:
         List of MVP features/components
     """
-    print_cyan("╔═══════════════════════════════════════════════════════════╗")
-    print_cyan("║ " + print_bold("4. MVP SCOPE") + "                                              ║")
-    print_cyan("╚═══════════════════════════════════════════════════════════╝")
+    print(print_cyan("╔═══════════════════════════════════════════════════════════╗"))
+    print(print_cyan("║ " + print_bold("4. MVP SCOPE") + "                                              ║"))
+    print(print_cyan("╚═══════════════════════════════════════════════════════════╝"))
     print()
 
     if uat_mode:
-        print_dim("  UAT mode: Using default MVP scope")
+        print(print_dim("  UAT mode: Using default MVP scope"))
         return DEFAULT_MVP_SCOPE
 
-    print_dim("  What's the minimum viable scope for Phase 1 delivery?")
+    print(print_dim("  What's the minimum viable scope for Phase 1 delivery?"))
     print()
-    print_dim("  Enter MVP features (one per line, empty line to finish):")
+    print(print_dim("  Enter MVP features (one per line, empty line to finish):"))
 
     mvp_scope = []
     while True:
@@ -387,7 +387,7 @@ def save_interview(
     }
 
     write_file(interview_file, json.dumps(interview_data, indent=2))
-    print_dim(f"  Interview saved: {interview_file}")
+    print(print_dim(f"  Interview saved: {interview_file}"))
 
 
 if __name__ == "__main__":

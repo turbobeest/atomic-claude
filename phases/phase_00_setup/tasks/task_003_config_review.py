@@ -37,7 +37,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
+        uat_mode: If True, skip interactive prompts
 
     Returns:
         True if task completed successfully, False otherwise
@@ -45,14 +45,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     config_file = output_dir / "project-config.json"
 
     print()
-    print_cyan("Configuration Review")
+    print(print_cyan("Configuration Review"))
     print()
-
-    # UAT mode - auto-approve
-    if uat_mode:
-        print_yellow("UAT Mode: Auto-approving configuration")
-        _approve_config(config_file)
-        return True
 
     # Show info box
     _show_info_box()
@@ -66,10 +60,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
 def _show_info_box() -> None:
     """Show informational box about configuration review."""
-    print_dim("  ┌─────────────────────────────────────────────────────────┐")
-    print_dim("  │ Review the extracted configuration below.               │")
-    print_dim("  │ You can approve as-is or edit specific fields.         │")
-    print_dim("  └─────────────────────────────────────────────────────────┘")
+    print(print_dim("  ┌─────────────────────────────────────────────────────────┐"))
+    print(print_dim("  │ Review the extracted configuration below.               │"))
+    print(print_dim("  │ You can approve as-is or edit specific fields.         │"))
+    print(print_dim("  └─────────────────────────────────────────────────────────┘"))
     print()
 
 
@@ -85,7 +79,7 @@ def _display_config(config_file: Path) -> None:
     extracted = config.get('extracted', {})
 
     # Project section
-    print_cyan("  PROJECT")
+    print(print_cyan("  PROJECT"))
     project = extracted.get('project', {})
     print(f"    Name:        {project.get('name', 'not set')}")
     print(f"    Description: {project.get('description', 'not set')}")
@@ -94,7 +88,7 @@ def _display_config(config_file: Path) -> None:
     print()
 
     # Repository section
-    print_cyan("  REPOSITORY")
+    print(print_cyan("  REPOSITORY"))
     repository = extracted.get('repository', {})
     print(f"    URL:         {repository.get('url', 'not set')}")
     print(f"    Branch:      {repository.get('default_branch', 'main')}")
@@ -104,7 +98,7 @@ def _display_config(config_file: Path) -> None:
     print()
 
     # Pipeline section
-    print_cyan("  PIPELINE")
+    print(print_cyan("  PIPELINE"))
     pipeline = extracted.get('pipeline', {})
     print(f"    Mode:        {pipeline.get('mode', 'component')}")
 
@@ -123,18 +117,94 @@ def _display_config(config_file: Path) -> None:
     print()
 
     # Sandbox section
-    print_cyan("  SANDBOX")
+    print(print_cyan("  SANDBOX"))
     sandbox = extracted.get('sandbox', {})
     print(f"    Network:     {sandbox.get('network_access', 'fetch-only')}")
     print(f"    Cmd Mode:    {sandbox.get('command_approval_mode', 'cautious')}")
     print()
 
-    # LLM section
-    print_cyan("  DEFAULT LLM")
-    llm = extracted.get('llm', {})
-    print(f"    Provider:    {llm.get('primary_provider', 'anthropic')}")
-    print_dim("    (You can choose a different model before each LLM task)")
+    # LLM Preferences section
+    print(print_cyan("  LLM PREFERENCES"))
+    providers = extracted.get('providers', {})
+    chain = providers.get('chain_priority', [])
+    if chain:
+        print(f"    Chain:       {' > '.join(chain)}")
+    else:
+        llm = extracted.get('llm', {})
+        print(f"    Provider:    {llm.get('primary_provider', 'anthropic')}")
+    model_cfg = providers.get('models', {})
+    if model_cfg:
+        print(f"    Primary:     {model_cfg.get('primary', 'sonnet')}")
+        print(f"    Fast:        {model_cfg.get('fast', 'haiku')}")
+        print(f"    Heavyweight: {model_cfg.get('heavyweight', 'opus')}")
+    effort = providers.get('effort_level')
+    thinking = providers.get('thinking_budget')
+    if effort:
+        print(f"    Effort:      {effort}")
+    if thinking is not None:
+        print(f"    Thinking:    {thinking} tokens")
+    routing = providers.get('routing', {})
+    if routing:
+        print(f"    Routing:     critical={routing.get('critical', '?')}, bulk={routing.get('bulk', '?')}")
+    fallback = providers.get('fallback', {})
+    if fallback:
+        fb_parts = []
+        if fallback.get('api_to_ollama'):
+            fb_parts.append("API->Ollama")
+        if fallback.get('ollama_to_api'):
+            fb_parts.append("Ollama->API")
+        if fallback.get('offline_mode'):
+            fb_parts.append("offline")
+        print(f"    Fallback:    {', '.join(fb_parts) if fb_parts else 'none'}")
     print()
+
+    # Agent Assignment section
+    print(print_cyan("  AGENTS"))
+    agents = extracted.get('agents', {})
+    if isinstance(agents, dict) and 'default_tier' in agents:
+        print(f"    Tier:        {agents.get('default_tier', 'sonnet')}")
+        assignments = agents.get('phase_assignments', {})
+        custom = [k for k, v in assignments.items() if v not in ('default', 'infer')]
+        if custom:
+            for k in custom:
+                print(f"    {k}:  {assignments[k]}")
+        else:
+            print(f"    Assignments: auto-select all")
+    else:
+        print(f"    Config:      default")
+    print()
+
+    # Audit Configuration section
+    print(print_cyan("  AUDITS"))
+    audits = extracted.get('audits', {})
+    print(f"    Profile:     {audits.get('default_profile', 'standard')}")
+    print(f"    Failure:     {audits.get('failure_mode', 'gate-high')}")
+    sev = audits.get('severity_filter', ['critical', 'high'])
+    print(f"    Severity:    {', '.join(sev) if isinstance(sev, list) else sev}")
+    print()
+
+    # Constraints section
+    constraints = extracted.get('constraints', {})
+    if constraints and any(constraints.get(k) for k in ('technical', 'infrastructure', 'compliance', 'dependencies')):
+        print(print_cyan("  CONSTRAINTS"))
+        if constraints.get('technical'):
+            tech = constraints['technical']
+            if isinstance(tech, list):
+                tech = ', '.join(tech)
+            print(f"    Technical:   {tech}")
+        if constraints.get('infrastructure'):
+            print(f"    Infra:       {constraints['infrastructure']}")
+        if constraints.get('compliance'):
+            comp = constraints['compliance']
+            if isinstance(comp, list):
+                comp = ', '.join(comp)
+            print(f"    Compliance:  {comp}")
+        if constraints.get('dependencies'):
+            deps = constraints['dependencies']
+            if isinstance(deps, list):
+                deps = ', '.join(deps)
+            print(f"    Deps:        {deps}")
+        print()
 
     # Check for any null/infer values that need attention
     warnings = []
@@ -144,7 +214,7 @@ def _display_config(config_file: Path) -> None:
         warnings.append("Repository URL not set (optional)")
 
     if warnings:
-        print_yellow("  NOTES:")
+        print(print_yellow("  NOTES:"))
         for w in warnings:
             print(f"    - {w}")
         print()
@@ -162,10 +232,10 @@ def _prompt_action(config_file: Path, output_dir: Path) -> bool:
         True if approved, False to restart
     """
     print()
-    print_green("  [a] Approve configuration")
-    print_yellow("  [e] Edit a field")
-    print_cyan("  [j] View raw JSON")
-    print_red("  [r] Restart entire setup from the beginning")
+    print(print_green("  [a] Approve configuration"))
+    print(print_yellow("  [e] Edit a field"))
+    print(print_cyan("  [j] View raw JSON"))
+    print(print_red("  [r] Restart entire setup from the beginning"))
     print()
 
     while True:
@@ -185,10 +255,10 @@ def _prompt_action(config_file: Path, output_dir: Path) -> bool:
             # Prompt again after viewing
             return _prompt_action(config_file, output_dir)
         elif choice == 'r':
-            print_yellow("Restarting configuration...")
+            print(print_yellow("Restarting configuration..."))
             return False
         else:
-            print_red("Invalid choice. Enter a, e, j, or r.")
+            print(print_red("Invalid choice. Enter a, e, j, or r."))
 
 
 def _approve_config(config_file: Path) -> None:
@@ -203,20 +273,17 @@ def _approve_config(config_file: Path) -> None:
     extracted = config.get('extracted', {})
 
     # Flatten extracted into main config
-    config['project'] = extracted.get('project', {})
-    config['repository'] = extracted.get('repository', {})
-    config['sandbox'] = extracted.get('sandbox', {})
-    config['mcp'] = extracted.get('mcp', {})
-    config['pipeline'] = extracted.get('pipeline', {})
-    config['agents'] = extracted.get('agents', {})
-    config['llm'] = extracted.get('llm', {})
+    for key in ('project', 'repository', 'sandbox', 'mcp', 'pipeline',
+                'agents', 'llm', 'constraints', 'providers', 'gardener', 'audits'):
+        if key in extracted:
+            config[key] = extracted[key]
     config['config_approved'] = True
     config['approved_at'] = datetime.now().isoformat()
 
     # Write back
     write_file(config_file, json.dumps(config, indent=2))
 
-    print_green("✓ Configuration approved")
+    print(print_green("✓ Configuration approved"))
 
 
 def _view_json(config_file: Path) -> None:
@@ -230,14 +297,14 @@ def _view_json(config_file: Path) -> None:
     extracted = config.get('extracted', {})
 
     print()
-    print_dim("  ─────────────────── RAW JSON ───────────────────")
+    print(print_dim("  ─────────────────── RAW JSON ───────────────────"))
     print()
     # Pretty print with indentation
     json_str = json.dumps(extracted, indent=2)
     for line in json_str.split('\n'):
         print(f"    {line}")
     print()
-    print_dim("  ────────────────────────────────────────────────")
+    print(print_dim("  ────────────────────────────────────────────────"))
     print()
 
     clear_input_buffer()
@@ -252,7 +319,7 @@ def _edit_field(config_file: Path) -> None:
         config_file: Path to project config file
     """
     print()
-    print_dim("  Edit which field?")
+    print(print_dim("  Edit which field?"))
     print("    1. Project Name")
     print("    2. Description")
     print("    3. Repository URL")
@@ -284,7 +351,7 @@ def _edit_field(config_file: Path) -> None:
     elif field_choice == '7':
         _edit_command_approval(config_file, extracted)
     else:
-        print_red("Invalid field selection")
+        print(print_red("Invalid field selection"))
 
 
 def _edit_project_name(config_file: Path, extracted: Dict[str, Any]) -> None:
@@ -294,7 +361,7 @@ def _edit_project_name(config_file: Path, extracted: Dict[str, Any]) -> None:
 
     # Validate project name (lowercase, numbers, hyphens only)
     if not new_name.replace('-', '').replace('_', '').replace('.', '').isalnum():
-        print_red("Invalid name (use lowercase, numbers, hyphens only)")
+        print(print_red("Invalid name (use lowercase, numbers, hyphens only)"))
         return
 
     # Update config
@@ -342,10 +409,10 @@ def _edit_pipeline_mode(config_file: Path, extracted: Dict[str, Any]) -> None:
     old_val = extracted.get('pipeline', {}).get('mode', 'component')
 
     print()
-    print_dim("    1. component  - Single feature or component")
-    print_dim("    2. full       - Full application")
-    print_dim("    3. library    - Reusable library/package")
-    print_dim("    4. prototype  - Quick prototype (fewer gates)")
+    print(print_dim("    1. component  - Single feature or component"))
+    print(print_dim("    2. full       - Full application"))
+    print(print_dim("    3. library    - Reusable library/package"))
+    print(print_dim("    4. prototype  - Quick prototype (fewer gates)"))
 
     mode = prompt_user("Mode (default: 1-4): ").strip()
 
@@ -367,10 +434,10 @@ def _edit_llm_provider(config_file: Path, extracted: Dict[str, Any]) -> None:
     old_val = extracted.get('llm', {}).get('primary_provider', 'anthropic')
 
     print()
-    print_dim("    1. anthropic  - Claude (recommended)")
-    print_dim("    2. openai     - GPT models")
-    print_dim("    3. google     - Gemini models")
-    print_dim("    4. local      - Local LLM (ollama, etc)")
+    print(print_dim("    1. anthropic  - Claude (recommended)"))
+    print(print_dim("    2. openai     - GPT models"))
+    print(print_dim("    3. google     - Gemini models"))
+    print(print_dim("    4. local      - Local LLM (ollama, etc)"))
 
     prov = prompt_user("Provider (default: 1-4): ").strip()
 
@@ -392,9 +459,9 @@ def _edit_network_access(config_file: Path, extracted: Dict[str, Any]) -> None:
     old_val = extracted.get('sandbox', {}).get('network_access', 'fetch-only')
 
     print()
-    print_dim("    1. none       - No network access")
-    print_dim("    2. fetch-only - HTTP GET only (recommended)")
-    print_dim("    3. full       - Full network access")
+    print(print_dim("    1. none       - No network access"))
+    print(print_dim("    2. fetch-only - HTTP GET only (recommended)"))
+    print(print_dim("    3. full       - Full network access"))
 
     net = prompt_user("Network access (default: 1-3): ").strip()
 
@@ -416,9 +483,9 @@ def _edit_command_approval(config_file: Path, extracted: Dict[str, Any]) -> None
     old_val = extracted.get('sandbox', {}).get('command_approval_mode', 'cautious')
 
     print()
-    print_dim("    1. ask-always - Prompt before every command")
-    print_dim("    2. cautious   - Prompt for risky commands (recommended)")
-    print_dim("    3. auto       - Auto-approve safe commands")
+    print(print_dim("    1. ask-always - Prompt before every command"))
+    print(print_dim("    2. cautious   - Prompt for risky commands (recommended)"))
+    print(print_dim("    3. auto       - Auto-approve safe commands"))
 
     cmd = prompt_user("Command approval (default: 1-3): ").strip()
 
@@ -446,14 +513,14 @@ def _show_change(field: str, old_val: str, new_val: str) -> None:
     """
     if old_val == new_val:
         print()
-        print_dim(f"No change to {field}")
+        print(print_dim(f"No change to {field}"))
     else:
         print()
-        print_dim("Changed:")
-        print_red(f"    {field}: {old_val}")
-        print_green(f"    {field}: {new_val}")
+        print(print_dim("Changed:"))
+        print(print_red(f"    {field}: {old_val}"))
+        print(print_green(f"    {field}: {new_val}"))
         print()
-        print_green(f"✓ Updated {field}")
+        print(print_green(f"✓ Updated {field}"))
 
 
 if __name__ == "__main__":
@@ -465,10 +532,8 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
 
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)

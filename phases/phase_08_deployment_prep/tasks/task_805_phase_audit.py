@@ -26,13 +26,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
-    print_bold("Phase Audit")
+    print(print_bold("Phase Audit"))
     print()
 
     # UAT Mode Bypass
     if uat_mode:
-        print_dim("  UAT Mode: Skipping audit")
-        print_green("✓ UAT bypass complete")
+        print(print_dim("  UAT Mode: Skipping audit"))
+        print(print_green("✓ UAT bypass complete"))
         return True
 
     # Run phase audit

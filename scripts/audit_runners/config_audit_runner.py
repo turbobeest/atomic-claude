@@ -348,7 +348,7 @@ class ConfigAuditRunner:
 
                 # Check for provider configuration
                 print(f"  Checking provider configuration...", end=" ")
-                provider_keys = ["bedrock_enabled", "ollama_enabled", "aws_region", "ollama_host"]
+                provider_keys = ["bedrock_enabled", "ollama_enabled", "aws_region", "ollama_host", "claude_code_enabled", "ATOMIC_LLM_PROVIDER"]
                 present_providers = [k for k in provider_keys if k in secrets]
 
                 if present_providers:

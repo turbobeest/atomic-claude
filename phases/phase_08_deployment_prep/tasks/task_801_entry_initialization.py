@@ -36,26 +36,26 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     config_file = atomic_root / ".outputs" / "0-setup" / "project-config.json"
 
     print()
-    print_dim("━" * 110)
-    print_cyan("  PHASE 08 - DEPLOYMENT PREP")
-    print_dim("━" * 110)
+    print(print_dim("━" * 110))
+    print(print_cyan("  PHASE 08 - DEPLOYMENT PREP"))
+    print(print_dim("━" * 110))
     print()
 
-    print_bold("Entry & Initialization")
+    print(print_bold("Entry & Initialization"))
     print()
 
     # UAT Mode Bypass
     if uat_mode:
-        print_dim("  UAT Mode: Skipping interactive validation")
-        print_green("✓ UAT bypass complete")
+        print(print_dim("  UAT Mode: Skipping interactive validation"))
+        print(print_green("✓ UAT bypass complete"))
         return True
 
-    print_dim("  Validating prerequisites for Deployment Prep phase.")
+    print(print_dim("  Validating prerequisites for Deployment Prep phase."))
     print()
 
     # PREREQUISITE VALIDATION
     print()
-    print_bold("  - PREREQUISITE VALIDATION")
+    print(print_bold("  - PREREQUISITE VALIDATION"))
     print()
 
     all_valid = True
@@ -66,66 +66,66 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             closeout_data = read_json(closeout_file)
             phase_7_status = closeout_data.get("status", "unknown")
             if phase_7_status == "complete":
-                print_green(f"  [CRIT] ✓ Phase 7 (Integration) complete")
+                print(print_green(f"  [CRIT] ✓ Phase 7 (Integration) complete"))
             else:
-                print_red(f"  [CRIT] ✗ Phase 7 not complete (status: {phase_7_status})")
+                print(print_red(f"  [CRIT] ✗ Phase 7 not complete (status: {phase_7_status})"))
                 all_valid = False
         except Exception as e:
-            print_red(f"  [CRIT] ✗ Phase 7 closeout invalid: {e}")
+            print(print_red(f"  [CRIT] ✗ Phase 7 closeout invalid: {e}"))
             all_valid = False
     else:
-        print_red("  [CRIT] ✗ Phase 7 closeout not found")
+        print(print_red("  [CRIT] ✗ Phase 7 closeout not found"))
         all_valid = False
 
     # Check integration report
     integration_report = integration_dir / "integration-report.json"
     if integration_report.exists():
-        print_green("  [BLCK] ✓ Integration report present")
+        print(print_green("  [BLCK] ✓ Integration report present"))
     else:
-        print_yellow("  [BLCK] ! Integration report not found")
+        print(print_yellow("  [BLCK] ! Integration report not found"))
 
     # Check project config
     if config_file.exists():
-        print_green("  [PASS] ✓ Project configuration found")
+        print(print_green("  [PASS] ✓ Project configuration found"))
     else:
-        print_yellow("  [PASS] ! Project configuration not found")
+        print(print_yellow("  [PASS] ! Project configuration not found"))
 
     print()
 
     if not all_valid:
-        print_yellow("⚠  Prerequisites not met - cannot proceed")
+        print(print_yellow("⚠  Prerequisites not met - cannot proceed"))
         return False
 
     # PHASE OBJECTIVES
     print()
-    print_bold("  - PHASE OBJECTIVES")
+    print(print_bold("  - PHASE OBJECTIVES"))
     print()
 
-    print_dim("  In this phase, we will:")
+    print(print_dim("  In this phase, we will:"))
     print()
-    print_cyan("    1. ") + "Prepare deployment artifacts"
-    print_cyan("    2. ") + "Generate release documentation"
-    print_cyan("    3. ") + "Create installation guides"
-    print_cyan("    4. ") + "Prepare changelog"
-    print_cyan("    5. ") + "Ready for Release phase"
+    print(print_cyan("    1. ") + "Prepare deployment artifacts")
+    print(print_cyan("    2. ") + "Generate release documentation")
+    print(print_cyan("    3. ") + "Create installation guides")
+    print(print_cyan("    4. ") + "Prepare changelog")
+    print(print_cyan("    5. ") + "Ready for Release phase")
     print()
 
     # DEPLOYMENT PREP PROCESS
     print()
-    print_bold("  - DEPLOYMENT PREP PROCESS")
+    print(print_bold("  - DEPLOYMENT PREP PROCESS"))
     print()
 
-    print_dim("  Preparation follows a parallel workflow:")
+    print(print_dim("  Preparation follows a parallel workflow:"))
     print()
     print("    Packaging  →  Changelog  →  Documentation  →  Approval")
-    print_dim("      (build)      (version)       (guides)        (gate)")
+    print(print_dim("      (build)      (version)       (guides)        (gate)"))
     print()
 
     if not uat_mode:
         prompt_user("  Press Enter to continue...")
         print()
 
-    print_green("✓ Entry & Initialization complete")
+    print(print_green("✓ Entry & Initialization complete"))
     return True
 
 

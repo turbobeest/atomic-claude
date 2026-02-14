@@ -57,6 +57,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.state import StateManager, PhaseStatus as StatePhaseStatus
 from core.config import Config
+from core.memory import memory_init, memory_checkpoint, memory_handle_backtrack
 
 
 # ============================================================================
@@ -286,16 +287,22 @@ class PhaseValidator:
                 errors.append(f"Dependency phase {dep_phase_num} not found")
                 continue
 
-            # Check if dependency phase is complete
-            if not self.state.is_task_complete(dep_metadata.phase_id, "001"):
-                # Phase hasn't started or isn't complete
-                # Check for phase completion marker
-                phase_data = self.state.get_phase_tasks(dep_metadata.phase_id)
-                if not phase_data:
-                    errors.append(
-                        f"Dependency phase {dep_phase_num} ({dep_metadata.phase_name}) "
-                        f"has not been started"
-                    )
+            # Check phase-level completion first (set by mark_phase_complete)
+            phase_state = self.state._state.get('phases', {}).get(dep_metadata.phase_id, {})
+            if phase_state.get('status') == 'completed':
+                continue
+
+            # Fallback: check if first task is complete
+            if self.state.is_task_complete(dep_metadata.phase_id, "001"):
+                continue
+
+            # Phase hasn't started or isn't complete
+            phase_data = self.state.get_phase_tasks(dep_metadata.phase_id)
+            if not phase_data:
+                errors.append(
+                    f"Dependency phase {dep_phase_num} ({dep_metadata.phase_name}) "
+                    f"has not been started"
+                )
 
         return errors
 
@@ -493,6 +500,12 @@ class PhasePipeline:
         # Set current phase in state
         self.state.set_current_phase(metadata.phase_id)
 
+        # Initialize memory system (idempotent — safe to call multiple times)
+        try:
+            memory_init(self.atomic_root / ".state")
+        except Exception as e:
+            print(f"  [memory] init warning: {e}")
+
         # Execute phase via orchestrator
         success = self._execute_phase_orchestrator(metadata, resume_at)
 
@@ -500,8 +513,23 @@ class PhasePipeline:
             print(f"\n❌ Phase {phase_num} failed or stopped.")
             return False
 
+        # Reload state from disk (orchestrator saved task completions via its own StateManager)
+        self.state._state = self.state.load_state()
+
         # Mark phase complete
         self.state.mark_phase_complete(metadata.phase_id)
+
+        # Memory checkpoint at phase boundary
+        try:
+            memory_checkpoint(
+                phase=metadata.phase_num,
+                phase_name=metadata.phase_name,
+                summary=f"Phase {metadata.phase_num} ({metadata.phase_name}) completed",
+                artifacts=[str(self.atomic_root / ".outputs" / metadata.phase_id / "closeout.json")],
+                state_snapshot={"phase_id": metadata.phase_id, "completed_at": datetime.now().isoformat()}
+            )
+        except Exception as e:
+            print(f"  [memory] checkpoint warning: {e}")
 
         # Create closeout if required
         if metadata.required_closeout:
@@ -511,14 +539,22 @@ class PhasePipeline:
 
         # Handle phase transition
         if auto_chain or transition_mode != TransitionMode.MANUAL:
+            next_phase_num = phase_num + 1
+            # Check human gates — force PROMPT even if auto_chain
+            human_gates = self.config.get("pipeline.human_gates", [0, 2, 5, 9])
+            effective_mode = TransitionMode.AUTO if auto_chain else transition_mode
+            if next_phase_num in human_gates:
+                effective_mode = TransitionMode.PROMPT
+
             next_phase = self.transition.transition_to_next(
                 phase_num,
-                TransitionMode.AUTO if auto_chain else transition_mode
+                effective_mode
             )
 
             if next_phase is not None:
                 self.transition.display_transition_banner(phase_num, next_phase)
-                return self.run_phase(next_phase, auto_chain=auto_chain)
+                return self.run_phase(next_phase, auto_chain=auto_chain,
+                                      transition_mode=transition_mode)
 
         return True
 
@@ -633,6 +669,15 @@ class PhasePipeline:
         print(f"\n🔄 Rolling back to Phase {phase_num}")
         if task_id:
             print(f"   Task: {task_id}")
+
+        # Clear memory state for phases being rolled back
+        try:
+            memory_init(self.atomic_root / ".state")
+            result = memory_handle_backtrack(phase_num)
+            print(f"   Memory: cleared {result.get('cleared_entries', 0)} entries, "
+                  f"invalidated {result.get('invalidated_checkpoints', 0)} checkpoints")
+        except Exception as e:
+            print(f"  [memory] backtrack warning: {e}")
 
         try:
             backtrack_to(phase_num, task_id)

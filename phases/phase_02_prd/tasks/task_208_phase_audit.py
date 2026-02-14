@@ -52,18 +52,18 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # UAT mode bypass
     if uat_mode:
-        print_yellow("  UAT mode: Skipping audit...")
+        print(print_yellow("  UAT mode: Skipping audit..."))
         create_minimal_audit(audit_file)
-        print_green("✓ UAT mode: Audit bypassed")
+        print(print_green("✓ UAT mode: Audit bypassed"))
         return True
 
     print()
-    print_cyan("╔═══════════════════════════════════════════════════════════╗")
-    print_cyan("║ " + print_bold("PHASE 2 AUDIT - PRD Validation") + "                           ║")
-    print_cyan("╚═══════════════════════════════════════════════════════════╝")
+    print(print_cyan("╔═══════════════════════════════════════════════════════════╗"))
+    print(print_cyan("║ " + print_bold("PHASE 2 AUDIT - PRD Validation") + "                           ║"))
+    print(print_cyan("╚═══════════════════════════════════════════════════════════╝"))
     print()
 
-    print_dim("  The PRD audit validates:")
+    print(print_dim("  The PRD audit validates:"))
     print("    • Structural completeness")
     print("    • Requirements quality")
     print("    • Testability")
@@ -71,7 +71,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     print()
 
     # Audit profile selection
-    print_cyan("  Select audit profile:")
+    print(print_cyan("  Select audit profile:"))
     print()
     print("    " + print_green("[minimal]") + "    Quick structural check (10 dimensions)")
     print("    " + print_green("[standard]") + "   Balanced review (25 dimensions)")
@@ -83,7 +83,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     profile = prompt_user("  Profile (default: standard): ").strip().lower() or "standard"
 
     if profile == "skip":
-        print_yellow("  Audit skipped")
+        print(print_yellow("  Audit skipped"))
         return True
 
     # Map profile to dimension count
@@ -95,11 +95,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     dim_count = dim_map.get(profile, 25)
 
     print()
-    print_green(f"  ✓ Selected {profile} profile ({dim_count} dimensions)")
+    print(print_green(f"  ✓ Selected {profile} profile ({dim_count} dimensions)"))
     print()
 
     # Run audit (simplified for now)
-    print_cyan("  Running audit...")
+    print(print_cyan("  Running audit..."))
     audit_result = run_simplified_audit(atomic_root, output_dir, profile, dim_count)
 
     # Save audit results
@@ -109,7 +109,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     show_audit_results(audit_result)
 
     print()
-    print_green("✓ Phase audit complete")
+    print(print_green("✓ Phase audit complete"))
     return True
 
 
@@ -282,7 +282,7 @@ def show_audit_results(audit_result: Dict[str, Any]) -> None:
     overall_status = audit_result.get("overall_status", "UNKNOWN")
 
     print()
-    print_cyan("  Audit Results:")
+    print(print_cyan("  Audit Results:"))
     print(f"    Passed:   {print_green(str(passed))}")
     print(f"    Warnings: {print_yellow(str(warnings))}")
     print(f"    Critical: {print_red(str(critical))}")
@@ -291,11 +291,11 @@ def show_audit_results(audit_result: Dict[str, Any]) -> None:
     print()
 
     if critical > 0:
-        print_red("  ! Critical issues found - review recommended")
+        print(print_red("  ! Critical issues found - review recommended"))
     elif warnings > 0:
-        print_yellow("  ! Warnings found - consider reviewing")
+        print(print_yellow("  ! Warnings found - consider reviewing"))
     else:
-        print_green("  ✓ All checks passed")
+        print(print_green("  ✓ All checks passed"))
 
 
 if __name__ == "__main__":

@@ -38,12 +38,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     ensure_dir(agents_file.parent)
 
     print()
-    print_dim("Selecting specialized agents for code review.")
+    print(print_dim("Selecting specialized agents for code review."))
     print()
 
     # UAT Mode Bypass
     if uat_mode:
-        print_yellow("UAT Mode: Creating minimal valid output")
+        print(print_yellow("UAT Mode: Creating minimal valid output"))
         write_file(agents_file, json.dumps({
             "agents": ["code-reviewer"],
             "count": 1,
@@ -56,16 +56,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             },
             "selected_at": datetime.now().isoformat()
         }, indent=2))
-        print_green("✓ UAT bypass complete")
+        print(print_green("✓ UAT bypass complete"))
         return True
 
     # Display agent roles
     _display_agent_roles()
 
     # Select agents
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("SELECT AGENTS")
+    print(print_bold("SELECT AGENTS"))
     print()
 
     clear_input_buffer()
@@ -89,78 +89,78 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     write_file(agents_file, json.dumps(agent_data, indent=2))
 
-    print_green("✓ Agent Selection complete")
+    print(print_green("✓ Agent Selection complete"))
     return True
 
 
 def _display_agent_roles() -> None:
     """Display code review agent roles."""
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("CODE REVIEW AGENT ROLES")
+    print(print_bold("CODE REVIEW AGENT ROLES"))
     print()
 
-    print_dim("Five agents work together for comprehensive code review:")
+    print(print_dim("Five agents work together for comprehensive code review:"))
     print()
 
     # Deep Code Reviewer
-    print_cyan("─" * 100)
-    print_bold("DEEP CODE REVIEWER")
+    print(print_cyan("─" * 100))
+    print(print_bold("DEEP CODE REVIEWER"))
     print()
     print("  Reviews code for correctness, clarity, and maintainability.")
     print("  Checks logic, error handling, edge cases, and code smells.")
     print()
     print(print_green("  Recommended:") + " deep-code-reviewer-phd (opus)")
     print(print_dim("  Alternative:") + " senior-engineer, code-quality-expert")
-    print_cyan("─" * 100)
+    print(print_cyan("─" * 100))
     print()
 
     # Architecture Compliance
-    print_magenta("─" * 100)
-    print_bold("ARCHITECTURE COMPLIANCE")
+    print(print_magenta("─" * 100))
+    print(print_bold("ARCHITECTURE COMPLIANCE"))
     print()
     print("  Verifies adherence to architectural patterns and design decisions.")
     print("  Checks dependency direction, layer separation, coupling.")
     print()
     print(print_green("  Recommended:") + " arch-compliance-phd (sonnet)")
     print(print_dim("  Alternative:") + " system-architect, design-pattern-expert")
-    print_magenta("─" * 100)
+    print(print_magenta("─" * 100))
     print()
 
     # Performance Analyzer
-    print_yellow("─" * 100)
-    print_bold("PERFORMANCE ANALYZER")
+    print(print_yellow("─" * 100))
+    print(print_bold("PERFORMANCE ANALYZER"))
     print()
     print("  Identifies performance bottlenecks and optimization opportunities.")
     print("  Reviews algorithmic complexity, memory usage, I/O patterns.")
     print()
     print(print_green("  Recommended:") + " perf-analyzer-phd (sonnet)")
     print(print_dim("  Alternative:") + " performance-engineer, optimization-specialist")
-    print_yellow("─" * 100)
+    print(print_yellow("─" * 100))
     print()
 
     # Documentation Reviewer
-    print_blue("─" * 100)
-    print_bold("DOCUMENTATION REVIEWER")
+    print(print_blue("─" * 100))
+    print(print_bold("DOCUMENTATION REVIEWER"))
     print()
     print("  Reviews code comments, API documentation, and README files.")
     print("  Ensures documentation matches implementation.")
     print()
     print(print_green("  Recommended:") + " doc-reviewer-phd (haiku)")
     print(print_dim("  Alternative:") + " technical-writer, api-doc-specialist")
-    print_blue("─" * 100)
+    print(print_blue("─" * 100))
     print()
 
     # Code Refiner
-    print_green("─" * 100)
-    print_bold("CODE REFINER")
+    print(print_green("─" * 100))
+    print(print_bold("CODE REFINER"))
     print()
     print("  Applies refinements based on review findings.")
     print("  Ensures tests continue to pass after changes.")
     print()
     print(print_green("  Recommended:") + " code-refiner-phd (opus)")
     print(print_dim("  Alternative:") + " refactoring-specialist, clean-code-expert")
-    print_green("─" * 100)
+    print(print_green("─" * 100))
     print()
 
 
@@ -244,9 +244,9 @@ def _select_all_agents() -> Dict[str, str]:
 
 def _display_selection_summary(agents: Dict[str, str]) -> None:
     """Display agent selection summary."""
-    print_dim("─" * 100)
+    print(print_dim("─" * 100))
     print()
-    print_bold("AGENT SELECTION SUMMARY")
+    print(print_bold("AGENT SELECTION SUMMARY"))
     print()
 
     print(print_cyan("  Deep Code:    ") + agents["deep"])

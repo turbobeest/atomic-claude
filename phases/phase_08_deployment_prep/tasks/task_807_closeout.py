@@ -40,14 +40,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     artifacts_file = deployment_dir / "artifacts.json"
     approval_file = deployment_dir / "approval.json"
 
-    print_bold("Phase Closeout")
+    print(print_bold("Phase Closeout"))
     print()
 
     closeout_dir.mkdir(parents=True, exist_ok=True)
 
     # UAT Mode Bypass
     if uat_mode:
-        print_dim("  UAT Mode: Creating minimal valid output")
+        print(print_dim("  UAT Mode: Creating minimal valid output"))
 
         # Create minimal closeout files
         with open(closeout_file, 'w') as f:
@@ -62,16 +62,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         }
         write_json(closeout_json, closeout_data)
 
-        print_green("✓ UAT bypass complete")
+        print(print_green("✓ UAT bypass complete"))
         return True
 
     print()
-    print_dim("  Final review before moving to Phase 9 (Release).")
+    print(print_dim("  Final review before moving to Phase 9 (Release)."))
     print()
 
     # CLOSEOUT CHECKLIST
     print()
-    print_bold("  - CLOSEOUT CHECKLIST")
+    print(print_bold("  - CLOSEOUT CHECKLIST"))
     print()
 
     checklist = []
@@ -149,14 +149,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # CLOSEOUT APPROVAL
     print()
-    print_bold("  - CLOSEOUT APPROVAL")
+    print(print_bold("  - CLOSEOUT APPROVAL"))
     print()
 
     if not all_passed:
-        print_yellow("  Some critical items need attention before closeout.")
+        print(print_yellow("  Some critical items need attention before closeout."))
         print()
 
-    print_cyan("  Closeout options:")
+    print(print_cyan("  Closeout options:"))
     print()
     print("    [approve] Approve closeout and proceed")
     print("    [review]  Review specific artifacts")
@@ -167,7 +167,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     if closeout_choice == "review":
         print()
-        print_dim("  Key artifacts:")
+        print(print_dim("  Key artifacts:"))
         print("    dist/                            - Release packages")
         print("    CHANGELOG.md                     - Version changelog")
         print("    docs/                            - Documentation")
@@ -180,12 +180,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     elif closeout_choice == "hold":
         print()
-        print_yellow("⚠  Closeout held - phase not complete")
+        print(print_yellow("⚠  Closeout held - phase not complete"))
         return False
 
     # GENERATING CLOSEOUT
     print()
-    print_bold("  - GENERATING CLOSEOUT")
+    print(print_bold("  - GENERATING CLOSEOUT"))
     print()
 
     # Generate markdown closeout
@@ -273,24 +273,24 @@ In the next phase, we will:
 
     # SESSION END
     print()
-    print_bold("  - SESSION END")
+    print(print_bold("  - SESSION END"))
     print()
     print("  Closeout saved to:")
-    print_dim("    .claude/closeout/phase-08-closeout.md")
+    print(print_dim("    .claude/closeout/phase-08-closeout.md"))
     print()
     print("  Deployment artifacts at:")
-    print_dim("    .claude/deployment/")
+    print(print_dim("    .claude/deployment/"))
     print()
-    print_bold("  Next: PHASE 9 - RELEASE")
+    print(print_bold("  Next: PHASE 9 - RELEASE"))
     print()
     print("  To continue:")
-    print_cyan("    ./orchestrator/pipeline resume")
+    print(print_cyan("    ./orchestrator/pipeline resume"))
     print()
-    print_green("  Phase 8 Complete!")
-    print_dim("  Package ready. Launch imminent.")
+    print(print_green("  Phase 8 Complete!"))
+    print(print_dim("  Package ready. Launch imminent."))
     print()
 
-    print_green("✓ Phase 8 closeout complete")
+    print(print_green("✓ Phase 8 closeout complete"))
 
     return True
 

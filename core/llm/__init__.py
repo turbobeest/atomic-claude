@@ -51,7 +51,15 @@ from .ollama import OllamaProvider
 
 from .invoke import invoke_llm, stream_llm, FeatureAwareLLMInvoker
 from .invoke import invoke_llm as invoke  # Alias for compatibility
-from .capabilities import ModelCapability, provider_supports
+from .capabilities import (
+    ModelCapability, provider_supports,
+    get_model_context_window, get_model_max_output,
+)
+from .resolver import (
+    resolve_model, get_resolver, reset_resolver,
+    ResolvedModel, ModelResolver,
+    CLAUDE_CODE_FAST_MODE_FORBIDDEN,
+)
 
 __all__ = [
     # Base classes and types
@@ -103,4 +111,13 @@ __all__ = [
     # Capabilities
     "ModelCapability",
     "provider_supports",
+    "get_model_context_window",
+    "get_model_max_output",
+    # Resolver
+    "resolve_model",
+    "get_resolver",
+    "reset_resolver",
+    "ResolvedModel",
+    "ModelResolver",
+    "CLAUDE_CODE_FAST_MODE_FORBIDDEN",
 ]

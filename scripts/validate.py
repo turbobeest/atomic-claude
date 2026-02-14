@@ -73,7 +73,7 @@ class Validator:
                 )
 
         # Optional LLM providers (at least one should be installed)
-        optional_providers = ["anthropic"]
+        optional_providers = ["anthropic", "boto3"]
         provider_installed = False
 
         for package in optional_providers:

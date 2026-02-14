@@ -14,6 +14,8 @@ import shutil
 import json
 from typing import Optional
 
+from core.memory import memory_init, memory_handle_backtrack
+
 
 PHASE_NAMES = {
     0: "setup", 1: "discovery", 2: "prd", 3: "tasking",
@@ -61,6 +63,13 @@ def backtrack_to(phase: int, task: Optional[str] = None):
 
     # Determine what to clear
     phases_to_clear = list(range(phase + 1, 10))
+
+    # Clear memory entries and invalidate checkpoints for rolled-back phases
+    try:
+        memory_init()
+        memory_handle_backtrack(phase)
+    except Exception:
+        pass  # Memory cleanup failure is non-blocking
 
     # Clear state for future phases
     print("\n📝 Clearing state...")

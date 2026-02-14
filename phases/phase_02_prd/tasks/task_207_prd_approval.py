@@ -51,20 +51,20 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     approval_file = output_dir / "prd-approved.json"
 
     print()
-    print_yellow("┌─────────────────────────────────────────────────────────┐")
-    print_yellow("│           " + print_bold("PRD REVIEW, REFINEMENT & APPROVAL") + "               │")
-    print_yellow("└─────────────────────────────────────────────────────────┘")
+    print(print_yellow("┌─────────────────────────────────────────────────────────┐"))
+    print(print_yellow("│           " + print_bold("PRD REVIEW, REFINEMENT & APPROVAL") + "               │"))
+    print(print_yellow("└─────────────────────────────────────────────────────────┘"))
     print()
 
     if not prd_file.exists():
-        print_red(f"  ✗ PRD file not found: {prd_file}")
+        print(print_red(f"  ✗ PRD file not found: {prd_file}"))
         return False
 
     # UAT mode bypass
     if uat_mode:
-        print_yellow("  UAT mode: Auto-approving PRD...")
+        print(print_yellow("  UAT mode: Auto-approving PRD..."))
         approve_prd(approval_file, prd_file, "uat-mode")
-        print_green("✓ PRD auto-approved (UAT mode)")
+        print(print_green("✓ PRD auto-approved (UAT mode)"))
         return True
 
     # Show validation scores
@@ -77,14 +77,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     while iteration < max_iterations:
         iteration += 1
 
-        print_dim("─" * 60)
+        print(print_dim("─" * 60))
         print()
 
         # Get recommendations from validation
         has_issues = check_for_issues(validation_file)
 
         if not has_issues:
-            print_green("  No outstanding issues detected. PRD is ready for approval.")
+            print(print_green("  No outstanding issues detected. PRD is ready for approval."))
             print()
             print("    " + print_green("[approve]") + "  Approve PRD and proceed to Phase 3")
             print("    " + print_cyan("[custom]") + "   Make a custom improvement request")
@@ -94,7 +94,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             clear_input_buffer()
             choice = prompt_user("  Choice (default: approve): ").strip().lower() or "approve"
         else:
-            print_cyan("  Recommended improvements available.")
+            print(print_cyan("  Recommended improvements available."))
             print()
             print("    " + print_green("[refine]") + "   Walk through recommendations")
             print("    " + print_cyan("[custom]") + "   Make a custom improvement request")
@@ -111,39 +111,39 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             approver = prompt_user("  Your name (for approval record): ").strip() or "User"
             approve_prd(approval_file, prd_file, approver)
             print()
-            print_green("✓ PRD approved and signed off")
+            print(print_green("✓ PRD approved and signed off"))
             return True
 
         elif choice in ["view", "v"]:
             # View PRD
             print()
-            print_dim("─" * 60)
+            print(print_dim("─" * 60))
             print()
             content = read_file(prd_file)
             lines = content.split('\n')
             for line in lines[:100]:
                 print(f"  {line}")
             print()
-            print_dim(f"  ... (showing first 100 lines)")
-            print_dim(f"  Full file: {prd_file}")
+            print(print_dim(f"  ... (showing first 100 lines)"))
+            print(print_dim(f"  Full file: {prd_file}"))
             print()
-            print_dim("─" * 60)
+            print(print_dim("─" * 60))
             print()
 
         elif choice in ["custom", "c"]:
             # Custom request
             print()
-            print_dim("  Enter custom improvement request:")
+            print(print_dim("  Enter custom improvement request:"))
             custom_request = prompt_user("  > ").strip()
             if custom_request:
-                print_yellow("  Custom refinement not yet fully implemented")
-                print_dim("  (Would invoke revision agent with custom request)")
+                print(print_yellow("  Custom refinement not yet fully implemented"))
+                print(print_dim("  (Would invoke revision agent with custom request)"))
             print()
 
         elif choice in ["refine", "r"]:
             # Refine
-            print_yellow("  Guided refinement not yet fully implemented")
-            print_dim("  (Would walk through each recommendation)")
+            print(print_yellow("  Guided refinement not yet fully implemented"))
+            print(print_dim("  (Would walk through each recommendation)"))
             print()
 
             # For now, just ask if they want to approve anyway
@@ -152,13 +152,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
                 approver = prompt_user("  Your name (for approval record): ").strip() or "User"
                 approve_prd(approval_file, prd_file, approver)
                 print()
-                print_green("✓ PRD approved")
+                print(print_green("✓ PRD approved"))
                 return True
 
         else:
-            print_red("  Invalid choice")
+            print(print_red("  Invalid choice"))
 
-    print_yellow("  Maximum iterations reached - proceeding with approval")
+    print(print_yellow("  Maximum iterations reached - proceeding with approval"))
     approve_prd(approval_file, prd_file, "auto-approved")
     return True
 
@@ -166,7 +166,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 def show_validation_scores(validation_file: Path) -> None:
     """Show validation scores from validation file."""
     if not validation_file.exists():
-        print_yellow("  ! No validation results found")
+        print(print_yellow("  ! No validation results found"))
         return
 
     try:
@@ -176,13 +176,13 @@ def show_validation_scores(validation_file: Path) -> None:
         overall_status = validation_data.get("overall_status", "UNKNOWN")
         overall_score = validation_data.get("overall_score", 0)
 
-        print_cyan("  Validation Status:")
+        print(print_cyan("  Validation Status:"))
         print(f"    Status: {overall_status}")
         print(f"    Score:  {overall_score}/100")
         print()
 
     except Exception as e:
-        print_yellow(f"  ! Error reading validation results: {e}")
+        print(print_yellow(f"  ! Error reading validation results: {e}"))
 
 
 def check_for_issues(validation_file: Path) -> bool:
@@ -222,7 +222,7 @@ def approve_prd(approval_file: Path, prd_file: Path, approver: str) -> None:
     }
 
     write_file(approval_file, json.dumps(approval_data, indent=2))
-    print_dim(f"  Approval recorded: {approval_file}")
+    print(print_dim(f"  Approval recorded: {approval_file}"))
 
 
 if __name__ == "__main__":

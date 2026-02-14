@@ -41,14 +41,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     config_file = atomic_root / ".outputs" / "0-setup" / "project-config.json"
 
     print()
-    print_dim("━" * 118)
-    print_cyan("  PHASE 07 - INTEGRATION")
-    print_dim("━" * 118)
+    print(print_dim("━" * 118))
+    print(print_cyan("  PHASE 07 - INTEGRATION"))
+    print(print_dim("━" * 118))
     print()
 
-    print_bold("Entry & Initialization")
+    print(print_bold("Entry & Initialization"))
     print()
-    print_dim("  Validating prerequisites for Integration phase.")
+    print(print_dim("  Validating prerequisites for Integration phase."))
     print()
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -56,7 +56,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # ─────────────────────────────────────────────────────────────────────────
 
     print()
-    print_bold("  - PREREQUISITE VALIDATION")
+    print(print_bold("  - PREREQUISITE VALIDATION"))
     print()
 
     all_valid = True
@@ -66,38 +66,38 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         closeout_data = read_json(closeout_file)
         phase_6_status = closeout_data.get("status", "unknown")
         if phase_6_status == "complete":
-            print_green("  [CRIT] ✓ Phase 6 (Code Review) complete")
+            print(print_green("  [CRIT] ✓ Phase 6 (Code Review) complete"))
         else:
-            print_red(f"  [CRIT] ✗ Phase 6 not complete (status: {phase_6_status})")
+            print(print_red(f"  [CRIT] ✗ Phase 6 not complete (status: {phase_6_status})"))
             all_valid = False
     else:
-        print_red("  [CRIT] ✗ Phase 6 closeout not found")
+        print(print_red("  [CRIT] ✗ Phase 6 closeout not found"))
         all_valid = False
 
     # Check for review artifacts
     review_dir = atomic_root / ".claude" / "reviews"
     if review_dir.exists():
-        print_green("  [BLCK] ✓ Review artifacts present")
+        print(print_green("  [BLCK] ✓ Review artifacts present"))
     else:
-        print_yellow("  [BLCK] ! Review artifacts not found")
+        print(print_yellow("  [BLCK] ! Review artifacts not found"))
 
     # Check project config
     if config_file.exists():
-        print_green("  [PASS] ✓ Project configuration found")
+        print(print_green("  [PASS] ✓ Project configuration found"))
     else:
-        print_yellow("  [PASS] ! Project configuration not found")
+        print(print_yellow("  [PASS] ! Project configuration not found"))
 
     # Check for test artifacts from implementation
     testing_dir = atomic_root / ".claude" / "testing"
     if testing_dir.exists():
-        print_green("  [PASS] ✓ Testing artifacts present")
+        print(print_green("  [PASS] ✓ Testing artifacts present"))
     else:
-        print_yellow("  [PASS] ! Testing artifacts not found")
+        print(print_yellow("  [PASS] ! Testing artifacts not found"))
 
     print()
 
     if not all_valid:
-        print_yellow("⚠  Prerequisites not met - cannot proceed")
+        print(print_yellow("⚠  Prerequisites not met - cannot proceed"))
         return False
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -105,16 +105,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # ─────────────────────────────────────────────────────────────────────────
 
     print()
-    print_bold("  - PHASE OBJECTIVES")
+    print(print_bold("  - PHASE OBJECTIVES"))
     print()
 
-    print_dim("  In this phase, we will:")
+    print(print_dim("  In this phase, we will:"))
     print()
-    print_cyan("    1.") + " Integrate all components end-to-end"
-    print_cyan("    2.") + " Run full E2E test suite"
-    print_cyan("    3.") + " Validate all acceptance criteria from PRD"
-    print_cyan("    4.") + " Performance testing against NFRs"
-    print_cyan("    5.") + " Generate comprehensive integration report"
+    print(print_cyan("    1.") + " Integrate all components end-to-end")
+    print(print_cyan("    2.") + " Run full E2E test suite")
+    print(print_cyan("    3.") + " Validate all acceptance criteria from PRD")
+    print(print_cyan("    4.") + " Performance testing against NFRs")
+    print(print_cyan("    5.") + " Generate comprehensive integration report")
     print()
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -122,20 +122,20 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # ─────────────────────────────────────────────────────────────────────────
 
     print()
-    print_bold("  - INTEGRATION PROCESS")
+    print(print_bold("  - INTEGRATION PROCESS"))
     print()
 
-    print_dim("  Integration follows a validation-first approach:")
+    print(print_dim("  Integration follows a validation-first approach:"))
     print()
     print("    E2E Testing  →  Acceptance  →  Performance  →  Approval")
-    print_dim("       (flows)       (criteria)    (benchmarks)     (gate)")
+    print(print_dim("       (flows)       (criteria)    (benchmarks)     (gate)"))
     print()
 
     if not uat_mode:
         prompt_user("  Press Enter to continue...")
     print()
 
-    print_green("✓ Entry & Initialization complete")
+    print(print_green("✓ Entry & Initialization complete"))
     return True
 
 

@@ -102,35 +102,35 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     ensure_dir(testing_dir)
 
     print()
-    print_dim("  Analyzing coverage, test quality, and implementation completeness.")
+    print(print_dim("  Analyzing coverage, test quality, and implementation completeness."))
     print()
 
     # Get validation metrics
     coverage, test_quality, security, tdd_completion = get_validation_metrics(tasks_file, setup_file)
 
     # Coverage Analysis
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("COVERAGE ANALYSIS")
+    print(print_bold("COVERAGE ANALYSIS"))
     print()
-    print_dim("  Running coverage analyzer...")
+    print(print_dim("  Running coverage analyzer..."))
     print()
 
     print("  " + "─" * 114)
-    print_bold("  COVERAGE REPORT")
+    print(print_bold("  COVERAGE REPORT"))
     print()
 
     # Unit coverage
     if coverage["unit"] >= coverage["unit_target"]:
-        print_green(f"    Unit Test Coverage:          {coverage['unit']}%") + f" (target: {coverage['unit_target']}%)"
+        print(print_green(f"    Unit Test Coverage:          {coverage['unit']}%") + f" (target: {coverage['unit_target']}%)")
     else:
-        print_red(f"    Unit Test Coverage:          {coverage['unit']}%") + f" (target: {coverage['unit_target']}%)"
+        print(print_red(f"    Unit Test Coverage:          {coverage['unit']}%") + f" (target: {coverage['unit_target']}%)")
 
     # Integration coverage
     if coverage["integration"] >= coverage["integration_target"]:
-        print_green(f"    Integration Test Coverage:   {coverage['integration']}%") + f" (target: {coverage['integration_target']}%)"
+        print(print_green(f"    Integration Test Coverage:   {coverage['integration']}%") + f" (target: {coverage['integration_target']}%)")
     else:
-        print_red(f"    Integration Test Coverage:   {coverage['integration']}%") + f" (target: {coverage['integration_target']}%)"
+        print(print_red(f"    Integration Test Coverage:   {coverage['integration']}%") + f" (target: {coverage['integration_target']}%)")
 
     print(f"    Branch Coverage:             {coverage['branch']}%")
 
@@ -138,37 +138,37 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     print()
 
     # Test Quality Analysis
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("TEST QUALITY ANALYSIS")
+    print(print_bold("TEST QUALITY ANALYSIS"))
     print()
-    print_dim("  Running quality reviewer...")
+    print(print_dim("  Running quality reviewer..."))
     print()
 
     print("  " + "─" * 114)
-    print_bold("  TEST QUALITY")
+    print(print_bold("  TEST QUALITY"))
     print()
     print(f"    Total Tests:       {test_quality['total_tests']}")
-    print_green(f"    Passing Tests:     {test_quality['passing_tests']}")
-    print_red(f"    Failing Tests:     {test_quality['total_tests'] - test_quality['passing_tests']}")
+    print(print_green(f"    Passing Tests:     {test_quality['passing_tests']}"))
+    print(print_red(f"    Failing Tests:     {test_quality['total_tests'] - test_quality['passing_tests']}"))
 
     if test_quality["flaky_tests"] == 0:
-        print_green(f"    Flaky Tests:       {test_quality['flaky_tests']}")
+        print(print_green(f"    Flaky Tests:       {test_quality['flaky_tests']}"))
     else:
-        print_yellow(f"    Flaky Tests:       {test_quality['flaky_tests']}")
+        print(print_yellow(f"    Flaky Tests:       {test_quality['flaky_tests']}"))
 
     if test_quality["slow_tests"] <= 3:
-        print_green(f"    Slow Tests (>1s):  {test_quality['slow_tests']}")
+        print(print_green(f"    Slow Tests (>1s):  {test_quality['slow_tests']}"))
     else:
-        print_yellow(f"    Slow Tests (>1s):  {test_quality['slow_tests']}")
+        print(print_yellow(f"    Slow Tests (>1s):  {test_quality['slow_tests']}"))
 
     print("  " + "─" * 114)
     print()
 
     # TDD Completion Status
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("TDD COMPLETION STATUS")
+    print(print_bold("TDD COMPLETION STATUS"))
     print()
 
     completion_rate = 0
@@ -176,100 +176,100 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         completion_rate = (tdd_completion["completed"] * 100) // tdd_completion["total"]
 
     print("  " + "─" * 114)
-    print_bold("  TDD COMPLETION")
+    print(print_bold("  TDD COMPLETION"))
     print()
     print(f"    Tasks Completed:    {tdd_completion['completed']} / {tdd_completion['total']}")
 
     if completion_rate == 100:
-        print_green(f"    Completion Rate:    {completion_rate}%")
+        print(print_green(f"    Completion Rate:    {completion_rate}%"))
     else:
-        print_yellow(f"    Completion Rate:    {completion_rate}%")
+        print(print_yellow(f"    Completion Rate:    {completion_rate}%"))
 
     print("  " + "─" * 114)
     print()
 
     # Security Status
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("SECURITY STATUS")
+    print(print_bold("SECURITY STATUS"))
     print()
 
     print("  " + "─" * 114)
-    print_bold("  SECURITY SCAN")
+    print(print_bold("  SECURITY SCAN"))
     print()
 
     if security["critical"] == 0:
-        print_green(f"    Critical Issues:   {security['critical']}")
+        print(print_green(f"    Critical Issues:   {security['critical']}"))
     else:
-        print_red(f"    Critical Issues:   {security['critical']}")
+        print(print_red(f"    Critical Issues:   {security['critical']}"))
 
     if security["high"] == 0:
-        print_green(f"    High Issues:       {security['high']}")
+        print(print_green(f"    High Issues:       {security['high']}"))
     else:
-        print_red(f"    High Issues:       {security['high']}")
+        print(print_red(f"    High Issues:       {security['high']}"))
 
-    print_yellow(f"    Medium Issues:     {security['medium']}")
-    print_dim(f"    Low Issues:        {security['low']}")
+    print(print_yellow(f"    Medium Issues:     {security['medium']}"))
+    print(print_dim(f"    Low Issues:        {security['low']}"))
 
     print("  " + "─" * 114)
     print()
 
     # Validation Summary
-    print_dim("─" * 120)
+    print(print_dim("─" * 120))
     print()
-    print_bold("VALIDATION SUMMARY")
+    print(print_bold("VALIDATION SUMMARY"))
     print()
 
     validation_passed = True
 
     # Check coverage targets
     if coverage["unit"] >= coverage["unit_target"]:
-        print_green(f"  ✓ Unit coverage meets target ({coverage['unit']}% >= {coverage['unit_target']}%)")
+        print(print_green(f"  ✓ Unit coverage meets target ({coverage['unit']}% >= {coverage['unit_target']}%)"))
     else:
-        print_red(f"  ✗ Unit coverage below target ({coverage['unit']}% < {coverage['unit_target']}%)")
+        print(print_red(f"  ✗ Unit coverage below target ({coverage['unit']}% < {coverage['unit_target']}%)"))
         validation_passed = False
 
     if coverage["integration"] >= coverage["integration_target"]:
-        print_green(f"  ✓ Integration coverage meets target ({coverage['integration']}% >= {coverage['integration_target']}%)")
+        print(print_green(f"  ✓ Integration coverage meets target ({coverage['integration']}% >= {coverage['integration_target']}%)"))
     else:
-        print_red(f"  ✗ Integration coverage below target ({coverage['integration']}% < {coverage['integration_target']}%)")
+        print(print_red(f"  ✗ Integration coverage below target ({coverage['integration']}% < {coverage['integration_target']}%)"))
         validation_passed = False
 
     # Check test quality
     if test_quality["flaky_tests"] == 0:
-        print_green("  ✓ No flaky tests detected")
+        print(print_green("  ✓ No flaky tests detected"))
     else:
-        print_yellow(f"  ! {test_quality['flaky_tests']} flaky tests detected")
+        print(print_yellow(f"  ! {test_quality['flaky_tests']} flaky tests detected"))
 
     if test_quality["passing_tests"] == test_quality["total_tests"]:
-        print_green("  ✓ All tests passing")
+        print(print_green("  ✓ All tests passing"))
     else:
-        print_red(f"  ✗ {test_quality['total_tests'] - test_quality['passing_tests']} tests failing")
+        print(print_red(f"  ✗ {test_quality['total_tests'] - test_quality['passing_tests']} tests failing"))
         validation_passed = False
 
     # Check security
     if security["critical"] == 0 and security["high"] == 0:
-        print_green("  ✓ No critical or high security issues")
+        print(print_green("  ✓ No critical or high security issues"))
     else:
-        print_red("  ✗ Security issues need attention")
+        print(print_red("  ✗ Security issues need attention"))
         validation_passed = False
 
     # Check TDD completion
     if completion_rate == 100:
-        print_green("  ✓ All TDD cycles complete")
+        print(print_green("  ✓ All TDD cycles complete"))
     else:
-        print_yellow(f"  ! TDD completion: {completion_rate}%")
+        print(print_yellow(f"  ! TDD completion: {completion_rate}%"))
 
     print()
 
     if validation_passed:
-        print_green("━" * 120)
-        print_green("✓ VALIDATION PASSED") + " - Ready for phase audit"
-        print_green("━" * 120)
+        print(print_green("━" * 120))
+        print(print_green("✓ VALIDATION PASSED") + " - Ready for phase audit")
+        print(print_green("━" * 120))
     else:
-        print_yellow("━" * 120)
-        print_yellow("! VALIDATION WARNINGS") + " - Review issues before proceeding"
-        print_yellow("━" * 120)
+        print(print_yellow("━" * 120))
+        print(print_yellow("! VALIDATION WARNINGS") + " - Review issues before proceeding")
+        print(print_yellow("━" * 120))
     print()
 
     # Save validation report
@@ -283,7 +283,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     }
     write_file(validation_file, json.dumps(validation_data, indent=2))
 
-    print_green("✓ Final Validation complete")
+    print(print_green("✓ Final Validation complete"))
     return True
 
 

@@ -53,7 +53,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # UAT Mode Bypass
     if uat_mode:
         print()
-        print_yellow("⚡ UAT Mode: Creating stub implementation files (no actual TDD cycles)")
+        print(print_yellow("⚡ UAT Mode: Creating stub implementation files (no actual TDD cycles)"))
         print()
 
         ensure_dir(testing_dir)
@@ -97,22 +97,22 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             }
             write_file(testing_dir / f"tdd-t{task_id}.json", json.dumps(tdd_record, indent=2))
 
-        print_green("✓ Created stub files for 3 tasks")
+        print(print_green("✓ Created stub files for 3 tasks"))
         print()
 
-        print_green("✓ TDD Execution complete (UAT mode)")
+        print(print_green("✓ TDD Execution complete (UAT mode)"))
         return True
 
     # For non-UAT mode, delegate to bash script for full TDD execution
     print()
-    print_yellow("⚠ TDD Execution requires bash implementation for full functionality")
-    print_dim("  This includes:")
-    print_dim("  - Parallel/sequential execution with git worktrees")
-    print_dim("  - LLM agent loading and prompting")
-    print_dim("  - RED/GREEN/REFACTOR/VERIFY phase execution")
-    print_dim("  - Error context accumulation and retry logic")
+    print(print_yellow("⚠ TDD Execution requires bash implementation for full functionality"))
+    print(print_dim("  This includes:"))
+    print(print_dim("  - Parallel/sequential execution with git worktrees"))
+    print(print_dim("  - LLM agent loading and prompting"))
+    print(print_dim("  - RED/GREEN/REFACTOR/VERIFY phase execution"))
+    print(print_dim("  - Error context accumulation and retry logic"))
     print()
-    print_cyan("  Delegating to bash script...")
+    print(print_cyan("  Delegating to bash script..."))
     print()
 
     # Execute the bash script
@@ -126,8 +126,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         )
         return exit_code == 0
     else:
-        print_red(f"✗ Bash script not found: {bash_script}")
-        print_yellow("  Creating minimal progress file as fallback...")
+        print(print_red(f"✗ Bash script not found: {bash_script}"))
+        print(print_yellow("  Creating minimal progress file as fallback..."))
 
         # Create minimal progress as fallback
         progress_data = {

@@ -41,7 +41,7 @@ def load_agents_from_csv(csv_path: Path, phase_filter: str = "06-09-implementati
                         'description': row.get('description', '')[:70]
                     })
     except Exception as e:
-        print_yellow(f"⚠  Could not parse CSV: {e}")
+        print(print_yellow(f"⚠  Could not parse CSV: {e}"))
 
     return agents
 
@@ -86,7 +86,7 @@ def analyze_project_characteristics(tasks_file: Path) -> Dict[str, any]:
             'complex_count': complex_count
         }
     except Exception as e:
-        print_red(f"✗ Could not analyze tasks: {e}")
+        print(print_red(f"✗ Could not analyze tasks: {e}"))
         return {}
 
 
@@ -146,30 +146,30 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # UAT Mode: Auto-select agents
     if uat_mode:
         print()
-        print_yellow("⚡ UAT Mode: Auto-selecting specification agents")
+        print(print_yellow("⚡ UAT Mode: Auto-selecting specification agents"))
         print()
         ensure_dir(output_dir)
         write_file(output_dir / "selected-agents.json", json.dumps({
             "agents": ["specification-agent", "tdd-agent"],
             "mode": "uat"
         }, indent=2))
-        print_green("✓ Agent selection complete (UAT mode)")
+        print(print_green("✓ Agent selection complete (UAT mode)"))
         return True
 
     print()
-    print_dim("  Selecting agents for OpenSpec generation and TDD subtask creation.")
+    print(print_dim("  Selecting agents for OpenSpec generation and TDD subtask creation."))
     print()
 
     # Load agents from CSV inventory
-    print_dim("─" * 109)
+    print(print_dim("─" * 109))
     print()
-    print_bold("SPECIFICATION AGENTS (from agent-inventory.csv)")
+    print(print_bold("SPECIFICATION AGENTS (from agent-inventory.csv)"))
     print()
 
     agents = load_agents_from_csv(csv_path)
 
     if agents:
-        print_dim("  Available agents from inventory:")
+        print(print_dim("  Available agents from inventory:"))
         print()
 
         for agent in agents:
@@ -189,8 +189,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             print(f"      \033[2m{desc}...\033[0m")
             print()
     else:
-        print_yellow(f"  ! Agent inventory not found at {csv_path}")
-        print_dim("  Using fallback agent list")
+        print(print_yellow(f"  ! Agent inventory not found at {csv_path}"))
+        print(print_dim("  Using fallback agent list"))
         print()
         print(f"    \033[1mspecification-agent\033[0m - Creates OpenSpec definitions")
         print(f"    \033[1mtdd-implementation-agent\033[0m - TDD methodology implementation")
@@ -200,43 +200,43 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         print()
 
     # Project Analysis
-    print_dim("─" * 109)
+    print(print_dim("─" * 109))
     print()
-    print_bold("PROJECT ANALYSIS")
+    print(print_bold("PROJECT ANALYSIS"))
     print()
 
     characteristics = analyze_project_characteristics(tasks_file)
     recommended_agents, reasons = recommend_agents(characteristics)
 
-    print_dim("  Based on your tasks:")
+    print(print_dim("  Based on your tasks:"))
     print()
 
     if characteristics.get('has_api'):
-        print_green("    ✓ API/service tasks detected → specification-agent for interface contracts")
+        print(print_green("    ✓ API/service tasks detected → specification-agent for interface contracts"))
 
     if characteristics.get('has_auth'):
-        print_green("    ✓ Authentication tasks detected → code-review-gate for security review")
+        print(print_green("    ✓ Authentication tasks detected → code-review-gate for security review"))
 
     complex_count = characteristics.get('complex_count', 0)
     if complex_count > 2:
-        print_green(f"    ✓ {complex_count} complex tasks → test-strategist for edge cases")
+        print(print_green(f"    ✓ {complex_count} complex tasks → test-strategist for edge cases"))
 
     task_count = characteristics.get('task_count', 0)
     if task_count > 10:
-        print_green(f"    ✓ {task_count} tasks → test-strategist for coverage strategy")
+        print(print_green(f"    ✓ {task_count} tasks → test-strategist for coverage strategy"))
 
     if not reasons:
-        print_dim("    No specific patterns detected - using core agents only")
+        print(print_dim("    No specific patterns detected - using core agents only"))
     print()
 
     # Agent Selection
-    print_dim("─" * 109)
+    print(print_dim("─" * 109))
     print()
-    print_bold("SELECT AGENT CONFIGURATION")
+    print(print_bold("SELECT AGENT CONFIGURATION"))
     print()
 
     rec_string = ', '.join(recommended_agents)
-    print_dim(f"  Recommended: {rec_string}")
+    print(print_dim(f"  Recommended: {rec_string}"))
     print()
 
     # Build list of all available agents
@@ -245,13 +245,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         "code-review-gate", "plan-guardian"
     ]
 
-    print_cyan("Options:")
+    print(print_cyan("Options:"))
     print()
-    print_green(f"  [approve]    Use recommended agents ({len(recommended_agents)} agents)")
-    print_yellow("  [core]       Core agents only (specification-agent, tdd-implementation-agent)")
-    print_cyan(f"  [full]       All {len(all_impl_agents)} implementation agents")
+    print(print_green(f"  [approve]    Use recommended agents ({len(recommended_agents)} agents)"))
+    print(print_yellow("  [core]       Core agents only (specification-agent, tdd-implementation-agent)"))
+    print(print_cyan(f"  [full]       All {len(all_impl_agents)} implementation agents"))
     print("\033[35m  [custom]     Select specific agents from inventory\033[0m")  # Magenta
-    print_dim("  [list]       Show agent inventory again")
+    print(print_dim("  [list]       Show agent inventory again"))
     print()
 
     selected_agents = []
@@ -271,7 +271,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             break
         elif agent_choice == "custom":
             print()
-            print_dim("  Available agents from inventory:")
+            print(print_dim("  Available agents from inventory:"))
             for idx, agent_name in enumerate(all_impl_agents, 1):
                 if agent_name in ["specification-agent", "tdd-implementation-agent"]:
                     print(f"    {idx}. {agent_name} (required)")
@@ -294,7 +294,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             break
         elif agent_choice == "list":
             print()
-            print_cyan("Agent Inventory (06-09-implementation):")
+            print(print_cyan("Agent Inventory (06-09-implementation):"))
             for agent in agents:
                 name = agent.get('name', '')
                 tier = agent.get('tier', '')
@@ -303,14 +303,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
                 print(f"    {name:25} [{tier}, {role}] {desc}")
             print()
         else:
-            print_red("  Invalid choice. Try again.")
+            print(print_red("  Invalid choice. Try again."))
 
     print()
 
     # Confirm Roster
-    print_dim("─" * 109)
+    print(print_dim("─" * 109))
     print()
-    print_bold("CONFIRMED ROSTER")
+    print(print_bold("CONFIRMED ROSTER"))
     print()
 
     # Load models from CSV
@@ -320,7 +320,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     for agent in selected_agents:
         model = agent_models.get(agent, 'sonnet')
-        print_green(f"    ✓ {agent} ({model})")
+        print(print_green(f"    ✓ {agent} ({model})"))
     print()
 
     # Save roster with model info
@@ -340,7 +340,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     write_file(roster_file, json.dumps(roster_data, indent=2))
 
-    print_green("✓ Agent Selection complete")
+    print(print_green("✓ Agent Selection complete"))
 
     return True
 

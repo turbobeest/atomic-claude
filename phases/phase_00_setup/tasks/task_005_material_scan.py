@@ -39,7 +39,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass interactive prompts for testing
+        uat_mode: If True, skip interactive prompts
 
     Returns:
         True if task completed successfully, False otherwise
@@ -49,10 +49,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     project_root = atomic_root.parent
 
     print()
-    print_cyan("Material Scan")
+    print(print_cyan("Material Scan"))
     print()
 
-    print_dim("  Scanning project for existing materials...")
+    print(print_dim("  Scanning project for existing materials..."))
     print()
 
     # Initialize manifest
@@ -64,6 +64,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         "files": {}
     }
 
+    # Exclude the atomic-claude tool directory from scans — we want project files only
+    exclude_dirs = [str(atomic_root)]
+
     # Scan for key files first
     _detect_key_files(manifest, project_root)
 
@@ -71,10 +74,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     _detect_stack(manifest, project_root)
 
     # Scan different categories
-    _scan_documentation(manifest, project_root)
-    _scan_configuration(manifest, project_root)
-    _scan_source_code(manifest, project_root)
-    _scan_tests(manifest, project_root)
+    _scan_documentation(manifest, project_root, exclude_dirs)
+    _scan_configuration(manifest, project_root, exclude_dirs)
+    _scan_source_code(manifest, project_root, exclude_dirs)
+    _scan_tests(manifest, project_root, exclude_dirs)
 
     # Calculate totals
     _calculate_totals(manifest)
@@ -88,13 +91,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # Record to context
     _record_context(manifest_file, manifest)
 
-    print_green("✓ Material manifest created")
+    print(print_green("✓ Material manifest created"))
     return True
 
 
 def _detect_key_files(manifest: Dict[str, Any], project_root: Path) -> None:
     """Detect key project files."""
-    print_cyan("  Key Files")
+    print(print_cyan("  Key Files"))
 
     key_files = []
 
@@ -102,62 +105,62 @@ def _detect_key_files(manifest: Dict[str, Any], project_root: Path) -> None:
     for fname in ["README.md", "README", "CHANGELOG.md", "LICENSE", "CONTRIBUTING.md"]:
         if (project_root / fname).exists():
             key_files.append(fname)
-            print_green(f"    ✓ {fname}")
+            print(print_green(f"    ✓ {fname}"))
 
     # Node.js / JavaScript
     for fname in ["package.json", "tsconfig.json", "vite.config.ts", "next.config.js"]:
         if (project_root / fname).exists():
             key_files.append(fname)
-            print_green(f"    ✓ {fname}")
+            print(print_green(f"    ✓ {fname}"))
 
     # Python
     for fname in ["pyproject.toml", "setup.py", "requirements.txt", "Pipfile"]:
         if (project_root / fname).exists():
             key_files.append(fname)
-            print_green(f"    ✓ {fname}")
+            print(print_green(f"    ✓ {fname}"))
 
     # Rust
     if (project_root / "Cargo.toml").exists():
         key_files.append("Cargo.toml")
-        print_green("    ✓ Cargo.toml")
+        print(print_green("    ✓ Cargo.toml"))
 
     # Go
     if (project_root / "go.mod").exists():
         key_files.append("go.mod")
-        print_green("    ✓ go.mod")
+        print(print_green("    ✓ go.mod"))
 
     # Ruby
     if (project_root / "Gemfile").exists():
         key_files.append("Gemfile")
-        print_green("    ✓ Gemfile")
+        print(print_green("    ✓ Gemfile"))
 
     # Java / Kotlin
     for fname in ["pom.xml", "build.gradle"]:
         if (project_root / fname).exists():
             key_files.append(fname)
-            print_green(f"    ✓ {fname}")
+            print(print_green(f"    ✓ {fname}"))
 
     # Docker
     for fname in ["Dockerfile", "docker-compose.yml"]:
         if (project_root / fname).exists():
             key_files.append(fname)
-            print_green(f"    ✓ {fname}")
+            print(print_green(f"    ✓ {fname}"))
 
     # CI/CD
     if (project_root / ".github" / "workflows").exists():
         key_files.append(".github/workflows")
-        print_green("    ✓ .github/workflows")
+        print(print_green("    ✓ .github/workflows"))
     if (project_root / ".gitlab-ci.yml").exists():
         key_files.append(".gitlab-ci.yml")
-        print_green("    ✓ .gitlab-ci.yml")
+        print(print_green("    ✓ .gitlab-ci.yml"))
 
     # Makefile
     if (project_root / "Makefile").exists():
         key_files.append("Makefile")
-        print_green("    ✓ Makefile")
+        print(print_green("    ✓ Makefile"))
 
     if not key_files:
-        print_dim("    Greenfield project detected - no standard project files found.")
+        print(print_dim("    Greenfield project detected - no standard project files found."))
 
     manifest['key_files'] = key_files
     print()
@@ -237,43 +240,43 @@ def _detect_stack(manifest: Dict[str, Any], project_root: Path) -> None:
 
     # Display if anything detected
     if languages or frameworks:
-        print_cyan("  Detected Stack")
+        print(print_cyan("  Detected Stack"))
         if languages:
-            print_dim(f"    Languages:  {', '.join(languages)}")
+            print(print_dim(f"    Languages:  {', '.join(languages)}"))
         if frameworks:
-            print_dim(f"    Frameworks: {', '.join(frameworks)}")
+            print(print_dim(f"    Frameworks: {', '.join(frameworks)}"))
         print()
 
 
-def _scan_documentation(manifest: Dict[str, Any], project_root: Path) -> None:
+def _scan_documentation(manifest: Dict[str, Any], project_root: Path, exclude_dirs: Optional[List[str]] = None) -> None:
     """Scan documentation files."""
     docs = _find_files(project_root, [
         "**/*.md", "**/*.rst", "**/*.txt", "**/*.adoc", "**/*.org"
-    ], max_depth=4, max_files=50)
+    ], max_depth=4, max_files=50, exclude_dirs=exclude_dirs)
 
     count = len(docs)
     sample = docs[:5]
     loc = _count_lines(docs[:20]) if docs else 0
 
-    print_cyan("  Documentation")
-    print_dim(f"  {count} files")
+    print(print_cyan("  Documentation"))
+    print(print_dim(f"  {count} files"))
     if count > 0:
         for f in sample:
-            print_dim(f"    {f.relative_to(project_root)}")
+            print(print_dim(f"    {f.relative_to(project_root)}"))
         if count > 5:
-            print_dim(f"    ... and {count - 5} more")
+            print(print_dim(f"    ... and {count - 5} more"))
     print()
 
     manifest['summary']['documentation'] = {"count": count, "lines": loc}
     manifest['files']['documentation'] = [str(f.relative_to(project_root)) for f in docs]
 
 
-def _scan_configuration(manifest: Dict[str, Any], project_root: Path) -> None:
+def _scan_configuration(manifest: Dict[str, Any], project_root: Path, exclude_dirs: Optional[List[str]] = None) -> None:
     """Scan configuration files."""
     configs = _find_files(project_root, [
         "**/*.json", "**/*.yaml", "**/*.yml", "**/*.toml",
         "**/*.ini", "**/*.env*", "**/.*rc", "**/*.config.js", "**/*.config.ts"
-    ], max_depth=3, max_files=30)
+    ], max_depth=3, max_files=30, exclude_dirs=exclude_dirs)
 
     # Filter out lock files
     configs = [f for f in configs if not any(
@@ -283,27 +286,27 @@ def _scan_configuration(manifest: Dict[str, Any], project_root: Path) -> None:
     count = len(configs)
     sample = configs[:5]
 
-    print_cyan("  Configuration")
-    print_dim(f"  {count} files")
+    print(print_cyan("  Configuration"))
+    print(print_dim(f"  {count} files"))
     if count > 0:
         for f in sample:
-            print_dim(f"    {f.relative_to(project_root)}")
+            print(print_dim(f"    {f.relative_to(project_root)}"))
         if count > 5:
-            print_dim(f"    ... and {count - 5} more")
+            print(print_dim(f"    ... and {count - 5} more"))
     print()
 
     manifest['summary']['configuration'] = {"count": count}
     manifest['files']['configuration'] = [str(f.relative_to(project_root)) for f in configs]
 
 
-def _scan_source_code(manifest: Dict[str, Any], project_root: Path) -> None:
+def _scan_source_code(manifest: Dict[str, Any], project_root: Path, exclude_dirs: Optional[List[str]] = None) -> None:
     """Scan source code files."""
     code = _find_files(project_root, [
         "**/*.py", "**/*.js", "**/*.ts", "**/*.jsx", "**/*.tsx", "**/*.vue",
         "**/*.go", "**/*.rs", "**/*.rb", "**/*.java", "**/*.kt", "**/*.scala",
         "**/*.c", "**/*.cpp", "**/*.h", "**/*.php", "**/*.swift", "**/*.sh",
         "**/*.sql", "**/*.graphql"
-    ], max_depth=5, max_files=100)
+    ], max_depth=5, max_files=100, exclude_dirs=exclude_dirs)
 
     # Filter out minified files and build artifacts
     code = [f for f in code if not any(
@@ -314,43 +317,43 @@ def _scan_source_code(manifest: Dict[str, Any], project_root: Path) -> None:
     sample = code[:5]
     loc = _count_lines(code[:50]) if code else 0
 
-    print_cyan("  Source Code")
-    print_dim(f"  {count} files (~{loc} lines)")
+    print(print_cyan("  Source Code"))
+    print(print_dim(f"  {count} files (~{loc} lines)"))
     if count > 0:
         for f in sample:
-            print_dim(f"    {f.relative_to(project_root)}")
+            print(print_dim(f"    {f.relative_to(project_root)}"))
         if count > 5:
-            print_dim(f"    ... and {count - 5} more")
+            print(print_dim(f"    ... and {count - 5} more"))
 
     # Warn if file count is high
     if count > 100:
         print()
-        print_yellow(f"    Note: Large codebase detected ({count} files).")
-        print_dim("    Consider connecting to external codebases during development")
-        print_dim("    rather than embedding all reference material upfront.")
+        print(print_yellow(f"    Note: Large codebase detected ({count} files)."))
+        print(print_dim("    Consider connecting to external codebases during development"))
+        print(print_dim("    rather than embedding all reference material upfront."))
     print()
 
     manifest['summary']['source_code'] = {"count": count, "lines": loc}
     manifest['files']['source_code'] = [str(f.relative_to(project_root)) for f in code[:50]]
 
 
-def _scan_tests(manifest: Dict[str, Any], project_root: Path) -> None:
+def _scan_tests(manifest: Dict[str, Any], project_root: Path, exclude_dirs: Optional[List[str]] = None) -> None:
     """Scan test files."""
     tests = _find_files(project_root, [
         "**/*_test.py", "**/test_*.py", "**/*.test.js", "**/*.spec.js",
         "**/*.test.ts", "**/*.spec.ts", "**/*_test.go", "**/*_test.rs"
-    ], max_depth=5, max_files=30)
+    ], max_depth=5, max_files=30, exclude_dirs=exclude_dirs)
 
     count = len(tests)
     sample = tests[:3]
 
-    print_cyan("  Tests")
-    print_dim(f"  {count} files")
+    print(print_cyan("  Tests"))
+    print(print_dim(f"  {count} files"))
     if count > 0:
         for f in sample:
-            print_dim(f"    {f.relative_to(project_root)}")
+            print(print_dim(f"    {f.relative_to(project_root)}"))
         if count > 3:
-            print_dim(f"    ... and {count - 3} more")
+            print(print_dim(f"    ... and {count - 3} more"))
     else:
         # Check for test directories
         test_dirs = []
@@ -358,7 +361,7 @@ def _scan_tests(manifest: Dict[str, Any], project_root: Path) -> None:
             if (project_root / test_dir).is_dir():
                 test_dirs.append(test_dir)
         if test_dirs:
-            print_dim(f"    Test directories found: {', '.join(test_dirs)}")
+            print(print_dim(f"    Test directories found: {', '.join(test_dirs)}"))
     print()
 
     manifest['summary']['tests'] = {"count": count}
@@ -391,9 +394,9 @@ def _display_summary(manifest: Dict[str, Any]) -> None:
     total_loc = total.get('lines', 0)
     key_count = len(manifest.get('key_files', []))
 
-    print_dim("  ────────────────────────────────────")
-    print_bold(f"  Total: {total_files} files, ~{total_loc} lines")
-    print_bold(f"  Key files: {key_count} identified")
+    print(print_dim("  ────────────────────────────────────"))
+    print(print_bold(f"  Total: {total_files} files, ~{total_loc} lines"))
+    print(print_bold(f"  Key files: {key_count} identified"))
     print()
 
 
@@ -401,7 +404,8 @@ def _find_files(
     root: Path,
     patterns: List[str],
     max_depth: int = 3,
-    max_files: int = 100
+    max_files: int = 100,
+    exclude_dirs: Optional[List[str]] = None,
 ) -> List[Path]:
     """
     Find files matching patterns.
@@ -411,12 +415,16 @@ def _find_files(
         patterns: List of glob patterns
         max_depth: Maximum directory depth
         max_files: Maximum files to return
+        exclude_dirs: Absolute directory paths to skip
 
     Returns:
         List of matching file paths
     """
     files = []
     exclude_patterns = ["node_modules", ".git", ".outputs", "__pycache__", "dist", "build"]
+    # Add explicit directory exclusions (e.g. the atomic-claude tool dir)
+    if exclude_dirs:
+        exclude_patterns.extend(exclude_dirs)
 
     for pattern in patterns:
         for f in root.glob(pattern):
@@ -477,7 +485,7 @@ def _record_context(manifest_file: Path, manifest: Dict[str, Any]) -> None:
         context_msg += f", stack: {', '.join(languages)}"
 
     # Record to context (in real implementation)
-    print_dim(f"  Context: {context_msg}")
+    print(print_dim(f"  Context: {context_msg}"))
 
 
 if __name__ == "__main__":
@@ -489,10 +497,7 @@ if __name__ == "__main__":
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,
                        help='Path to phase output directory')
-    parser.add_argument('--uat-mode', action='store_true',
-                       help='Run in UAT mode (skip interactive prompts)')
-
     args = parser.parse_args()
 
-    success = execute(args.atomic_root, args.output_dir, args.uat_mode)
+    success = execute(args.atomic_root, args.output_dir)
     sys.exit(0 if success else 1)
