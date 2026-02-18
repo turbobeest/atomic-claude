@@ -13,6 +13,41 @@
 - **Purpose**: Live operational testing against real projects
 - **Sync**: Bug fixes and features should be applied to BOTH repos
 
+## 🚨 Safety Rules
+
+### Destructive Operations Require Human Approval
+
+**CRITICAL RULE** (Established 2026-02-18):
+
+**The `rm` command must NEVER be used without explicit human approval.**
+
+This includes:
+- ❌ `rm -rf` (recursive force delete)
+- ❌ `rm -r` (recursive delete)
+- ❌ `rm file.txt` (single file delete)
+- ❌ Any variant of rm with wildcards
+
+**Required Process**:
+1. AI identifies files/directories for deletion
+2. AI presents detailed analysis and recommendations
+3. **Human explicitly approves** the specific rm command
+4. Only then execute deletion
+
+**Why**: Prevents accidental deletion of critical files, especially when working across dual repositories or analyzing deprecated content.
+
+**Alternative Safe Commands** (AI can use without approval):
+- ✅ `mv file.txt archive/` (move to archive)
+- ✅ `git status` (check changes)
+- ✅ `ls`, `find`, `grep` (read-only operations)
+- ✅ File reads, analysis, recommendations
+
+**Example Safe Workflow**:
+```bash
+# AI: "I recommend deleting these files: [list]"
+# Human: "Approved, execute rm command"
+# AI: [executes rm]
+```
+
 ## Workflow Best Practices
 
 ### 1. Making Changes
@@ -136,6 +171,23 @@ When core systems change (config, state, LLM routing, orchestration):
   curl http://127.0.0.1:5174/api/root
   ```
 - **Applied To**: [x] Dev [ ] Operational
+
+### Documentation Cleanup - Historical Artifacts Removed
+- **Date**: 2026-02-18
+- **Symptom**: docs/ directory bloated with 2.5MB of historical development artifacts
+- **Root Cause**: LLM training corpus and development progress docs accumulated during Python migration (Feb 2026)
+- **Fix**:
+  - Deleted `docs/corpus/` (1.6MB, 114 files) - LLM training corpus with split/duplicate files
+  - Archived completion reports to `docs/archive/completion-reports/` (23 files, ~400KB)
+  - Archived migration docs to `docs/archive/migration/` (9 files, ~140KB)
+- **Files Removed**:
+  - 114 corpus files (40 BUG-PATTERNS splits, 19 setup splits, 4 PRD splits, ~50 duplicates)
+  - 23 completion status reports (*-COMPLETE.md)
+  - 9 migration planning documents
+- **Result**: docs/ reduced from 2.5MB to 2.1MB, streamlined to operational documentation
+- **Testing**: Verified zero operational references to removed files
+- **Applied To**: [x] Dev [ ] Operational
+- **Safety**: Established rm command approval requirement (see Safety Rules section)
 
 ### Issue Template
 ```

@@ -30,10 +30,11 @@ core/                  # Core systems
     recall.py          # Memory recall mechanisms
     store.py           # Memory persistence
   features/            # Feature flags and profiles
-phases/                # Phase 00-09 orchestrators + Python task modules
-  phase_NN_name/       # Phase directory (e.g., phase_00_setup, phase_05_implementation)
-    orchestratorNN.py  # Phase orchestrator (Python)
-    tasks/             # Python task modules
+phases/                # Dual structure: orchestrators + task implementations
+  phaseNN/             # Orchestrator directory (e.g., phase00, phase05)
+    orchestratorNN.py  # Phase orchestrator imported by pipeline.py
+  phase_NN_name/       # Task implementation directory (e.g., phase_00_setup, phase_05_implementation)
+    tasks/             # Python task modules called by orchestrator
       task_NNN_name.py # Individual task (e.g., task_001_mode_selection.py)
 orchestration/         # Pipeline coordination
   pipeline.py          # PhasePipeline orchestrator, phase registry, state machine
@@ -100,9 +101,9 @@ Configured via `.env` (`ATOMIC_LLM_PROVIDER`, `ATOMIC_NETWORK_MODE`). See `.env.
 
 ## Conventions
 
-- Phase orchestrators: `phases/phase_NN_name/orchestratorNN.py`
-- Phase tasks: `phases/phase_NN_name/tasks/task_NNN_name.py` (Python modules, not shell)
-- Legacy `phases/phase00-09/` directories exist but are superseded by `phase_NN_name/` format
+- Phase orchestrators: `phases/phaseNN/orchestratorNN.py` (imported by pipeline.py)
+- Phase tasks: `phases/phase_NN_name/tasks/task_NNN_name.py` (called by orchestrators)
+- Both `phaseNN/` and `phase_NN_name/` directories are required (orchestrators + tasks)
 - State persisted in `.state/`, logs in `.logs/`, outputs in `.outputs/`
 - `reports/` is scratch work only
 - Agent definitions follow templates in `agents/templates/`
