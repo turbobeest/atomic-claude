@@ -15,10 +15,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PORT="${ATOMIC_TASKS_PORT:-5174}"
 
-# Set ATOMIC_ROOT for this project
+# Set ATOMIC_ROOT (where atomic-claude code lives)
 export ATOMIC_ROOT="${ATOMIC_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 
-PID_DIR="$ATOMIC_ROOT/.state/dashboard"
+# Detect PROJECT_ROOT: if .state/ or .outputs/ exist in parent, use parent
+# (This handles atomic-claude deployed in a host project like CUI-ENGAGEMENT-MANAGER/atomic-claude)
+if [[ -d "$ATOMIC_ROOT/.state" ]]; then
+    PROJECT_ROOT="$ATOMIC_ROOT"
+elif [[ -d "$(dirname "$ATOMIC_ROOT")/.state" ]] || [[ -d "$(dirname "$ATOMIC_ROOT")/.outputs" ]]; then
+    PROJECT_ROOT="$(cd "$ATOMIC_ROOT/.." && pwd)"
+else
+    PROJECT_ROOT="$ATOMIC_ROOT"
+fi
+
+PID_DIR="$PROJECT_ROOT/.state/dashboard"
 
 # --- Stop any existing dashboard processes first ---
 STOP_SCRIPT="$SCRIPT_DIR/stop-dashboard.sh"
@@ -101,9 +111,15 @@ _start_subapp() {
         (cd "$dir" && npm install --silent 2>/dev/null) || { echo "  ! $name npm install failed"; return 1; }
     fi
 
-    # Start dev server with setsid (own process group), bind all interfaces for remote access
+    # Start dev server, bind all interfaces for remote access
+    # Use setsid on Linux, plain background on macOS (setsid not available)
     cd "$dir"
-    setsid nohup npx vite dev --port "$port" --host 0.0.0.0 > "$dir/dev.log" 2>&1 &
+    if command -v setsid &>/dev/null; then
+        setsid nohup npx vite dev --port "$port" --host 0.0.0.0 > "$dir/dev.log" 2>&1 &
+    else
+        # macOS: use nohup without setsid
+        nohup npx vite dev --port "$port" --host 0.0.0.0 > "$dir/dev.log" 2>&1 &
+    fi
     local pid=$!
     echo "$pid" > "$PID_DIR/${pidname}.pid"
 

@@ -11,7 +11,17 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ATOMIC_ROOT="${ATOMIC_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-PID_DIR="$ATOMIC_ROOT/.state/dashboard"
+
+# Detect PROJECT_ROOT: if .state/ or .outputs/ exist in parent, use parent
+if [[ -d "$ATOMIC_ROOT/.state" ]]; then
+    PROJECT_ROOT="$ATOMIC_ROOT"
+elif [[ -d "$(dirname "$ATOMIC_ROOT")/.state" ]] || [[ -d "$(dirname "$ATOMIC_ROOT")/.outputs" ]]; then
+    PROJECT_ROOT="$(cd "$ATOMIC_ROOT/.." && pwd)"
+else
+    PROJECT_ROOT="$ATOMIC_ROOT"
+fi
+
+PID_DIR="$PROJECT_ROOT/.state/dashboard"
 
 PORT_MAIN="${ATOMIC_TASKS_PORT:-5174}"
 PORT_AGENTS=5175

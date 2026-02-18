@@ -11,18 +11,22 @@ const app = express();
 
 const PORT = process.env.ATOMIC_TASKS_PORT || 5174;
 const ATOMIC_ROOT = process.env.ATOMIC_ROOT || path.resolve(__dirname, '..');
-const STATE_DIR = path.join(ATOMIC_ROOT, '.state');
-const STATUS_FILE = path.join(STATE_DIR, 'current-task.json');
-const TASK_STATE_FILE = path.join(STATE_DIR, 'task-state.json');  // Python writes to .state/
-const MEMORY_DIR = path.join(STATE_DIR, 'memory');
 
-// Pipeline writes .outputs/ to the project root (atomic-claude's parent),
-// not inside atomic-claude itself. Auto-detect which location has .outputs.
-const PROJECT_ROOT = fs.existsSync(path.join(ATOMIC_ROOT, '.outputs'))
+// When atomic-claude is deployed in a host project, both .state/ and .outputs/
+// live in the PROJECT ROOT (host), not inside atomic-claude/ itself.
+// Auto-detect: if .state/ or .outputs/ exist in parent, use parent as PROJECT_ROOT.
+const PROJECT_ROOT = fs.existsSync(path.join(ATOMIC_ROOT, '.state'))
   ? ATOMIC_ROOT
-  : fs.existsSync(path.join(path.resolve(ATOMIC_ROOT, '..'), '.outputs'))
+  : fs.existsSync(path.join(path.resolve(ATOMIC_ROOT, '..'), '.state'))
     ? path.resolve(ATOMIC_ROOT, '..')
-    : ATOMIC_ROOT;
+    : fs.existsSync(path.join(path.resolve(ATOMIC_ROOT, '..'), '.outputs'))
+      ? path.resolve(ATOMIC_ROOT, '..')
+      : ATOMIC_ROOT;
+
+const STATE_DIR = path.join(PROJECT_ROOT, '.state');
+const STATUS_FILE = path.join(STATE_DIR, 'current-task.json');
+const TASK_STATE_FILE = path.join(STATE_DIR, 'task-state.json');
+const MEMORY_DIR = path.join(STATE_DIR, 'memory');
 const OUTPUTS_DIR = path.join(PROJECT_ROOT, '.outputs');
 const PROJECT_CONFIG = path.join(OUTPUTS_DIR, '0-setup', 'project-config.json');
 
