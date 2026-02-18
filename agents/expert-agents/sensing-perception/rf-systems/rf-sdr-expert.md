@@ -4,27 +4,12 @@
 # =============================================================================
 # Use for: Specialized domain work requiring depth
 # Examples: RF systems, SDR, signal intelligence, electronic warfare
-# Model: opus (complex signal processing decisions)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: rf-sdr-expert
 description: Radio Frequency and Software Defined Radio specialist. Invoke for RF/SDR system design, signal intelligence, electronic warfare, spectrum analysis, and adaptive communication systems.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Kimi-K2-Thinking
-  - Qwen3-235B-A22B
-  - llama3.3:70b
 tier: expert
-
-model_selection:
-  priorities: [math, reasoning, quality]
-  minimum_tier: medium
-  profiles:
-    default: math_reasoning
-    batch: budget
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

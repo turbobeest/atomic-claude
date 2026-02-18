@@ -703,28 +703,37 @@ class SecurityAuditRunner:
         """Check that network mode is properly enforced."""
         self.checks_run += 1
 
-        # Check if network mode is checked before making requests
-        provider_file = self.atomic_root / "lib" / "provider.py"
+        # Check if network mode is checked in LLM provider modules
+        provider_files = [
+            self.atomic_root / "core" / "llm" / "router.py",
+            self.atomic_root / "core" / "llm" / "anthropic.py",
+            self.atomic_root / "core" / "llm" / "bedrock.py",
+        ]
 
-        if provider_file.exists():
-            content = provider_file.read_text()
+        found_any = False
+        has_network_check = False
+        for provider_file in provider_files:
+            if provider_file.exists():
+                found_any = True
+                content = provider_file.read_text()
+                if 'ATOMIC_NETWORK_MODE' in content or 'ATOMIC_OFFLINE_MODE' in content:
+                    has_network_check = True
+                    break
 
-            has_network_check = 'ATOMIC_NETWORK_MODE' in content or 'ATOMIC_OFFLINE_MODE' in content
-
-            if has_network_check:
-                print(f"  {GREEN}✓{NC} Network mode enforcement present")
-            else:
-                self.findings.append(SecurityFinding(
-                    category="Network Security",
-                    severity="medium",
-                    title="Network mode not enforced",
-                    description="Code may not check network mode before making requests",
-                    location="lib/provider.py",
-                    remediation="Check ATOMIC_NETWORK_MODE or ATOMIC_OFFLINE_MODE before network requests"
-                ))
-                print(f"  {YELLOW}⚠{NC}  Network mode enforcement not found")
+        if not found_any:
+            print(f"  {DIM}−{NC} LLM provider modules not found")
+        elif has_network_check:
+            print(f"  {GREEN}✓{NC} Network mode enforcement present")
         else:
-            print(f"  {DIM}−{NC} provider.py not found")
+            self.findings.append(SecurityFinding(
+                category="Network Security",
+                severity="medium",
+                title="Network mode not enforced",
+                description="Code may not check network mode before making requests",
+                location="core/llm/",
+                remediation="Check ATOMIC_NETWORK_MODE or ATOMIC_OFFLINE_MODE before network requests"
+            ))
+            print(f"  {YELLOW}⚠{NC}  Network mode enforcement not found")
 
     def check_sandbox_configuration(self):
         """Check sandbox configuration."""

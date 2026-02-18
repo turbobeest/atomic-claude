@@ -1,41 +1,54 @@
 """
-Task 101: Entry Validation
+Task 101: Entry Validation & Corpus Analysis
 
-Validate Phase 0 completion and load prerequisites.
+Validate Phase 0 completion, load prerequisites, and analyze
+collected reference materials.
 
 Checks:
   - phase-00-closeout.md exists
   - project-config.json is valid
   - pipeline-state.json shows Phase 0 complete
+
+Then:
+  - Loads materials from docs/reference/ (collected by Task 005)
+  - Runs LLM analysis on the corpus
+  - Conversational reflection to confirm understanding
+  - Saves corpus data for downstream phases
 """
 
 import json
 import sys
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.config import Config
 from core.state import StateManager
+from core.llm import invoke_llm as invoke
 from core.ui import phase_header, success, error, warning, info, step
 
+# Supported file extensions for corpus analysis
+SUPPORTED_EXTS = {'.md', '.txt', '.rst', '.pdf', '.json', '.yaml', '.yml', '.dot', '.svg'}
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
-    Execute Task 101: Entry Validation.
+    Execute Task 101: Entry Validation & Corpus Analysis.
 
     Args:
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
-        uat_mode: If True, bypass some checks for testing
+        uat_mode: If True, bypass interactive prompts for testing
+        mem: Optional TaskMemory instance for recording substantive memory
 
     Returns:
         True if validation passed, False otherwise
     """
     setup_dir = output_dir.parent / "0-setup"
+    project_root = atomic_root.parent
 
     # Phase 1 Welcome Banner
     print()
@@ -107,7 +120,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # CHECK 3: Pipeline State
     # ═══════════════════════════════════════════════════════════════
 
-    state_file = atomic_root / ".claude" / "pipeline-state.json"
+    state_file = project_root / ".claude" / "pipeline-state.json"
     if state_file.exists():
         try:
             with open(state_file) as f:
@@ -132,9 +145,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     print()
 
     if not validation_passed:
-        print("╔═══════════════════════════════════════════════════════╗")
-        print("║ VALIDATION FAILED                                     ║")
-        print("╚═══════════════════════════════════════════════════════╝")
+        print("╔═══════════════════════════════════════════════════════════╗")
+        print("║ VALIDATION FAILED                                         ║")
+        print("╚═══════════════════════════════════════════════════════════╝")
         print()
         for issue in issues:
             print(f"  • {issue}")
@@ -161,13 +174,71 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # Initialize phase output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # ═══════════════════════════════════════════════════════════════
+    # CORPUS ANALYSIS
+    # ═══════════════════════════════════════════════════════════════
+
+    reference_dir = project_root / "docs" / "reference"
+    materials = _collect_reference_materials(reference_dir)
+
+    if not materials:
+        print("  No reference materials found in docs/reference/")
+        print("  (Materials can be added during Task 005 in Phase 0)")
+        print()
+        if mem:
+            mem.finding("Phase 0 validation: all checks passed")
+            mem.finding("Corpus: no reference materials found (greenfield project)")
+        success("Entry validation passed")
+        return True
+
+    print(f"  Found {len(materials)} reference materials for analysis")
+    print()
+
+    corpus_data = {
+        "materials": [{"path": str(p), "name": p.name, "type": "file"} for p in materials],
+        "analyzed_at": datetime.now().isoformat(),
+    }
+
+    # LLM Analysis
+    analysis_file = output_dir / "corpus-analysis.md"
+    prompts_dir = output_dir / "prompts"
+    prompts_dir.mkdir(parents=True, exist_ok=True)
+
+    _analyze_corpus(materials, analysis_file, prompts_dir, setup_dir, uat_mode)
+
+    # Conversational reflection
+    if not uat_mode and analysis_file.exists():
+        _corpus_reflection(analysis_file, corpus_data)
+
+    # Save corpus data
+    _save_corpus(output_dir / "corpus.json", corpus_data, analysis_file)
+
+    # Record substantive memory
+    if mem:
+        mem.finding("Phase 0 validation: all checks passed")
+        mem.finding(f"Corpus: {len(materials)} materials collected")
+        if analysis_file.exists():
+            try:
+                analysis_text = analysis_file.read_text()[:500]
+                mem.conversation(f"Corpus analysis summary: {analysis_text.splitlines()[0] if analysis_text else 'N/A'}")
+            except Exception:
+                pass
+        feedback = corpus_data.get("human_feedback", "")
+        if feedback:
+            mem.conversation(f"Human feedback: {feedback}")
+
     success("Entry validation passed")
     return True
 
 
+# ---------------------------------------------------------------------------
+# Validation helpers
+# ---------------------------------------------------------------------------
+
 def _find_closeout(atomic_root: Path, phase_id: str) -> Optional[Path]:
     """Find phase closeout file."""
-    closeout_dir = atomic_root / ".claude" / "closeout"
+    project_root = atomic_root.parent
+    closeout_dir = project_root / ".claude" / "closeout"
 
     # Try multiple naming patterns
     patterns = [
@@ -184,7 +255,7 @@ def _find_closeout(atomic_root: Path, phase_id: str) -> Optional[Path]:
             return closeout_file
 
     # Try outputs directory
-    outputs_dir = atomic_root / ".outputs" / phase_id
+    outputs_dir = atomic_root.parent / ".outputs" / phase_id
     for pattern in patterns:
         closeout_file = outputs_dir / pattern
         if closeout_file.exists():
@@ -211,10 +282,344 @@ def _flatten_config(config_file: Path, config_data: Dict[str, Any]) -> None:
         json.dump(config_data, f, indent=2)
 
 
+# ---------------------------------------------------------------------------
+# Corpus analysis (merged from former Task 102)
+# ---------------------------------------------------------------------------
+
+def _collect_reference_materials(reference_dir: Path) -> List[Path]:
+    """Collect materials from docs/reference/ (populated by Task 005)."""
+    if not reference_dir.exists():
+        return []
+
+    materials = []
+    for f in sorted(reference_dir.rglob("*")):
+        if f.is_file() and f.suffix.lower() in SUPPORTED_EXTS:
+            materials.append(f)
+
+    return materials
+
+
+def _analyze_corpus(
+    materials: List[Path],
+    analysis_file: Path,
+    prompts_dir: Path,
+    setup_dir: Path,
+    uat_mode: bool = False,
+) -> None:
+    """Analyze reference materials using LLM."""
+    print("╔═══════════════════════════════════════════════════════════╗")
+    print("║ CORPUS ANALYSIS                                           ║")
+    print("╚═══════════════════════════════════════════════════════════╝")
+    print()
+    print(f"  Corpus size: {len(materials)} materials")
+    print()
+
+    # Determine context budget and model from resolver
+    try:
+        from core.llm.resolver import resolve_model
+        rm = resolve_model(phase_id="1-discovery", task_id="101")
+        context_tokens = rm.context_window or 200_000
+        corpus_model = rm.tier  # Use the resolved tier for the invoke call
+    except Exception:
+        context_tokens = 200_000
+        corpus_model = "sonnet"
+    # Use 50% of context for corpus (~4 chars/token).
+    # 50% leaves room for the prompt template, Claude Code system prompt,
+    # and the model's response.
+    max_chars = int(context_tokens * 0.5 * 4)
+
+    # --- Pass 1: measure file sizes ---
+    file_sizes = []  # [(path, char_count), ...]
+    for path in materials:
+        if not path.is_file():
+            continue
+        try:
+            size = path.stat().st_size  # bytes ≈ chars for text
+            file_sizes.append((path, size))
+        except OSError:
+            continue
+
+    total_chars = sum(s for _, s in file_sizes)
+
+    # --- If over budget, let user discard files ---
+    if total_chars > max_chars and not uat_mode:
+        budget_k = max_chars // 1000
+        total_k = total_chars // 1000
+        print(f"  Total corpus: ~{total_k:,}K chars  |  Context budget: ~{budget_k:,}K chars")
+        print()
+        print("  Some files will be truncated or skipped. You can discard")
+        print("  files to make room for the ones that matter most.")
+        print()
+
+        # Show numbered file list with sizes
+        for i, (path, size) in enumerate(file_sizes, 1):
+            size_label = f"{size:,}" if size < 10_000 else f"{size // 1000:,}K"
+            print(f"    {i:>2}. {path.name:<40} {size_label:>8} chars")
+        print()
+
+        print("  Enter numbers to discard (e.g. '3 5 7'), or press Enter to keep all:")
+        choice = input("  > ").strip()
+
+        if choice:
+            try:
+                discard_indices = {int(x) for x in choice.split()}
+                before = len(file_sizes)
+                file_sizes = [
+                    (p, s) for i, (p, s) in enumerate(file_sizes, 1)
+                    if i not in discard_indices
+                ]
+                discarded = before - len(file_sizes)
+                if discarded:
+                    print(f"  ✓ Discarded {discarded} file(s)")
+                    total_chars = sum(s for _, s in file_sizes)
+                    print(f"  Revised corpus: ~{total_chars // 1000:,}K chars")
+            except ValueError:
+                print("  (Could not parse — keeping all files)")
+        print()
+
+    # --- Pass 2: build corpus content ---
+    corpus_content = ""
+    chars_used = 0
+    files_read = 0
+    files_truncated = 0
+    files_skipped = 0
+
+    for path, _ in file_sizes:
+        if chars_used >= max_chars:
+            files_skipped += 1
+            continue
+
+        try:
+            text = path.read_text(errors='ignore')
+            header = f"\n=== FILE: {path.name} ===\n"
+            remaining = max_chars - chars_used - len(header) - 1
+
+            if remaining <= 0:
+                files_skipped += 1
+                continue
+
+            if len(text) > remaining:
+                orig_len = len(text)
+                text = text[:remaining]
+                files_truncated += 1
+                header = f"\n=== FILE: {path.name} [TRUNCATED: {remaining:,} of {orig_len:,} chars] ===\n"
+
+            corpus_content += header + text + "\n"
+            chars_used += len(header) + len(text) + 1
+            files_read += 1
+
+        except Exception:
+            continue
+
+    if files_truncated > 0:
+        print(f"  Note: {files_truncated} file(s) truncated to fit context budget")
+        print()
+    if files_skipped > 0:
+        print(f"  Note: {files_skipped} file(s) skipped (context budget full)")
+        print()
+
+    if files_read == 0:
+        print("  No readable files found - skipping LLM analysis")
+        return
+
+    # Extract project context
+    project_context = _load_project_context(setup_dir)
+
+    # Create analysis prompt
+    prompt = f"""# Task: Analyze Project Corpus
+
+You are a **technical analyst** specializing in software project discovery. Your role is to synthesize scattered documentation into a coherent understanding that will guide the PRD authoring phase.
+
+**IMPORTANT:** Analyze these materials in the context of the project described below. These are the project's own documents, NOT the framework/tool that orchestrates development.
+
+## Token Budget
+
+This analysis should be concise (500-800 words). Focus on actionable insights, not exhaustive summaries.
+
+{project_context}
+
+## Materials Collected
+
+**Note:** Large files may be truncated (marked with [TRUNCATED]). Analyze what's provided and note if critical information might be missing from truncated sections.
+
+{corpus_content}
+
+## Your Task
+
+Provide a concise analysis:
+
+1. **Project Understanding** (2-3 sentences)
+   - What is this project about?
+   - What problem does it solve?
+
+2. **Key Themes** (3-5 bullets)
+   - Main concepts and themes found
+
+3. **Technical Indicators**
+   - Technologies mentioned
+   - Architecture patterns detected
+   - Constraints identified
+
+4. **Gaps & Questions** (3-5 bullets)
+   - What's unclear or missing?
+   - What should we ask the human?
+
+5. **Recommended Focus Areas**
+   - Where should discovery focus?
+
+Be specific to THIS project. Output as markdown.
+"""
+
+    prompt_file = prompts_dir / "corpus-analysis.md"
+    with open(prompt_file, 'w') as f:
+        f.write(prompt)
+
+    print("  Claude is analyzing corpus...")
+
+    try:
+        result = invoke(
+            prompt_file=prompt_file,
+            output_file=analysis_file,
+            description="Corpus analysis",
+            model=corpus_model,
+        )
+
+        if result:
+            success("Corpus analyzed")
+        else:
+            warning("Corpus analysis failed - continuing")
+            # Remove stale analysis file so reflection doesn't show old data
+            if analysis_file.exists():
+                analysis_file.unlink()
+    except Exception as e:
+        warning(f"Corpus analysis failed: {e}")
+        # Remove stale analysis file so reflection doesn't show old data
+        if analysis_file.exists():
+            analysis_file.unlink()
+
+
+def _load_project_context(setup_dir: Path) -> str:
+    """Load project context from setup config."""
+    config_file = setup_dir / "project-config.json"
+
+    if not config_file.exists():
+        return ""
+
+    try:
+        with open(config_file) as f:
+            config_data = json.load(f)
+
+        p_name = (
+            config_data.get('project', {}).get('name')
+            or config_data.get('extracted', {}).get('project', {}).get('name', 'Unknown')
+        )
+        p_desc = (
+            config_data.get('project', {}).get('description')
+            or config_data.get('extracted', {}).get('project', {}).get('description', '')
+        )
+
+        return f"## Project Context (from setup configuration)\n\n**Project Name:** {p_name}\n**Description:** {p_desc}\n\n---\n"
+
+    except Exception:
+        return ""
+
+
+def _corpus_reflection(analysis_file: Path, corpus_data: Dict[str, Any]) -> None:
+    """Conversational reflection to confirm corpus understanding."""
+    print()
+    print("╔═══════════════════════════════════════════════════════════╗")
+    print("║ REFLECTION                                                ║")
+    print("╚═══════════════════════════════════════════════════════════╝")
+    print()
+
+    # Show analysis preview
+    print("  From the corpus analysis:")
+    print()
+    with open(analysis_file) as f:
+        for i, line in enumerate(f):
+            if i >= 40:
+                break
+            print(f"  │ {line.rstrip()}")
+    print()
+
+    print("  Let's make sure I understand your project correctly.")
+    print()
+
+    reflection_turns = 0
+
+    while True:
+        if reflection_turns == 0:
+            print("  Does this analysis capture your project accurately?")
+            print("  Share any corrections, clarifications, or missing context.")
+            print("  (Type 'yes' or press Enter if accurate, or provide feedback)")
+        else:
+            print("  Anything else to add or clarify? (Enter to continue)")
+        print()
+
+        human_feedback = input("  > ").strip()
+
+        if not human_feedback or human_feedback.lower() in ('yes', 'correct', 'accurate', 'good', 'ok', 'y'):
+            print()
+            print("  ✓ Understanding confirmed")
+            break
+
+        # Store feedback
+        if "human_feedback" not in corpus_data:
+            corpus_data["human_feedback"] = ""
+        corpus_data["human_feedback"] += "\n" + human_feedback
+        corpus_data["human_feedback"] = corpus_data["human_feedback"].lstrip("\n")
+        print()
+        print("  ✓ Feedback noted")
+        print()
+        reflection_turns += 1
+
+        if reflection_turns >= 3:
+            print("  (We've captured several pieces of feedback. Enter to proceed, or continue adding.)")
+
+    print()
+
+
+def _save_corpus(corpus_json: Path, corpus_data: Dict[str, Any], analysis_file: Path = None) -> None:
+    """Save corpus JSON and summary."""
+    # Save JSON
+    with open(corpus_json, 'w') as f:
+        json.dump(corpus_data, f, indent=2)
+    print(f"  ✓ Saved corpus.json")
+
+    # Generate index alongside corpus.json
+    index_file = corpus_json.parent / "CORPUS-INDEX.md"
+    with open(index_file, 'w') as f:
+        f.write("# Corpus Index\n\n")
+        f.write(f"Generated: {datetime.now().isoformat()}\n\n")
+        f.write("## Materials\n\n")
+
+        for material in corpus_data.get("materials", []):
+            name = material.get("name", "unknown")
+            f.write(f"- **{name}**\n")
+
+        # Analysis summary
+        if analysis_file and analysis_file.exists():
+            f.write("\n## Analysis Summary\n\n")
+            with open(analysis_file) as af:
+                for i, line in enumerate(af):
+                    if i >= 30:
+                        break
+                    f.write(line)
+
+        # Human feedback
+        if corpus_data.get("human_feedback"):
+            f.write("\n## Human Feedback\n\n")
+            f.write(corpus_data["human_feedback"])
+            f.write("\n")
+
+    print(f"  ✓ Generated CORPUS-INDEX.md")
+    print()
+
+
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Task 101: Entry Validation")
+    parser = argparse.ArgumentParser(description="Task 101: Entry Validation & Corpus Analysis")
     parser.add_argument('--atomic-root', type=Path, default=Path.cwd(),
                        help='Path to atomic-claude root directory')
     parser.add_argument('--output-dir', type=Path, required=True,

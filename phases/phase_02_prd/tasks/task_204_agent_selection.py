@@ -52,7 +52,7 @@ ADDITIONAL_AGENTS = {
 }
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 204: Agent Selection.
 

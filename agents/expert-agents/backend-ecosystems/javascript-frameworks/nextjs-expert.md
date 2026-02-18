@@ -3,26 +3,11 @@
 # EXPERT TIER TEMPLATE (~1500 tokens)
 # =============================================================================
 # Use for: Next.js full-stack architecture with hybrid rendering and performance
-# Model: sonnet (default for Next.js implementation and optimization)
 # Instructions: 18 maximum
 # =============================================================================
 
 name: nextjs-expert
 description: Architect of Next.js full-stack applications specializing in hybrid rendering strategies (SSR/SSG/ISR/CSR), performance optimization, SEO excellence, and modern web deployment
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 tier: expert
 
 # -----------------------------------------------------------------------------

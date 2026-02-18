@@ -20,7 +20,7 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 606: Phase Closeout.
 
@@ -32,17 +32,18 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
-    closeout_dir = atomic_root / ".claude" / "closeout"
+    project_root = atomic_root.parent
+    closeout_dir = project_root / ".claude" / "closeout"
     closeout_file = closeout_dir / "phase-06-closeout.md"
     closeout_json = closeout_dir / "phase-06-closeout.json"
-    review_dir = atomic_root / ".claude" / "reviews"
+    review_dir = project_root / ".claude" / "reviews"
     findings_file = review_dir / "findings.json"
     refinement_file = review_dir / "refinement-report.json"
 
     # Find audit file (new path first, then legacy)
-    audit_file = atomic_root / ".outputs" / "audits" / "phase-6-report.json"
+    audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-6-report.json"
     if not audit_file.exists():
-        audit_file = atomic_root / ".claude" / "audit" / "phase-06-audit.json"
+        audit_file = project_root / ".claude" / "audit" / "phase-06-audit.json"
 
     print()
     print(print_dim("Final review before moving to Phase 7 (Integration Testing)."))

@@ -4,26 +4,12 @@
 # =============================================================================
 # Use for: Qualitative evaluation of agent definitions across subjective dimensions
 # Domain: Agent quality assessment, instruction analysis, knowledge authority
-# Model: opus (qualitative judgment requires frontier reasoning)
 # Instructions: 32 total
 # =============================================================================
 
 name: agent-quality-auditor
 description: Qualitative evaluation agent that assesses instruction quality, knowledge source authority, identity clarity, and anti-pattern specificity. Invoke for subjective quality dimensions that require expert judgment rather than pattern matching.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Kimi-K2-Thinking
-  - Qwen3-235B-A22B
-  - llama3.3:70b
 tier: phd
-
-model_selection:
-  priorities: [quality, reasoning]
-  minimum_tier: large
-  profiles:
-    default: quality_critical
 
 # -----------------------------------------------------------------------------
 # TOOL MODES

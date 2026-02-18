@@ -1,20 +1,23 @@
-<script lang="ts">
-	export let data;
+<script>
+	let { data } = $props();
 
-	let searchTerm = '';
-	let typeFilter = '';
-	let selectedSkill = null;
+	let searchTerm = $state('');
+	let typeFilter = $state('');
+	let selectedSkill = $state(null);
 
-	$: filteredSkills = data.skills.filter(skill => {
-		const matchesSearch = !searchTerm ||
-			skill.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-			skill.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-			skill.category.toLowerCase().includes(searchTerm.toLowerCase());
+	let filteredSkills = $derived(
+		data.skills.filter(skill => {
+			const matchesSearch = !searchTerm ||
+				skill.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+				skill.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+				skill.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
+				(skill.author && skill.author.toLowerCase().includes(searchTerm.toLowerCase()));
 
-		const matchesType = !typeFilter || skill.type === typeFilter;
+			const matchesType = !typeFilter || skill.type === typeFilter;
 
-		return matchesSearch && matchesType;
-	});
+			return matchesSearch && matchesType;
+		})
+	);
 
 	function openSkill(skill) {
 		selectedSkill = skill;
@@ -26,14 +29,14 @@
 </script>
 
 <svelte:head>
-	<title>Skills Browser - 84 Specialized Skills</title>
+	<title>Skills Browser - {data.skills.length} Skills</title>
 </svelte:head>
 
 <div class="container">
 	<header class="header">
 		<div class="header-content">
-			<h1 class="title">⚡ Skills Library</h1>
-			<p class="subtitle">{data.skills.length} specialized skills for tactical operations and community workflows</p>
+			<h1 class="title">Skills Library</h1>
+			<p class="subtitle">{data.skills.length} skills across tactical operations and community workflows</p>
 		</div>
 	</header>
 
@@ -53,24 +56,27 @@
 
 	<div class="skills-grid">
 		{#each filteredSkills as skill (skill.id)}
-			<button class="skill-card" on:click={() => openSkill(skill)}>
+			<button class="skill-card" onclick={() => openSkill(skill)}>
 				<div class="skill-header">
 					<h3 class="skill-name">{skill.name}</h3>
 					<span class="skill-badge {skill.type}">{skill.type}</span>
 				</div>
-				<p class="skill-description">{skill.description}</p>
+				{#if skill.description}
+					<p class="skill-description">{skill.description}</p>
+				{/if}
 				<div class="skill-meta">
-					<span class="meta-item">🤖 {skill.model}</span>
-					{#if skill.tools && skill.tools.length > 0}
-						<span class="meta-item">🔧 {skill.tools.join(', ')}</span>
+					{#if skill.author}
+						<span class="meta-item">by {skill.author}</span>
 					{/if}
-					{#if skill.context}
-						<span class="meta-item">📍 {skill.context}</span>
-					{/if}
+					<span class="meta-item category-label">{skill.category}</span>
 				</div>
-				<div class="skill-footer">
-					<span class="category-label">{skill.category}</span>
-				</div>
+				{#if skill.tags && skill.tags.length > 0}
+					<div class="skill-tags">
+						{#each skill.tags as tag}
+							<span class="tag">{tag}</span>
+						{/each}
+					</div>
+				{/if}
 			</button>
 		{/each}
 	</div>
@@ -83,14 +89,35 @@
 </div>
 
 {#if selectedSkill}
-	<div class="modal-overlay" on:click={closeModal}>
-		<div class="modal-content" on:click|stopPropagation>
+	<div class="modal-overlay" onclick={closeModal} role="dialog" aria-modal="true">
+		<div class="modal-content" onclick={(e) => e.stopPropagation()}>
 			<div class="modal-header">
-				<h2 class="modal-title">{selectedSkill.name}</h2>
-				<button class="modal-close" on:click={closeModal}>&times;</button>
+				<div>
+					<h2 class="modal-title">{selectedSkill.name}</h2>
+					{#if selectedSkill.author}
+						<p class="modal-author">by {selectedSkill.author}</p>
+					{/if}
+				</div>
+				<button class="modal-close" onclick={closeModal}>&times;</button>
 			</div>
 			<div class="modal-body">
-				<pre class="skill-content">{selectedSkill.content}</pre>
+				{#if selectedSkill.description}
+					<p class="modal-description">{selectedSkill.description}</p>
+				{/if}
+				{#if selectedSkill.tags && selectedSkill.tags.length > 0}
+					<div class="modal-section">
+						<h3>When to Use</h3>
+						<ul>
+							{#each selectedSkill.tags as tag}
+								<li>{tag}</li>
+							{/each}
+						</ul>
+					</div>
+				{/if}
+				<div class="modal-meta">
+					<span class="meta-badge">{selectedSkill.type}</span>
+					<span class="meta-badge">{selectedSkill.category}</span>
+				</div>
 			</div>
 		</div>
 	</div>
@@ -199,6 +226,7 @@
 		font-size: 11px;
 		font-weight: 500;
 		text-transform: uppercase;
+		flex-shrink: 0;
 	}
 
 	.skill-badge.tactical {
@@ -215,14 +243,14 @@
 		color: #808080;
 		font-size: 14px;
 		line-height: 1.5;
-		margin-bottom: 16px;
+		margin-bottom: 12px;
 	}
 
 	.skill-meta {
 		display: flex;
 		gap: 12px;
 		flex-wrap: wrap;
-		margin-bottom: 16px;
+		margin-bottom: 8px;
 	}
 
 	.meta-item {
@@ -230,17 +258,25 @@
 		color: #707070;
 	}
 
-	.skill-footer {
-		display: flex;
-		gap: 8px;
-		align-items: center;
-	}
-
 	.category-label {
-		font-size: 11px;
-		color: #606060;
 		text-transform: uppercase;
 		letter-spacing: 0.5px;
+	}
+
+	.skill-tags {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		margin-top: 8px;
+	}
+
+	.tag {
+		font-size: 11px;
+		color: #606060;
+		background: #1a1a1a;
+		padding: 2px 8px;
+		border-radius: 4px;
+		border: 1px solid #222;
 	}
 
 	.empty-state {
@@ -268,7 +304,7 @@
 		background: #0f0f0f;
 		border: 1px solid #2a2a2a;
 		border-radius: 12px;
-		max-width: 900px;
+		max-width: 700px;
 		width: 100%;
 		max-height: 90vh;
 		display: flex;
@@ -278,7 +314,7 @@
 	.modal-header {
 		display: flex;
 		justify-content: space-between;
-		align-items: center;
+		align-items: start;
 		padding: 20px 24px;
 		border-bottom: 1px solid #2a2a2a;
 	}
@@ -288,6 +324,12 @@
 		font-weight: 600;
 		color: #b0b0b0;
 		margin: 0;
+	}
+
+	.modal-author {
+		font-size: 13px;
+		color: #606060;
+		margin-top: 4px;
 	}
 
 	.modal-close {
@@ -313,12 +355,58 @@
 		flex: 1;
 	}
 
-	.skill-content {
-		font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-		font-size: 13px;
+	.modal-description {
+		color: #909090;
+		font-size: 15px;
 		line-height: 1.6;
-		color: #a0a0a0;
-		white-space: pre-wrap;
-		word-wrap: break-word;
+		margin-bottom: 20px;
+	}
+
+	.modal-section {
+		margin-bottom: 20px;
+	}
+
+	.modal-section h3 {
+		color: #808080;
+		font-size: 14px;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+		margin-bottom: 8px;
+	}
+
+	.modal-section ul {
+		list-style: none;
+		padding: 0;
+	}
+
+	.modal-section li {
+		color: #707070;
+		font-size: 14px;
+		padding: 4px 0;
+		padding-left: 16px;
+		position: relative;
+	}
+
+	.modal-section li::before {
+		content: '\2022';
+		position: absolute;
+		left: 0;
+		color: #4a4a4a;
+	}
+
+	.modal-meta {
+		display: flex;
+		gap: 8px;
+	}
+
+	.meta-badge {
+		font-size: 12px;
+		color: #606060;
+		background: #1a1a1a;
+		padding: 4px 12px;
+		border-radius: 6px;
+		border: 1px solid #222;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
 	}
 </style>

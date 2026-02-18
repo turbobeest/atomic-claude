@@ -4,28 +4,12 @@
 # =============================================================================
 # Use for: Specialized domain work requiring depth
 # Examples: REST/GraphQL testing, contract testing, API validation, mock servers
-# Model: sonnet (API testing domain)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: api-tester
 description: API testing specialist for REST and GraphQL endpoints. Invoke for API test automation, contract testing, Postman/Newman workflows, OpenAPI validation, mock server setup, and API integration testing.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
 tier: expert
-
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

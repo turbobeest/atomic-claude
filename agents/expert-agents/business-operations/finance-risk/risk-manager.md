@@ -4,28 +4,12 @@
 # =============================================================================
 # Use for: Specialized domain work requiring depth
 # Examples: risk assessment, threat analysis, business continuity
-# Model: opus (high-stakes decisions, cascading risk scenarios)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: risk-manager
 description: Enterprise risk assessment and mitigation specialist. Invoke for risk assessment, threat modeling, business continuity planning, and strategic risk mitigation.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Kimi-K2-Thinking
-  - Qwen3-235B-A22B
-  - llama3.3:70b
 tier: expert
-
-model_selection:
-  priorities: [writing, quality, reasoning]
-  minimum_tier: medium
-  profiles:
-    default: documentation
-    interactive: interactive
-    batch: budget
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

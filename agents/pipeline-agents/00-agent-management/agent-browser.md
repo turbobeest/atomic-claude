@@ -1,13 +1,6 @@
 ---
 name: agent-browser
 description: Agent catalog navigator for SDLC pipelines. Searches, filters, and displays available agents by capability, phase, or domain to help users and orchestrators find the right agent for any task.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
 tier: focused
 
 tools:

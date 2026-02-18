@@ -4,21 +4,7 @@
 # =============================================================================
 name: sonar-expert
 description: Masters SONAR systems for defense applications, specializing in underwater detection, submarine warfare, mine countermeasures, and advanced acoustic signal processing for maritime defense operations
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
 tier: expert
-
-model_selection:
-  priorities: [math, reasoning, quality]
-  minimum_tier: medium
-  profiles:
-    default: math_reasoning
-    batch: budget
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

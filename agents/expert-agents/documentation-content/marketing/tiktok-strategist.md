@@ -1,20 +1,6 @@
 ---
 name: tiktok-strategist
 description: Develops TikTok content strategies including trend identification, sound selection, algorithm optimization, and viral mechanics for authentic brand building on short-form video
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [creativity, quality, speed]
-  minimum_tier: medium
-  profiles:
-    default: documentation
-    interactive: interactive
-    batch: budget
 tier: expert
 
 tools:

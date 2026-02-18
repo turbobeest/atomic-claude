@@ -7,6 +7,7 @@ Final review before moving to Phase 3 (Tasking).
 """
 
 import os
+import re
 import sys
 import json
 from pathlib import Path
@@ -25,7 +26,7 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 209: Phase Closeout.
 
@@ -37,10 +38,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
-    closeout_dir = atomic_root / ".claude" / "closeout"
+    project_root = atomic_root.parent
+    closeout_dir = project_root / ".claude" / "closeout"
     closeout_file = closeout_dir / "phase-02-closeout.md"
     closeout_json = closeout_dir / "phase-02-closeout.json"
-    prd_file = atomic_root.parent / "docs" / "prd" / "PRD.md"
+    prd_file = project_root / "docs" / "prd" / "PRD.md"
 
     ensure_dir(closeout_dir)
 
@@ -143,7 +145,12 @@ def run_closeout_checklist(
     # Check PRD document
     if prd_file.exists():
         content = read_file(prd_file)
-        section_count = len([l for l in content.split('\n') if l.startswith('##')])
+        # Count top-level PRD sections (# N. or ## N. numbered headings)
+        lines = content.split('\n')
+        top_sections = [l for l in lines if re.match(r'^# \d+\.\s', l)]
+        if not top_sections:
+            top_sections = [l for l in lines if re.match(r'^## \d+\.\s', l)]
+        section_count = len(top_sections)
 
         if section_count >= 10:
             print("  " + print_green("[CRIT]") + " " + print_green("✓") + f" PRD authored ({section_count} sections)")
@@ -179,10 +186,11 @@ def run_closeout_checklist(
         checklist.append(("PRD approved", "FAIL"))
         all_passed = False
 
-    # Check audit
-    audit_file = atomic_root / ".claude" / "audit" / "phase-02-audit.json"
+    # Check audit (project deliverable in project_root, fallback in atomic_root)
+    project_root = atomic_root.parent
+    audit_file = project_root / ".claude" / "audit" / "phase-02-audit.json"
     if not audit_file.exists():
-        audit_file = atomic_root / ".outputs" / "audits" / "phase-2-report.json"
+        audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-2-report.json"
 
     if audit_file.exists():
         try:
@@ -253,7 +261,11 @@ def generate_closeout_documents(
     if prd_file.exists():
         content = read_file(prd_file)
         prd_lines = len(content.split('\n'))
-        prd_sections = len([l for l in content.split('\n') if l.startswith('##')])
+        lines = content.split('\n')
+        top = [l for l in lines if re.match(r'^# \d+\.\s', l)]
+        if not top:
+            top = [l for l in lines if re.match(r'^## \d+\.\s', l)]
+        prd_sections = len(top)
 
     # Generate markdown closeout
     markdown_content = f"""# Phase 2 Closeout: PRD

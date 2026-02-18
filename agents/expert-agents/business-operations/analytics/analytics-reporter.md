@@ -4,28 +4,12 @@
 # =============================================================================
 # Use for: Specialized domain work requiring depth
 # Examples: analytics dashboards, KPI tracking, funnel analysis, cohort analysis
-# Model: sonnet (data visualization and reporting domain)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: analytics-reporter
 description: Analytics and reporting specialist for business intelligence dashboards. Invoke for GA4 configuration, Mixpanel/Amplitude implementation, KPI tracking, funnel analysis, cohort analysis, and dashboard design.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
 tier: expert
-
-model_selection:
-  priorities: [reasoning, quality, writing]
-  minimum_tier: medium
-  profiles:
-    default: documentation
-    interactive: interactive
-    batch: budget
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

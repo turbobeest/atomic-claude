@@ -480,7 +480,7 @@ class IntegrationAuditRunner:
         """Test that phase-specific env vars are passed."""
         env = os.environ.copy()
         env["CURRENT_PHASE"] = "0-setup"
-        env["ATOMIC_OUTPUT_DIR"] = str(self.atomic_root / ".outputs")
+        env["ATOMIC_OUTPUT_DIR"] = str(self.atomic_root.parent / ".outputs")
 
         result = subprocess.run(
             ["bash", str(self.fixtures_dir / "env_phase.sh")],
@@ -505,64 +505,39 @@ class IntegrationAuditRunner:
         assert "test_value" in result.stdout, "Should pass custom env vars"
 
     # ========================================================================
-    # LIBRARY FUNCTION ACCESS TESTS
+    # LIBRARY FUNCTION ACCESS TESTS (Python core.ui)
     # ========================================================================
 
     def test_source_atomic_lib(self):
-        """Test that scripts can source lib/atomic.sh."""
-        env = os.environ.copy()
-        env["ATOMIC_ROOT"] = str(self.atomic_root)
-
-        result = subprocess.run(
-            ["bash", str(self.fixtures_dir / "lib_source.sh")],
-            capture_output=True,
-            text=True,
-            env=env
-        )
-        assert result.returncode == 0, "Should source atomic.sh successfully"
+        """Test that core.ui module can be imported with step, success, error."""
+        try:
+            from core.ui import step, success, error
+        except ImportError as e:
+            assert False, f"Should import step, success, error from core.ui: {e}"
 
     def test_atomic_step_function(self):
-        """Test that atomic_step() is accessible."""
-        env = os.environ.copy()
-        env["ATOMIC_ROOT"] = str(self.atomic_root)
-
-        result = subprocess.run(
-            ["bash", str(self.fixtures_dir / "lib_atomic_step.sh")],
-            capture_output=True,
-            text=True,
-            env=env
-        )
-        assert result.returncode == 0, "Should call atomic_step()"
-        # Note: Output may be empty if atomic_step writes to stderr or uses colors
+        """Test that step() from core.ui runs without error."""
+        from core.ui import step
+        try:
+            step("Test step")
+        except Exception as e:
+            assert False, f"step() should run without error: {e}"
 
     def test_atomic_success_function(self):
-        """Test that atomic_success() is accessible."""
-        env = os.environ.copy()
-        env["ATOMIC_ROOT"] = str(self.atomic_root)
-
-        result = subprocess.run(
-            ["bash", str(self.fixtures_dir / "lib_atomic_success.sh")],
-            capture_output=True,
-            text=True,
-            env=env
-        )
-        assert result.returncode == 0, "Should call atomic_success()"
+        """Test that success() from core.ui runs without error."""
+        from core.ui import success
+        try:
+            success("Test success")
+        except Exception as e:
+            assert False, f"success() should run without error: {e}"
 
     def test_atomic_error_function(self):
-        """Test that atomic_error() is accessible."""
-        env = os.environ.copy()
-        env["ATOMIC_ROOT"] = str(self.atomic_root)
-
-        result = subprocess.run(
-            ["bash", str(self.fixtures_dir / "lib_atomic_error.sh")],
-            capture_output=True,
-            text=True,
-            env=env
-        )
-        # Note: atomic_error might not exit 1 by itself
-        # Just verify it can be called
-        assert "atomic_error" not in result.stderr or result.returncode != 127, \
-            "atomic_error should be callable"
+        """Test that error() from core.ui runs without error."""
+        from core.ui import error
+        try:
+            error("Test error")
+        except Exception as e:
+            assert False, f"error() should run without error: {e}"
 
     # ========================================================================
     # ERROR PROPAGATION TESTS
@@ -1067,29 +1042,6 @@ exit 0
 
             "env_custom.sh": """#!/bin/bash
 echo "CUSTOM_VAR=$CUSTOM_VAR"
-exit 0
-""",
-
-            "lib_source.sh": """#!/bin/bash
-source "$ATOMIC_ROOT/lib/atomic.sh" || exit 1
-exit 0
-""",
-
-            "lib_atomic_step.sh": """#!/bin/bash
-source "$ATOMIC_ROOT/lib/atomic.sh" || exit 1
-atomic_step "Test step" || exit 1
-exit 0
-""",
-
-            "lib_atomic_success.sh": """#!/bin/bash
-source "$ATOMIC_ROOT/lib/atomic.sh" || exit 1
-atomic_success "Test success" || exit 1
-exit 0
-""",
-
-            "lib_atomic_error.sh": """#!/bin/bash
-source "$ATOMIC_ROOT/lib/atomic.sh" || exit 1
-atomic_error "Test error"
 exit 0
 """,
 

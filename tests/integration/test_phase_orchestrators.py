@@ -75,15 +75,10 @@ class TestPhase00Orchestrator:
              patch('phases.phase_00_setup.tasks.task_002') as mock_002, \
              patch('phases.phase_00_setup.tasks.task_003') as mock_003, \
              patch('phases.phase_00_setup.tasks.task_004') as mock_004, \
-             patch('phases.phase_00_setup.tasks.task_005') as mock_005, \
-             patch('phases.phase_00_setup.tasks.task_006') as mock_006, \
-             patch('phases.phase_00_setup.tasks.task_007') as mock_007, \
-             patch('phases.phase_00_setup.tasks.task_008') as mock_008, \
-             patch('phases.phase_00_setup.tasks.task_009') as mock_009:
+             patch('phases.phase_00_setup.tasks.task_005') as mock_005:
 
             # All tasks succeed by default
-            for mock in [mock_001, mock_002, mock_003, mock_004, mock_005,
-                        mock_006, mock_007, mock_008, mock_009]:
+            for mock in [mock_001, mock_002, mock_003, mock_004, mock_005]:
                 mock.return_value = True
 
             yield {
@@ -92,10 +87,6 @@ class TestPhase00Orchestrator:
                 '003': mock_003,
                 '004': mock_004,
                 '005': mock_005,
-                '006': mock_006,
-                '007': mock_007,
-                '008': mock_008,
-                '009': mock_009,
             }
 
     @patch('orchestration.pre_task_validation.validate_directory_pristine')
@@ -108,7 +99,7 @@ class TestPhase00Orchestrator:
 
         assert result is True
 
-        # Verify all 9 tasks were called
+        # Verify all 5 tasks were called
         for task_id, mock in mock_tasks.items():
             assert mock.called, f"Task {task_id} was not called"
 
@@ -121,42 +112,40 @@ class TestPhase00Orchestrator:
         """Test phase stops when task fails."""
         mock_validate.return_value = True
 
-        # Task 005 fails
-        mock_tasks['005'].return_value = False
+        # Task 004 fails
+        mock_tasks['004'].return_value = False
 
         from phases.phase00.orchestrator00 import run_phase
         result = run_phase()
 
         assert result is False
 
-        # Tasks 001-005 should be called, 006-009 should not
-        for task_id in ['001', '002', '003', '004', '005']:
+        # Tasks 001-004 should be called, 005 should not
+        for task_id in ['001', '002', '003', '004']:
             assert mock_tasks[task_id].called
-        for task_id in ['006', '007', '008', '009']:
-            assert not mock_tasks[task_id].called
+        assert not mock_tasks['005'].called
 
     @patch('orchestration.pre_task_validation.validate_directory_pristine')
     def test_run_phase_resume_at(self, mock_validate, mock_tasks, temp_state_dir):
         """Test resuming from specific task."""
         mock_validate.return_value = True
 
-        # Mark tasks 001-003 as complete
+        # Mark tasks 001-002 as complete
         state = StateManager()
-        state.mark_task_complete("0-setup", "001", "Mode selection")
-        state.mark_task_complete("0-setup", "002", "Config collection")
-        state.mark_task_complete("0-setup", "003", "Config review")
+        state.mark_task_complete("0-setup", "001", "Setup wizard")
+        state.mark_task_complete("0-setup", "002", "Material scan")
 
         from phases.phase00.orchestrator00 import run_phase
-        result = run_phase(resume_at="004")
+        result = run_phase(resume_at="003")
 
         assert result is True
 
-        # Tasks 001-003 should be skipped
-        for task_id in ['001', '002', '003']:
+        # Tasks 001-002 should be skipped
+        for task_id in ['001', '002']:
             assert not mock_tasks[task_id].called
 
-        # Tasks 004-009 should be called
-        for task_id in ['004', '005', '006', '007', '008', '009']:
+        # Tasks 003-005 should be called
+        for task_id in ['003', '004', '005']:
             assert mock_tasks[task_id].called
 
     @patch('orchestration.pre_task_validation.validate_directory_pristine')
@@ -179,9 +168,9 @@ class TestPhase00Orchestrator:
         assert closeout['phase'] == '0-setup'
         assert closeout['phase_num'] == 0
         assert 'completed_at' in closeout
-        assert len(closeout['tasks_completed']) == 9
+        assert len(closeout['tasks_completed']) == 5
         assert '001' in closeout['tasks_completed']
-        assert '009' in closeout['tasks_completed']
+        assert '005' in closeout['tasks_completed']
 
     @patch('orchestration.pre_task_validation.validate_directory_pristine')
     def test_run_phase_state_tracking(self, mock_validate, mock_tasks, temp_state_dir):
@@ -195,7 +184,7 @@ class TestPhase00Orchestrator:
 
         # Verify all tasks marked complete
         state = StateManager()
-        for task_id in ['001', '002', '003', '004', '005', '006', '007', '008', '009']:
+        for task_id in ['001', '002', '003', '004', '005']:
             assert state.is_task_complete("0-setup", task_id)
 
     def test_run_phase_pre_task_validation_failure(self, mock_tasks, temp_state_dir):
@@ -212,7 +201,7 @@ class TestPhase00Orchestrator:
             # Only first 3 tasks should be called
             for task_id in ['001', '002', '003']:
                 assert mock_tasks[task_id].called
-            for task_id in ['004', '005', '006', '007', '008', '009']:
+            for task_id in ['004', '005']:
                 assert not mock_tasks[task_id].called
 
     @patch('orchestration.pre_task_validation.validate_directory_pristine')
@@ -220,8 +209,8 @@ class TestPhase00Orchestrator:
         """Test phase handles exceptions gracefully."""
         mock_validate.return_value = True
 
-        # Task 005 raises exception
-        mock_tasks['005'].side_effect = Exception("Simulated error")
+        # Task 004 raises exception
+        mock_tasks['004'].side_effect = Exception("Simulated error")
 
         from phases.phase00.orchestrator00 import run_phase
         result = run_phase()
@@ -231,7 +220,7 @@ class TestPhase00Orchestrator:
         # Verify error was logged to state
         state = StateManager()
         state_data = state.load_state()
-        task_state = state_data.get('phases', {}).get('0-setup', {}).get('tasks', {}).get('005', {})
+        task_state = state_data.get('phases', {}).get('0-setup', {}).get('tasks', {}).get('004', {})
         assert task_state.get('status') == 'failed'
         assert 'error' in task_state
 
@@ -242,9 +231,9 @@ class TestPhase00Orchestrator:
 
         # Mark some tasks as complete
         state = StateManager()
-        state.mark_task_complete("0-setup", "001", "Mode selection")
-        state.mark_task_complete("0-setup", "003", "Config review")
-        state.mark_task_complete("0-setup", "007", "Environment setup")
+        state.mark_task_complete("0-setup", "001", "Setup wizard")
+        state.mark_task_complete("0-setup", "003", "Environment setup")
+        state.mark_task_complete("0-setup", "005", "Environment check")
 
         from phases.phase00.orchestrator00 import run_phase
         result = run_phase()
@@ -254,12 +243,11 @@ class TestPhase00Orchestrator:
         # Completed tasks should not be called
         assert not mock_tasks['001'].called
         assert not mock_tasks['003'].called
-        assert not mock_tasks['007'].called
+        assert not mock_tasks['005'].called
 
         # Other tasks should be called
         assert mock_tasks['002'].called
         assert mock_tasks['004'].called
-        assert mock_tasks['008'].called
 
     @patch('orchestration.pre_task_validation.validate_directory_pristine')
     def test_run_phase_output_directory_creation(self, mock_validate, mock_tasks, temp_state_dir):
@@ -277,26 +265,26 @@ class TestPhase00Orchestrator:
         """Test partial completion and resume."""
         mock_validate.return_value = True
 
-        # First run: fail at task 005
-        mock_tasks['005'].return_value = False
+        # First run: fail at task 004
+        mock_tasks['004'].return_value = False
 
         from phases.phase00.orchestrator00 import run_phase
         result = run_phase()
         assert result is False
 
-        # Verify tasks 001-004 are complete
+        # Verify tasks 001-003 are complete
         state = StateManager()
-        for task_id in ['001', '002', '003', '004']:
+        for task_id in ['001', '002', '003']:
             assert state.is_task_complete("0-setup", task_id)
-        assert not state.is_task_complete("0-setup", "005")
+        assert not state.is_task_complete("0-setup", "004")
 
-        # Second run: fix task 005
-        mock_tasks['005'].return_value = True
-        result = run_phase(resume_at="005")
+        # Second run: fix task 004
+        mock_tasks['004'].return_value = True
+        result = run_phase(resume_at="004")
         assert result is True
 
         # Now all tasks should be complete
-        for task_id in ['001', '002', '003', '004', '005', '006', '007', '008', '009']:
+        for task_id in ['001', '002', '003', '004', '005']:
             assert state.is_task_complete("0-setup", task_id)
 
 
@@ -318,11 +306,10 @@ class TestPhase01Orchestrator:
              patch('phases.phase_01_discovery.tasks.task_106') as mock_106, \
              patch('phases.phase_01_discovery.tasks.task_107') as mock_107, \
              patch('phases.phase_01_discovery.tasks.task_108') as mock_108, \
-             patch('phases.phase_01_discovery.tasks.task_109') as mock_109, \
-             patch('phases.phase_01_discovery.tasks.task_110') as mock_110:
+             patch('phases.phase_01_discovery.tasks.task_109') as mock_109:
 
             for mock in [mock_101, mock_102, mock_103, mock_104, mock_105,
-                        mock_106, mock_107, mock_108, mock_109, mock_110]:
+                        mock_106, mock_107, mock_108, mock_109]:
                 mock.return_value = True
 
             yield {
@@ -335,7 +322,6 @@ class TestPhase01Orchestrator:
                 '107': mock_107,
                 '108': mock_108,
                 '109': mock_109,
-                '110': mock_110,
             }
 
     @patch('orchestration.pre_task_validation.validate_directory_pristine')
@@ -348,7 +334,7 @@ class TestPhase01Orchestrator:
 
         assert result is True
 
-        # Verify all 10 tasks were called
+        # Verify all 9 tasks were called
         for task_id, mock in mock_tasks.items():
             assert mock.called, f"Task {task_id} was not called"
 
@@ -365,10 +351,10 @@ class TestPhase01Orchestrator:
 
         assert result is False
 
-        # Tasks 101-105 should be called, 106-110 should not
+        # Tasks 101-105 should be called, 106-109 should not
         for task_id in ['101', '102', '103', '104', '105']:
             assert mock_tasks[task_id].called
-        for task_id in ['106', '107', '108', '109', '110']:
+        for task_id in ['106', '107', '108', '109']:
             assert not mock_tasks[task_id].called
 
     @patch('orchestration.pre_task_validation.validate_directory_pristine')
@@ -379,8 +365,8 @@ class TestPhase01Orchestrator:
         # Mark tasks 101-103 as complete
         state = StateManager()
         state.mark_task_complete("1-discovery", "101", "Entry validation")
-        state.mark_task_complete("1-discovery", "102", "Corpus collection")
-        state.mark_task_complete("1-discovery", "103", "Import requirements")
+        state.mark_task_complete("1-discovery", "102", "Import requirements")
+        state.mark_task_complete("1-discovery", "103", "Agent selection")
 
         from phases.phase01.orchestrator01 import run_phase
         result = run_phase(resume_at="104")
@@ -391,8 +377,8 @@ class TestPhase01Orchestrator:
         for task_id in ['101', '102', '103']:
             assert not mock_tasks[task_id].called
 
-        # Tasks 104-110 should be called
-        for task_id in ['104', '105', '106', '107', '108', '109', '110']:
+        # Tasks 104-109 should be called
+        for task_id in ['104', '105', '106', '107', '108', '109']:
             assert mock_tasks[task_id].called
 
     @patch('orchestration.pre_task_validation.validate_directory_pristine')
@@ -413,7 +399,7 @@ class TestPhase01Orchestrator:
 
         assert closeout['phase'] == '1-discovery'
         assert closeout['phase_num'] == 1
-        assert len(closeout['tasks_completed']) == 10
+        assert len(closeout['tasks_completed']) == 9
 
     @patch('orchestration.pre_task_validation.validate_directory_pristine')
     def test_run_phase_state_tracking(self, mock_validate, mock_tasks, temp_state_dir):
@@ -426,7 +412,7 @@ class TestPhase01Orchestrator:
         assert result is True
 
         state = StateManager()
-        for task_id in ['101', '102', '103', '104', '105', '106', '107', '108', '109', '110']:
+        for task_id in ['101', '102', '103', '104', '105', '106', '107', '108', '109']:
             assert state.is_task_complete("1-discovery", task_id)
 
     def test_run_phase_pre_task_validation_failure(self, mock_tasks, temp_state_dir):
@@ -444,7 +430,7 @@ class TestPhase01Orchestrator:
         """Test phase handles exceptions."""
         mock_validate.return_value = True
 
-        mock_tasks['106'].side_effect = Exception("Discovery error")
+        mock_tasks['105'].side_effect = Exception("Discovery error")
 
         from phases.phase01.orchestrator01 import run_phase
         result = run_phase()
@@ -458,14 +444,14 @@ class TestPhase01Orchestrator:
 
         state = StateManager()
         state.mark_task_complete("1-discovery", "101", "Entry validation")
-        state.mark_task_complete("1-discovery", "105", "Opening dialogue")
+        state.mark_task_complete("1-discovery", "104", "Opening dialogue")
 
         from phases.phase01.orchestrator01 import run_phase
         result = run_phase()
 
         assert result is True
         assert not mock_tasks['101'].called
-        assert not mock_tasks['105'].called
+        assert not mock_tasks['104'].called
         assert mock_tasks['102'].called
 
     @patch('orchestration.pre_task_validation.validate_directory_pristine')
@@ -484,16 +470,16 @@ class TestPhase01Orchestrator:
         """Test partial completion and resume."""
         mock_validate.return_value = True
 
-        # First run: fail at task 107
-        mock_tasks['107'].return_value = False
+        # First run: fail at task 106
+        mock_tasks['106'].return_value = False
 
         from phases.phase01.orchestrator01 import run_phase
         result = run_phase()
         assert result is False
 
-        # Second run: continue from 107
-        mock_tasks['107'].return_value = True
-        result = run_phase(resume_at="107")
+        # Second run: continue from 106
+        mock_tasks['106'].return_value = True
+        result = run_phase(resume_at="106")
         assert result is True
 
 

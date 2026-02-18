@@ -3,26 +3,11 @@
 # EXPERT TIER - Keras ML Expert (~1500 tokens)
 # =============================================================================
 # Use for: Streaming ML, real-time inference, online learning, TensorFlow deployment
-# Model: sonnet (streaming pipeline design, latency optimization)
 # Instructions: 20 maximum
 # =============================================================================
 
 name: kerasml-expert
 description: Masters Keras framework for streaming ML applications, specializing in real-time model inference, online learning, distributed training, and adaptive neural networks for continuous data streams
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [math, reasoning, quality]
-  minimum_tier: medium
-  profiles:
-    default: math_reasoning
-    interactive: interactive
-    batch: budget
 tier: expert
 
 tools:

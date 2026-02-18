@@ -463,6 +463,38 @@ class StateManager:
     # STATE MUTATIONS
     # ========================================================================
 
+    def mark_task_started(self, phase_id: str, task_id: str, task_name: str, auto_save: bool = True) -> None:
+        """
+        Mark a task as in-progress and record its start time.
+
+        Args:
+            phase_id: Phase identifier
+            task_id: Task identifier
+            task_name: Task name/description
+            auto_save: Auto-save state to disk (default True)
+        """
+        # Ensure phase exists
+        if phase_id not in self._state['phases']:
+            self._state['phases'][phase_id] = {
+                'started_at': datetime.now().isoformat(),
+                'tasks': {}
+            }
+
+        if 'tasks' not in self._state['phases'][phase_id]:
+            self._state['phases'][phase_id]['tasks'] = {}
+
+        self._state['phases'][phase_id]['tasks'][task_id] = {
+            'name': task_name,
+            'status': 'in_progress',
+            'started_at': datetime.now().isoformat(),
+        }
+
+        self._state['current_task'] = task_id
+        self._state['metadata']['last_updated'] = datetime.now().isoformat()
+
+        if auto_save:
+            self.save_state()
+
     def mark_task_complete(self, phase_id: str, task_id: str, task_name: str, artifacts: List[str] = None, auto_save: bool = True) -> None:
         """
         Mark a task as complete.
@@ -485,10 +517,15 @@ class StateManager:
         if 'tasks' not in self._state['phases'][phase_id]:
             self._state['phases'][phase_id]['tasks'] = {}
 
+        # Preserve started_at from mark_task_started() if it exists
+        existing = self._state['phases'][phase_id]['tasks'].get(task_id, {})
+        started_at = existing.get('started_at', datetime.now().isoformat())
+
         # Update task
         self._state['phases'][phase_id]['tasks'][task_id] = {
             'name': task_name,
-            'status': 'completed',  # Use "completed" not "complete" for consistency
+            'status': 'completed',
+            'started_at': started_at,
             'completed_at': datetime.now().isoformat(),
             'artifacts': artifacts or []
         }
@@ -739,7 +776,7 @@ class StateManager:
         self.save_state()
 
         # Clear outputs
-        outputs_dir = self.atomic_root / ".outputs"
+        outputs_dir = self.atomic_root.parent / ".outputs"
         if outputs_dir.exists():
             shutil.rmtree(outputs_dir)
 

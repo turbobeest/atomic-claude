@@ -15,7 +15,7 @@ from core.audit import run_phase_audit
 from core.utils.cli_ui import print_yellow
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 706: Phase Audit.
 
@@ -34,9 +34,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # Delegate to audit system
     return run_phase_audit(
         phase_num=7,
-        phase_name="Integration",
-        atomic_root=atomic_root,
-        output_dir=output_dir
+        phase_id="7-integration",
+        output_dir=output_dir,
     )
 
 

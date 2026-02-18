@@ -1,19 +1,6 @@
 ---
 name: tdd-implementation-agent
 description: Phase 6-9 core implementation agent for the SDLC pipeline. Implements tasks using strict TDD methodology—tests first, then implementation, then refactor. Works from specifications and test strategies to produce verified code.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Kimi-K2-Thinking
-  - Qwen3-235B-A22B
-  - llama3.3:70b
-model_selection:
-  priorities: [quality, reasoning, tool_use]
-  minimum_tier: large
-  profiles:
-    default: quality_critical
-    batch: batch
 tier: phd
 
 phase: 6-9

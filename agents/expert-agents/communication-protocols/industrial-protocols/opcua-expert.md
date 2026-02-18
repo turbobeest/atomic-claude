@@ -4,28 +4,12 @@
 # =============================================================================
 # Use for: Specialized domain work requiring depth
 # Examples: security-auditor, rust-pro, kubernetes-expert, database-optimizer
-# Model: sonnet (default) or opus (complex domains, high-stakes decisions)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: opcua-expert
 description: Masters OPC-UA (Open Platform Communications Unified Architecture) for industrial automation and SCADA systems, specializing in secure machine-to-machine communication, information modeling, and industrial IoT integration
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
 tier: expert
-
-model_selection:
-  priorities: [quality, reasoning, code_debugging]
-  minimum_tier: medium
-  profiles:
-    default: quality_critical
-    interactive: interactive
-    batch: budget
 
 mcp_servers:
   protocol-specs:

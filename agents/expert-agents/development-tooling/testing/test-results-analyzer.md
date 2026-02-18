@@ -4,28 +4,12 @@
 # =============================================================================
 # Use for: Specialized domain work requiring depth
 # Examples: test report synthesis, flaky test detection, coverage gap analysis
-# Model: sonnet (test analysis domain)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: test-results-analyzer
 description: Test analysis specialist for test report synthesis and quality assessment. Invoke for test result interpretation, flaky test detection, coverage gap analysis, failure pattern identification, and regression analysis.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
 tier: expert
-
-model_selection:
-  priorities: [reasoning, quality, code_debugging]
-  minimum_tier: medium
-  profiles:
-    default: code_review
-    interactive: interactive
-    batch: budget
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

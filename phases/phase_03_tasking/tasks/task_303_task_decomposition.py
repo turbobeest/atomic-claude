@@ -33,7 +33,7 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 303: Task Decomposition.
 
@@ -104,6 +104,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     sections = _extract_prd_sections(prd_content)
     project_name = _extract_project_name(prd_content)
 
+    # Load corpus analysis for technical context
+    corpus_analysis_file = project_root / ".outputs" / "1-discovery" / "corpus-analysis.md"
+    if corpus_analysis_file.exists():
+        try:
+            analysis = read_file(corpus_analysis_file).strip()
+            if analysis:
+                sections["corpus_analysis"] = analysis
+        except Exception:
+            pass
+
     print(print_green(f"✓ PRD loaded ({prd_lines} lines)"))
     print(print_dim("  Extracted: Feature Requirements, Dependencies, Phases, Tech Stack"))
     print()
@@ -114,44 +124,122 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     print(print_bold("TASK GENERATION"))
     print()
 
-    # Build prompt
-    prompt_content = _build_decomposition_prompt(
-        decomposer_prompt,
-        project_name,
-        sections,
-        uat_mode
-    )
-    prompt_file = prompts_dir / "task-decomposition.md"
-    write_file(prompt_file, prompt_content)
+    # Try per-feature decomposition for large PRDs
+    features_text = sections.get("features", "")
+    feature_list = _split_into_features(features_text) if features_text else []
+    use_per_feature = len(feature_list) >= 2 and not uat_mode
 
-    print(print_dim("Invoking task-decomposer agent..."))
-    print()
+    if use_per_feature:
+        print(print_dim(f"Large PRD detected — decomposing {len(feature_list)} features individually"))
+        print()
 
-    # Invoke LLM
-    try:
-        result = invoke(
-            prompt=prompt_content,
-            output_file=raw_tasks_file,
-            description="Task decomposition",
-            model="primary"
-        )
+        feature_results = []
+        failed_features = []
 
-        if result and raw_tasks_file.exists():
-            # Validate JSON
+        for i, (feature_id, feature_content) in enumerate(feature_list, 1):
+            print(print_dim(f"  [{i}/{len(feature_list)}] Decomposing {feature_id}..."))
+
+            feat_prompt = _build_decomposition_prompt(
+                decomposer_prompt,
+                project_name,
+                sections,
+                uat_mode,
+                feature=(feature_id, feature_content)
+            )
+
+            # Save per-feature prompt for debugging
+            feat_prompt_file = prompts_dir / f"task-decomposition-{feature_id}.md"
+            write_file(feat_prompt_file, feat_prompt)
+
+            feat_output = output_dir / f"raw-tasks-{feature_id}.json"
+
             try:
-                tasks_data = json.loads(read_file(raw_tasks_file))
-                task_count = len(tasks_data.get("tasks", []))
-                print(print_green(f"✓ Generated {task_count} tasks"))
-            except json.JSONDecodeError:
-                print(print_yellow("⚠ Invalid JSON output - attempting repair"))
-                if not _repair_json(raw_tasks_file):
-                    _create_template_tasks(raw_tasks_file)
+                result = invoke(
+                    prompt=feat_prompt,
+                    output_file=feat_output,
+                    description=f"Decompose {feature_id}",
+                    model="opus",
+                    timeout=900
+                )
+
+                if result and feat_output.exists():
+                    raw = read_file(feat_output)
+                    try:
+                        feat_tasks = json.loads(raw)
+                        count = len(feat_tasks.get("tasks", []))
+                        print(print_green(f"    ✓ {count} tasks from {feature_id}"))
+                        feature_results.append((feature_id, feat_tasks))
+                    except json.JSONDecodeError:
+                        # Try repair
+                        if _repair_json(feat_output):
+                            feat_tasks = json.loads(read_file(feat_output))
+                            count = len(feat_tasks.get("tasks", []))
+                            print(print_green(f"    ✓ {count} tasks from {feature_id} (repaired)"))
+                            feature_results.append((feature_id, feat_tasks))
+                        else:
+                            print(print_yellow(f"    ⚠ {feature_id}: invalid JSON, skipping"))
+                            failed_features.append(feature_id)
+                else:
+                    print(print_yellow(f"    ⚠ {feature_id}: no output, skipping"))
+                    failed_features.append(feature_id)
+            except Exception as e:
+                print(print_yellow(f"    ⚠ {feature_id} error: {e}"))
+                failed_features.append(feature_id)
+
+        print()
+
+        if feature_results:
+            # Merge all feature tasks
+            merged = _merge_feature_tasks(feature_results, project_name)
+            write_file(raw_tasks_file, json.dumps(merged, indent=2))
+            total = len(merged.get("tasks", []))
+            print(print_green(f"✓ Merged {total} tasks from {len(feature_results)} features"))
+            if failed_features:
+                print(print_yellow(f"⚠ Skipped features: {', '.join(failed_features)}"))
         else:
-            print(print_yellow("⚠ Task decomposition failed - creating template"))
+            print(print_yellow("⚠ All per-feature calls failed — falling back to template"))
             _create_template_tasks(raw_tasks_file)
-    except Exception as e:
-        print(print_yellow(f"⚠ Task decomposition error: {e}"))
-        _create_template_tasks(raw_tasks_file)
+    else:
+        # Single-call path: small PRDs or UAT mode
+        prompt_content = _build_decomposition_prompt(
+            decomposer_prompt,
+            project_name,
+            sections,
+            uat_mode
+        )
+        prompt_file = prompts_dir / "task-decomposition.md"
+        write_file(prompt_file, prompt_content)
+
+        print(print_dim("Invoking task-decomposer agent..."))
+        print()
+
+        # Use longer timeout for monolithic call
+        single_timeout = 1800 if not uat_mode else 600
+
+        try:
+            result = invoke(
+                prompt=prompt_content,
+                output_file=raw_tasks_file,
+                description="Task decomposition",
+                model="opus",
+                timeout=single_timeout
+            )
+
+            if result and raw_tasks_file.exists():
+                try:
+                    tasks_data = json.loads(read_file(raw_tasks_file))
+                    task_count = len(tasks_data.get("tasks", []))
+                    print(print_green(f"✓ Generated {task_count} tasks"))
+                except json.JSONDecodeError:
+                    print(print_yellow("⚠ Invalid JSON output - attempting repair"))
+                    if not _repair_json(raw_tasks_file):
+                        _create_template_tasks(raw_tasks_file)
+            else:
+                print(print_yellow("⚠ Task decomposition failed - creating template"))
+                _create_template_tasks(raw_tasks_file)
+        except Exception as e:
+            print(print_yellow(f"⚠ Task decomposition error: {e}"))
+            _create_template_tasks(raw_tasks_file)
 
     print()
 
@@ -220,32 +308,129 @@ def _extract_prd_sections(content: str) -> Dict[str, str]:
     """Extract relevant sections from PRD."""
     sections = {}
 
-    # Extract Section 3: Feature Requirements
-    match = re.search(r'^## 3\. Feature Requirements(.+?)^## 4\.', content, re.MULTILINE | re.DOTALL)
+    # Extract Section 3: Feature Requirements — full content for accurate decomposition
+    # Support both "# 3." and "## 3." heading levels
+    match = re.search(r'^#{1,2} 3\. Feature Requirements(.+?)^#{1,2} 4\.', content, re.MULTILINE | re.DOTALL)
     if match:
-        sections["features"] = match.group(1).strip()[:5000]  # Limit size
+        sections["features"] = match.group(1).strip()
 
     # Extract Section 4: Non-Functional Requirements
-    match = re.search(r'^## 4\. Non-Functional(.+?)^## 5\.', content, re.MULTILINE | re.DOTALL)
+    match = re.search(r'^#{1,2} 4\. Non-Functional(.+?)^#{1,2} 5\.', content, re.MULTILINE | re.DOTALL)
     if match:
-        sections["nfrs"] = match.group(1).strip()[:2000]
+        sections["nfrs"] = match.group(1).strip()
 
     # Extract Section 5: Logical Dependency Chain
-    match = re.search(r'^## 5\. Logical Dependency(.+?)^## 6\.', content, re.MULTILINE | re.DOTALL)
+    match = re.search(r'^#{1,2} 5\. Logical Dependency(.+?)^#{1,2} 6\.', content, re.MULTILINE | re.DOTALL)
     if match:
-        sections["dependencies"] = match.group(1).strip()[:3000]
+        sections["dependencies"] = match.group(1).strip()
 
     # Extract Section 6: Development Phases
-    match = re.search(r'^## 6\. Development Phases(.+?)^## 7\.', content, re.MULTILINE | re.DOTALL)
+    match = re.search(r'^#{1,2} 6\. Development Phases(.+?)^#{1,2} 7\.', content, re.MULTILINE | re.DOTALL)
     if match:
-        sections["phases"] = match.group(1).strip()[:2000]
+        sections["phases"] = match.group(1).strip()
 
-    # Extract Tech Stack
-    match = re.search(r'### 2\.1 Tech Stack(.+?)### 2\.2', content, re.MULTILINE | re.DOTALL)
+    # Extract Tech Stack — support ## 2.1 and ### 2.1 heading levels
+    match = re.search(r'^#{2,3} 2\.1 Tech Stack(.+?)^#{2,3} 2\.2', content, re.MULTILINE | re.DOTALL)
     if match:
-        sections["tech_stack"] = match.group(1).strip()[:1000]
+        sections["tech_stack"] = match.group(1).strip()
 
     return sections
+
+
+def _split_into_features(features_text: str) -> List[tuple]:
+    """
+    Split features section into individual features by sub-headings.
+
+    Supports heading formats:
+      ### F1: Title, ### F2: Title
+      ### 3.1 Title, ### 3.2 Title
+      ## F1: Title, ## F2: Title
+      #### F1: Title
+
+    Returns:
+        List of (feature_id, feature_content) tuples.
+        If no sub-headings found, returns the whole section as one chunk.
+    """
+    # Match feature sub-headings: ### F1:, ## 3.1, #### F1:, ### Feature 1, etc.
+    pattern = r'^(#{2,4})\s+(F\d+[:\s]|3\.\d+\s|\d+\.\d+\s|Feature\s+\d+)'
+    splits = list(re.finditer(pattern, features_text, re.MULTILINE))
+
+    if len(splits) < 2:
+        # Can't split meaningfully — return whole section
+        return [("all", features_text)]
+
+    features = []
+    for i, m in enumerate(splits):
+        start = m.start()
+        end = splits[i + 1].start() if i + 1 < len(splits) else len(features_text)
+        chunk = features_text[start:end].strip()
+
+        # Extract feature ID from the heading
+        heading_line = chunk.split("\n", 1)[0]
+        # Try to pull F1, F2, 3.1, etc. from the heading
+        fid_match = re.search(r'(F\d+|3\.\d+|\d+\.\d+)', heading_line)
+        feature_id = fid_match.group(1) if fid_match else f"feature-{i+1}"
+
+        features.append((feature_id, chunk))
+
+    return features
+
+
+def _merge_feature_tasks(
+    feature_results: List[tuple],
+    project_name: str
+) -> Dict[str, Any]:
+    """
+    Merge per-feature task lists into one unified task set.
+
+    Args:
+        feature_results: List of (feature_id, tasks_data_dict) tuples
+        project_name: Project name for meta
+
+    Returns:
+        Merged tasks dict with re-numbered IDs and remapped dependencies.
+    """
+    id_remap = {}  # (feature_idx, old_id) -> new_id
+    next_id = 1
+
+    # First pass: assign new sequential IDs and build remap table
+    for feat_idx, (feature_id, tasks_data) in enumerate(feature_results):
+        tasks = tasks_data.get("tasks", [])
+        for task in tasks:
+            old_id = task.get("id", 0)
+            id_remap[(feat_idx, old_id)] = next_id
+            task["id"] = next_id
+            # Tag with source feature
+            task.setdefault("tags", [])
+            if feature_id not in task["tags"]:
+                task["tags"].append(feature_id)
+            next_id += 1
+
+    # Second pass: remap dependencies and collect tasks
+    all_tasks = []
+    for feat_idx, (feature_id, tasks_data) in enumerate(feature_results):
+        tasks = tasks_data.get("tasks", [])
+        for task in tasks:
+            old_deps = task.get("dependencies", [])
+            new_deps = []
+            for dep_id in old_deps:
+                # Try same-feature remap first
+                new_dep = id_remap.get((feat_idx, dep_id))
+                if new_dep is not None:
+                    new_deps.append(new_dep)
+                # else: cross-feature dep — leave for task 304 dependency mapper
+            task["dependencies"] = new_deps
+            all_tasks.append(task)
+
+    return {
+        "meta": {
+            "project_name": project_name,
+            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "source": "prd-sectional",
+            "version": "1.0"
+        },
+        "tasks": all_tasks
+    }
 
 
 def _extract_project_name(content: str) -> str:
@@ -260,7 +445,8 @@ def _build_decomposition_prompt(
     agent_prompt: str,
     project_name: str,
     sections: Dict[str, str],
-    uat_mode: bool
+    uat_mode: bool,
+    feature: Optional[tuple] = None
 ) -> str:
     """Build the task decomposition prompt."""
     if agent_prompt:
@@ -280,12 +466,24 @@ def _build_decomposition_prompt(
         prompt += "- 1 testing task\n"
         prompt += "- 1 deployment task\n\n"
         prompt += "Keep it minimal for pipeline testing.\n\n"
+    elif feature:
+        # Per-feature mode: smaller, focused output
+        feature_id, feature_content = feature
+        prompt += "## Token Budget Warning\n\n"
+        prompt += f"You are decomposing **one feature ({feature_id})** from the PRD.\n"
+        prompt += "Generate 3-15 tasks for this feature only. Keep descriptions concise (1-2 sentences). "
+        prompt += "Acceptance criteria should be bullet points, not paragraphs.\n"
+        prompt += "Start task IDs from 1. Dependencies reference IDs within this feature set only.\n\n"
     else:
         prompt += "## Token Budget Warning\n\n"
         prompt += "Your output should be 50-150 tasks typically. Keep descriptions concise (1-2 sentences). "
         prompt += "Acceptance criteria should be bullet points, not paragraphs.\n\n"
 
     prompt += f"## Project Context\n\nProject Name: {project_name}\n\n"
+
+    # Add corpus analysis for technical context if available
+    if "corpus_analysis" in sections:
+        prompt += f"### Technical Landscape (Corpus Analysis)\n{sections['corpus_analysis']}\n\n"
 
     prompt += """## Task Generation Rules
 
@@ -358,14 +556,29 @@ Start with `{` and end with `}`.
 
     if "tech_stack" in sections:
         prompt += f"### Tech Stack\n{sections['tech_stack']}\n\n"
-    if "features" in sections:
-        prompt += f"### Feature Requirements (Section 3)\n{sections['features']}\n\n"
-    if "nfrs" in sections:
-        prompt += f"### Non-Functional Requirements (Section 4)\n{sections['nfrs']}\n\n"
-    if "dependencies" in sections:
-        prompt += f"### Logical Dependency Chain (Section 5)\n{sections['dependencies']}\n\n"
-    if "phases" in sections:
-        prompt += f"### Development Phases (Section 6)\n{sections['phases']}\n\n"
+
+    if feature:
+        # Per-feature mode: only include this feature's content
+        feature_id, feature_content = feature
+        prompt += f"### Feature: {feature_id}\n{feature_content}\n\n"
+        # Include trimmed NFRs for context (first 2000 chars)
+        if "nfrs" in sections:
+            nfrs = sections["nfrs"]
+            if len(nfrs) > 2000:
+                nfrs = nfrs[:2000] + "\n\n... (truncated)"
+            prompt += f"### Non-Functional Requirements (summary)\n{nfrs}\n\n"
+        if "dependencies" in sections:
+            prompt += f"### Logical Dependency Chain (Section 5)\n{sections['dependencies']}\n\n"
+    else:
+        # Full mode: include all sections
+        if "features" in sections:
+            prompt += f"### Feature Requirements (Section 3)\n{sections['features']}\n\n"
+        if "nfrs" in sections:
+            prompt += f"### Non-Functional Requirements (Section 4)\n{sections['nfrs']}\n\n"
+        if "dependencies" in sections:
+            prompt += f"### Logical Dependency Chain (Section 5)\n{sections['dependencies']}\n\n"
+        if "phases" in sections:
+            prompt += f"### Development Phases (Section 6)\n{sections['phases']}\n\n"
 
     return prompt
 

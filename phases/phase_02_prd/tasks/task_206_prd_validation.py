@@ -32,6 +32,7 @@ from core.utils.cli_ui import (
     print_red, print_dim, prompt_user, clear_input_buffer
 )
 from core.utils.file_ops import ensure_dir, read_file, write_file
+from phases.phase_02_prd.tasks.task_206b_prd_revision import prd_revision_flow
 
 
 # Expected PRD sections
@@ -54,7 +55,7 @@ EXPECTED_SECTIONS = [
 ]
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 206: PRD Validation.
 
@@ -153,9 +154,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
                 print(print_green("✓ PRD approved with warnings"))
                 return True
             else:
-                # TODO: Implement revision flow (task 206b)
-                print(print_yellow("  Revision flow not yet implemented"))
-                return True
+                revised = prd_revision_flow(validation_file, prd_file, prompts_dir)
+                if revised:
+                    continue  # re-validate
+                return True  # user discarded revision, approve anyway
         else:
             print()
             print(print_red("  ✗ PRD validation failed with critical issues"))
@@ -170,9 +172,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             if choice == "abort":
                 return False
             else:
-                # TODO: Implement revision flow (task 206b)
-                print(print_yellow("  Revision flow not yet implemented"))
-                return False
+                revised = prd_revision_flow(validation_file, prd_file, prompts_dir)
+                if revised:
+                    continue  # re-validate
+                return False  # user discarded revision, abort
 
     print(print_red("  ✗ Maximum validation iterations reached"))
     return False
@@ -400,20 +403,13 @@ def build_validation_prompt(prd_content: str) -> str:
     Returns:
         Prompt string
     """
-    # Abbreviate PRD if too long
-    lines = prd_content.split('\n')
-    if len(lines) > 500:
-        abbreviated = '\n'.join(lines[:300]) + '\n\n[... middle sections omitted ...]\n\n' + '\n'.join(lines[-200:])
-    else:
-        abbreviated = prd_content
-
     prompt = f"""# Task: Validate PRD Quality
 
 You are an independent PRD quality auditor validating this Product Requirements Document.
 
 ## PRD Content
 
-{abbreviated}
+{prd_content}
 
 ## Validation Criteria
 

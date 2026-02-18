@@ -32,9 +32,11 @@ from core.utils.cli_ui import (
     print_red, print_dim, prompt_user, clear_input_buffer
 )
 from core.utils.file_ops import ensure_dir, read_file, write_file
+from phases.phase_02_prd.tasks.task_206b_prd_revision import prd_revision_flow, invoke_revision_agent
+from phases.phase_02_prd.tasks.task_206_prd_validation import validate_content
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 207: PRD Approval.
 
@@ -49,6 +51,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     prd_file = atomic_root.parent / "docs" / "prd" / "PRD.md"
     validation_file = output_dir / "prd-validation.json"
     approval_file = output_dir / "prd-approved.json"
+    prompts_dir = output_dir / "prompts"
+    ensure_dir(prompts_dir)
 
     print()
     print(print_yellow("┌─────────────────────────────────────────────────────────┐"))
@@ -136,24 +140,22 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             print(print_dim("  Enter custom improvement request:"))
             custom_request = prompt_user("  > ").strip()
             if custom_request:
-                print(print_yellow("  Custom refinement not yet fully implemented"))
-                print(print_dim("  (Would invoke revision agent with custom request)"))
+                revised = invoke_revision_agent(prd_file, prompts_dir, custom_request)
+                if revised:
+                    validation_result = validate_content(prd_file, prompts_dir, atomic_root, output_dir)
+                    if validation_result:
+                        write_file(validation_file, json.dumps(validation_result, indent=2))
+                        show_validation_scores(validation_file)
             print()
 
         elif choice in ["refine", "r"]:
-            # Refine
-            print(print_yellow("  Guided refinement not yet fully implemented"))
-            print(print_dim("  (Would walk through each recommendation)"))
-            print()
-
-            # For now, just ask if they want to approve anyway
-            approve_anyway = prompt_user("  Approve PRD anyway? (y/n): ").strip().lower()
-            if approve_anyway == "y":
-                approver = prompt_user("  Your name (for approval record): ").strip() or "User"
-                approve_prd(approval_file, prd_file, approver)
-                print()
-                print(print_green("✓ PRD approved"))
-                return True
+            # Guided refinement via 206b Q&A flow
+            revised = prd_revision_flow(validation_file, prd_file, prompts_dir)
+            if revised:
+                validation_result = validate_content(prd_file, prompts_dir, atomic_root, output_dir)
+                if validation_result:
+                    write_file(validation_file, json.dumps(validation_result, indent=2))
+                    show_validation_scores(validation_file)
 
         else:
             print(print_red("  Invalid choice"))

@@ -4,27 +4,12 @@
 # =============================================================================
 # Use for: Laser ranging systems for defense applications
 # Focus: Precision distance measurement, target designation, guided munition support
-# Model: sonnet (well-established laser physics and ranging techniques)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: laser-ranging-expert
 description: Masters laser ranging systems for defense applications, specializing in precision distance measurement, target designation, and guided munition support with advanced laser technologies and atmospheric compensation
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
 tier: expert
-
-model_selection:
-  priorities: [math, reasoning, quality]
-  minimum_tier: medium
-  profiles:
-    default: math_reasoning
-    batch: budget
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

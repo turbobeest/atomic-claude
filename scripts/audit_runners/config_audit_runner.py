@@ -85,7 +85,7 @@ class ConfigAuditRunner:
 
         self.test_dir = self.atomic_root / "test"
         self.reports_dir = self.test_dir / "reports"
-        self.outputs_dir = self.atomic_root / ".outputs" / "0-setup"
+        self.outputs_dir = self.atomic_root.parent / ".outputs" / "0-setup"
         self.init_dir = self.atomic_root / "initialization"
 
         # Ensure directories exist

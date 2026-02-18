@@ -1,19 +1,6 @@
 ---
 name: focused-agent-editor
 description: Creates and revises focused-tier agent definitions (~500 tokens, 5-10 instructions). Invoke for bounded, well-defined agent roles.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [code_generation, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    batch: budget
 tier: focused
 
 tools:

@@ -4,26 +4,11 @@
 # =============================================================================
 # Use for: Type-safe applications, enterprise-scale development, advanced type systems
 # Domain: Application languages, static typing, developer tooling
-# Model: sonnet (use opus for complex type-level programming or novel generics)
 # Instructions: 18 total
 # =============================================================================
 
 name: typescript-pro
 description: TypeScript specialist for advanced type systems, strict type safety, and enterprise-scale applications
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 tier: expert
 
 # -----------------------------------------------------------------------------

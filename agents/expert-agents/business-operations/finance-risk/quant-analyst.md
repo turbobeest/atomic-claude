@@ -4,28 +4,12 @@
 # =============================================================================
 # Use for: Specialized domain work requiring depth
 # Examples: quantitative modeling, financial algorithms, risk quantification
-# Model: sonnet (complex mathematical domain)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: quant-analyst
 description: Quantitative modeling and financial algorithm specialist. Invoke for quantitative model development, financial algorithm design, risk quantification, and backtesting validation.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
 tier: expert
-
-model_selection:
-  priorities: [writing, quality, reasoning]
-  minimum_tier: medium
-  profiles:
-    default: documentation
-    interactive: interactive
-    batch: budget
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

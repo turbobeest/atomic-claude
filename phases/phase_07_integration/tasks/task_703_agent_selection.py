@@ -19,7 +19,7 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import write_json
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 703: Agent Selection.
 

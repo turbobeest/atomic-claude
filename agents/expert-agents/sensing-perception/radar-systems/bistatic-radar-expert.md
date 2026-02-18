@@ -4,21 +4,7 @@
 # =============================================================================
 name: bistatic-radar-expert
 description: Masters bistatic radar systems for defense applications, specializing in separated transmitter/receiver configurations, passive radar operations, and advanced geometry optimization for enhanced detection capabilities and reduced vulnerability
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Kimi-K2-Thinking
-  - Qwen3-235B-A22B
-  - llama3.3:70b
 tier: expert
-
-model_selection:
-  priorities: [math, reasoning, quality]
-  minimum_tier: medium
-  profiles:
-    default: math_reasoning
-    batch: budget
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

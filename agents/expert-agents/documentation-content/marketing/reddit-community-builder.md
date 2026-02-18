@@ -1,20 +1,6 @@
 ---
 name: reddit-community-builder
 description: Develops Reddit engagement strategies including subreddit research, authentic community participation, AMA coordination, and karma-positive brand building
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [reasoning, quality, writing]
-  minimum_tier: medium
-  profiles:
-    default: documentation
-    interactive: interactive
-    batch: budget
 tier: expert
 
 tools:

@@ -4,19 +4,6 @@
 # =============================================================================
 name: security-specifier
 description: Translates security requirements into specification-level constraints. Defines authentication contracts, encryption preconditions, audit logging postconditions, and data classification rules that become testable security acceptance criteria.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Kimi-K2-Thinking
-  - Qwen3-235B-A22B
-  - llama3.3:70b
-model_selection:
-  priorities: [quality, reasoning, code_debugging]
-  minimum_tier: large
-  profiles:
-    default: quality_critical
-    batch: batch
 tier: expert
 
 # -----------------------------------------------------------------------------

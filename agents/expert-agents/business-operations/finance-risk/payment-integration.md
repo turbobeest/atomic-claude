@@ -4,28 +4,12 @@
 # =============================================================================
 # Use for: Specialized domain work requiring depth
 # Examples: payment security, PCI compliance, transaction processing
-# Model: sonnet (security-critical domain)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: payment-integration
 description: Secure payment gateway integration specialist. Invoke for payment gateway integration, PCI DSS compliance, transaction security, and secure payment processing implementation.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
 tier: expert
-
-model_selection:
-  priorities: [writing, quality, reasoning]
-  minimum_tier: medium
-  profiles:
-    default: documentation
-    interactive: interactive
-    batch: budget
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

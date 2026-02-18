@@ -18,8 +18,59 @@ from core.features.flags import Feature, get_feature_flags
 # Default thinking budget (can be overridden via project config)
 _DEFAULT_THINKING_BUDGET = 10_000
 
+# Tier names that need resolution to provider-specific model IDs
+_TIER_NAMES = frozenset({"opus", "sonnet", "haiku"})
+
 # Lazy singleton router
 _default_router = None
+
+# Cached model_ids from config/models.json (loaded once)
+_model_ids_cache: Optional[Dict[str, Dict[str, str]]] = None
+
+
+def _load_model_ids() -> Dict[str, Dict[str, str]]:
+    """Load model_ids from config/models.json (cached)."""
+    global _model_ids_cache
+    if _model_ids_cache is not None:
+        return _model_ids_cache
+
+    config_path = Path(__file__).parent.parent.parent / "config" / "models.json"
+    try:
+        data = json.loads(config_path.read_text())
+        _model_ids_cache = data.get("model_ids", {})
+    except Exception:
+        _model_ids_cache = {}
+
+    return _model_ids_cache
+
+
+def _resolve_model_for_provider(model: str, provider: BaseLLMProvider) -> str:
+    """
+    Resolve a tier name (opus/sonnet/haiku) to a provider-specific model ID.
+
+    Uses config/models.json as the single source of truth.
+    If the model is already a full model ID (not a tier name), returns it as-is.
+
+    Args:
+        model: Tier name or full model ID
+        provider: Active provider instance
+
+    Returns:
+        Provider-specific model ID
+    """
+    if model not in _TIER_NAMES:
+        return model  # Already a full model ID, pass through
+
+    provider_name = getattr(provider, "provider_name", "")
+    model_ids = _load_model_ids()
+
+    # Look up provider-specific model ID
+    provider_models = model_ids.get(provider_name, {})
+    if model in provider_models:
+        return provider_models[model]
+
+    # Fallback: return tier name and let the provider's own _resolve_model handle it
+    return model
 
 
 def _get_default_router():
@@ -42,7 +93,20 @@ def _get_default_router():
         provider_name = "api"
 
     # Register provider based on config
-    if provider_name in ("api", "claude-code", "max"):
+    if provider_name == "claude-code":
+        try:
+            from .claude_code import ClaudeCodeProvider
+            import shutil
+            if shutil.which("claude"):
+                provider = ClaudeCodeProvider(config={})
+                _default_router.register_provider(
+                    "claude-code", provider,
+                    [ModelRole.PRIMARY, ModelRole.FAST, ModelRole.HEAVYWEIGHT]
+                )
+        except Exception as e:
+            print(f"  [llm] Claude Code provider init warning: {e}")
+
+    elif provider_name in ("api", "max"):
         try:
             from .anthropic import AnthropicProvider
             api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -77,21 +141,119 @@ def _get_default_router():
         except Exception as e:
             print(f"  [llm] Ollama provider init warning: {e}")
 
+    # Fallback: if no provider registered yet but claude CLI is available, use it
+    if not _default_router.get_provider():
+        try:
+            import shutil
+            if shutil.which("claude"):
+                from .claude_code import ClaudeCodeProvider
+                provider = ClaudeCodeProvider(config={})
+                _default_router.register_provider(
+                    "claude-code", provider,
+                    [ModelRole.PRIMARY, ModelRole.FAST, ModelRole.HEAVYWEIGHT]
+                )
+        except Exception:
+            pass
+
     return _default_router
 
 
+# Per-million-token pricing (USD) by model tier.
+# Source: https://platform.claude.com/docs/en/about-claude/pricing
+_MODEL_PRICING = {
+    # Opus 4.6 / 4.5
+    "opus": {"input": 5.0, "output": 25.0},
+    # Sonnet 4.5 / 4
+    "sonnet": {"input": 3.0, "output": 15.0},
+    # Haiku 4.5
+    "haiku": {"input": 1.0, "output": 5.0},
+}
+
+# Providers where per-token cost is not applicable
+_NO_COST_PROVIDERS = {"claude-code", "ollama"}
+
+
+def _resolve_tier(model_id: str) -> str | None:
+    """Map a model ID string to a pricing tier."""
+    if not model_id:
+        return None
+    m = model_id.lower()
+    if "opus" in m:
+        return "opus"
+    if "sonnet" in m:
+        return "sonnet"
+    if "haiku" in m:
+        return "haiku"
+    return None
+
+
 def _track_tokens(response):
-    """Update session token tracking file."""
+    """Update session token tracking file with usage and cost."""
     try:
         tokens_file = Path(".state/session-tokens.json")
         if tokens_file.exists():
             data = json.loads(tokens_file.read_text())
         else:
-            data = {"total_input_tokens": 0, "total_output_tokens": 0,
-                    "estimated_cost_usd": 0, "by_provider": {}, "by_model": {}}
+            data = {
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "estimated_cost_usd": 0,
+                "cost_available": True,
+                "by_provider": {},
+                "by_model": {},
+            }
+
+        # Extract usage
+        input_toks = 0
+        output_toks = 0
         if hasattr(response, 'usage'):
-            data["total_input_tokens"] += response.usage.input_tokens
-            data["total_output_tokens"] += response.usage.output_tokens
+            usage = response.usage
+            input_toks = getattr(usage, 'input_tokens', 0) or 0
+            output_toks = getattr(usage, 'output_tokens', 0) or 0
+
+        if input_toks == 0 and output_toks == 0:
+            return
+
+        data["total_input_tokens"] += input_toks
+        data["total_output_tokens"] += output_toks
+
+        # Determine provider and model
+        provider_name = getattr(response, 'provider', None) or "unknown"
+        model_id = getattr(response, 'model', None) or "unknown"
+
+        # Track by_provider
+        if provider_name not in data["by_provider"]:
+            data["by_provider"][provider_name] = {
+                "input_tokens": 0, "output_tokens": 0, "cost_usd": 0,
+            }
+        prov = data["by_provider"][provider_name]
+        prov["input_tokens"] += input_toks
+        prov["output_tokens"] += output_toks
+
+        # Track by_model
+        if model_id not in data["by_model"]:
+            data["by_model"][model_id] = {
+                "input_tokens": 0, "output_tokens": 0, "cost_usd": 0,
+            }
+        mdl = data["by_model"][model_id]
+        mdl["input_tokens"] += input_toks
+        mdl["output_tokens"] += output_toks
+
+        # Calculate cost (skip for subscription/local providers)
+        if provider_name in _NO_COST_PROVIDERS:
+            data["cost_available"] = False
+        else:
+            tier = _resolve_tier(model_id)
+            if tier and tier in _MODEL_PRICING:
+                pricing = _MODEL_PRICING[tier]
+                call_cost = (
+                    (input_toks / 1_000_000) * pricing["input"]
+                    + (output_toks / 1_000_000) * pricing["output"]
+                )
+                data["estimated_cost_usd"] += call_cost
+                prov["cost_usd"] += call_cost
+                mdl["cost_usd"] += call_cost
+
         tokens_file.parent.mkdir(parents=True, exist_ok=True)
         tokens_file.write_text(json.dumps(data, indent=2))
     except Exception:
@@ -332,11 +494,11 @@ def invoke_llm(
             "No LLM provider available. Set ANTHROPIC_API_KEY or configure a provider."
         )
 
-    # --- Invoke ---
+    # --- Resolve model tier to provider-specific model ID ---
     invoke_kwargs = {k: v for k, v in kwargs.items()
                      if k not in ('prompt_file', 'output_file', 'description')}
     if model is not None:
-        invoke_kwargs['model'] = model
+        invoke_kwargs['model'] = _resolve_model_for_provider(model, provider)
 
     invoker = FeatureAwareLLMInvoker(provider)
     response = invoker.invoke(actual_prompt, **invoke_kwargs)
@@ -382,6 +544,11 @@ def stream_llm(
         raise RuntimeError(
             "No LLM provider available. Set ANTHROPIC_API_KEY or configure a provider."
         )
+
+    # Resolve model tier if present in kwargs
+    if "model" in kwargs:
+        kwargs = dict(kwargs)
+        kwargs["model"] = _resolve_model_for_provider(kwargs["model"], provider)
 
     invoker = FeatureAwareLLMInvoker(provider)
     yield from invoker.stream(prompt, **kwargs)

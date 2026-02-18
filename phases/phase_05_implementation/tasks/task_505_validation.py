@@ -82,7 +82,7 @@ def get_validation_metrics(
     return coverage, test_quality, security, tdd_completion
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 505: Final Validation.
 
@@ -94,8 +94,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
-    testing_dir = atomic_root / ".claude" / "testing"
-    tasks_file = atomic_root / ".taskmaster" / "tasks" / "tasks.json"
+    project_root = atomic_root.parent
+    testing_dir = project_root / ".claude" / "testing"
+    tasks_file = project_root / ".taskmaster" / "tasks" / "tasks.json"
     validation_file = testing_dir / "validation-report.json"
     setup_file = output_dir / "tdd-setup.json"
 

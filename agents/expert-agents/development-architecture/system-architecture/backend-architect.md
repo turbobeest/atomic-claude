@@ -4,27 +4,13 @@
 # =============================================================================
 # Use for: Specialized domain work requiring depth
 # Examples: security-auditor, rust-pro, kubernetes-expert, database-optimizer
-# Model: sonnet (default) or opus (complex domains, high-stakes decisions)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: backend-architect
 description: Designs RESTful APIs, microservice boundaries, and database schemas with focus on performance, scalability, and integration efficiency
-model: opus  # Well-defined backend patterns, use opus for novel architectures
 
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
 tier: expert
-
-model_selection:
-  priorities: [quality, reasoning, code_debugging]
-  minimum_tier: large
-  profiles:
-    default: quality_critical
-    batch: batch
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

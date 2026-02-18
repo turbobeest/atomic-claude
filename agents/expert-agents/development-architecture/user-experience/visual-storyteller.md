@@ -3,27 +3,13 @@
 # EXPERT TIER TEMPLATE (~1500 tokens)
 # =============================================================================
 # Use for: Visual narrative design, presentation design, data visualization
-# Model: sonnet (default for visual communication and storytelling)
 # Instructions: 18 maximum
 # =============================================================================
 
 name: visual-storyteller
 description: Master of visual narrative design specializing in presentation design, data visualization, infographics, slide decks, pitch materials, and visual communication for compelling story-driven content
-model: opus
 
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
 tier: expert
-
-model_selection:
-  priorities: [quality, reasoning, creativity]
-  minimum_tier: large
-  profiles:
-    default: quality_critical
-    batch: batch
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

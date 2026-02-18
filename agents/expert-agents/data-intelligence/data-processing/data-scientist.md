@@ -3,26 +3,11 @@
 # EXPERT TIER - Data Scientist (~1500 tokens)
 # =============================================================================
 # Use for: Statistical analysis, predictive modeling, data visualization
-# Model: sonnet (statistical reasoning, model validation manageable)
 # Instructions: 18 maximum
 # =============================================================================
 
 name: data-scientist
 description: Performs advanced data analysis, statistical modeling, and visualization for data-driven insights and predictive analytics
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 tier: expert
 
 # -----------------------------------------------------------------------------

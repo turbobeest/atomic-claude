@@ -315,7 +315,7 @@ class PhaseValidator:
                 continue
 
             closeout_file = (
-                self.atomic_root / ".outputs" /
+                self.atomic_root.parent / ".outputs" /
                 dep_metadata.phase_id / "closeout.json"
             )
 
@@ -329,7 +329,7 @@ class PhaseValidator:
 
     def _check_phase_0_complete(self) -> bool:
         """Check if Phase 0 is complete."""
-        phase_0_closeout = self.atomic_root / ".outputs" / "0-setup" / "closeout.json"
+        phase_0_closeout = self.atomic_root.parent / ".outputs" / "0-setup" / "closeout.json"
         return phase_0_closeout.exists()
 
 
@@ -390,13 +390,13 @@ class PhaseTransition:
         print("="*80)
         print(f"\nNext: Phase {next_phase} - {next_metadata.phase_name}")
         print("\nOptions:")
-        print("  [c] Continue to next phase")
+        print("  [C] Continue to next phase (default)")
         print("  [p] Pause (resume later)")
         print("  [q] Quit")
         print()
 
         while True:
-            choice = input("Choice (c/p/q): ").strip().lower()
+            choice = input("Choice (C/p/q): ").strip().lower()
 
             if choice in ('c', 'continue', ''):
                 return next_phase
@@ -494,6 +494,15 @@ class PhasePipeline:
 
         metadata = PHASE_REGISTRY[phase_num]
 
+        # Check if phase is already complete (all tasks done + closeout exists)
+        # If so, auto-advance instead of running the full orchestrator
+        if self._is_phase_already_complete(metadata) and not resume_at:
+            print(f"\n  ✓ Phase {phase_num} ({metadata.phase_name}) already complete, advancing...")
+            # Skip directly to transition handling
+            return self._handle_phase_transition(
+                phase_num, auto_chain, transition_mode
+            )
+
         # Display phase header
         self._display_phase_header(metadata)
 
@@ -525,7 +534,7 @@ class PhasePipeline:
                 phase=metadata.phase_num,
                 phase_name=metadata.phase_name,
                 summary=f"Phase {metadata.phase_num} ({metadata.phase_name}) completed",
-                artifacts=[str(self.atomic_root / ".outputs" / metadata.phase_id / "closeout.json")],
+                artifacts=[str(self.atomic_root.parent / ".outputs" / metadata.phase_id / "closeout.json")],
                 state_snapshot={"phase_id": metadata.phase_id, "completed_at": datetime.now().isoformat()}
             )
         except Exception as e:
@@ -538,6 +547,26 @@ class PhasePipeline:
         print(f"\n✅ Phase {phase_num} complete!")
 
         # Handle phase transition
+        return self._handle_phase_transition(
+            phase_num, auto_chain, transition_mode
+        )
+
+    def _is_phase_already_complete(self, metadata: PhaseMetadata) -> bool:
+        """Check if a phase is already fully complete (status + closeout)."""
+        phase_state = self.state._state.get('phases', {}).get(metadata.phase_id, {})
+        if phase_state.get('status') != 'completed':
+            return False
+        # Also verify closeout file exists
+        closeout_file = self.atomic_root.parent / ".outputs" / metadata.phase_id / "closeout.json"
+        return closeout_file.exists()
+
+    def _handle_phase_transition(
+        self,
+        phase_num: int,
+        auto_chain: bool,
+        transition_mode: TransitionMode
+    ) -> bool:
+        """Handle transition to the next phase after completion."""
         if auto_chain or transition_mode != TransitionMode.MANUAL:
             next_phase_num = phase_num + 1
             # Check human gates — force PROMPT even if auto_chain
@@ -594,7 +623,7 @@ class PhasePipeline:
     def _ensure_closeout_exists(self, metadata: PhaseMetadata) -> None:
         """Ensure closeout file exists for phase."""
         closeout_file = (
-            self.atomic_root / ".outputs" / metadata.phase_id / "closeout.json"
+            self.atomic_root.parent / ".outputs" / metadata.phase_id / "closeout.json"
         )
 
         if closeout_file.exists():
@@ -765,7 +794,7 @@ class PhasePipeline:
 
             # Check completion
             closeout_file = (
-                self.atomic_root / ".outputs" / metadata.phase_id / "closeout.json"
+                self.atomic_root.parent / ".outputs" / metadata.phase_id / "closeout.json"
             )
 
             if closeout_file.exists():

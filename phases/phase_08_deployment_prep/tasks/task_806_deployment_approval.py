@@ -19,7 +19,7 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import read_json, write_json
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 806: Deployment Approval.
 
@@ -31,7 +31,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
-    deployment_dir = atomic_root / ".claude" / "deployment"
+    project_root = atomic_root.parent
+
+    deployment_dir = project_root / ".claude" / "deployment"
     artifacts_file = deployment_dir / "artifacts.json"
     approval_file = deployment_dir / "approval.json"
 

@@ -3,27 +3,13 @@
 # FOCUSED TIER TEMPLATE (~500 tokens)
 # =============================================================================
 # Use for: Frontend component implementation in SDLC pipeline
-# Model: sonnet (implementation work with accessibility/performance requirements)
 # Instructions: 10 maximum
 # =============================================================================
 
 name: frontend-developer
 description: Implements frontend components with accessibility compliance, responsive design, and performance optimization for SDLC pipeline
-model: opus
 
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
 tier: focused
-
-model_selection:
-  priorities: [quality, reasoning, code_debugging]
-  minimum_tier: large
-  profiles:
-    default: quality_critical
-    batch: batch
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

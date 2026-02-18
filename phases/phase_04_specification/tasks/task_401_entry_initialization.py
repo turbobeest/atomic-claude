@@ -36,7 +36,7 @@ PHASE_BANNER = r"""━━━━━━━━━━━━━━━━━━━━�
 """
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 401: Entry & Initialization.
 
@@ -48,9 +48,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
-    tasks_file = atomic_root / ".taskmaster" / "tasks" / "tasks.json"
-    packages_file = atomic_root / ".taskmaster" / "reports" / "work-packages.json"
-    specs_dir = atomic_root / ".claude" / "specs"
+    project_root = atomic_root.parent
+    tasks_file = project_root / ".taskmaster" / "tasks" / "tasks.json"
+    packages_file = project_root / ".taskmaster" / "reports" / "work-packages.json"
+    specs_dir = project_root / ".claude" / "specs"
     init_file = output_dir / "initialization.json"
 
     # Display phase banner
@@ -79,12 +80,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     verification_passed = True
 
     # Check Phase 3 closeout
-    phase3_closeout = atomic_root / ".claude" / "closeout" / "phase-03-closeout.json"
+    phase3_closeout = project_root / ".claude" / "closeout" / "phase-03-closeout.json"
     if phase3_closeout.exists():
         try:
             closeout_data = json.loads(read_file(phase3_closeout))
             status = closeout_data.get("status", "unknown")
-            if status == "complete":
+            if status == "complete" or "tasks_completed" in closeout_data:
                 print(print_green("  ✓ Phase 3 closeout verified"))
             else:
                 print(print_yellow(f"  ! Phase 3 closeout status: {status}"))

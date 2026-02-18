@@ -1,19 +1,6 @@
 ---
 name: prd-writer
 description: Phase 2 agent for SDLC pipelines. Authors formal Product Requirements Documents using the 15-section template (sections 0-14), ensuring compatibility with TaskMaster task decomposition and OpenSpec spec-driven development workflows.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Kimi-K2-Thinking
-  - Qwen3-235B-A22B
-  - llama3.3:70b
-model_selection:
-  priorities: [quality, reasoning, tool_use]
-  minimum_tier: large
-  profiles:
-    default: quality_critical
-    batch: batch
 tier: expert
 
 phase: 2

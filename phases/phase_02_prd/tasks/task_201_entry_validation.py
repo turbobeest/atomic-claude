@@ -5,8 +5,7 @@ Validates Phase 1 artifacts exist and loads context before proceeding.
 
 Required artifacts from Phase 1:
   - phase-01-closeout.json
-  - selected-approach.json
-  - direction-confirmed.json
+  - selected-approach.json (includes confirmed direction)
   - corpus.json (optional but recommended)
 """
 
@@ -29,7 +28,7 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 201: Entry Validation.
 
@@ -41,6 +40,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
+    project_root = atomic_root.parent
     phase1_dir = output_dir.parent / "1-discovery"
 
     # Display Phase 2 welcome banner
@@ -53,7 +53,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     print()
 
     # Validate artifacts
-    all_valid, missing = validate_phase1_artifacts(phase1_dir)
+    all_valid, missing = validate_phase1_artifacts(phase1_dir, project_root)
 
     # Handle missing artifacts
     if not all_valid:
@@ -114,12 +114,13 @@ def _show_phase_welcome() -> None:
     print()
 
 
-def validate_phase1_artifacts(phase1_dir: Path) -> Tuple[bool, List[str]]:
+def validate_phase1_artifacts(phase1_dir: Path, project_root: Path = None) -> Tuple[bool, List[str]]:
     """
     Validate Phase 1 artifacts exist.
 
     Args:
         phase1_dir: Path to Phase 1 output directory
+        project_root: Path to the project root (parent of atomic-claude)
 
     Returns:
         Tuple of (all_valid, missing_items)
@@ -130,20 +131,25 @@ def validate_phase1_artifacts(phase1_dir: Path) -> Tuple[bool, List[str]]:
     print("  " + print_cyan("Phase 1 Closeout:"))
 
     # Check Phase 1 closeout
-    closeout_file = find_closeout(phase1_dir)
+    closeout_file = find_closeout(phase1_dir, project_root)
     if closeout_file:
         try:
             with open(closeout_file, 'r') as f:
                 closeout_data = json.load(f)
-            status = closeout_data.get('status', 'unknown')
-            if status == 'complete':
-                print("    " + print_green("✓") + " Phase 1 closeout found (status: complete)")
+            # Accept multiple indicators of completion:
+            #   - "status": "complete" (task_109 format)
+            #   - "tasks_completed" key present (orchestrator format)
+            #   - valid JSON file exists (minimum bar)
+            status = closeout_data.get('status', '')
+            has_tasks = 'tasks_completed' in closeout_data
+            if status == 'complete' or has_tasks:
+                print("    " + print_green("✓") + " Phase 1 closeout found")
             else:
-                print("    " + print_yellow("!") + f" Phase 1 closeout (status: {status})")
-                all_valid = False
+                # File exists with valid JSON — warn but don't block
+                print("    " + print_yellow("!") + f" Phase 1 closeout found (status: {status or 'unset'})")
         except Exception as e:
             print("    " + print_red("✗") + f" Phase 1 closeout - error reading: {e}")
-            missing.append("Phase 1 closeout")
+            missing.append("Phase 1 closeout (unreadable)")
             all_valid = False
     else:
         print("    " + print_red("✗") + " Phase 1 closeout - NOT FOUND")
@@ -166,15 +172,6 @@ def validate_phase1_artifacts(phase1_dir: Path) -> Tuple[bool, List[str]]:
     else:
         print("    " + print_red("✗") + " selected-approach.json - NOT FOUND")
         missing.append("selected-approach.json")
-        all_valid = False
-
-    # Check direction confirmed
-    direction_file = phase1_dir / "direction-confirmed.json"
-    if direction_file.exists():
-        print("    " + print_green("✓") + " direction-confirmed.json")
-    else:
-        print("    " + print_red("✗") + " direction-confirmed.json - NOT FOUND")
-        missing.append("direction-confirmed.json")
         all_valid = False
 
     # Check corpus (optional)
@@ -202,12 +199,13 @@ def validate_phase1_artifacts(phase1_dir: Path) -> Tuple[bool, List[str]]:
     return all_valid, missing
 
 
-def find_closeout(phase_dir: Path) -> Optional[Path]:
+def find_closeout(phase_dir: Path, project_root: Path = None) -> Optional[Path]:
     """
     Find closeout file in phase directory.
 
     Args:
         phase_dir: Path to phase output directory
+        project_root: Path to the project root (parent of atomic-claude)
 
     Returns:
         Path to closeout file if found, None otherwise
@@ -224,8 +222,9 @@ def find_closeout(phase_dir: Path) -> Optional[Path]:
         if closeout_file.exists():
             return closeout_file
 
-    # Also check in .claude/closeout directory
-    closeout_dir = phase_dir.parent.parent / ".claude" / "closeout"
+    # Also check in .claude/closeout directory (in project root)
+    closeout_base = project_root if project_root else phase_dir.parent.parent.parent
+    closeout_dir = closeout_base / ".claude" / "closeout"
     for pattern in patterns:
         closeout_file = closeout_dir / pattern
         if closeout_file.exists():
@@ -254,33 +253,35 @@ def load_phase1_context(phase1_dir: Path) -> Dict[str, Any]:
         "corpus_materials": 0
     }
 
-    # Extract approach information
+    # Extract approach and direction information from selected-approach.json
+    # (Task 106 stores the confirmed direction here)
     approach_file = phase1_dir / "selected-approach.json"
     if approach_file.exists():
         try:
             with open(approach_file, 'r') as f:
                 approach_data = json.load(f)
+
+            # Extract approach name (varies by mode)
+            approach_name = (
+                approach_data.get('name')
+                or approach_data.get('direction', {}).get('summary', 'unnamed')
+            )
             context["approach"] = {
-                "name": approach_data.get('name', 'unnamed'),
-                "summary": approach_data.get('summary', ''),
-                "rationale": approach_data.get('rationale', '')
+                "name": approach_name,
+                "summary": approach_data.get('summary', approach_data.get('direction', {}).get('summary', '')),
+                "rationale": approach_data.get('rationale', approach_data.get('direction', {}).get('rationale', ''))
             }
-            print("    • Selected approach: " + approach_data.get('name', 'unnamed'))
+            print("    • Selected approach: " + approach_name)
+
+            # Extract direction/vision (stored in the same file)
+            direction = approach_data.get('direction', {})
+            if direction:
+                context["vision"] = direction.get('summary', '')
+                context["constraints"] = approach_data.get('open_items', [])
+                key_decisions = approach_data.get('key_decisions', [])
+                print(f"    • Direction confirmed ({len(key_decisions)} key decisions)")
         except Exception as e:
             print(print_yellow(f"    ⚠ Error loading approach: {e}"))
-
-    # Extract direction/vision information
-    direction_file = phase1_dir / "direction-confirmed.json"
-    if direction_file.exists():
-        try:
-            with open(direction_file, 'r') as f:
-                direction_data = json.load(f)
-            context["vision"] = direction_data.get('vision', '')
-            context["constraints"] = direction_data.get('constraints', [])
-            constraint_count = len(context["constraints"])
-            print(f"    • Vision confirmed with {constraint_count} constraints")
-        except Exception as e:
-            print(print_yellow(f"    ⚠ Error loading direction: {e}"))
 
     # Extract corpus information
     corpus_file = phase1_dir / "corpus.json"

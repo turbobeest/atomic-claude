@@ -22,7 +22,7 @@ from core.utils.file_ops import ensure_dir, read_file, write_file
 from core.llm import invoke_llm
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 604: Refinement.
 
@@ -34,7 +34,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
-    review_dir = atomic_root / ".claude" / "reviews"
+    project_root = atomic_root.parent
+    review_dir = project_root / ".claude" / "reviews"
     findings_file = review_dir / "findings.json"
     refinement_file = review_dir / "refinement-report.json"
     prompts_dir = output_dir / "prompts"
@@ -264,21 +265,60 @@ def _address_issues(findings_data: Dict, severity: str, fixes_dir: Path, atomic_
 
 def _apply_fix(finding: Dict, output_prefix: Path, atomic_root: Path) -> bool:
     """Apply a fix for a finding."""
-    # Build fix prompt
+    # Load actual source code around the finding's line number
+    source_context = ""
+    finding_file = finding.get('file', 'unknown')
+    finding_line = finding.get('line', 0)
+
+    if finding_file and finding_file != 'unknown':
+        # Try to find the file relative to project root
+        source_path = atomic_root / finding_file
+        if not source_path.exists():
+            source_path = atomic_root.parent / finding_file
+        if not source_path.exists():
+            # Try as-is (absolute or relative to cwd)
+            source_path = Path(finding_file)
+
+        if source_path.exists():
+            try:
+                source_lines = source_path.read_text().splitlines()
+                # Extract ~50 lines around the finding's line number
+                context_radius = 25
+                start_line = max(0, finding_line - context_radius - 1)
+                end_line = min(len(source_lines), finding_line + context_radius)
+                numbered_lines = []
+                for i, line in enumerate(source_lines[start_line:end_line], start=start_line + 1):
+                    marker = " >> " if i == finding_line else "    "
+                    numbered_lines.append(f"{marker}{i:4d} | {line}")
+                source_context = "\n".join(numbered_lines)
+            except Exception:
+                source_context = "(Unable to read source file)"
+
+    # Build fix prompt with actual code context
+    code_section = ""
+    if source_context:
+        code_section = f"""## Source Code (around line {finding_line})
+
+```
+{source_context}
+```
+
+"""
+
     prompt = f"""# Code Fix Request
 
 You are a code-refiner agent. Apply a minimal, targeted fix for the issue described below.
 
 ## Issue Details
 
-- **File**: {finding.get('file', 'unknown')}
-- **Line**: {finding.get('line', 0)}
+- **File**: {finding_file}
+- **Line**: {finding_line}
 - **Severity**: {finding.get('severity', 'major')}
 - **Category**: {finding.get('category', 'general')}
 - **Description**: {finding.get('description', 'No description')}
 - **Recommendation**: {finding.get('recommendation', 'Fix the issue')}
 
-## Fix Requirements
+{code_section}## Fix Requirements
 
 1. **Minimal Change**: Only fix the identified issue, nothing else
 2. **Preserve Behavior**: Don't change any unrelated functionality
@@ -292,7 +332,7 @@ Respond with ONLY valid JSON (no markdown wrapper):
 {{
   "can_fix": true,
   "fix_type": "code_change|config_change|documentation",
-  "file_path": "{finding.get('file', 'unknown')}",
+  "file_path": "{finding_file}",
   "explanation": "Brief explanation of what the fix does",
   "requires_manual_review": false,
   "manual_review_reason": "Why manual review is needed (if applicable)"

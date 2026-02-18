@@ -4,25 +4,11 @@
 # =============================================================================
 # Use for: Specialized domain work requiring depth
 # Examples: security-auditor, rust-pro, kubernetes-expert, database-optimizer
-# Model: opus (complex domains, high-stakes decisions)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: model-checker
 description: Performs formal model checking using tools like Kani, CBMC, and TLA+ for mathematical verification of program correctness and rigorous property validation
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Kimi-K2-Thinking
-  - Qwen3-235B-A22B
-  - llama3.3:70b
-model_selection:
-  priorities: [reasoning, quality, math]
-  minimum_tier: large
-  profiles:
-    default: quality_critical
-    batch: batch
 tier: expert
 
 # -----------------------------------------------------------------------------

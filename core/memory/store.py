@@ -137,6 +137,61 @@ class MemoryStore:
         # Save immediately (append-only log)
         self._save()
 
+        # Write phase-based markdown file for dashboard consumption
+        self._write_phase_file(entry)
+
+    def _write_phase_file(self, entry: MemoryEntry) -> None:
+        """
+        Write a markdown file for the entry into the phase-based directory
+        structure that the dashboard reads.
+
+        Files are written to .state/memory/phase-{N}/ and appended to
+        so that multiple memory entries for the same task accumulate.
+
+        Args:
+            entry: Memory entry to write
+        """
+        try:
+            # Extract phase number from entry.phase (e.g., "0-setup" -> "0")
+            phase_num = entry.phase.split('-')[0]
+
+            # Create phase directory if needed
+            phase_dir = self.memory_dir / f"phase-{phase_num}"
+            phase_dir.mkdir(parents=True, exist_ok=True)
+
+            # Determine filename based on task_id presence
+            if entry.task_id:
+                filename = f"task_{entry.task_id}.md"
+            else:
+                filename = f"phase_{phase_num}.md"
+
+            file_path = phase_dir / filename
+
+            # Format the markdown content
+            timestamp_str = entry.timestamp.isoformat() if hasattr(entry.timestamp, 'isoformat') else str(entry.timestamp)
+            entry_type_str = entry.entry_type.value if hasattr(entry.entry_type, 'value') else str(entry.entry_type)
+
+            lines = []
+            lines.append(f"## {entry_type_str} - {timestamp_str}")
+            lines.append("")
+            lines.append(entry.content)
+            lines.append("")
+            if entry.tags:
+                lines.append(f"Tags: {', '.join(entry.tags)}")
+                lines.append("")
+            lines.append("---")
+            lines.append("")
+
+            md_content = "\n".join(lines)
+
+            # Append to existing file (or create new)
+            with open(file_path, 'a', encoding='utf-8') as f:
+                f.write(md_content)
+
+        except Exception:
+            # Never block the main memory operation
+            pass
+
     def get(self, entry_id: str) -> Optional[MemoryEntry]:
         """
         Retrieve entry by ID.

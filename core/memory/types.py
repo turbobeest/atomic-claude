@@ -14,6 +14,7 @@ class MemoryEntryType(str, Enum):
     """Type of memory entry."""
     TASK_START = "task_start"
     TASK_END = "task_end"
+    TASK_PROGRESS = "task_progress"
     PHASE_CLOSEOUT = "phase_closeout"
     CHECKPOINT = "checkpoint"
     USER_NOTE = "user_note"

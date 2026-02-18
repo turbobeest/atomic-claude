@@ -4,19 +4,6 @@
 # =============================================================================
 name: debugger
 description: Debugs code systematically, analyzes complex errors, and implements reliable fixes with comprehensive root cause analysis
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [code_debugging, quality, reasoning]
-  minimum_tier: medium
-  profiles:
-    default: code_review
-    batch: budget
 tier: expert
 
 # -----------------------------------------------------------------------------

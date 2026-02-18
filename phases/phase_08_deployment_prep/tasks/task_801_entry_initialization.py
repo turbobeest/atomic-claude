@@ -19,7 +19,7 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import read_json
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 801: Entry & Initialization.
 
@@ -31,9 +31,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
+    project_root = atomic_root.parent
+
     closeout_file = _find_closeout(atomic_root, "7-integration")
-    integration_dir = atomic_root / ".claude" / "integration"
-    config_file = atomic_root / ".outputs" / "0-setup" / "project-config.json"
+    integration_dir = project_root / ".claude" / "integration"
+    config_file = atomic_root.parent / ".outputs" / "0-setup" / "project-config.json"
 
     print()
     print(print_dim("━" * 110))
@@ -65,7 +67,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         try:
             closeout_data = read_json(closeout_file)
             phase_7_status = closeout_data.get("status", "unknown")
-            if phase_7_status == "complete":
+            if phase_7_status == "complete" or "tasks_completed" in closeout_data:
                 print(print_green(f"  [CRIT] ✓ Phase 7 (Integration) complete"))
             else:
                 print(print_red(f"  [CRIT] ✗ Phase 7 not complete (status: {phase_7_status})"))
@@ -131,7 +133,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
 def _find_closeout(atomic_root: Path, phase_name: str) -> Optional[Path]:
     """Find closeout file for a phase."""
-    closeout_dir = atomic_root / ".outputs" / phase_name
+    closeout_dir = atomic_root.parent / ".outputs" / phase_name
     if closeout_dir.exists():
         closeout_file = closeout_dir / "closeout.json"
         if closeout_file.exists():

@@ -20,8 +20,12 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def load_agents_from_csv(csv_path: Path, phase_filter: str = "06-09-implementation") -> List[Dict[str, str]]:
-    """Load agents from CSV inventory file."""
+def load_agents_from_csv(csv_path: Path, category_filter: str = "06-09-implementation") -> List[Dict[str, str]]:
+    """Load agents from CSV inventory file.
+
+    CSV columns: name, path, tier, category, subcategory, description,
+                 grade, composite_score, role, rationale
+    """
     agents = []
 
     if not csv_path.exists():
@@ -31,12 +35,10 @@ def load_agents_from_csv(csv_path: Path, phase_filter: str = "06-09-implementati
         with open(csv_path, 'r') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                # Check if agent is for implementation phases
-                if row.get('phase', '') == phase_filter:
+                if row.get('category', '') == category_filter:
                     agents.append({
                         'name': row.get('name', ''),
                         'tier': row.get('tier', ''),
-                        'model': row.get('model', 'sonnet'),
                         'role': row.get('role', ''),
                         'description': row.get('description', '')[:70]
                     })
@@ -121,7 +123,7 @@ def recommend_agents(characteristics: Dict[str, any]) -> Tuple[List[str], List[s
     return recommended, reasons
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 402: Agent Selection.
 
@@ -133,8 +135,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
-    roster_file = atomic_root / ".claude" / "agent-roster.json"
-    tasks_file = atomic_root / ".taskmaster" / "tasks" / "tasks.json"
+    project_root = atomic_root.parent
+    roster_file = project_root / ".claude" / "agent-roster.json"
+    tasks_file = project_root / ".taskmaster" / "tasks" / "tasks.json"
 
     # Determine agent repo location
     agent_repo = atomic_root / "repos" / "agents"
@@ -182,10 +185,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
             name = agent.get('name', '')
             tier = agent.get('tier', '')
-            model = agent.get('model', '')
             desc = agent.get('description', '')
 
-            print(f"    {symbol} \033[1m{name}\033[0m [{tier}, {model}]")
+            print(f"    {symbol} \033[1m{name}\033[0m [{tier}, {role}]")
             print(f"      \033[2m{desc}...\033[0m")
             print()
     else:
@@ -295,12 +297,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         elif agent_choice == "list":
             print()
             print(print_cyan("Agent Inventory (06-09-implementation):"))
-            for agent in agents:
-                name = agent.get('name', '')
-                tier = agent.get('tier', '')
-                role = agent.get('role', '')
-                desc = agent.get('description', '')
-                print(f"    {name:25} [{tier}, {role}] {desc}")
+            if agents:
+                for agent in agents:
+                    name = agent.get('name', '')
+                    tier = agent.get('tier', '')
+                    role = agent.get('role', '')
+                    desc = agent.get('description', '')
+                    print(f"    {name:25} [{tier}, {role}] {desc}")
+            else:
+                print(print_dim("    No agents found in inventory"))
             print()
         else:
             print(print_red("  Invalid choice. Try again."))
@@ -313,26 +318,17 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     print(print_bold("CONFIRMED ROSTER"))
     print()
 
-    # Load models from CSV
-    agent_models = {}
-    for agent in agents:
-        agent_models[agent['name']] = agent.get('model', 'sonnet')
-
     for agent in selected_agents:
-        model = agent_models.get(agent, 'sonnet')
-        print(print_green(f"    ✓ {agent} ({model})"))
+        print(print_green(f"    ✓ {agent}"))
     print()
 
-    # Save roster with model info
+    # Save roster
     ensure_dir(roster_file.parent)
-
-    agents_with_models = [f"{agent}:{agent_models.get(agent, 'sonnet')}"
-                          for agent in selected_agents]
 
     roster_data = {
         "phase": 4,
         "phase_name": "Specification",
-        "agents": agents_with_models,
+        "agents": selected_agents,
         "task_count": task_count,
         "source": "agent-inventory.csv",
         "confirmed_at": str(Path(__file__).stat().st_mtime)

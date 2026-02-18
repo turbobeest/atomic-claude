@@ -83,6 +83,8 @@ class ModelResolver:
         tier: str = None,
         provider: str = None,
         model_id: str = None,
+        context_window: int = None,
+        effort_level: str = None,
         task_only: bool = False,
     ) -> None:
         """Set an override for an agent's model assignment.
@@ -90,7 +92,10 @@ class ModelResolver:
         task_only=False: persists to .state/model-overrides.json (session-wide)
         task_only=True: in-memory only, cleared by clear_task_overrides()
         """
-        entry = {"tier": tier, "provider": provider, "model_id": model_id}
+        entry = {
+            "tier": tier, "provider": provider, "model_id": model_id,
+            "context_window": context_window, "effort_level": effort_level,
+        }
         if task_only:
             self._task_overrides[agent_name] = entry
         else:
@@ -152,6 +157,8 @@ class ModelResolver:
                     phase_id=phase_id, task_id=task_id,
                     override_provider=ov.get("provider"),
                     override_model_id=ov.get("model_id"),
+                    override_context_window=ov.get("context_window"),
+                    override_effort_level=ov.get("effort_level"),
                 )
 
         # Level 2: Agent preference
@@ -233,6 +240,8 @@ class ModelResolver:
         task_id: str = None,
         override_provider: str = None,
         override_model_id: str = None,
+        override_context_window: int = None,
+        override_effort_level: str = None,
     ) -> ResolvedModel:
         """Construct a ResolvedModel from a resolved tier."""
         provider = (
@@ -252,11 +261,14 @@ class ModelResolver:
         model_id = override_model_id or self._resolve_model_id(tier, provider)
 
         context_window = tier_def.get("context_window", 200_000)
-        # Provider can cap default context window (e.g. claude-code 200K default)
+        # Provider can cap default context window (e.g. aws-bedrock 200K)
         # Heavyweight role (Phase 2) gets the full tier context window
         prov_ctx = prov_overrides.get("context_window")
         if prov_ctx and role != "heavyweight":
             context_window = prov_ctx
+        # User override for context window
+        if override_context_window:
+            context_window = override_context_window
         max_output = tier_def.get("max_output", 8_192)
         ext_thinking = tier_def.get("extended_thinking", False)
 
@@ -270,11 +282,13 @@ class ModelResolver:
             or prov_overrides.get("thinking_budget")
         )
 
-        # Effort level: project config > provider override
+        # Effort level: project config > provider override > user override
         effort_level = (
             self._config.get("providers", {}).get("effort_level")
             or prov_overrides.get("effort_level")
         )
+        if override_effort_level:
+            effort_level = override_effort_level
 
         # GUARD: Enforce minimum effort level per provider.
         # Claude Code "low" effort is strictly forbidden — subscription is
@@ -346,7 +360,7 @@ class ModelResolver:
 
     def _get_config_mtime(self) -> float:
         """Get mtime of project config file, 0 if missing."""
-        config_path = self._atomic_root / ".outputs" / "0-setup" / "project-config.json"
+        config_path = self._atomic_root.parent / ".outputs" / "0-setup" / "project-config.json"
         try:
             return config_path.stat().st_mtime
         except OSError:
@@ -362,7 +376,7 @@ class ModelResolver:
 
     def _load_project_config(self) -> Dict[str, Any]:
         """Load .outputs/0-setup/project-config.json -> extracted section."""
-        config_path = self._atomic_root / ".outputs" / "0-setup" / "project-config.json"
+        config_path = self._atomic_root.parent / ".outputs" / "0-setup" / "project-config.json"
         try:
             data = json.loads(config_path.read_text())
             return data.get("extracted", {})

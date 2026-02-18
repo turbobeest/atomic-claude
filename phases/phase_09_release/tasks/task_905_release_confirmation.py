@@ -26,7 +26,7 @@ YELLOW = "\033[93m"
 NC = "\033[0m"
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 905: Release Confirmation.
 
@@ -38,7 +38,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
-    release_dir = atomic_root / ".claude" / "release"
+    project_root = atomic_root.parent
+
+    release_dir = project_root / ".claude" / "release"
     execution_file = release_dir / "execution.json"
     confirmation_file = release_dir / "confirmation.json"
 

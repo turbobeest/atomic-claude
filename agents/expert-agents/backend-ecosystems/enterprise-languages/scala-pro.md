@@ -4,26 +4,11 @@
 # =============================================================================
 # Use for: Functional programming, distributed systems, big data processing
 # Domain: Enterprise languages, type-safe systems, Akka/Spark ecosystems
-# Model: sonnet (use opus for complex type-level programming or critical architecture)
 # Instructions: 18 total
 # =============================================================================
 
 name: scala-pro
 description: Scala specialist for functional programming, distributed systems with Akka, and big data processing with Spark
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 tier: expert
 
 # -----------------------------------------------------------------------------

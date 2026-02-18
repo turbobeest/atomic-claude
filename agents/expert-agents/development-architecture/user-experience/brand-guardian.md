@@ -3,27 +3,13 @@
 # EXPERT TIER TEMPLATE (~1500 tokens)
 # =============================================================================
 # Use for: Brand consistency enforcement, style guide compliance, visual identity
-# Model: sonnet (default for brand and design system work)
 # Instructions: 18 maximum
 # =============================================================================
 
 name: brand-guardian
 description: Master of brand consistency enforcement specializing in brand voice, visual identity, style guide compliance, tone consistency, messaging alignment, and asset management for cohesive brand experiences
-model: opus
 
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
 tier: expert
-
-model_selection:
-  priorities: [quality, reasoning, consistency]
-  minimum_tier: large
-  profiles:
-    default: quality_critical
-    batch: batch
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

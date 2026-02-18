@@ -4,26 +4,11 @@
 # =============================================================================
 # Use for: Laravel/Symfony applications, modern PHP patterns, web performance
 # Domain: Dynamic languages, web frameworks, type-safe PHP development
-# Model: sonnet (use opus for complex architecture or critical security)
 # Instructions: 18 total
 # =============================================================================
 
 name: php-pro
 description: Modern PHP specialist for Laravel/Symfony frameworks, typed code, performance optimization, and contemporary development practices
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 tier: expert
 
 # -----------------------------------------------------------------------------

@@ -28,9 +28,25 @@ from core.state import StateManager
 from core.ui import phase_header, phase_complete
 from core.memory import memory_save, MemoryEntryType
 from orchestration.pre_task_validation import validate_directory_pristine
-from orchestration.dashboard_sync import write_current_task, clear_current_task, log_error
-from orchestration.task_display import display_task_roster, resolve_agent_roster
+from orchestration.dashboard_sync import write_current_task, clear_current_task, log_error, ensure_dashboard
+from orchestration.memory_enrichment import summarize_task_artifacts, enrich_memory_with_llm
+from orchestration.task_memory import TaskMemory
+from orchestration.task_display import display_task_roster, resolve_agent_roster, is_infrastructure_task
 from core.llm.resolver import resolve_model, get_resolver
+
+
+def _make_flush_fn(phase_id: str, task_id: str):
+    """Create a callback for mid-task memory checkpoints."""
+    def flush(content, tags, entry_type):
+        memory_save(
+            phase=phase_id,
+            task_id=task_id,
+            content=content,
+            tags=tags,
+            entry_type=MemoryEntryType.TASK_PROGRESS,
+        )
+    return flush
+
 
 # Import Phase 04 task modules
 from phases.phase_04_specification.tasks import (
@@ -44,7 +60,8 @@ from phases.phase_04_specification.tasks import (
 
 # Get paths from environment
 ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path.cwd()))
-OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT / '.outputs' / '4-specification'))
+PROJECT_ROOT = ATOMIC_ROOT.parent
+OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', PROJECT_ROOT / '.outputs' / '4-specification'))
 UAT_MODE = os.getenv('ATOMIC_UAT_MODE', 'false').lower() == 'true'
 
 
@@ -63,6 +80,9 @@ def run_phase(resume_at: str = None) -> bool:
     state = StateManager()
     phase_id = "4-specification"
 
+    # Register active phase in task-state.json so dashboard always knows
+    state.set_current_phase(phase_id)
+
     # Task list in execution order
     tasks = [
         ("401", "Entry initialization", task_401_entry_initialization),
@@ -72,6 +92,16 @@ def run_phase(resume_at: str = None) -> bool:
         ("405", "Phase audit", task_405_phase_audit),
         ("406", "Closeout", task_406_closeout),
     ]
+
+    # Expected artifacts per task (relative to OUTPUT_DIR)
+    task_artifacts = {
+        "401": ["initialization.json"],
+        "402": ["selected-agents.json"],
+        "403": ["openspec-generation.json"],
+        "404": ["tdd-injection.json"],
+        "405": [],  # audit — writes to audits dir, not OUTPUT_DIR
+        "406": ["closeout.json"],
+    }
 
     # Determine starting point
     start_index = 0
@@ -95,13 +125,21 @@ def run_phase(resume_at: str = None) -> bool:
 
         # Run task
         print(f"\n⚡ Running Task {task_id}: {task_name}")
-        roster = resolve_agent_roster(phase_id, task_id, OUTPUT_DIR)
-        roster = display_task_roster(task_id, task_name, roster, uat_mode=UAT_MODE)
-        write_current_task(phase_id, task_id, task_name, resolved=roster[0][1],
-                           agent_roster=roster)
+        ensure_dashboard(ATOMIC_ROOT)
+        if is_infrastructure_task(task_name):
+            print(f"\n  {task_name}\n")
+            write_current_task(phase_id, task_id, task_name)
+        else:
+            roster = resolve_agent_roster(phase_id, task_id, OUTPUT_DIR)
+            roster = display_task_roster(task_id, task_name, roster, uat_mode=UAT_MODE)
+            write_current_task(phase_id, task_id, task_name, resolved=roster[0][1],
+                               agent_roster=roster)
 
+        state.mark_task_started(phase_id, task_id, task_name)
+        mem = TaskMemory(phase_id, task_id, task_name,
+                         flush_fn=_make_flush_fn(phase_id, task_id))
         try:
-            success = task_func()
+            success = task_func(mem)
             if not success:
                 state.mark_task_failed(phase_id, task_id, task_name)
                 print(f"\n❌ Task {task_id} failed")
@@ -109,18 +147,38 @@ def run_phase(resume_at: str = None) -> bool:
                 get_resolver().clear_task_overrides()
                 return False
 
-            state.mark_task_complete(phase_id, task_id, task_name)
-            clear_current_task()
+            # Collect actual artifacts (files that exist)
+            artifacts = [
+                str(OUTPUT_DIR / f) for f in task_artifacts.get(task_id, [])
+                if (OUTPUT_DIR / f).exists()
+            ]
+            state.mark_task_complete(phase_id, task_id, task_name, artifacts=artifacts)
+            # Don't clear current-task.json here — the next write_current_task()
+            # overwrites it, keeping the dashboard session alive between tasks.
             get_resolver().clear_task_overrides()
 
-            # Save task completion to memory
+            # Save task completion to memory (with enriched artifact summaries)
             try:
+                if mem.has_entries():
+                    memory_content = mem.build_content()
+                    memory_metadata = mem.build_metadata()
+                else:
+                    # Try LLM enrichment first (haiku), fall back to file-based summary
+                    memory_content = enrich_memory_with_llm(
+                        artifacts, task_id, task_name, output_dir=OUTPUT_DIR
+                    )
+                    if not memory_content:
+                        memory_content = summarize_task_artifacts(
+                            artifacts, task_id, task_name, output_dir=OUTPUT_DIR
+                        )
+                    memory_metadata = {}
                 memory_save(
                     phase=phase_id,
                     task_id=task_id,
-                    content=f"Task {task_id} ({task_name}) completed",
+                    content=memory_content,
                     tags=["task-complete", phase_id, f"task-{task_id}"],
                     entry_type=MemoryEntryType.TASK_END,
+                    metadata=memory_metadata,
                 )
             except Exception:
                 pass  # Memory save failure is non-blocking
@@ -133,6 +191,8 @@ def run_phase(resume_at: str = None) -> bool:
             get_resolver().clear_task_overrides()
             return False
 
+    # Phase complete — NOW clear current-task.json
+    clear_current_task()
     phase_complete("Phase 4: Specification")
 
     # Save phase completion to memory
@@ -155,34 +215,34 @@ def run_phase(resume_at: str = None) -> bool:
 
 # Task wrapper functions (call Python modules)
 
-def task_401_entry_initialization() -> bool:
+def task_401_entry_initialization(mem=None) -> bool:
     """Task 401: Entry initialization"""
-    return task_401(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE)
+    return task_401(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
 
 
-def task_402_agent_selection() -> bool:
+def task_402_agent_selection(mem=None) -> bool:
     """Task 402: Agent selection"""
-    return task_402(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE)
+    return task_402(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
 
 
-def task_403_openspec_generation() -> bool:
+def task_403_openspec_generation(mem=None) -> bool:
     """Task 403: OpenSpec generation"""
-    return task_403(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE)
+    return task_403(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
 
 
-def task_404_tdd_subtask_injection() -> bool:
+def task_404_tdd_subtask_injection(mem=None) -> bool:
     """Task 404: TDD subtask injection"""
-    return task_404(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE)
+    return task_404(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
 
 
-def task_405_phase_audit() -> bool:
+def task_405_phase_audit(mem=None) -> bool:
     """Task 405: Phase audit"""
-    return task_405(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE)
+    return task_405(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
 
 
-def task_406_closeout() -> bool:
+def task_406_closeout(mem=None) -> bool:
     """Task 406: Closeout"""
-    return task_406(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE)
+    return task_406(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
 
 
 def create_closeout(phase_id: str, tasks: list):
@@ -201,7 +261,7 @@ def create_closeout(phase_id: str, tasks: list):
     atomic_root = Path(__file__).parent.parent.parent
 
     # Closeout file path
-    closeout_dir = atomic_root / ".outputs" / phase_id
+    closeout_dir = atomic_root.parent / ".outputs" / phase_id
     closeout_dir.mkdir(parents=True, exist_ok=True)
     closeout_file = closeout_dir / "closeout.json"
 

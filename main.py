@@ -7,6 +7,7 @@ Python-based SDLC pipeline orchestrator.
 
 import sys
 import argparse
+import readline  # Enable arrow keys, history, and line editing in input()
 from pathlib import Path
 
 # Add project root to path
@@ -93,7 +94,17 @@ def do_reset():
         return
 
     root = Path(__file__).parent
-    for d in [root / ".state", root / ".outputs", root / ".logs"]:
+
+    # Stop dashboard processes before clearing state (PID files live in .state/)
+    try:
+        from orchestration.dashboard_sync import stop_dashboard
+        print("  Stopping dashboard...")
+        stop_dashboard(root)
+    except Exception:
+        pass
+
+    project_root = root.parent
+    for d in [root / ".state", project_root / ".outputs", root / ".logs"]:
         if d.exists():
             shutil.rmtree(d)
             print(f"  Cleared {d.name}/")

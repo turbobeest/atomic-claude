@@ -1,22 +1,7 @@
 ---
 name: arkit-expert
 description: ARKit spatial computing specialist for iOS-native augmented reality experiences that seamlessly blend digital content with physical environments
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
 tier: expert
-
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 
 tools:
   audit: Read, Grep, Glob, Bash

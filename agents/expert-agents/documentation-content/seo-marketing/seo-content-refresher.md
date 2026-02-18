@@ -1,20 +1,6 @@
 ---
 name: seo-content-refresher
 description: Refreshes and updates existing content for sustained SEO performance through strategic optimization and freshness improvements
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [writing, quality, reasoning]
-  minimum_tier: medium
-  profiles:
-    default: documentation
-    interactive: interactive
-    batch: budget
 tier: expert
 
 tools:

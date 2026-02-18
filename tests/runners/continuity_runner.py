@@ -307,37 +307,26 @@ class ContinuityTestRunner:
 
     def _find_task_script(self, phase_num: str, task_id: str) -> Optional[Path]:
         """
-        Find task script file for given phase and task.
+        Find task module for given phase and task.
 
         Args:
             phase_num: Phase number (e.g., "0", "1")
             task_id: Task ID (e.g., "001", "101")
 
         Returns:
-            Path to task script or None if not found
+            Path to task module or None if not found
         """
-        phase_dir = self.atomic_root / "phases" / f"phase{int(phase_num):02d}"
-
-        # Try different naming patterns
-        patterns = [
-            f"task{task_id}.sh",
-            f"task{int(task_id):03d}.sh",
-            f"task-{task_id}.sh",
-            f"{task_id}-*.sh",
-        ]
-
-        for pattern in patterns:
-            matches = list(phase_dir.glob(pattern))
+        # Search Python task modules in phase_NN_name directories
+        phase_dirs = list(self.atomic_root.glob(f"phases/phase_{int(phase_num):02d}_*/tasks/"))
+        for tasks_dir in phase_dirs:
+            # Match task_NNN_*.py pattern
+            matches = list(tasks_dir.glob(f"task_{task_id}_*.py"))
             if matches:
                 return matches[0]
-
-        # Try tasks subdirectory (newer phases)
-        tasks_dir = phase_dir / "tasks"
-        if tasks_dir.exists():
-            for pattern in patterns:
-                matches = list(tasks_dir.glob(pattern))
-                if matches:
-                    return matches[0]
+            # Also try without underscore prefix
+            matches = list(tasks_dir.glob(f"task_{int(task_id):03d}_*.py"))
+            if matches:
+                return matches[0]
 
         return None
 

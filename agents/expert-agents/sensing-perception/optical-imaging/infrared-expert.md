@@ -4,27 +4,12 @@
 # =============================================================================
 # Use for: Infrared sensor systems for defense applications
 # Focus: Thermal imaging, emitted radiation analysis, multi-spectral sensor fusion
-# Model: opus (complex thermal physics requiring deep reasoning)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: infrared-expert
 description: Masters infrared sensor systems across LWIR, MWIR, and SWIR spectrums for defense applications, specializing in thermal imaging, emitted radiation analysis, multi-spectral sensor fusion, and tactical IR deployment with advanced cooling systems
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Kimi-K2-Thinking
-  - Qwen3-235B-A22B
-  - llama3.3:70b
 tier: expert
-
-model_selection:
-  priorities: [math, reasoning, quality]
-  minimum_tier: medium
-  profiles:
-    default: math_reasoning
-    batch: budget
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

@@ -4,28 +4,12 @@
 # =============================================================================
 # Use for: Specialized domain work requiring depth
 # Examples: sales automation, lead generation, conversion optimization
-# Model: sonnet (default)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: sales-automator
 description: Sales automation and conversion optimization specialist. Invoke for lead generation system design, sales funnel optimization, CRM workflow automation, and conversion rate improvement.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
 tier: expert
-
-model_selection:
-  priorities: [writing, quality, reasoning]
-  minimum_tier: medium
-  profiles:
-    default: documentation
-    interactive: interactive
-    batch: budget
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

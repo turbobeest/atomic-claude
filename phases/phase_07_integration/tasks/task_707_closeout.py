@@ -19,7 +19,7 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import read_json, write_json, write_file, ensure_dir
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 707: Phase Closeout.
 
@@ -31,13 +31,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
-    closeout_dir = atomic_root / ".claude" / "closeout"
+    project_root = atomic_root.parent
+
+    closeout_dir = project_root / ".claude" / "closeout"
     closeout_file = closeout_dir / "phase-07-closeout.md"
     closeout_json = closeout_dir / "phase-07-closeout.json"
-    integration_dir = atomic_root / ".claude" / "integration"
+    integration_dir = project_root / ".claude" / "integration"
     report_file = integration_dir / "integration-report.json"
     approval_file = integration_dir / "approval.json"
-    audit_file = atomic_root / ".outputs" / "audits" / "phase-7-report.json"
+    audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-7-report.json"
 
     ensure_dir(closeout_dir)
 

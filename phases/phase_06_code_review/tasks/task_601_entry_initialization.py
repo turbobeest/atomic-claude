@@ -20,7 +20,7 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 601: Entry & Initialization.
 
@@ -32,8 +32,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
+    project_root = atomic_root.parent
+
     # Find Phase 5 closeout
-    closeout_file = _find_closeout(atomic_root, "5-implementation")
+    closeout_file = _find_closeout(atomic_root, project_root, "5-implementation")
 
     # Display phase header
     _display_phase_header()
@@ -74,19 +76,19 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     return True
 
 
-def _find_closeout(atomic_root: Path, phase_name: str) -> Path:
+def _find_closeout(atomic_root: Path, project_root: Path, phase_name: str) -> Path:
     """Find closeout file for a phase."""
     # Try new format first
-    closeout_file = atomic_root / ".outputs" / phase_name / "closeout.json"
+    closeout_file = atomic_root.parent / ".outputs" / phase_name / "closeout.json"
     if closeout_file.exists():
         return closeout_file
 
     # Try legacy format
-    closeout_file = atomic_root / ".claude" / "closeout" / f"{phase_name}-closeout.json"
+    closeout_file = project_root / ".claude" / "closeout" / f"{phase_name}-closeout.json"
     if closeout_file.exists():
         return closeout_file
 
-    return atomic_root / ".outputs" / phase_name / "closeout.json"
+    return atomic_root.parent / ".outputs" / phase_name / "closeout.json"
 
 
 def _display_phase_header() -> None:
@@ -139,7 +141,7 @@ def _verify_phase_5(closeout_file: Path) -> bool:
     coverage = closeout_data.get("coverage", {})
     unit_coverage = coverage.get("unit", 0)
 
-    if phase5_status != "complete":
+    if phase5_status != "complete" and "tasks_completed" not in closeout_data:
         print(print_red(f"✗ Phase 5 status: {phase5_status}"))
         print()
         print(print_red("Phase 5 must be complete before starting Phase 6"))

@@ -3,8 +3,6 @@
 ATOMIC CLAUDE - AWS Bedrock Provider
 
 AWS Bedrock provider implementation using boto3.
-
-Reference: /Users/jamesterbeest/dev/atomic-claude/lib/provider.sh lines 200-600
 """
 
 import json

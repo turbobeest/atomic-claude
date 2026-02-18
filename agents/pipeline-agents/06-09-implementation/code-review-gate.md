@@ -1,19 +1,6 @@
 ---
 name: code-review-gate
 description: Phase 6-9 code review gate agent for the SDLC pipeline. Reviews TDD implementations against specifications, enforces quality standards, validates test coverage, and provides gate pass/fail decisions with actionable feedback.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Kimi-K2-Thinking
-  - Qwen3-235B-A22B
-  - llama3.3:70b
-model_selection:
-  priorities: [quality, reasoning, tool_use]
-  minimum_tier: large
-  profiles:
-    default: quality_critical
-    batch: batch
 tier: expert
 
 phase: 6-9

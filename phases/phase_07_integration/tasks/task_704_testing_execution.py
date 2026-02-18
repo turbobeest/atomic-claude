@@ -86,7 +86,7 @@ def run_integration_tests(atomic_root: Path, setup_data: Dict) -> Dict:
     }
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 704: Testing Execution.
 

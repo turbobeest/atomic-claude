@@ -4,26 +4,11 @@
 # =============================================================================
 # Use for: Specialized domain work requiring depth
 # Examples: security-auditor, rust-pro, kubernetes-expert, database-optimizer
-# Model: sonnet (default) or opus (complex domains, high-stakes decisions)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: oracle-cloud-architect
 description: Designs and implements secure, high-performance architectures on Oracle Cloud Infrastructure utilizing OCI-specific services and enterprise best practices. Invoke for OCI architecture design, enterprise database integration, and performance optimization.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Kimi-K2-Thinking
-  - Qwen3-235B-A22B
-  - llama3.3:70b
-model_selection:
-  priorities: [quality, reasoning, code_debugging]
-  minimum_tier: medium
-  profiles:
-    default: quality_critical
-    interactive: interactive
-    batch: budget
 tier: expert
 
 # -----------------------------------------------------------------------------

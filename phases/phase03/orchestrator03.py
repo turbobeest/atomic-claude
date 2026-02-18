@@ -28,9 +28,25 @@ from core.state import StateManager
 from core.ui import phase_header, phase_complete
 from core.memory import memory_save, MemoryEntryType
 from orchestration.pre_task_validation import validate_directory_pristine
-from orchestration.dashboard_sync import write_current_task, clear_current_task, log_error
-from orchestration.task_display import display_task_roster, resolve_agent_roster
+from orchestration.dashboard_sync import write_current_task, clear_current_task, log_error, ensure_dashboard
+from orchestration.memory_enrichment import summarize_task_artifacts, enrich_memory_with_llm
+from orchestration.task_memory import TaskMemory
+from orchestration.task_display import display_task_roster, resolve_agent_roster, is_infrastructure_task
 from core.llm.resolver import resolve_model, get_resolver
+
+
+def _make_flush_fn(phase_id: str, task_id: str):
+    """Create a callback for mid-task memory checkpoints."""
+    def flush(content, tags, entry_type):
+        memory_save(
+            phase=phase_id,
+            task_id=task_id,
+            content=content,
+            tags=tags,
+            entry_type=MemoryEntryType.TASK_PROGRESS,
+        )
+    return flush
+
 
 # Import Phase 03 task modules
 from phases.phase_03_tasking.tasks import (
@@ -44,7 +60,8 @@ from phases.phase_03_tasking.tasks import (
 
 # Get paths from environment
 ATOMIC_ROOT = Path(os.getenv('ATOMIC_ROOT', Path.cwd()))
-OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', ATOMIC_ROOT / '.outputs' / '3-tasking'))
+PROJECT_ROOT = ATOMIC_ROOT.parent
+OUTPUT_DIR = Path(os.getenv('ATOMIC_OUTPUT_DIR', PROJECT_ROOT / '.outputs' / '3-tasking'))
 UAT_MODE = os.getenv('ATOMIC_UAT_MODE', 'false').lower() == 'true'
 
 
@@ -63,6 +80,9 @@ def run_phase(resume_at: str = None) -> bool:
     state = StateManager()
     phase_id = "3-tasking"
 
+    # Register active phase in task-state.json so dashboard always knows
+    state.set_current_phase(phase_id)
+
     # Task list in execution order
     tasks = [
         ("301", "Entry initialization", task_301_entry_initialization),
@@ -72,6 +92,16 @@ def run_phase(resume_at: str = None) -> bool:
         ("305", "Phase audit", task_305_phase_audit),
         ("306", "Closeout", task_306_closeout),
     ]
+
+    # Expected artifacts per task (relative to OUTPUT_DIR)
+    task_artifacts = {
+        "301": ["entry-validation.json"],
+        "302": ["selected-agents.json", "prd-analysis.json"],
+        "303": ["raw-tasks.json", "prompts/task-decomposition.md"],
+        "304": ["dependency-analysis.json"],
+        "305": [],  # audit — writes to audits dir, not OUTPUT_DIR
+        "306": [],  # closeout — writes to project .claude/closeout/
+    }
 
     # Determine starting point
     start_index = 0
@@ -95,13 +125,21 @@ def run_phase(resume_at: str = None) -> bool:
 
         # Run task
         print(f"\n⚡ Running Task {task_id}: {task_name}")
-        roster = resolve_agent_roster(phase_id, task_id, OUTPUT_DIR)
-        roster = display_task_roster(task_id, task_name, roster, uat_mode=UAT_MODE)
-        write_current_task(phase_id, task_id, task_name, resolved=roster[0][1],
-                           agent_roster=roster)
+        ensure_dashboard(ATOMIC_ROOT)
+        if is_infrastructure_task(task_name):
+            print(f"\n  {task_name}\n")
+            write_current_task(phase_id, task_id, task_name)
+        else:
+            roster = resolve_agent_roster(phase_id, task_id, OUTPUT_DIR)
+            roster = display_task_roster(task_id, task_name, roster, uat_mode=UAT_MODE)
+            write_current_task(phase_id, task_id, task_name, resolved=roster[0][1],
+                               agent_roster=roster)
 
+        state.mark_task_started(phase_id, task_id, task_name)
+        mem = TaskMemory(phase_id, task_id, task_name,
+                         flush_fn=_make_flush_fn(phase_id, task_id))
         try:
-            success = task_func()
+            success = task_func(mem)
             if not success:
                 state.mark_task_failed(phase_id, task_id, task_name)
                 print(f"\n❌ Task {task_id} failed")
@@ -109,18 +147,38 @@ def run_phase(resume_at: str = None) -> bool:
                 get_resolver().clear_task_overrides()
                 return False
 
-            state.mark_task_complete(phase_id, task_id, task_name)
-            clear_current_task()
+            # Collect actual artifacts (files that exist)
+            artifacts = [
+                str(OUTPUT_DIR / f) for f in task_artifacts.get(task_id, [])
+                if (OUTPUT_DIR / f).exists()
+            ]
+            state.mark_task_complete(phase_id, task_id, task_name, artifacts=artifacts)
+            # Don't clear current-task.json here — the next write_current_task()
+            # overwrites it, keeping the dashboard session alive between tasks.
             get_resolver().clear_task_overrides()
 
-            # Save task completion to memory
+            # Save task completion to memory (with enriched artifact summaries)
             try:
+                if mem.has_entries():
+                    memory_content = mem.build_content()
+                    memory_metadata = mem.build_metadata()
+                else:
+                    # Try LLM enrichment first (haiku), fall back to file-based summary
+                    memory_content = enrich_memory_with_llm(
+                        artifacts, task_id, task_name, output_dir=OUTPUT_DIR
+                    )
+                    if not memory_content:
+                        memory_content = summarize_task_artifacts(
+                            artifacts, task_id, task_name, output_dir=OUTPUT_DIR
+                        )
+                    memory_metadata = {}
                 memory_save(
                     phase=phase_id,
                     task_id=task_id,
-                    content=f"Task {task_id} ({task_name}) completed",
+                    content=memory_content,
                     tags=["task-complete", phase_id, f"task-{task_id}"],
                     entry_type=MemoryEntryType.TASK_END,
+                    metadata=memory_metadata,
                 )
             except Exception:
                 pass  # Memory save failure is non-blocking
@@ -133,6 +191,8 @@ def run_phase(resume_at: str = None) -> bool:
             get_resolver().clear_task_overrides()
             return False
 
+    # Phase complete — NOW clear current-task.json
+    clear_current_task()
     phase_complete("Phase 3: Tasking")
 
     # Save phase completion to memory
@@ -155,34 +215,34 @@ def run_phase(resume_at: str = None) -> bool:
 
 # Task wrapper functions (call Python modules)
 
-def task_301_entry_initialization() -> bool:
+def task_301_entry_initialization(mem=None) -> bool:
     """Task 301: Entry initialization"""
-    return task_301(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE)
+    return task_301(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
 
 
-def task_302_agent_selection() -> bool:
+def task_302_agent_selection(mem=None) -> bool:
     """Task 302: Agent selection"""
-    return task_302(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE)
+    return task_302(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
 
 
-def task_303_task_decomposition() -> bool:
+def task_303_task_decomposition(mem=None) -> bool:
     """Task 303: Task decomposition"""
-    return task_303(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE)
+    return task_303(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
 
 
-def task_304_dependency_analysis() -> bool:
+def task_304_dependency_analysis(mem=None) -> bool:
     """Task 304: Dependency analysis"""
-    return task_304(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE)
+    return task_304(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
 
 
-def task_305_phase_audit() -> bool:
+def task_305_phase_audit(mem=None) -> bool:
     """Task 305: Phase audit"""
-    return task_305(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE)
+    return task_305(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
 
 
-def task_306_closeout() -> bool:
+def task_306_closeout(mem=None) -> bool:
     """Task 306: Closeout"""
-    return task_306(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE)
+    return task_306(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
 
 
 def create_closeout(phase_id: str, tasks: list):
@@ -196,7 +256,7 @@ def create_closeout(phase_id: str, tasks: list):
     import os
 
     atomic_root = Path(os.environ.get("ATOMIC_ROOT", Path.cwd()))
-    output_dir = atomic_root / ".outputs" / phase_id
+    output_dir = atomic_root.parent / ".outputs" / phase_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
     closeout_file = output_dir / "closeout.json"
@@ -211,6 +271,7 @@ def create_closeout(phase_id: str, tasks: list):
         "phase": phase_id,
         "phase_num": phase_num,
         "completed_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "status": "complete",
         "tasks_completed": completed_tasks,
         "summary": f"Phase {phase_num} ({phase_id.split('-', 1)[1].title()}) completed successfully."
     }

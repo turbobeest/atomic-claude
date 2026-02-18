@@ -45,7 +45,7 @@
             <span class="text-sm font-normal text-slate-400">({categoryAudits.length})</span>
           </h3>
           <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {#each categoryAudits as audit (audit.audit_id)}
+            {#each categoryAudits as audit, i (audit.audit_id + ':' + i)}
               <AuditCard {audit} onclick={() => onselect?.(audit)} />
             {/each}
           </div>
@@ -54,7 +54,7 @@
     </div>
   {:else}
     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-      {#each audits as audit (audit.audit_id)}
+      {#each audits as audit, i (audit.audit_id + ':' + i)}
         <AuditCard {audit} onclick={() => onselect?.(audit)} />
       {/each}
     </div>

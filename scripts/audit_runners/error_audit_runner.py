@@ -127,7 +127,7 @@ class ErrorAuditRunner:
             cleanup_shutil.copytree(phase0_output, phase0_backup)
             cleanup_shutil.rmtree(phase0_output)
 
-        # Create invalid setup.md in parent directory (where task002.sh looks for it)
+        # Create invalid setup.md in parent directory
         setup_dir = REPO_ROOT.parent / "initialization"
         setup_dir.mkdir(exist_ok=True)
         setup_file = setup_dir / "setup.md"
@@ -332,24 +332,17 @@ sys.exit(0 if success else 1)
             f.write('{"version": "1.0", "phases": {corrupted json')
 
         try:
-            result = subprocess.run(
-                ["bash", "-c", f"""
-                    source {REPO_ROOT}/lib/task-state.sh
-                    task_state_init '0-setup'
-                """],
-                cwd=REPO_ROOT,
-                capture_output=True,
-                text=True,
-                timeout=10,
-                env={**os.environ, "ATOMIC_ROOT": str(REPO_ROOT)}
-            )
+            # Use Python StateManager to test recovery from corrupted state
+            import sys
+            sys.path.insert(0, str(REPO_ROOT))
+            from core.state import StateManager
+            sm = StateManager()
+            sm.initialize_phase("0-setup")
 
-            # Should either recover or fail gracefully
-            recovered = STATE_FILE.exists() and result.returncode == 0
-            failed_gracefully = result.returncode != 0 and "error" in result.stderr.lower()
-            no_crash = "Segmentation fault" not in result.stderr
-
-            passed = (recovered or failed_gracefully) and no_crash
+            # If we get here without exception, recovery succeeded
+            recovered = STATE_FILE.exists()
+            no_crash = True
+            passed = recovered and no_crash
 
             self.add_result(
                 "graceful_failure",

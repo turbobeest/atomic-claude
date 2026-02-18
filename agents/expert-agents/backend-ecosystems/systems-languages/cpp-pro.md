@@ -4,26 +4,11 @@
 # =============================================================================
 # Use for: High-performance applications, modern C++ patterns, RAII resource management
 # Domain: Systems languages, template metaprogramming, zero-overhead abstractions
-# Model: sonnet (use opus for complex template metaprogramming or novel RAII patterns)
 # Instructions: 18 total
 # =============================================================================
 
 name: cpp-pro
 description: Modern C++ specialist for RAII patterns, template metaprogramming, and high-performance applications with zero-overhead abstractions
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 tier: expert
 
 # -----------------------------------------------------------------------------

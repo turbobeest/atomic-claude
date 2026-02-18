@@ -4,28 +4,12 @@
 # =============================================================================
 # Use for: Specialized domain work requiring depth
 # Examples: NVIDIA Omniverse, USD composition, collaborative 3D
-# Model: opus (complex multi-disciplinary workflows)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: omniverse-expert
 description: NVIDIA Omniverse and USD composition specialist. Invoke for real-time collaborative 3D workflows, physically accurate simulation, and multi-application interoperability.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Kimi-K2-Thinking
-  - Qwen3-235B-A22B
-  - llama3.3:70b
 tier: expert
-
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

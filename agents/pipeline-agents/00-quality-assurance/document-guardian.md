@@ -1,20 +1,6 @@
 ---
 name: document-guardian
 description: Real-time quality guardian for multi-section document generation. Monitors completed sections, detects drift, and injects targeted context to maintain consistency across long-form structured documents (PRDs, specifications, runbooks).
-model: llama3.3:70b
-model_fallbacks:
-  - nemotron:70b
-  - qwen2.5:72b
-  - llama3.1:70b
-model_selection:
-  priorities: [context_window, accuracy, speed]
-  minimum_tier: large
-  minimum_context: 32768
-  profiles:
-    default: large_context
-    batch: batch
-  provider_preference: ollama
-  provider_rationale: "Guardian must avoid CLI truncation issues - requires direct API access with full output capture. Ollama provides this with large-context models. Bedrock requires boto3 SDK implementation."
 tier: pipeline
 
 phase: multi

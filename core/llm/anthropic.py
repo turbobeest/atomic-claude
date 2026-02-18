@@ -3,8 +3,6 @@
 ATOMIC CLAUDE - Anthropic Provider
 
 Anthropic API provider implementation using official SDK.
-
-Reference: /Users/jamesterbeest/dev/atomic-claude/lib/atomic.sh lines 700-1200
 """
 
 import os

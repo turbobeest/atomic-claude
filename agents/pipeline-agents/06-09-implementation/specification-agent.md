@@ -1,19 +1,6 @@
 ---
 name: specification-agent
 description: Phase 6-9 agent for the SDLC pipeline. Creates formal specifications for each task, defining precise implementation contracts with inputs, outputs, interfaces, and test criteria. Ensures 1:1 task-to-spec mapping.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Kimi-K2-Thinking
-  - Qwen3-235B-A22B
-  - llama3.3:70b
-model_selection:
-  priorities: [quality, reasoning, tool_use]
-  minimum_tier: large
-  profiles:
-    default: quality_critical
-    batch: batch
 tier: expert
 
 phase: 6-9

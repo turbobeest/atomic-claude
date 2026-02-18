@@ -25,7 +25,7 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import read_json
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 701: Entry & Initialization.
 
@@ -37,8 +37,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
-    closeout_file = atomic_root / ".outputs" / "6-code-review" / "closeout.json"
-    config_file = atomic_root / ".outputs" / "0-setup" / "project-config.json"
+    project_root = atomic_root.parent
+
+    closeout_file = atomic_root.parent / ".outputs" / "6-code-review" / "closeout.json"
+    config_file = atomic_root.parent / ".outputs" / "0-setup" / "project-config.json"
 
     print()
     print(print_dim("━" * 118))
@@ -65,7 +67,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     if closeout_file.exists():
         closeout_data = read_json(closeout_file)
         phase_6_status = closeout_data.get("status", "unknown")
-        if phase_6_status == "complete":
+        if phase_6_status == "complete" or "tasks_completed" in closeout_data:
             print(print_green("  [CRIT] ✓ Phase 6 (Code Review) complete"))
         else:
             print(print_red(f"  [CRIT] ✗ Phase 6 not complete (status: {phase_6_status})"))
@@ -75,7 +77,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         all_valid = False
 
     # Check for review artifacts
-    review_dir = atomic_root / ".claude" / "reviews"
+    review_dir = project_root / ".claude" / "reviews"
     if review_dir.exists():
         print(print_green("  [BLCK] ✓ Review artifacts present"))
     else:
@@ -88,7 +90,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         print(print_yellow("  [PASS] ! Project configuration not found"))
 
     # Check for test artifacts from implementation
-    testing_dir = atomic_root / ".claude" / "testing"
+    testing_dir = project_root / ".claude" / "testing"
     if testing_dir.exists():
         print(print_green("  [PASS] ✓ Testing artifacts present"))
     else:

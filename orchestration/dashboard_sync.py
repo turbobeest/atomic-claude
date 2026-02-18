@@ -7,10 +7,16 @@ Writes current-task.json, session-tokens.json, and errors.json for dashboard con
 """
 
 import json
+import os
+import urllib.request
 from pathlib import Path
 from datetime import datetime
-import requests
 from typing import Dict, Any, Optional, Tuple
+
+try:
+    import requests
+except ImportError:
+    requests = None
 
 
 def write_current_task(phase_id: str, task_id: str, task_name: str,
@@ -176,6 +182,133 @@ def clear_current_task():
         ct.unlink()
 
 
+def _get_dashboard_port() -> str:
+    """Get configured dashboard port."""
+    return os.environ.get("ATOMIC_TASKS_PORT", "5174")
+
+
+def _check_port_listening(port) -> bool:
+    """Quick check if something is listening on a port."""
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=0.5):
+            return True
+    except (OSError, ConnectionRefusedError):
+        return False
+
+
+def ensure_dashboard(atomic_root=None) -> bool:
+    """Pre-task dashboard health check.
+
+    Verifies the main dashboard server and browser sub-apps (agents,
+    audits, skills) are all running.  Calls start-dashboard.sh to
+    start anything that is down.
+
+    Args:
+        atomic_root: Expected project root (Path or str).
+                     Defaults to ATOMIC_ROOT env or cwd.
+
+    Returns:
+        True if healthy (or successfully restarted), False on failure.
+    """
+    if atomic_root is None:
+        atomic_root = Path(os.environ.get("ATOMIC_ROOT", Path.cwd()))
+    atomic_root = Path(atomic_root)
+
+    port = _get_dashboard_port()
+    expected = str(atomic_root.resolve())
+
+    # Check main dashboard
+    main_ok = False
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/root")
+        with urllib.request.urlopen(req, timeout=1) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            running = str(Path(data.get("root", "")).resolve())
+            if running == expected:
+                main_ok = True
+    except Exception:
+        pass
+
+    # Check sub-apps (agent-manager:5175, audit-browser:5176, skills-browser:5177)
+    subapps_ok = all(_check_port_listening(p) for p in (5175, 5176, 5177))
+
+    if main_ok and subapps_ok:
+        return True
+
+    # Something is down — call start-dashboard.sh which handles everything
+    return _restart_dashboard(atomic_root, port)
+
+
+def _restart_dashboard(atomic_root: Path, port: str) -> bool:
+    """Start (or restart) the dashboard via start-dashboard.sh.
+
+    Blocks until the main dashboard responds or times out (10s).
+    """
+    import subprocess
+    import time
+
+    script = atomic_root / "dashboard" / "start-dashboard.sh"
+    if not script.exists():
+        return False
+
+    env = os.environ.copy()
+    env["ATOMIC_ROOT"] = str(atomic_root)
+    env["ATOMIC_TASKS_PORT"] = port
+
+    try:
+        subprocess.Popen(
+            ["bash", str(script)],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception:
+        return False
+
+    # Wait for main dashboard to respond (up to 10s)
+    for _ in range(20):
+        try:
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/api/root")
+            with urllib.request.urlopen(req, timeout=1):
+                return True
+        except Exception:
+            time.sleep(0.5)
+    return False
+
+
+def stop_dashboard(atomic_root=None):
+    """Stop all dashboard processes via stop-dashboard.sh.
+
+    Args:
+        atomic_root: Project root (Path or str). Defaults to ATOMIC_ROOT env or cwd.
+    """
+    import subprocess
+
+    if atomic_root is None:
+        atomic_root = Path(os.environ.get("ATOMIC_ROOT", Path.cwd()))
+    atomic_root = Path(atomic_root)
+
+    stop_script = atomic_root / "dashboard" / "stop-dashboard.sh"
+    if not stop_script.exists():
+        return
+
+    env = os.environ.copy()
+    env["ATOMIC_ROOT"] = str(atomic_root)
+
+    try:
+        subprocess.run(
+            ["bash", str(stop_script)],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except Exception:
+        pass
+
+
 def log_error(phase_id: str, task_id: str, error: str, traceback_str: str = None):
     """Append error to .logs/errors.json."""
     logs_dir = Path(".logs")
@@ -209,16 +342,16 @@ def sync_dashboard(phase_id: Optional[str] = None, task_id: Optional[str] = None
         fix_state_inconsistencies()
 
     # Trigger dashboard refresh (if server running)
-    try:
-        requests.post(
-            "http://localhost:5173/api/refresh",
-            json={"phase": phase_id, "task": task_id},
-            timeout=1
-        )
-        print("✅ Dashboard synced")
-    except requests.exceptions.RequestException:
-        # Dashboard not running, that's ok
-        pass
+    port = _get_dashboard_port()
+    if requests:
+        try:
+            requests.post(
+                f"http://127.0.0.1:{port}/api/refresh",
+                json={"phase": phase_id, "task": task_id},
+                timeout=1
+            )
+        except Exception:
+            pass  # Dashboard not running, that's ok
 
 
 def validate_state_files() -> bool:
@@ -301,15 +434,17 @@ def get_dashboard_status() -> Dict[str, Any]:
     Returns:
         dict: Dashboard status (running, port, etc.)
     """
+    port = _get_dashboard_port()
     try:
-        response = requests.get("http://localhost:5173/api/status", timeout=1)
-        if response.status_code == 200:
-            return {
-                "running": True,
-                "port": 5173,
-                "url": "http://localhost:5173",
-            }
-    except requests.exceptions.RequestException:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/root")
+        with urllib.request.urlopen(req, timeout=1) as resp:
+            if resp.status == 200:
+                return {
+                    "running": True,
+                    "port": int(port),
+                    "url": f"http://127.0.0.1:{port}",
+                }
+    except Exception:
         pass
 
     return {"running": False}
@@ -340,7 +475,8 @@ def start_dashboard():
             stderr=subprocess.DEVNULL,
         )
 
-        print("✓ Dashboard started at http://localhost:5173")
+        port = _get_dashboard_port()
+        print(f"✓ Dashboard started at http://localhost:{port}")
 
     except Exception as e:
         print(f"⚠️  Could not start dashboard: {e}")

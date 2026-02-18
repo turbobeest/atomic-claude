@@ -10,6 +10,14 @@ import termios
 import tty
 from typing import Optional
 
+# Enable readline for all input() calls in the process.
+# This gives arrow-key navigation, cursor movement (Home/End),
+# history recall (Up/Down), and emacs-style editing (Ctrl-A/E/K).
+try:
+    import readline  # noqa: F401
+except ImportError:
+    pass  # Windows or missing GNU readline
+
 
 # ANSI color codes
 BOLD = '\033[1m'
@@ -148,6 +156,52 @@ def print_warning(message: str) -> None:
 def print_info(message: str) -> None:
     """Print an info message."""
     print(print_cyan(f"ℹ {message}"))
+
+
+def prompt_menu(
+    options: list[tuple[str, str]],
+    header: str = "  Options:",
+    default: int = 1,
+) -> str:
+    """
+    Display a numbered menu and return the selected option key.
+
+    Args:
+        options: List of (key, label) tuples. key is returned on selection.
+        header: Text displayed above the menu.
+        default: 1-based index of default option (selected on bare Enter).
+
+    Returns:
+        The key string of the selected option.
+    """
+    print()
+    print(header)
+    print()
+    for i, (key, label) in enumerate(options, 1):
+        marker = " *" if i == default else ""
+        print(f"    {i}. {label}{marker}")
+    print()
+
+    clear_input_buffer()
+    choice = prompt_user(f"  Choice [default={default}]: ").strip()
+
+    if not choice:
+        return options[default - 1][0]
+
+    try:
+        idx = int(choice) - 1
+        if 0 <= idx < len(options):
+            return options[idx][0]
+    except ValueError:
+        pass
+
+    # If typed text matches a key directly, accept it
+    choice_lower = choice.lower()
+    for key, _label in options:
+        if key.lower() == choice_lower:
+            return key
+
+    return options[default - 1][0]
 
 
 def confirm(prompt_text: str, default: bool = False) -> bool:

@@ -4,26 +4,11 @@
 # =============================================================================
 # Use for: Concurrent systems, microservices, scalable backend infrastructure
 # Domain: Systems languages, distributed systems, cloud-native applications
-# Model: sonnet (use opus for novel concurrency patterns or distributed system design)
 # Instructions: 18 total
 # =============================================================================
 
 name: golang-pro
 description: Go systems programming specialist for concurrent microservices, idiomatic patterns, and performance-optimized backend infrastructure
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 tier: expert
 
 # -----------------------------------------------------------------------------

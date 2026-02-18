@@ -19,7 +19,7 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import read_json, write_json, ensure_dir
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 702: Integration Setup.
 
@@ -31,8 +31,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
-    config_file = atomic_root / ".outputs" / "0-setup" / "project-config.json"
-    integration_dir = atomic_root / ".claude" / "integration"
+    project_root = atomic_root.parent
+
+    config_file = atomic_root.parent / ".outputs" / "0-setup" / "project-config.json"
+    integration_dir = project_root / ".claude" / "integration"
 
     ensure_dir(integration_dir)
 

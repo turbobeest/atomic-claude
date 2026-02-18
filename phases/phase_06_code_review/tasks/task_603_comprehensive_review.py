@@ -26,7 +26,7 @@ from core.utils.file_ops import ensure_dir, read_file, write_file
 from core.llm import invoke_llm
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 603: Comprehensive Review.
 
@@ -38,7 +38,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
-    review_dir = atomic_root / ".claude" / "reviews"
+    project_root = atomic_root.parent
+    review_dir = project_root / ".claude" / "reviews"
     findings_file = review_dir / "findings.json"
     prompts_dir = output_dir / "prompts"
     src_dir = atomic_root / "src"
@@ -98,6 +99,9 @@ None (UAT stub)
     code_sample = _gather_code_sample(source_files, atomic_root, prompts_dir)
     test_sample = _gather_test_sample(test_files, prompts_dir)
 
+    # Load project context for review grounding
+    project_context = _load_project_context(atomic_root)
+
     # Execute parallel review
     print()
     print(print_bold("- PARALLEL REVIEW EXECUTION"))
@@ -106,10 +110,10 @@ None (UAT stub)
     print()
 
     results = {}
-    results["code"] = _deep_code_review(code_sample, prompts_dir, agents.get("deep"))
-    results["arch"] = _architecture_review(code_sample, prompts_dir, agents.get("arch"))
-    results["perf"] = _performance_review(code_sample, prompts_dir, agents.get("perf"))
-    results["doc"] = _documentation_review(code_sample, test_sample, prompts_dir, agents.get("doc"))
+    results["code"] = _deep_code_review(code_sample, prompts_dir, agents.get("deep"), project_context)
+    results["arch"] = _architecture_review(code_sample, prompts_dir, agents.get("arch"), project_context)
+    results["perf"] = _performance_review(code_sample, prompts_dir, agents.get("perf"), project_context)
+    results["doc"] = _documentation_review(code_sample, test_sample, prompts_dir, agents.get("doc"), project_context)
 
     # Display and save results
     _display_and_save_results(results, findings_file)
@@ -204,55 +208,117 @@ def _gather_test_sample(files: List[Path], prompts_dir: Path) -> Path:
     return sample_file
 
 
-def _deep_code_review(code_file: Path, prompts_dir: Path, agent_name: str) -> Dict[str, Any]:
+def _load_project_context(atomic_root: Path) -> str:
+    """Load project context for review prompts."""
+    project_root = atomic_root.parent
+    context_parts = []
+
+    # Load project config
+    config_file = project_root / ".outputs" / "0-setup" / "project-config.json"
+    if config_file.exists():
+        try:
+            cfg = json.loads(read_file(config_file))
+            project = cfg.get("project", {})
+            if project.get("name"):
+                context_parts.append(f"**Project:** {project['name']}")
+            if project.get("description"):
+                context_parts.append(f"**Description:** {project['description']}")
+            if project.get("type"):
+                context_parts.append(f"**Type:** {project['type']}")
+        except Exception:
+            pass
+
+    # Load corpus analysis from discovery phase
+    analysis_file = project_root / ".outputs" / "1-discovery" / "corpus-analysis.md"
+    if analysis_file.exists():
+        try:
+            analysis = read_file(analysis_file).strip()
+            if analysis:
+                context_parts.append(f"\n**Technical Landscape:**\n{analysis}")
+        except Exception:
+            pass
+
+    # Load OpenSpec constraints if available
+    openspec_dir = project_root / ".openspec"
+    if openspec_dir.exists():
+        spec_files = list(openspec_dir.glob("spec-t*.json"))
+        if spec_files:
+            spec_summary = []
+            for sf in spec_files[:10]:
+                try:
+                    spec = json.loads(read_file(sf))
+                    title = spec.get("task_title", sf.stem)
+                    spec_summary.append(f"  - {title}")
+                except Exception:
+                    pass
+            if spec_summary:
+                context_parts.append(f"\n**OpenSpec Tasks:**\n" + "\n".join(spec_summary))
+
+    return "\n".join(context_parts) if context_parts else ""
+
+
+def _deep_code_review(code_file: Path, prompts_dir: Path, agent_name: str,
+                      project_context: str = "") -> Dict[str, Any]:
     """Execute deep code review."""
     print(print_cyan("    Worker 1: Deep Code Review         "))
 
     output_file = prompts_dir / "review-code.json"
-    prompt = _build_code_review_prompt(code_file, agent_name)
+    prompt = _build_code_review_prompt(code_file, agent_name, project_context)
 
     return _execute_review(prompt, output_file, "sonnet")
 
 
-def _architecture_review(code_file: Path, prompts_dir: Path, agent_name: str) -> Dict[str, Any]:
+def _architecture_review(code_file: Path, prompts_dir: Path, agent_name: str,
+                          project_context: str = "") -> Dict[str, Any]:
     """Execute architecture review."""
     print(print_magenta("    Worker 2: Architecture Compliance  "))
 
     output_file = prompts_dir / "review-arch.json"
-    prompt = _build_architecture_prompt(code_file, agent_name)
+    prompt = _build_architecture_prompt(code_file, agent_name, project_context)
 
     return _execute_review(prompt, output_file, "sonnet")
 
 
-def _performance_review(code_file: Path, prompts_dir: Path, agent_name: str) -> Dict[str, Any]:
+def _performance_review(code_file: Path, prompts_dir: Path, agent_name: str,
+                         project_context: str = "") -> Dict[str, Any]:
     """Execute performance review."""
     print(print_yellow("    Worker 3: Performance Analysis     "))
 
     output_file = prompts_dir / "review-perf.json"
-    prompt = _build_performance_prompt(code_file, agent_name)
+    prompt = _build_performance_prompt(code_file, agent_name, project_context)
 
     return _execute_review(prompt, output_file, "haiku")
 
 
-def _documentation_review(code_file: Path, test_file: Path, prompts_dir: Path, agent_name: str) -> Dict[str, Any]:
+def _documentation_review(code_file: Path, test_file: Path, prompts_dir: Path,
+                           agent_name: str, project_context: str = "") -> Dict[str, Any]:
     """Execute documentation review."""
     print(print_blue("    Worker 4: Documentation Review     "))
 
     output_file = prompts_dir / "review-doc.json"
-    prompt = _build_documentation_prompt(code_file, test_file, agent_name)
+    prompt = _build_documentation_prompt(code_file, test_file, agent_name, project_context)
 
     return _execute_review(prompt, output_file, "haiku")
 
 
-def _build_code_review_prompt(code_file: Path, agent_name: str) -> str:
+def _build_code_review_prompt(code_file: Path, agent_name: str,
+                               project_context: str = "") -> str:
     """Build deep code review prompt."""
     code_content = read_file(code_file) if code_file.exists() else ""
+
+    context_section = ""
+    if project_context:
+        context_section = f"""## Project Context
+
+{project_context}
+
+"""
 
     return f"""# Deep Code Review
 
 You are a senior code reviewer performing thorough code analysis.
 
-## Review Focus Areas
+{context_section}## Review Focus Areas
 
 1. **Logic Errors**: Incorrect conditions, off-by-one errors, null checks
 2. **Error Handling**: Missing try/catch, unhandled edge cases, error propagation
@@ -295,15 +361,24 @@ Be specific. If no issues found in a category, return 0 for that count.
 """
 
 
-def _build_architecture_prompt(code_file: Path, agent_name: str) -> str:
+def _build_architecture_prompt(code_file: Path, agent_name: str,
+                                project_context: str = "") -> str:
     """Build architecture review prompt."""
     code_content = read_file(code_file) if code_file.exists() else ""
+
+    context_section = ""
+    if project_context:
+        context_section = f"""## Project Context
+
+{project_context}
+
+"""
 
     return f"""# Architecture Compliance Review
 
 You are a software architect reviewing code for architectural compliance.
 
-## Review Focus Areas
+{context_section}## Review Focus Areas
 
 1. **Layer Separation**: Presentation/business/data layer boundaries
 2. **Dependency Direction**: Dependencies should point inward (to domain)
@@ -337,15 +412,24 @@ Respond with ONLY valid JSON (no markdown wrapper):
 """
 
 
-def _build_performance_prompt(code_file: Path, agent_name: str) -> str:
+def _build_performance_prompt(code_file: Path, agent_name: str,
+                               project_context: str = "") -> str:
     """Build performance review prompt."""
     code_content = read_file(code_file) if code_file.exists() else ""
+
+    context_section = ""
+    if project_context:
+        context_section = f"""## Project Context
+
+{project_context}
+
+"""
 
     return f"""# Performance Analysis Review
 
 You are a performance engineer reviewing code for efficiency issues.
 
-## Review Focus Areas
+{context_section}## Review Focus Areas
 
 1. **Algorithm Complexity**: O(n^2) where O(n) is possible
 2. **Memory Usage**: Large allocations, memory leaks
@@ -381,16 +465,25 @@ Respond with ONLY valid JSON (no markdown wrapper):
 """
 
 
-def _build_documentation_prompt(code_file: Path, test_file: Path, agent_name: str) -> str:
+def _build_documentation_prompt(code_file: Path, test_file: Path, agent_name: str,
+                                 project_context: str = "") -> str:
     """Build documentation review prompt."""
     code_content = read_file(code_file) if code_file.exists() else ""
     test_content = read_file(test_file) if test_file.exists() else ""
+
+    context_section = ""
+    if project_context:
+        context_section = f"""## Project Context
+
+{project_context}
+
+"""
 
     return f"""# Documentation Review
 
 You are a technical writer reviewing code documentation quality.
 
-## Review Focus Areas
+{context_section}## Review Focus Areas
 
 1. **Public API Docs**: All public functions have clear documentation
 2. **Complex Logic Comments**: Non-obvious code has explanatory comments

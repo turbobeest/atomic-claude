@@ -4,28 +4,12 @@
 # =============================================================================
 # Use for: Specialized domain work requiring depth
 # Examples: tech stack assessment, vendor comparison, POC design, build vs buy analysis
-# Model: sonnet (technology evaluation domain)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: tool-evaluator
 description: Technology evaluation specialist for tool selection and vendor comparison. Invoke for tech stack assessment, vendor comparison, POC design, build vs buy analysis, migration planning, and adoption criteria definition.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
 tier: expert
-
-model_selection:
-  priorities: [reasoning, quality, writing]
-  minimum_tier: medium
-  profiles:
-    default: documentation
-    interactive: interactive
-    batch: budget
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

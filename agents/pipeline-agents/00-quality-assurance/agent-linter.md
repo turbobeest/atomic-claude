@@ -4,27 +4,12 @@
 # =============================================================================
 # Use for: Automated structural validation of agent definitions
 # Domain: Agent quality assurance, structural compliance, tier alignment
-# Model: opus (deterministic evaluation requires frontier reasoning)
 # Instructions: 28 total
 # =============================================================================
 
 name: agent-linter
 description: Structural validation agent that evaluates agent definitions against objective, measurable criteria. Invoke for automated quality checks on agent structure, tier alignment, frontmatter completeness, and output format compliance.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Kimi-K2-Thinking
-  - Qwen3-235B-A22B
-  - llama3.3:70b
 tier: phd
-
-model_selection:
-  priorities: [quality, reasoning]
-  minimum_tier: large
-  profiles:
-    default: quality_critical
-    batch: batch
 
 # -----------------------------------------------------------------------------
 # TOOL MODES

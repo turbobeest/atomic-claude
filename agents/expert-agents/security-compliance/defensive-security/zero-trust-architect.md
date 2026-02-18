@@ -4,19 +4,6 @@
 # =============================================================================
 name: zero-trust-architect
 description: Designs and implements zero trust architecture principles with secure identity verification, least privilege access, and continuous monitoring for mission-critical systems
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Kimi-K2-Thinking
-  - Qwen3-235B-A22B
-  - llama3.3:70b
-model_selection:
-  priorities: [quality, code_debugging, reasoning]
-  minimum_tier: large
-  profiles:
-    default: security_audit
-    batch: quality_critical
 tier: expert
 
 # Pipeline integration

@@ -52,7 +52,7 @@ def _call_memory_function(func_name: str, *args: str) -> tuple[int, str, str]:
     env = os.environ.copy()
     env["ATOMIC_ROOT"] = str(atomic_root)
     env["ATOMIC_STATE_DIR"] = str(atomic_root / ".state")
-    env["ATOMIC_OUTPUT_DIR"] = str(atomic_root / ".outputs")
+    env["ATOMIC_OUTPUT_DIR"] = str(atomic_root.parent / ".outputs")
 
     # Build command: source memory.sh, then call function
     args_str = " ".join(f'"{arg}"' for arg in args)

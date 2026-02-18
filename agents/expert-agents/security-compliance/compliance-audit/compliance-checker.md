@@ -4,25 +4,11 @@
 # =============================================================================
 # Use for: Specialized domain work requiring depth
 # Examples: compliance audit, regulatory verification, PII protection
-# Model: sonnet (default)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: compliance-checker
 description: Regulatory compliance and data protection specialist. Invoke for compliance audits, regulatory verification, PII protection validation, and data governance enforcement.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [quality, code_debugging, reasoning]
-  minimum_tier: large
-  profiles:
-    default: security_audit
-    batch: quality_critical
 tier: expert
 
 # Pipeline integration

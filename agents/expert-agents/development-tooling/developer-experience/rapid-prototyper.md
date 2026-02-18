@@ -4,25 +4,11 @@
 # =============================================================================
 # Use for: Specialized domain work requiring depth
 # Examples: security-auditor, rust-pro, kubernetes-expert, database-optimizer
-# Model: sonnet (default) or opus (complex domains, high-stakes decisions)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: rapid-prototyper
 description: Creates quick MVPs and proof-of-concept implementations with speed-over-polish approach, validation-focused development, and low-to-high fidelity progression
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [speed, reasoning, quality]
-  minimum_tier: medium
-  profiles:
-    default: balanced
-    interactive: interactive
 tier: expert
 
 # -----------------------------------------------------------------------------

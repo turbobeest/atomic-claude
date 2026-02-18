@@ -4,26 +4,11 @@
 # =============================================================================
 # Use for: Backend services, data processing, API development, scripting automation
 # Domain: Application languages, ecosystem integration, rapid development
-# Model: sonnet (use opus for complex async or security-critical applications)
 # Instructions: 18 total
 # =============================================================================
 
 name: python-pro
 description: Python specialist for backend services, API development, and automation with Pythonic idioms, type safety, and security-first design
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 tier: expert
 
 # -----------------------------------------------------------------------------

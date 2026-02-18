@@ -56,9 +56,6 @@ class TestTask201EntryValidation:
         (phase1_dir / "selected-approach.json").write_text(
             json.dumps({"name": "test-approach"})
         )
-        (phase1_dir / "direction-confirmed.json").write_text(
-            json.dumps({"vision": "test"})
-        )
 
         result = task_201_entry_validation.execute(
             atomic_root=temp_dir,
@@ -79,9 +76,6 @@ class TestTask201EntryValidation:
         )
         (phase1_dir / "selected-approach.json").write_text(
             json.dumps({"name": "microservices"})
-        )
-        (phase1_dir / "direction-confirmed.json").write_text(
-            json.dumps({"vision": "Build platform"})
         )
 
         all_valid, missing = task_201_entry_validation.validate_phase1_artifacts(
@@ -130,18 +124,17 @@ class TestTask201EntryValidation:
         phase1_dir = temp_dir / ".outputs" / "1-discovery"
         phase1_dir.mkdir(parents=True)
 
-        # Create context files
+        # Create context files (Task 106 format with direction embedded)
         (phase1_dir / "selected-approach.json").write_text(
             json.dumps({
-                "name": "Microservices",
-                "summary": "Service-oriented architecture",
-                "rationale": "Scalability"
-            })
-        )
-        (phase1_dir / "direction-confirmed.json").write_text(
-            json.dumps({
-                "vision": "Build a scalable platform",
-                "constraints": ["Budget", "Timeline"]
+                "direction": {
+                    "summary": "Build a scalable platform",
+                    "rationale": "Scalability"
+                },
+                "key_decisions": ["Use microservices"],
+                "open_items": ["Budget", "Timeline"],
+                "confirmed_at": "2024-01-01T00:00:00",
+                "confirmed_by": "human"
             })
         )
 
@@ -149,8 +142,8 @@ class TestTask201EntryValidation:
 
         assert isinstance(context, dict)
         assert "approach" in context
-        assert context["approach"]["name"] == "Microservices"
-        assert "vision" in context
+        assert context["approach"]["name"] == "Build a scalable platform"
+        assert context["vision"] == "Build a scalable platform"
 
     def test_load_phase1_context_with_corpus(self, temp_dir):
         """Test loading context including corpus data."""
@@ -742,75 +735,62 @@ class TestTask208PhaseAudit:
     """Unit tests for task_208_phase_audit."""
 
     def test_execute_uat_mode_success(self, temp_dir):
-        """Test execute in UAT mode returns True."""
+        """Test execute in UAT mode returns True (delegates to core.audit)."""
+        output_dir = temp_dir / ".outputs" / "2-prd"
+        output_dir.mkdir(parents=True)
+
+        with patch('phases.phase_02_prd.tasks.task_208_phase_audit.run_phase_audit',
+                    return_value=True):
+            result = task_208_phase_audit.execute(
+                atomic_root=temp_dir,
+                output_dir=output_dir,
+                uat_mode=True,
+            )
+
+        assert result is True
+
+    @patch('phases.phase_02_prd.tasks.task_208_phase_audit.run_phase_audit',
+           return_value=True)
+    def test_delegates_to_run_phase_audit(self, mock_rpa, temp_dir):
+        """Task 208 delegates to core.audit.run_phase_audit."""
+        output_dir = temp_dir / ".outputs" / "2-prd"
+        output_dir.mkdir(parents=True)
+
+        task_208_phase_audit.execute(
+            atomic_root=temp_dir,
+            output_dir=output_dir,
+            uat_mode=False,
+        )
+
+        mock_rpa.assert_called_once_with(2, "2-prd", output_dir, False)
+
+    @patch('phases.phase_02_prd.tasks.task_208_phase_audit.run_phase_audit',
+           return_value=True)
+    def test_accepts_mem_parameter(self, mock_rpa, temp_dir):
+        """Task 208 accepts optional mem parameter."""
         output_dir = temp_dir / ".outputs" / "2-prd"
         output_dir.mkdir(parents=True)
 
         result = task_208_phase_audit.execute(
             atomic_root=temp_dir,
             output_dir=output_dir,
-            uat_mode=True
+            uat_mode=False,
+            mem=None,
         )
 
         assert result is True
 
-    def test_audit_checks_prd_artifacts(self, temp_dir):
-        """Test audit checks for PRD artifacts."""
-        output_dir = temp_dir / ".outputs" / "2-prd"
+    def test_bad_output_dir_non_blocking(self, temp_dir):
+        """Non-standard output_dir name returns True (non-blocking)."""
+        output_dir = temp_dir / ".outputs" / "nodash"
         output_dir.mkdir(parents=True)
 
-        # Create artifacts
-        (output_dir / "PRD.md").write_text("# PRD")
-        (output_dir / "prd-validation.json").write_text("{}")
-        (output_dir / "prd-approval.json").write_text("{}")
+        result = task_208_phase_audit.execute(
+            atomic_root=temp_dir,
+            output_dir=output_dir,
+        )
 
-        results = task_208_phase_audit._audit_prd_artifacts(output_dir)
-
-        assert results["prd"] is True
-        assert results["validation"] is True
-        assert results["approval"] is True
-
-    def test_audit_missing_artifacts(self, temp_dir):
-        """Test audit detects missing artifacts."""
-        output_dir = temp_dir / ".outputs" / "2-prd"
-        output_dir.mkdir(parents=True)
-
-        results = task_208_phase_audit._audit_prd_artifacts(output_dir)
-
-        assert not all(results.values())
-
-    @patch('core.llm.invoke_llm')
-    def test_generate_phase_audit_report(self, mock_llm):
-        """Test phase audit report generation."""
-        mock_llm.return_value = json.dumps({
-            "status": "complete",
-            "prd_quality": "high",
-            "recommendations": []
-        })
-
-        audit_results = {"prd": True, "validation": True, "approval": True}
-
-        report = task_208_phase_audit._generate_phase_audit_report(audit_results)
-
-        mock_llm.assert_called_once()
-        assert isinstance(report, dict)
-
-    def test_save_phase_audit(self, temp_dir):
-        """Test saving phase audit."""
-        output_file = temp_dir / "phase-audit.json"
-
-        audit = {
-            "phase": "2-prd",
-            "status": "complete",
-            "artifacts_verified": ["PRD.md", "validation.json"],
-            "audited_at": datetime.now().isoformat()
-        }
-
-        task_208_phase_audit._save_phase_audit(output_file, audit)
-
-        assert output_file.exists()
-        data = json.loads(output_file.read_text())
-        assert data["status"] == "complete"
+        assert result is True
 
 
 # ============================================================================

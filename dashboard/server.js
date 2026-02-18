@@ -14,8 +14,17 @@ const ATOMIC_ROOT = process.env.ATOMIC_ROOT || path.resolve(__dirname, '..');
 const STATE_DIR = path.join(ATOMIC_ROOT, '.state');
 const STATUS_FILE = path.join(STATE_DIR, 'current-task.json');
 const TASK_STATE_FILE = path.join(STATE_DIR, 'task-state.json');  // Python writes to .state/
-const PROJECT_CONFIG = path.join(ATOMIC_ROOT, '.outputs', '0-setup', 'project-config.json');
 const MEMORY_DIR = path.join(STATE_DIR, 'memory');
+
+// Pipeline writes .outputs/ to the project root (atomic-claude's parent),
+// not inside atomic-claude itself. Auto-detect which location has .outputs.
+const PROJECT_ROOT = fs.existsSync(path.join(ATOMIC_ROOT, '.outputs'))
+  ? ATOMIC_ROOT
+  : fs.existsSync(path.join(path.resolve(ATOMIC_ROOT, '..'), '.outputs'))
+    ? path.resolve(ATOMIC_ROOT, '..')
+    : ATOMIC_ROOT;
+const OUTPUTS_DIR = path.join(PROJECT_ROOT, '.outputs');
+const PROJECT_CONFIG = path.join(OUTPUTS_DIR, '0-setup', 'project-config.json');
 
 // Ensure directories exist
 if (!fs.existsSync(STATE_DIR)) {
@@ -34,6 +43,11 @@ app.use(express.static(path.join(__dirname, 'public'), {
   }
 }));
 app.use(express.json());
+
+// API: Report this server's ATOMIC_ROOT (used by start-dashboard.sh to detect stale instances)
+app.get('/api/root', (req, res) => {
+  res.json({ root: ATOMIC_ROOT });
+});
 
 // API: Get current task status with staleness detection
 app.get('/api/status', (req, res) => {
@@ -84,8 +98,8 @@ app.get('/api/tasks', (req, res) => {
               // Add memory flow metadata
               task.memory = getTaskMemoryFlow(phaseId, taskId);
 
-              // Add file artifacts
-              task.files = getTaskFiles(phaseId, taskId);
+              // Add file artifacts (use task's own artifacts list)
+              task.files = getTaskFiles(phaseId, taskId, task.artifacts || []);
             }
           }
         }
@@ -103,7 +117,7 @@ app.get('/api/tasks', (req, res) => {
 // API: Get project configuration
 app.get('/api/config', (req, res) => {
   try {
-    let config = { project: { name: 'Unnamed Project' } };
+    let config = { project: { name: null } };
 
     if (fs.existsSync(PROJECT_CONFIG)) {
       config = JSON.parse(fs.readFileSync(PROJECT_CONFIG, 'utf8'));
@@ -161,7 +175,7 @@ app.get('/api/config', (req, res) => {
 app.get('/api/task/:phase/:taskId', (req, res) => {
   try {
     const { phase, taskId } = req.params;
-    const phaseDir = path.join(ATOMIC_ROOT, '.outputs', phase);
+    const phaseDir = path.join(OUTPUTS_DIR, phase);
 
     const details = {
       inputs: [],
@@ -203,18 +217,31 @@ app.get('/api/task/:phase/:taskId', (req, res) => {
 app.get('/api/memory/stats', (req, res) => {
   try {
     const stats = {
-      recallDefinitions: 0,
-      saveDefinitions: 0,
-      debugEntries: 0,
-      localFiles: 0
+      phasesTracked: 0,
+      taskFiles: 0,
+      avgEntrySize: 0,
+      debugEntries: 0
     };
 
-    // Count task memory definitions
-    const defsFile = path.join(ATOMIC_ROOT, 'lib', 'task-memory-defs.sh');
-    if (fs.existsSync(defsFile)) {
-      const content = fs.readFileSync(defsFile, 'utf8');
-      stats.recallDefinitions = (content.match(/TASK_MEMORY_RECALL\[/g) || []).length;
-      stats.saveDefinitions = (content.match(/TASK_MEMORY_SAVE\[/g) || []).length;
+    // Count phases and task memory files
+    if (fs.existsSync(MEMORY_DIR)) {
+      const phaseDirs = fs.readdirSync(MEMORY_DIR, { withFileTypes: true })
+        .filter(e => e.isDirectory() && e.name.startsWith('phase-'));
+      stats.phasesTracked = phaseDirs.length;
+
+      let totalSize = 0;
+      let fileCount = 0;
+      for (const phaseDir of phaseDirs) {
+        const phasePath = path.join(MEMORY_DIR, phaseDir.name);
+        const files = fs.readdirSync(phasePath).filter(f => f.endsWith('.md'));
+        for (const file of files) {
+          const content = fs.readFileSync(path.join(phasePath, file), 'utf8');
+          totalSize += content.length;
+          fileCount++;
+        }
+      }
+      stats.taskFiles = fileCount;
+      stats.avgEntrySize = fileCount > 0 ? Math.round(totalSize / fileCount) : 0;
     }
 
     // Count memory debug entries
@@ -223,24 +250,239 @@ app.get('/api/memory/stats', (req, res) => {
       stats.debugEntries = fs.readdirSync(debugDir).length;
     }
 
-    // Count local memory files
-    if (fs.existsSync(MEMORY_DIR)) {
-      const countFiles = (dir) => {
-        let count = 0;
-        const entries = fs.readdirSync(dir, { withFileTypes: true });
-        for (const entry of entries) {
-          if (entry.isDirectory()) {
-            count += countFiles(path.join(dir, entry.name));
-          } else {
-            count++;
+    res.json(stats);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Memory entries — read actual memory files from .state/memory/
+// Also enriches with structured metadata from memory.json when available
+app.get('/api/memory/entries', (req, res) => {
+  try {
+    const entries = [];
+
+    // Load metadata index from memory.json for enrichment
+    const metadataIndex = {};
+    const memoryJsonFile = path.join(STATE_DIR, 'memory.json');
+    if (fs.existsSync(memoryJsonFile)) {
+      try {
+        const memoryData = JSON.parse(fs.readFileSync(memoryJsonFile, 'utf8'));
+        for (const entry of (memoryData.entries || [])) {
+          if (entry.task_id) {
+            metadataIndex[entry.task_id] = entry.metadata || {};
           }
         }
-        return count;
-      };
-      stats.localFiles = countFiles(MEMORY_DIR);
+      } catch (err) {
+        // Ignore parse errors
+      }
     }
 
-    res.json(stats);
+    if (fs.existsSync(MEMORY_DIR)) {
+      // Walk phase directories
+      const phaseDirs = fs.readdirSync(MEMORY_DIR, { withFileTypes: true })
+        .filter(d => d.isDirectory() && d.name.startsWith('phase-'))
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      for (const phaseDir of phaseDirs) {
+        const phasePath = path.join(MEMORY_DIR, phaseDir.name);
+        const files = fs.readdirSync(phasePath)
+          .filter(f => f.endsWith('.md'))
+          .sort();
+
+        for (const file of files) {
+          const filePath = path.join(phasePath, file);
+          const content = fs.readFileSync(filePath, 'utf8');
+          const stat = fs.statSync(filePath);
+
+          // Extract task_id from filename (e.g., "task_002.md" -> "002")
+          const taskIdMatch = file.match(/task_(\d+)/);
+          const taskId = taskIdMatch ? taskIdMatch[1] : null;
+
+          // Parse the markdown memory format:
+          // ## type - timestamp\n\nContent\n\nTags: ...\n\n---
+          const sections = content.split('---').filter(s => s.trim());
+          for (const section of sections) {
+            const headerMatch = section.match(/##\s+(\S+)\s+-\s+(.+)/);
+            const tagsMatch = section.match(/Tags:\s+(.+)/);
+            // Content is everything between header line and Tags line
+            const lines = section.trim().split('\n');
+            const contentLines = [];
+            let pastHeader = false;
+            for (const line of lines) {
+              if (line.startsWith('## ')) { pastHeader = true; continue; }
+              if (line.startsWith('Tags:')) continue;
+              if (pastHeader && line.trim()) contentLines.push(line.trim());
+            }
+
+            const entry = {
+              phase: phaseDir.name,
+              file: file,
+              type: headerMatch ? headerMatch[1] : 'unknown',
+              timestamp: headerMatch ? headerMatch[2].trim() : stat.mtime.toISOString(),
+              content: contentLines.join('\n'),
+              tags: tagsMatch ? tagsMatch[1].split(',').map(t => t.trim()) : [],
+            };
+
+            // Enrich with structured metadata from memory.json
+            if (taskId && metadataIndex[taskId]) {
+              entry.metadata = metadataIndex[taskId];
+            }
+
+            // Include source file path for detail view
+            entry.filePath = path.relative(ATOMIC_ROOT, filePath);
+            entry.taskId = taskId;
+
+            entries.push(entry);
+          }
+        }
+      }
+    }
+
+    // Sort by timestamp descending (newest first)
+    entries.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    res.json({ entries, total: entries.length });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Memory detail — returns full memory content + associated output artifacts
+app.get('/api/memory/detail', (req, res) => {
+  try {
+    const { phase, taskId } = req.query;
+    if (!phase || !taskId) {
+      return res.status(400).json({ error: 'Missing phase or taskId parameter' });
+    }
+
+    const result = {
+      memoryContent: null,
+      taskInfo: null,
+      artifacts: [],
+      outputFiles: []
+    };
+
+    // 1. Read the raw memory markdown file
+    const memoryFile = path.join(MEMORY_DIR, phase, `task_${taskId}.md`);
+    if (fs.existsSync(memoryFile)) {
+      result.memoryContent = fs.readFileSync(memoryFile, 'utf8');
+    }
+
+    // 2. Get task info from task-state.json (status, timestamps, artifacts)
+    if (fs.existsSync(TASK_STATE_FILE)) {
+      try {
+        const taskState = JSON.parse(fs.readFileSync(TASK_STATE_FILE, 'utf8'));
+        const phases = taskState.phases || {};
+        // Find the task across phases by task ID
+        for (const [phaseId, phaseData] of Object.entries(phases)) {
+          const tasks = phaseData.tasks || {};
+          if (tasks[taskId]) {
+            result.taskInfo = {
+              ...tasks[taskId],
+              phaseId: phaseId
+            };
+            break;
+          }
+        }
+      } catch (err) {
+        // Ignore parse errors
+      }
+    }
+
+    // 3. Load associated artifact contents (preview: first 3KB each)
+    if (result.taskInfo && result.taskInfo.artifacts) {
+      for (const artifactPath of result.taskInfo.artifacts) {
+        try {
+          // Resolve path — multiple strategies to handle symlinks and path mismatches
+          let fullPath = path.isAbsolute(artifactPath)
+            ? artifactPath
+            : path.join(ATOMIC_ROOT, artifactPath);
+
+          if (!fs.existsSync(fullPath)) {
+            // Strategy 1: Extract .outputs/ relative path and try under PROJECT_ROOT
+            const outputsIdx = artifactPath.indexOf('.outputs/');
+            if (outputsIdx >= 0) {
+              const relFromOutputs = artifactPath.slice(outputsIdx);
+              const projPath = path.join(path.resolve(PROJECT_ROOT), relFromOutputs);
+              if (fs.existsSync(projPath)) {
+                fullPath = projPath;
+              }
+            }
+          }
+
+          if (!fs.existsSync(fullPath)) {
+            // Strategy 2: Resolve symlinks in ATOMIC_ROOT and try matching
+            try {
+              const realAtomic = fs.realpathSync(ATOMIC_ROOT);
+              const realProject = fs.realpathSync(PROJECT_ROOT);
+              // Replace realpath-based atomic root in the stored path
+              if (artifactPath.includes(realAtomic)) {
+                const altPath = artifactPath.replace(realAtomic, realProject);
+                if (fs.existsSync(altPath)) fullPath = altPath;
+              }
+            } catch (e) { /* ignore */ }
+          }
+
+          if (!fs.existsSync(fullPath)) continue;
+
+          const stat = fs.statSync(fullPath);
+          // Skip secrets
+          if (path.basename(fullPath) === 'secrets.json') continue;
+
+          let preview = '';
+          if (stat.size <= 3072) {
+            preview = fs.readFileSync(fullPath, 'utf8');
+          } else {
+            const buf = Buffer.alloc(3072);
+            const fd = fs.openSync(fullPath, 'r');
+            fs.readSync(fd, buf, 0, 3072, 0);
+            fs.closeSync(fd);
+            preview = buf.toString('utf8') + '\n... (truncated)';
+          }
+
+          result.artifacts.push({
+            name: path.basename(fullPath),
+            path: artifactPath,
+            size: stat.size,
+            modified: stat.mtime,
+            preview: preview
+          });
+        } catch (err) {
+          // Skip unreadable artifacts
+        }
+      }
+    }
+
+    // 4. List all files in the phase output directory (for discovery)
+    if (result.taskInfo && result.taskInfo.phaseId) {
+      const phaseOutputDir = path.join(OUTPUTS_DIR, result.taskInfo.phaseId);
+      if (fs.existsSync(phaseOutputDir)) {
+        try {
+          const walkDir = (dir, prefix = '') => {
+            const items = fs.readdirSync(dir, { withFileTypes: true });
+            for (const item of items) {
+              const relPath = prefix ? `${prefix}/${item.name}` : item.name;
+              if (item.isDirectory()) {
+                // Skip deeply nested dirs (prompts/, etc.) — just list top-level
+                if (!prefix) walkDir(path.join(dir, item.name), relPath);
+              } else {
+                const stat = fs.statSync(path.join(dir, item.name));
+                result.outputFiles.push({
+                  name: relPath,
+                  size: stat.size,
+                  modified: stat.mtime
+                });
+              }
+            }
+          };
+          walkDir(phaseOutputDir);
+        } catch (err) {
+          // Ignore walk errors
+        }
+      }
+    }
+
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -392,92 +634,55 @@ function getTaskMemoryFlow(phaseId, taskId) {
 }
 
 // Helper: Get file artifacts for a task
-function getTaskFiles(phaseId, taskId) {
+// Uses the task's own artifacts list from task-state.json for precise per-task files.
+function getTaskFiles(phaseId, taskId, artifacts) {
   const files = { read: [], written: [] };
-  const phaseDir = path.join(ATOMIC_ROOT, '.outputs', phaseId);
 
-  if (!fs.existsSync(phaseDir)) {
+  if (!artifacts || artifacts.length === 0) {
     return files;
   }
 
-  // Known input patterns (files read by task)
-  const inputPatterns = [
-    'prompt', 'input', 'context', 'material', 'corpus',
-    'requirements', 'reference', 'setup', 'config'
-  ];
-
-  // Known output patterns (files written by task)
-  const outputPatterns = [
-    'response', 'output', 'result', 'extracted', 'generated',
-    'summary', 'decisions', 'artifacts', 'session', 'metadata',
-    'current-task', 'selected', 'approved', 'validated', 'secrets'
-  ];
-
-  // Recursively scan directory and subdirectories
-  const scanDirectory = (dirPath, relativePath = '') => {
+  for (const artifactPath of artifacts) {
     try {
-      const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+      // Resolve to absolute path (artifacts may be absolute or relative)
+      const fullPath = path.isAbsolute(artifactPath)
+        ? artifactPath
+        : path.join(ATOMIC_ROOT, artifactPath);
 
-      entries.forEach(entry => {
-        const fullPath = path.join(dirPath, entry.name);
-        const relPath = relativePath ? path.join(relativePath, entry.name) : entry.name;
+      if (!fs.existsSync(fullPath)) continue;
 
-        if (entry.isDirectory()) {
-          // Recursively scan subdirectories
-          scanDirectory(fullPath, relPath);
-        } else {
-          try {
-            const stat = fs.statSync(fullPath);
-            const fileInfo = {
-              name: relPath,
-              path: fullPath.replace(ATOMIC_ROOT, ''),
-              size: stat.size,
-              modified: stat.mtime
-            };
+      const stat = fs.statSync(fullPath);
+      // Derive display name: relative to phase output dir, or just the filename
+      const phaseOutputDir = path.join(OUTPUTS_DIR, phaseId);
+      let displayName;
+      if (fullPath.startsWith(phaseOutputDir)) {
+        displayName = path.relative(phaseOutputDir, fullPath);
+      } else {
+        displayName = path.basename(fullPath);
+      }
+      // Build a serveable path: relative to ATOMIC_ROOT or PROJECT_ROOT
+      let servePath;
+      if (fullPath.startsWith(ATOMIC_ROOT)) {
+        servePath = fullPath.replace(ATOMIC_ROOT, '');
+      } else if (PROJECT_ROOT !== ATOMIC_ROOT && fullPath.startsWith(PROJECT_ROOT)) {
+        servePath = fullPath.replace(PROJECT_ROOT, '');
+      } else {
+        servePath = fullPath;  // absolute fallback
+      }
+      const fileInfo = {
+        name: displayName,
+        path: servePath,
+        size: stat.size,
+        modified: stat.mtime
+      };
 
-            // Check if file is related to this task
-            // Be more inclusive: match task ID, or show all files for certain phases
-            const isRelated = relPath.includes(taskId) ||
-                             relPath.includes(phaseId) ||
-                             phaseId === '0-setup' ||  // Show all files for phase 0
-                             phaseId === '1-discovery' ||  // Show all files for phase 1
-                             phaseId === '2-prd' ||  // Show all files for phase 2
-                             relPath === 'session.json' ||
-                             relPath === 'metadata.json' ||
-                             relPath === 'current-task.json' ||
-                             relPath === 'closeout.md' ||
-                             relPath === 'closeout.json';
-
-            if (!isRelated) return;
-
-            // Categorize as input (read) or output (written)
-            const lowerName = relPath.toLowerCase();
-            const isInput = inputPatterns.some(p => lowerName.includes(p)) ||
-                           (relPath.endsWith('.md') && !lowerName.includes('output'));
-
-            const isOutput = outputPatterns.some(p => lowerName.includes(p)) ||
-                            relPath.endsWith('.json') ||
-                            relPath.endsWith('.err');
-
-            if (isInput && !isOutput) {
-              files.read.push(fileInfo);
-            } else {
-              files.written.push(fileInfo);
-            }
-          } catch (err) {
-            // Skip files we can't stat
-          }
-        }
-      });
-    } catch (error) {
-      // Directory read failed, skip
+      files.written.push(fileInfo);
+    } catch (err) {
+      // Skip files we can't stat
     }
-  };
-
-  scanDirectory(phaseDir);
+  }
 
   // Sort by name
-  files.read.sort((a, b) => a.name.localeCompare(b.name));
   files.written.sort((a, b) => a.name.localeCompare(b.name));
 
   return files;
@@ -491,9 +696,25 @@ app.get('/api/file', (req, res) => {
       return res.status(400).json({ error: 'Missing path parameter' });
     }
 
-    // Security: ensure path is within ATOMIC_ROOT
-    const fullPath = path.join(ATOMIC_ROOT, filePath);
-    if (!fullPath.startsWith(ATOMIC_ROOT)) {
+    // Resolve full path — try relative to ATOMIC_ROOT first, then PROJECT_ROOT
+    let fullPath;
+    if (path.isAbsolute(filePath)) {
+      fullPath = filePath;
+    } else {
+      fullPath = path.join(ATOMIC_ROOT, filePath);
+      if (!fs.existsSync(fullPath) && PROJECT_ROOT !== ATOMIC_ROOT) {
+        const altPath = path.join(PROJECT_ROOT, filePath);
+        if (fs.existsSync(altPath)) {
+          fullPath = altPath;
+        }
+      }
+    }
+
+    // Security: ensure path is within ATOMIC_ROOT or PROJECT_ROOT
+    const resolvedPath = path.resolve(fullPath);
+    const resolvedAtomic = path.resolve(ATOMIC_ROOT);
+    const resolvedProject = path.resolve(PROJECT_ROOT);
+    if (!resolvedPath.startsWith(resolvedAtomic) && !resolvedPath.startsWith(resolvedProject)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -570,8 +791,8 @@ app.get('/api/errors', (req, res) => {
 app.get('/api/agents', (req, res) => {
   try {
     const agentFiles = [
-      path.join(ATOMIC_ROOT, '.outputs', '1-discovery', 'selected-agents.json'),
-      path.join(ATOMIC_ROOT, '.outputs', '3-tasking', 'selected-agents.json')
+      path.join(OUTPUTS_DIR, '1-discovery', 'selected-agents.json'),
+      path.join(OUTPUTS_DIR, '3-tasking', 'selected-agents.json')
     ];
 
     const agents = [];
@@ -833,21 +1054,6 @@ app.get('/api/narrative', (req, res) => {
   }
 });
 
-// API: Get confidence scores (would need to be tracked in outputs)
-app.get('/api/confidence', (req, res) => {
-  try {
-    // This would need to be implemented in task outputs
-    // For now, return structure
-    res.json({
-      overall: 85,
-      by_section: {},
-      warnings: []
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // API: Export pipeline report
 app.get('/api/export/report', async (req, res) => {
   try {
@@ -885,7 +1091,7 @@ app.get('/api/export/report', async (req, res) => {
     }
 
     // Load project name
-    const projectConfig = path.join(ATOMIC_ROOT, '.outputs', '0-setup', 'project-config.json');
+    const projectConfig = path.join(OUTPUTS_DIR, '0-setup', 'project-config.json');
     if (fs.existsSync(projectConfig)) {
       const config = JSON.parse(fs.readFileSync(projectConfig, 'utf8'));
       report.project.name = config.extracted?.project?.name || config.project?.name || report.project.name;

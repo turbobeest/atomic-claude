@@ -3,26 +3,11 @@
 # EXPERT TIER - Database Optimizer (~1500 tokens)
 # =============================================================================
 # Use for: Query tuning, index strategy, execution plan analysis
-# Model: sonnet (pattern matching against criteria, performance analysis)
 # Instructions: 18 maximum
 # =============================================================================
 
 name: database-optimizer
 description: Specializes in database performance tuning, index strategy optimization, and query execution plan analysis for maximum efficiency
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 tier: expert
 
 # -----------------------------------------------------------------------------

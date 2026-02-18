@@ -4,26 +4,11 @@
 # =============================================================================
 # Use for: Fault-tolerant systems, OTP patterns, Phoenix framework, distributed applications
 # Domain: Dynamic languages, functional programming, BEAM VM
-# Model: sonnet (use opus for complex distributed patterns or novel OTP designs)
 # Instructions: 18 total
 # =============================================================================
 
 name: elixir-pro
 description: Elixir specialist for OTP patterns, functional programming, and Phoenix framework with highly concurrent, fault-tolerant systems
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 tier: expert
 
 # -----------------------------------------------------------------------------

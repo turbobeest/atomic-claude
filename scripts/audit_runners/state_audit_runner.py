@@ -567,7 +567,7 @@ class StateAuditRunner:
             tasks = phases[phase_id].get("tasks", {})
 
             for task_id in tasks.keys():
-                if task_id < target_task:
+                if int(task_id) < int(target_task):
                     tasks[task_id]["status"] = "complete"
                     tasks[task_id]["completed_at"] = datetime.now().isoformat()
 
@@ -580,10 +580,11 @@ class StateAuditRunner:
     def _run_phase_with_resume(self, phase_num: int, resume_task: str) -> Dict:
         """Run phase with --resume-at flag."""
         cmd = [
-            "bash",
-            str(REPO_ROOT / "phases" / f"{phase_num}-setup" / "run.sh"),
-            f"--resume-at={resume_task}",
-            "--mode=document"
+            "python",
+            str(REPO_ROOT / "main.py"),
+            "run",
+            str(phase_num),
+            f"--resume-at={resume_task}"
         ]
 
         env = os.environ.copy()
@@ -623,34 +624,25 @@ class StateAuditRunner:
 
     def _test_invalid_json_recovery(self) -> Dict:
         """Test recovery from invalid JSON."""
+        from core.state import StateManager
+
         # Create invalid JSON
         STATE_FILE.parent.mkdir(exist_ok=True)
         with open(STATE_FILE, 'w') as f:
             f.write("{invalid json content")
 
-        # Try to initialize phase - should recover
-        cmd = [
-            "bash",
-            str(REPO_ROOT / "lib" / "task-state.sh")
-        ]
-
+        # Try to initialize phase via StateManager - should recover
         try:
-            # Source the library and call task_state_init
-            result = subprocess.run(
-                ["bash", "-c", f"source {REPO_ROOT}/lib/task-state.sh && task_state_init '0-setup'"],
-                env={"ATOMIC_ROOT": str(REPO_ROOT)},
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            sm = StateManager(atomic_root=REPO_ROOT)
+            sm.set_current_phase("0-setup")
 
-            # Check if state file was recreated
+            # Check if state file was recreated with valid JSON
             if STATE_FILE.exists():
                 try:
                     with open(STATE_FILE) as f:
                         json.load(f)
                     return {"recovered": True}
-                except:
+                except Exception:
                     return {"recovered": False}
 
             return {"recovered": False}
@@ -660,19 +652,16 @@ class StateAuditRunner:
 
     def _test_missing_file_recovery(self) -> Dict:
         """Test recovery from missing state file."""
+        from core.state import StateManager
+
         # Remove state file
         if STATE_FILE.exists():
             STATE_FILE.unlink()
 
-        # Try to initialize phase - should recreate
+        # Try to initialize phase via StateManager - should recreate
         try:
-            result = subprocess.run(
-                ["bash", "-c", f"source {REPO_ROOT}/lib/task-state.sh && task_state_init '0-setup'"],
-                env={"ATOMIC_ROOT": str(REPO_ROOT)},
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            sm = StateManager(atomic_root=REPO_ROOT)
+            sm.set_current_phase("0-setup")
 
             # Check if state file was created
             if STATE_FILE.exists():
@@ -680,7 +669,7 @@ class StateAuditRunner:
                     with open(STATE_FILE) as f:
                         state_data = json.load(f)
                     return {"recovered": True, "state_data": state_data}
-                except:
+                except Exception:
                     return {"recovered": False}
 
             return {"recovered": False}
@@ -690,6 +679,8 @@ class StateAuditRunner:
 
     def _test_partial_state_recovery(self) -> Dict:
         """Test recovery from partial state data."""
+        from core.state import StateManager
+
         # Create partial state (missing phases key)
         STATE_FILE.parent.mkdir(exist_ok=True)
         with open(STATE_FILE, 'w') as f:
@@ -699,15 +690,10 @@ class StateAuditRunner:
                 "current_task": None
             }, f)
 
-        # Try to initialize phase - should add missing keys
+        # Try to initialize phase via StateManager - should add missing keys
         try:
-            result = subprocess.run(
-                ["bash", "-c", f"source {REPO_ROOT}/lib/task-state.sh && task_state_init '0-setup'"],
-                env={"ATOMIC_ROOT": str(REPO_ROOT)},
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            sm = StateManager(atomic_root=REPO_ROOT)
+            sm.set_current_phase("0-setup")
 
             # Check if state file was fixed
             if STATE_FILE.exists():
@@ -717,7 +703,7 @@ class StateAuditRunner:
 
                     has_phases = "phases" in state_data
                     return {"recovered": has_phases}
-                except:
+                except Exception:
                     return {"recovered": False}
 
             return {"recovered": False}
@@ -727,6 +713,8 @@ class StateAuditRunner:
 
     def _test_corrupted_task_recovery(self) -> Dict:
         """Test recovery from corrupted task data."""
+        from core.state import StateManager
+
         # Create state with corrupted task
         STATE_FILE.parent.mkdir(exist_ok=True)
         with open(STATE_FILE, 'w') as f:
@@ -745,18 +733,13 @@ class StateAuditRunner:
                 }
             }, f)
 
-        # Try to run phase - should handle gracefully
+        # Try to initialize via StateManager - should handle gracefully without crashing
         try:
-            result = subprocess.run(
-                ["bash", "-c", f"source {REPO_ROOT}/lib/task-state.sh && task_state_init '0-setup'"],
-                env={"ATOMIC_ROOT": str(REPO_ROOT)},
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            sm = StateManager(atomic_root=REPO_ROOT)
+            sm.set_current_phase("0-setup")
 
-            # System should not crash
-            return {"recovered": result.returncode == 0 or "error" not in result.stderr.lower()}
+            # System should not crash - if we got here, it recovered
+            return {"recovered": True}
 
         except Exception as e:
             return {"recovered": False, "error": str(e)}

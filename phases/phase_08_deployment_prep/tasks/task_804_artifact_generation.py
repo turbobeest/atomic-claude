@@ -20,7 +20,7 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import read_json, write_json
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 804: Artifact Generation.
 
@@ -32,7 +32,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
-    deployment_dir = atomic_root / ".claude" / "deployment"
+    project_root = atomic_root.parent
+
+    deployment_dir = project_root / ".claude" / "deployment"
     prompts_dir = deployment_dir / "prompts"
     setup_file = deployment_dir / "setup.json"
     artifacts_file = deployment_dir / "artifacts.json"
@@ -73,7 +75,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         release_type = setup_data.get("release", {}).get("type", "minor")
 
     # Gather project context
-    prd_file = atomic_root / "docs" / "prd" / "PRD.md"
+    prd_file = project_root / "docs" / "prd" / "PRD.md"
     project_context = ""
     if prd_file.exists():
         with open(prd_file, 'r') as f:

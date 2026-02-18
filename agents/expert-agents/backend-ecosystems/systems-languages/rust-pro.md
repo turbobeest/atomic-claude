@@ -4,26 +4,11 @@
 # =============================================================================
 # Use for: Memory-safe systems programming with ownership patterns
 # Domain: Systems languages, performance-critical applications, concurrent systems
-# Model: sonnet (use opus for novel safety patterns or critical security decisions)
 # Instructions: 18 total
 # =============================================================================
 
 name: rust-pro
 description: Rust systems programming specialist for memory-safe, high-performance applications with ownership optimization and safety guarantees
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 tier: expert
 
 # -----------------------------------------------------------------------------

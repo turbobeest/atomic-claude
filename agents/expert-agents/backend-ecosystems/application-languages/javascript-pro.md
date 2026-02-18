@@ -4,26 +4,11 @@
 # =============================================================================
 # Use for: Modern ES6+ applications, async architecture, Node.js backend, full-stack development
 # Domain: Application languages, event-driven systems, npm ecosystem
-# Model: sonnet (use opus for novel async patterns or complex architecture)
 # Instructions: 18 total
 # =============================================================================
 
 name: javascript-pro
 description: JavaScript specialist for modern ES6+ patterns, async/await architecture, and Node.js ecosystem integration across full-stack applications
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 tier: expert
 
 # -----------------------------------------------------------------------------

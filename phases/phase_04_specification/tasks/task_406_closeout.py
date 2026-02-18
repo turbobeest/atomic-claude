@@ -265,7 +265,7 @@ In the next phase, we will:
     return closeout_md, closeout_json
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 406: Phase Closeout.
 
@@ -277,14 +277,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
-    closeout_dir = atomic_root / ".claude" / "closeout"
-    tasks_file = atomic_root / ".taskmaster" / "tasks" / "tasks.json"
-    specs_dir = atomic_root / ".claude" / "specs"
+    project_root = atomic_root.parent
+    closeout_dir = project_root / ".claude" / "closeout"
+    tasks_file = project_root / ".taskmaster" / "tasks" / "tasks.json"
+    specs_dir = project_root / ".claude" / "specs"
 
     # Check audit file (new path first, then legacy)
-    audit_file = atomic_root / ".outputs" / "audits" / "phase-4-report.json"
+    audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-4-report.json"
     if not audit_file.exists():
-        audit_file = atomic_root / ".claude" / "audit" / "phase-04-audit.json"
+        audit_file = project_root / ".claude" / "audit" / "phase-04-audit.json"
 
     # UAT Mode: Auto-approve closeout
     if uat_mode:

@@ -4,28 +4,12 @@
 # =============================================================================
 # Use for: Specialized domain work requiring depth
 # Examples: security-auditor, rust-pro, kubernetes-expert, database-optimizer
-# Model: sonnet (default) or opus (complex domains, high-stakes decisions)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: kafka-expert
 description: Masters Apache Kafka for distributed event streaming and real-time data pipelines, specializing in high-throughput messaging, stream processing, and scalable data architecture with advanced cluster management
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
 tier: expert
-
-model_selection:
-  priorities: [quality, reasoning, code_debugging]
-  minimum_tier: medium
-  profiles:
-    default: quality_critical
-    interactive: interactive
-    batch: budget
 
 mcp_servers:
   protocol-specs:

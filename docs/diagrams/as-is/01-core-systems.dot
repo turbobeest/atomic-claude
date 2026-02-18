@@ -1,0 +1,236 @@
+// Atomic Claude 2.0 — Core Systems Architecture (As-Is)
+// How memory, state, LLM, config, and dashboard interconnect
+//
+// Generated: 2026-02-15
+
+digraph core_systems {
+    rankdir=TB
+    compound=true
+    fontname="Helvetica"
+    fontsize=14
+    label="Core Systems Architecture (As-Is)\nData Flow Between Subsystems"
+    labelloc=t
+    labeljust=l
+    pad=0.5
+    nodesep=0.5
+    ranksep=0.7
+
+    node [fontname="Helvetica", fontsize=10, style=filled]
+    edge [fontname="Helvetica", fontsize=9]
+
+    // =============================================
+    // STATE MANAGEMENT
+    // =============================================
+
+    subgraph cluster_state {
+        label="State Management (core/state.py)"
+        style=filled
+        fillcolor="#FFF0F5"
+        color="#CD5C5C"
+
+        sm [label="StateManager", shape=box, fillcolor="#FFB6C1", style="filled,bold"]
+        ts [label=".state/task-state.json\n{\n  current_phase\n  current_task\n  phases: { status, tasks }\n}", shape=note, fillcolor="#FFE4E1"]
+        lock [label=".state/state.lock\n(fcntl file lock)", shape=note, fillcolor="#FFE4E1"]
+        snaps [label=".state/snapshots/\n(point-in-time captures)", shape=folder, fillcolor="#FFE4E1"]
+
+        sm -> ts [label="atomic write\n(tmp + rename)"]
+        sm -> lock [label="acquire/release"]
+        sm -> snaps [label="save/restore"]
+    }
+
+    // =============================================
+    // MEMORY SYSTEM
+    // =============================================
+
+    subgraph cluster_memory {
+        label="Memory System (core/memory/)"
+        style=filled
+        fillcolor="#F5F0FF"
+        color="#9370DB"
+
+        // Public API
+        mem_api [label="memory_save()\nmemory_recall()\nmemory_checkpoint()\nmemory_compact()\nmemory_handle_backtrack()",
+                 shape=box, fillcolor="#DDA0DD", style="filled,bold"]
+
+        // Components
+        store [label="MemoryStore\nAppend-only log", shape=box, fillcolor="#E6E0F3"]
+        recall [label="MemoryRecall\nScoring engine", shape=box, fillcolor="#E6E0F3"]
+        checkpoint [label="CheckpointManager\nPhase-boundary saves", shape=box, fillcolor="#E6E0F3"]
+        compactor [label="MemoryCompactor\nDedupe + prune", shape=box, fillcolor="#E6E0F3"]
+
+        // Storage
+        memjson [label=".state/memory.json\n(all entries, append-only)", shape=note, fillcolor="#E8E0F0"]
+        memhead [label=".state/memory-head.json\n(head pointer)", shape=note, fillcolor="#E8E0F0"]
+        memindex [label=".state/memory-index.json\n(id → offset)", shape=note, fillcolor="#E8E0F0"]
+        memphase [label=".state/memory/phase-N/\ntask_NNN.md\n(dashboard-readable)", shape=folder, fillcolor="#E8E0F0"]
+        memckpt [label=".state/memory-checkpoints/\nphaseN-timestamp.json", shape=folder, fillcolor="#E8E0F0"]
+
+        mem_api -> store
+        mem_api -> recall
+        mem_api -> checkpoint
+        mem_api -> compactor
+
+        store -> memjson [label="append"]
+        store -> memhead [label="update"]
+        store -> memindex [label="update"]
+        store -> memphase [label="write markdown"]
+        checkpoint -> memckpt [label="create/invalidate"]
+    }
+
+    // =============================================
+    // RECALL SCORING
+    // =============================================
+
+    subgraph cluster_scoring {
+        label="Recall Scoring Algorithm"
+        style=dashed
+        color="#9370DB"
+
+        scoring [label="total = 0.5 * keyword_match\n       + 0.3 * recency (7-day half-life)\n       + 0.2 * phase_proximity\n\nthreshold: 0.3 (default)\nmax_tokens: 4000 (default)",
+                 shape=box, fillcolor="#F0E8FF"]
+    }
+
+    recall -> scoring [style=dotted]
+
+    // =============================================
+    // LLM SYSTEM
+    // =============================================
+
+    subgraph cluster_llm {
+        label="LLM System (core/llm/)"
+        style=filled
+        fillcolor="#F0FFF0"
+        color="#228B22"
+
+        invoke [label="invoke_llm()\nstream_llm()", shape=box, fillcolor="#98FB98", style="filled,bold"]
+        resolver [label="ModelResolver\nResolves tier/provider/model\nfor phase + task + agent",
+                  shape=box, fillcolor="#C8F0C8"]
+        router [label="LLMRouter\nFallback chain\nCircuit breaker\nHealth checks",
+                shape=box, fillcolor="#C8F0C8"]
+
+        // Providers
+        cc [label="ClaudeCodeProvider\nclaude -p ...\n(subprocess)", shape=box, fillcolor="#B0E0B0"]
+        anth [label="AnthropicProvider\nSDK direct call", shape=box, fillcolor="#B0E0B0"]
+        bed [label="BedrockProvider\nboto3 / GovCloud", shape=box, fillcolor="#B0E0B0"]
+        oll [label="OllamaProvider\nHTTP to local", shape=box, fillcolor="#B0E0B0"]
+
+        // Resolution sources
+        models_json [label="config/models.json\n(tier defs, fallback chains,\nrole→tier mapping)",
+                     shape=note, fillcolor="#E0F0E0"]
+        overrides [label=".state/model-overrides.json\n(user interactive choices)",
+                   shape=note, fillcolor="#E0F0E0"]
+        manifest [label="agents/agent-manifest.json\n(agent model preferences)",
+                  shape=note, fillcolor="#E0F0E0"]
+
+        invoke -> resolver [label="resolve model"]
+        invoke -> router [label="get provider"]
+        resolver -> models_json [label="read"]
+        resolver -> overrides [label="read"]
+        resolver -> manifest [label="read"]
+
+        router -> cc [label="priority 1"]
+        router -> anth [label="priority 2"]
+        router -> bed [label="priority 3"]
+        router -> oll [label="priority 4"]
+    }
+
+    // =============================================
+    // TOKEN TRACKING
+    // =============================================
+
+    tokens [label=".state/session-tokens.json\n{\n  total_input_tokens\n  total_output_tokens\n  estimated_cost_usd\n  by_provider, by_model\n}",
+            shape=note, fillcolor="#FFFACD"]
+
+    invoke -> tokens [label="update after\neach call", style=dashed]
+
+    // =============================================
+    // CONFIG SYSTEM
+    // =============================================
+
+    subgraph cluster_config {
+        label="Configuration (core/config.py)"
+        style=filled
+        fillcolor="#FFFFF0"
+        color="#DAA520"
+
+        cfg [label="Config (singleton)\nget(key) / set(key, val)\nhot-reload capable",
+             shape=box, fillcolor="#F0E68C", style="filled,bold"]
+
+        // Sources (priority low → high)
+        defaults [label="Built-in defaults\n(lowest priority)", shape=note, fillcolor="#FFF8DC"]
+        projcfg [label=".outputs/0-setup/\nproject-config.json\n(Phase 0 output)", shape=note, fillcolor="#FFF8DC"]
+        dotenv [label=".env\n(ATOMIC_*, CLAUDE_*,\nAWS_*)", shape=note, fillcolor="#FFF8DC"]
+        envvars [label="Environment\nvariables", shape=note, fillcolor="#FFF8DC"]
+        cli [label="CLI args\n(highest priority)", shape=note, fillcolor="#FFF8DC"]
+
+        defaults -> cfg [label="1"]
+        projcfg -> cfg [label="2"]
+        dotenv -> cfg [label="3"]
+        envvars -> cfg [label="4"]
+        cli -> cfg [label="5"]
+    }
+
+    // =============================================
+    // DASHBOARD
+    // =============================================
+
+    subgraph cluster_dashboard {
+        label="Dashboard (dashboard/)"
+        style=filled
+        fillcolor="#F0F8FF"
+        color="#4682B4"
+
+        dash [label="Node.js/Express\nlocalhost:3000", shape=box, fillcolor="#87CEEB", style="filled,bold"]
+
+        // Data sources
+        ct [label=".state/current-task.json\n(live task indicator)", shape=note, fillcolor="#E0F0FF"]
+        st [label=".state/session-tokens.json", shape=note, fillcolor="#E0F0FF"]
+        errlog [label=".logs/errors.json", shape=note, fillcolor="#E0F0FF"]
+
+        dash -> ct [label="reads", dir=back]
+        dash -> ts [label="reads", dir=back, constraint=false, style=dotted]
+        dash -> memphase [label="reads\nmarkdown", dir=back, constraint=false, style=dotted]
+        dash -> st [label="reads", dir=back]
+        dash -> errlog [label="reads", dir=back]
+    }
+
+    // =============================================
+    // ORCHESTRATION SUPPORT
+    // =============================================
+
+    subgraph cluster_orch {
+        label="Orchestration Support"
+        style=filled
+        fillcolor="#F5F5F5"
+        color="#696969"
+
+        dsync [label="dashboard_sync.py\nwrite_current_task()\nclear_current_task()\nlog_error()",
+               shape=box, fillcolor="#D3D3D3"]
+        pretask [label="pre_task_validation.py\nvalidate_directory_pristine()\nBLOCKER if violations",
+                 shape=box, fillcolor="#FFB6B6"]
+        tdisplay [label="task_display.py\nAgent roster display\nInteractive model override",
+                  shape=box, fillcolor="#D3D3D3"]
+        tmem [label="task_memory.py\nTaskMemory class\ndecision/finding/config/\nconversation/warning",
+              shape=box, fillcolor="#D3D3D3"]
+        menrich [label="memory_enrichment.py\nsummarize_task_artifacts()\n(fallback when no TaskMemory)",
+                 shape=box, fillcolor="#D3D3D3"]
+        backtrack [label="backtrack.py\nbacktrack_to(phase, task)\nClears state + outputs +\nmemory after target",
+                   shape=box, fillcolor="#D3D3D3"]
+
+        dsync -> ct [label="writes"]
+        dsync -> errlog [label="appends"]
+        tdisplay -> overrides [label="writes", constraint=false]
+        tdisplay -> resolver [label="set_override()", constraint=false, style=dotted]
+    }
+
+    // =============================================
+    // CROSS-SYSTEM CONNECTIONS
+    // =============================================
+
+    // Config feeds resolver
+    cfg -> resolver [label="project-config\nhot-reload", style=dashed, constraint=false]
+
+    // Backtrack clears state + memory
+    backtrack -> sm [label="reset phases", style=dashed, color="#CC0000", constraint=false]
+    backtrack -> store [label="clear_phase()", style=dashed, color="#CC0000", constraint=false]
+}

@@ -4,27 +4,12 @@
 # =============================================================================
 # Use for: Hyperspectral imaging systems for defense applications
 # Focus: Spectral signature analysis, material identification, camouflage detection
-# Model: opus (complex spectral analysis requiring deep reasoning)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: hyperspectral-expert
 description: Masters hyperspectral imaging systems for defense applications, specializing in spectral signature analysis, material identification, camouflage detection, and multi-dimensional data processing with advanced spectral libraries and classification algorithms
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Kimi-K2-Thinking
-  - Qwen3-235B-A22B
-  - llama3.3:70b
 tier: expert
-
-model_selection:
-  priorities: [math, reasoning, quality]
-  minimum_tier: medium
-  profiles:
-    default: math_reasoning
-    batch: budget
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

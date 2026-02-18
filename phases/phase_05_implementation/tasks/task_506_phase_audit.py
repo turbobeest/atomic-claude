@@ -15,7 +15,7 @@ from core.audit import run_phase_audit
 from core.utils.cli_ui import print_green, print_yellow
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute phase audit task.
 

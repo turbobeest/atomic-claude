@@ -48,6 +48,7 @@ from .router import LLMRouter, RouterConfig
 from .anthropic import AnthropicProvider
 from .bedrock import BedrockProvider
 from .ollama import OllamaProvider
+from .claude_code import ClaudeCodeProvider
 
 from .invoke import invoke_llm, stream_llm, FeatureAwareLLMInvoker
 from .invoke import invoke_llm as invoke  # Alias for compatibility
@@ -103,6 +104,7 @@ __all__ = [
     "AnthropicProvider",
     "BedrockProvider",
     "OllamaProvider",
+    "ClaudeCodeProvider",
     # Invocation
     "invoke_llm",
     "invoke",

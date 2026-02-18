@@ -48,7 +48,7 @@ PRD_SECTIONS = [
 ]
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 205: PRD Authoring.
 
@@ -83,36 +83,98 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # Load context from previous tasks
     context = load_prd_context(atomic_root, output_dir)
 
+    # Detect partial state from output files
+    resuming = False
+    completed_gens = set()
+
     # Check if PRD already exists
     if prd_file.exists():
         print(print_yellow(f"  PRD already exists: {prd_file}"))
-        print()
-        print("    " + print_cyan("[continue]") + "  Continue with existing PRD")
-        print("    " + print_yellow("[regenerate]") + " Regenerate from scratch")
-        print()
 
-        clear_input_buffer()
-        choice = prompt_user("  Choice (default: continue): ").strip().lower() or "continue"
+        # Scan output files for resume detection
+        completed_gens = _detect_completed_sections(prompts_dir)
+        total_gens = 12
+        remaining = total_gens - len(completed_gens)
+        invalid_gens = set()
 
-        if choice == "regenerate":
-            # Backup existing PRD
-            backup_file = prd_file.parent / f"PRD.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-            prd_file.rename(backup_file)
-            print(print_dim(f"  Backed up to: {backup_file}"))
+        # Check for output files that exist but are invalid
+        for gen_num in range(1, 13):
+            output_file = prompts_dir / f"gen{gen_num:02d}_output.md"
+            if output_file.exists() and gen_num not in completed_gens:
+                invalid_gens.add(gen_num)
+
+        if 0 < len(completed_gens) < total_gens:
+            # Partial state — show resume option
+            print()
+            gen_names = {s["gen"]: s["name"] for s in PRD_SECTIONS}
+            print(print_green(f"    Valid sections ({len(completed_gens)}): ") +
+                  ", ".join(f"{g}-{gen_names[g]}" for g in sorted(completed_gens)))
+            if invalid_gens:
+                print(print_red(f"    Invalid sections ({len(invalid_gens)}): ") +
+                      ", ".join(f"{g}-{gen_names[g]}" for g in sorted(invalid_gens)))
+            missing = set(range(1, 13)) - completed_gens
+            if missing - invalid_gens:
+                print(print_yellow(f"    Missing sections ({len(missing - invalid_gens)}): ") +
+                      ", ".join(f"{g}-{gen_names[g]}" for g in sorted(missing - invalid_gens)))
+            print()
+            print("    " + print_cyan("[enter]") + "  Accept PRD as-is")
+            print("    " + print_yellow("[r]") + "      Resume from where it left off")
+            print("    " + print_yellow("[n]") + "      Regenerate from scratch")
+            print()
+
+            clear_input_buffer()
+            choice = prompt_user("  Choice (default: accept): ").strip().lower()
+
+            if choice == "r":
+                resuming = True
+                print(print_cyan(f"  Resuming — {remaining} section(s) to generate..."))
+            elif choice == "n":
+                backup_file = prd_file.parent / f"PRD.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+                prd_file.rename(backup_file)
+                print(print_dim(f"  Backed up to: {backup_file}"))
+                completed_gens = set()
+            else:
+                print(print_green("✓ Using existing PRD"))
+                return True
         else:
-            print(print_green("✓ Using existing PRD"))
-            return True
+            # All complete or none — original 2-option menu
+            print()
+            print("    " + print_cyan("[enter]") + "  Accept existing PRD")
+            print("    " + print_yellow("[n]") + "      Regenerate from scratch")
+            print()
+
+            clear_input_buffer()
+            choice = prompt_user("  Choice (default: accept): ").strip().lower()
+
+            if choice == "n":
+                backup_file = prd_file.parent / f"PRD.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+                prd_file.rename(backup_file)
+                print(print_dim(f"  Backed up to: {backup_file}"))
+                completed_gens = set()
+            else:
+                print(print_green("✓ Using existing PRD"))
+                return True
 
     print()
     print(print_cyan("  Generating PRD in 12 generations..."))
     print()
 
-    # Generate PRD section by section
-    prd_content = ""
+    # Rebuild prior content from valid outputs when resuming
+    if resuming:
+        prd_content = _rebuild_prd_content(prompts_dir, completed_gens)
+        if prd_content:
+            prd_content += "\n\n"
+    else:
+        prd_content = ""
 
+    # Generate PRD section by section
     for section_def in PRD_SECTIONS:
         gen_num = section_def["gen"]
         section_name = section_def["name"]
+
+        if gen_num in completed_gens:
+            print(f"  [{gen_num}/12] {section_name} " + print_green("(cached)"))
+            continue
 
         print(f"  [{gen_num}/12] {section_name}...")
 
@@ -348,8 +410,8 @@ def generate_section(
 
         if success and output_file.exists():
             content = read_file(output_file)
-            # Extract markdown if wrapped in code fence
             content = extract_markdown(content)
+            content = _strip_llm_preamble(content)
             return content
         else:
             return ""
@@ -427,18 +489,11 @@ Generate the following section(s):
 
 """
 
-    # Add prior sections context (abbreviated)
+    # Add prior sections context (full content for LLM coherence)
     if prior_content:
-        # Get first 200 lines and last 50 lines
-        lines = prior_content.split('\n')
-        if len(lines) > 250:
-            abbreviated = '\n'.join(lines[:200]) + '\n\n[... middle sections omitted ...]\n\n' + '\n'.join(lines[-50:])
-        else:
-            abbreviated = prior_content
-
         prompt += f"""### Prior Sections
 
-{abbreviated}
+{prior_content}
 
 """
 
@@ -464,26 +519,82 @@ def extract_markdown(content: str) -> str:
     """
     Extract markdown content from LLM response.
 
+    Strips outer code fences if the LLM wrapped its entire output in one.
+    Does NOT match internal code fences (e.g. code examples within the content).
+
     Args:
         content: LLM response content
 
     Returns:
         Extracted markdown content
     """
-    # Check if content is wrapped in markdown code fence
-    if '```markdown' in content or '```md' in content:
-        # Extract content between code fences
-        match = re.search(r'```(?:markdown|md)\n(.*?)\n```', content, re.DOTALL)
-        if match:
-            return match.group(1)
+    # Only strip code fences that wrap the entire output:
+    # - re.match anchors to the start of the string
+    # - greedy (.*) + end anchor captures everything to the LAST closing fence
+    # This prevents matching internal code blocks (directory trees, code examples)
 
-    # Check for generic code fence
-    if '```' in content:
-        match = re.search(r'```\n(.*?)\n```', content, re.DOTALL)
-        if match:
-            return match.group(1)
+    # Check for ```markdown or ```md wrapping
+    match = re.match(r'\s*```(?:markdown|md)\n(.*)\n```\s*$', content, re.DOTALL)
+    if match:
+        return match.group(1)
+
+    # Check for generic ``` wrapping
+    match = re.match(r'\s*```\n(.*)\n```\s*$', content, re.DOTALL)
+    if match:
+        return match.group(1)
 
     return content
+
+
+def _strip_llm_preamble(content: str) -> str:
+    """Strip LLM preamble/reflection text before the actual section header.
+
+    LLM outputs sometimes start with "I have sufficient context..." or similar
+    thinking-out-loud text before the actual markdown section header (# N. Title).
+    """
+    match = re.search(r'^(# \d+\.)', content, re.MULTILINE)
+    if match and match.start() > 0:
+        return content[match.start():]
+    return content
+
+
+def _is_valid_section_output(content: str) -> bool:
+    """Check if content is real PRD content (not an LLM summary/reflection)."""
+    if len(content) < 500:
+        return False
+    if not re.search(r'^#{2,3}\s+', content, re.MULTILINE):
+        return False
+    return True
+
+
+def _detect_completed_sections(prompts_dir: Path) -> set:
+    """Scan output files and return set of valid generation numbers."""
+    completed = set()
+    for gen_num in range(1, 13):
+        output_file = prompts_dir / f"gen{gen_num:02d}_output.md"
+        if output_file.exists():
+            try:
+                content = read_file(output_file)
+                content = extract_markdown(content)
+                content = _strip_llm_preamble(content)
+                if _is_valid_section_output(content):
+                    completed.add(gen_num)
+            except Exception:
+                pass
+    return completed
+
+
+def _rebuild_prd_content(prompts_dir: Path, completed_gens: set) -> str:
+    """Rebuild PRD content from valid output files in generation order."""
+    parts = []
+    for gen_num in sorted(completed_gens):
+        output_file = prompts_dir / f"gen{gen_num:02d}_output.md"
+        if output_file.exists():
+            content = read_file(output_file)
+            content = extract_markdown(content)
+            content = _strip_llm_preamble(content)
+            parts.append(content)
+    return "\n\n".join(parts)
 
 
 if __name__ == "__main__":

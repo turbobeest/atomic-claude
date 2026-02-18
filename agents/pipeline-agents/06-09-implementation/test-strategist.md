@@ -1,20 +1,6 @@
 ---
 name: test-strategist
 description: Phase 6-9 agent for the SDLC pipeline. Designs test strategies for each specification, defining test types, coverage targets, and test case outlines. Prepares test plan before TDD implementation begins.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [quality, reasoning, code_debugging]
-  minimum_tier: medium
-  profiles:
-    default: quality_critical
-    interactive: interactive
-    batch: budget
 tier: expert
 
 phase: 6-9

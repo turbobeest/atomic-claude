@@ -14,7 +14,7 @@ from core.utils.cli_ui import print_bold, print_dim, print_green
 from core.audit import run_phase_audit
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 805: Phase Audit.
 
@@ -38,9 +38,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     # Run phase audit
     return run_phase_audit(
         phase_num=8,
-        phase_name="Deployment Prep",
-        atomic_root=atomic_root,
-        output_dir=output_dir
+        phase_id="8-deployment",
+        output_dir=output_dir,
     )
 
 

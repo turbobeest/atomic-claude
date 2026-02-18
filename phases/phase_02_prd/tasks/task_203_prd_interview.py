@@ -55,7 +55,7 @@ DEFAULT_MVP_SCOPE = [
 ]
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 203: PRD Interview (Optional).
 

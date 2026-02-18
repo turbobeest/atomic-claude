@@ -20,7 +20,7 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 501: Entry & Initialization.
 
@@ -32,10 +32,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
-    phase4_closeout = atomic_root / ".outputs" / "4-specification" / "closeout.json"
-    tasks_file = atomic_root / ".taskmaster" / "tasks" / "tasks.json"
-    specs_dir = atomic_root / ".claude" / "specs"
-    testing_dir = atomic_root / ".claude" / "testing"
+    project_root = atomic_root.parent
+    phase4_closeout = atomic_root.parent / ".outputs" / "4-specification" / "closeout.json"
+    tasks_file = project_root / ".taskmaster" / "tasks" / "tasks.json"
+    specs_dir = project_root / ".claude" / "specs"
+    testing_dir = project_root / ".claude" / "testing"
     init_file = output_dir / "initialization.json"
 
     # Phase 5 Welcome Banner
@@ -92,7 +93,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         with open(phase4_closeout) as f:
             closeout_data = json.load(f)
         phase4_status = closeout_data.get("status", "unknown")
-        if phase4_status == "complete":
+        if phase4_status == "complete" or "tasks_completed" in closeout_data:
             print(print_green(f"✓ Phase 4 closeout verified"))
         else:
             print(print_yellow(f"! Phase 4 closeout status: {phase4_status}"))

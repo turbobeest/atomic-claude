@@ -1,0 +1,189 @@
+// Atomic Claude 2.0 — Memory System (As-Is)
+// How memory is written, stored, recalled, and consumed
+//
+// Generated: 2026-02-15
+
+digraph memory_system {
+    rankdir=LR
+    compound=true
+    fontname="Helvetica"
+    fontsize=14
+    label="Memory System (As-Is)\nWrite Path → Storage → Recall Path → Consumption"
+    labelloc=t
+    labeljust=l
+    pad=0.5
+    nodesep=0.5
+    ranksep=0.8
+
+    node [fontname="Helvetica", fontsize=10, style=filled]
+    edge [fontname="Helvetica", fontsize=9]
+
+    // =============================================
+    // WRITE PATH (left side)
+    // =============================================
+
+    subgraph cluster_write {
+        label="Write Path"
+        style=filled
+        fillcolor="#F0FFF0"
+        color="#228B22"
+
+        // Sources
+        task_mem [label="TaskMemory\n(in-task recording)\n\nmem.decision()\nmem.finding()\nmem.configuration()\nmem.conversation()\nmem.warning()",
+                  shape=box, fillcolor="#DDA0DD"]
+
+        artifact_sum [label="summarize_task_artifacts()\n(fallback for tasks\nwithout TaskMemory)\n\nReads JSON artifacts,\nextracts key fields",
+                      shape=box, fillcolor="#E8E0F3"]
+
+        // Orchestrator decision point
+        orch_save [label="Orchestrator\nmemory_save()\n\nif mem.has_entries():\n  content = mem.build_content()\n  metadata = mem.build_metadata()\nelse:\n  content = summarize_artifacts()",
+                   shape=box, fillcolor="#C8F0C8", style="filled,bold"]
+
+        task_mem -> orch_save [label="rich path"]
+        artifact_sum -> orch_save [label="fallback"]
+
+        // Entry types
+        task_end [label="TASK_END\n(per-task entry)", shape=ellipse, fillcolor="#FFFACD"]
+        phase_close [label="PHASE_CLOSEOUT\n(phase-level summary)", shape=ellipse, fillcolor="#FFFACD"]
+        checkpoint_entry [label="CHECKPOINT\n(phase boundary\nsnapshot)", shape=ellipse, fillcolor="#FFFACD"]
+
+        orch_save -> task_end
+        orch_save -> phase_close [label="after all tasks"]
+    }
+
+    // =============================================
+    // STORAGE (center)
+    // =============================================
+
+    subgraph cluster_storage {
+        label="Storage Layer (MemoryStore)"
+        style=filled
+        fillcolor="#F5F0FF"
+        color="#9370DB"
+
+        // Primary store
+        memjson [label=".state/memory.json\n\nAppend-only JSON array\nAll MemoryEntry objects:\n{\n  id, timestamp,\n  entry_type, phase,\n  task_id, content,\n  tags, metadata,\n  relevance_score\n}",
+                 shape=cylinder, fillcolor="#DDA0DD", style="filled,bold"]
+
+        // Index
+        memindex [label=".state/memory-index.json\n\n{ entry_id → array_index }\nFast lookup by ID",
+                  shape=note, fillcolor="#E8E0F3"]
+
+        // Phase markdown (for dashboard)
+        memphase [label=".state/memory/\n  phase-0/\n    task_001.md\n    task_002.md\n    ...\n  phase-1/\n    task_101.md\n    ...\n\nHuman-readable markdown\nper task, per phase",
+                  shape=folder, fillcolor="#E8E0F3"]
+
+        // Head pointer
+        memhead [label=".state/memory-head.json\n\n{ project, head_phase,\n  head_checkpoint }",
+                 shape=note, fillcolor="#E8E0F3"]
+
+        // Checkpoints
+        memckpt [label=".state/memory-checkpoints/\n  phase0-timestamp.json\n  phase1-timestamp.json\n  ...\n\nPhase boundary snapshots:\n{ summary, key_decisions,\n  artifacts, state_snapshot,\n  context entries }",
+                 shape=folder, fillcolor="#E8E0F3"]
+    }
+
+    // Write connections
+    task_end -> memjson [label="append()"]
+    phase_close -> memjson [label="append()"]
+    checkpoint_entry -> memckpt [label="create_checkpoint()"]
+
+    memjson -> memindex [label="auto-update\non append", style=dashed]
+    memjson -> memphase [label="_write_phase_file()\nmarkdown rendering", style=dashed]
+    memjson -> memhead [label="update head\npointer", style=dashed]
+
+    // =============================================
+    // RECALL PATH (right side)
+    // =============================================
+
+    subgraph cluster_recall {
+        label="Recall Path (MemoryRecall)"
+        style=filled
+        fillcolor="#FFF0F5"
+        color="#CD5C5C"
+
+        // Scoring
+        scoring [label="Scoring Algorithm\n\ntotal = 0.5 * keyword_match\n     + 0.3 * recency\n     + 0.2 * phase_proximity\n\nkeyword: word intersection ratio\nrecency: exp(-age_days / 7)\nphase: 1.0 same, 0.7 adjacent, 0.3 distant",
+                 shape=box, fillcolor="#FFB6C1", style="filled,bold"]
+
+        // Recall methods
+        recall_query [label="memory_recall(query)\n\nSearch by keywords\nFilter by phase/task\nRank by score\nTruncate to max_tokens",
+                      shape=box, fillcolor="#FFE4E1"]
+
+        recall_phase [label="memory_recall_phase(N)\n\nGet all entries from\nphase N, sorted by time\nTruncate to max_tokens",
+                      shape=box, fillcolor="#FFE4E1"]
+
+        recall_recent [label="memory_recall_recent(N)\n\nGet N most recent\nentries, any phase",
+                       shape=box, fillcolor="#FFE4E1"]
+
+        recall_query -> scoring
+        recall_phase -> scoring [style=dashed, label="sort only"]
+        recall_recent -> scoring [style=dashed, label="no scoring"]
+    }
+
+    memjson -> recall_query [label="query entries"]
+    memjson -> recall_phase [label="filter by phase"]
+    memjson -> recall_recent [label="sort by time"]
+
+    // =============================================
+    // CONSUMERS
+    // =============================================
+
+    subgraph cluster_consume {
+        label="Consumers"
+        style=filled
+        fillcolor="#F0F8FF"
+        color="#4682B4"
+
+        // Dashboard
+        dash_mem [label="Dashboard\nMemory Explorer\n\nReads .state/memory/\nphase-N/task_NNN.md\n\nShows metadata from\nmemory.json if available",
+                  shape=component, fillcolor="#87CEEB"]
+
+        // Task prompts (future)
+        task_prompts [label="Task Prompts\n(Phase 2+ tasks)\n\nRecall Phase 0+1 context\nto inform PRD, tasking,\nspecification, implementation",
+                      shape=box, fillcolor="#ADD8E6"]
+
+        // Backtrack
+        backtrack_mem [label="Backtrack System\n\nClear entries after\ntarget phase\nInvalidate checkpoints",
+                       shape=box, fillcolor="#FFB6B6"]
+    }
+
+    recall_query -> task_prompts [label="MemoryContext\n{ entries, total_tokens }"]
+    recall_phase -> task_prompts
+    memphase -> dash_mem [label="reads markdown"]
+    memjson -> dash_mem [label="reads metadata", style=dashed]
+
+    memjson -> backtrack_mem [label="clear_phase(N)", style=dashed, color="#CC0000"]
+    memckpt -> backtrack_mem [label="invalidate_after(N)", style=dashed, color="#CC0000"]
+
+    // =============================================
+    // COMPACTION
+    // =============================================
+
+    subgraph cluster_compact {
+        label="Maintenance (MemoryCompactor)"
+        style=dashed
+        color="#666666"
+
+        compact [label="memory_compact()\n\nImportance scoring:\n0.4 * type_score\n+ 0.3 * recency_score\n+ 0.2 * length_score\n+ 0.1 * relevance_score\n\nRemoves: old, short,\nlow-relevance entries\nDeduplicates: >85% similar",
+                 shape=box, fillcolor="#D3D3D3"]
+    }
+
+    memjson -> compact [label="prune", style=dashed, dir=both]
+
+    // =============================================
+    // CRITICAL OBSERVATION
+    // =============================================
+
+    subgraph cluster_observation {
+        label="As-Is Reality Check"
+        style=dashed
+        color="#CC0000"
+        fontcolor="#CC0000"
+
+        node [shape=plaintext, fillcolor=white]
+
+        obs1 [label="Before TaskMemory (just fixed):\nAll entries were generic 'Task N completed'\nor artifact-file summaries.\nRecall returned near-useless context."]
+        obs2 [label="After TaskMemory:\nEntries now contain decisions, findings,\nconfiguration — keyword matching works.\nBut only Phase 0 + 1 tasks are enriched.\nPhases 2-9 still use fallback summarizer."]
+        obs3 [label="Dashboard reads markdown files, not\nmemory.json directly. metadata field\nwas added to server.js but untested."]
+    }
+}

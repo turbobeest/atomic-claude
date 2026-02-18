@@ -1,22 +1,7 @@
 ---
 name: ffmpeg-expert
 description: Masters FFmpeg multimedia framework for video/audio processing, transcoding, streaming, format conversion, and advanced media manipulation
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
 tier: expert
-
-model_selection:
-  priorities: [quality, reasoning, code_debugging]
-  minimum_tier: medium
-  profiles:
-    default: quality_critical
-    interactive: interactive
-    batch: budget
 
 tools:
   audit: Read, Grep, Glob, Bash

@@ -53,7 +53,7 @@ def detect_tech_stack(atomic_root: Path) -> str:
     return "unknown"
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 502: TDD Setup.
 
@@ -65,9 +65,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
-    tasks_file = atomic_root / ".taskmaster" / "tasks" / "tasks.json"
+    project_root = atomic_root.parent
+    tasks_file = project_root / ".taskmaster" / "tasks" / "tasks.json"
     setup_file = output_dir / "tdd-setup.json"
-    config_file = atomic_root / ".claude" / "config" / "tdd-tools.json"
+    config_file = project_root / ".claude" / "config" / "tdd-tools.json"
 
     # UAT Mode Bypass
     if uat_mode:

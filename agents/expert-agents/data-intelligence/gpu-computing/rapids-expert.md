@@ -5,20 +5,6 @@
 
 name: rapids-expert
 description: Specializes in NVIDIA RAPIDS GPU-accelerated data science ecosystem with cuDF, cuML, and cuGraph integration for high-performance analytics workflows
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [math, reasoning, quality]
-  minimum_tier: medium
-  profiles:
-    default: math_reasoning
-    interactive: interactive
-    batch: budget
 tier: expert
 
 tools:

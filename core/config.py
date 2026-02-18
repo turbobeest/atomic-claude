@@ -250,7 +250,7 @@ class ConfigLoader:
         config = {}
 
         # Load project config (Phase 00 Task 002/003)
-        project_config_file = self.atomic_root / ".outputs" / "0-setup" / "project-config.json"
+        project_config_file = self.atomic_root.parent / ".outputs" / "0-setup" / "project-config.json"
         if project_config_file.exists():
             try:
                 with open(project_config_file, 'r') as f:
@@ -270,7 +270,7 @@ class ConfigLoader:
                 pass
 
         # Load secrets (Phase 00 Task 004)
-        secrets_file = self.atomic_root / ".outputs" / "0-setup" / "secrets.json"
+        secrets_file = self.atomic_root.parent / ".outputs" / "0-setup" / "secrets.json"
         if secrets_file.exists():
             try:
                 with open(secrets_file, 'r') as f:

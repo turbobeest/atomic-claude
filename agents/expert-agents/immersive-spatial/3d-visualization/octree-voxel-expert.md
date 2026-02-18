@@ -4,28 +4,12 @@
 # =============================================================================
 # Use for: Specialized domain work requiring depth
 # Examples: spatial data structures, volumetric algorithms, 3D optimization
-# Model: opus (algorithmic depth, performance critical decisions)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: octree-voxel-expert
 description: Spatial data structures and volumetric rendering specialist. Invoke for octree algorithm design, voxel architectures, massive 3D dataset management, and real-time spatial query optimization.
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Kimi-K2-Thinking
-  - Qwen3-235B-A22B
-  - llama3.3:70b
 tier: expert
-
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 
 # -----------------------------------------------------------------------------
 # TOOL MODES - What tools are available in each operational mode

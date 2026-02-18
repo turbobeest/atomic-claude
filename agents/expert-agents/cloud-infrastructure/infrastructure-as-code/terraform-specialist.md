@@ -4,26 +4,11 @@
 # =============================================================================
 # Use for: Specialized domain work requiring depth
 # Examples: security-auditor, rust-pro, kubernetes-expert, database-optimizer
-# Model: sonnet (default) or opus (complex domains, high-stakes decisions)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: terraform-specialist
 description: Masters Infrastructure as Code with advanced Terraform modules, state management, and infrastructure automation best practices. Validates infrastructure against OpenSpec contracts and enforces deployment gates. Invoke for IaC design, module development, state management, infrastructure automation, and deployment validation (phases 11-12).
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [quality, reasoning, code_debugging]
-  minimum_tier: medium
-  profiles:
-    default: quality_critical
-    interactive: interactive
-    batch: budget
 tier: expert
 
 # -----------------------------------------------------------------------------

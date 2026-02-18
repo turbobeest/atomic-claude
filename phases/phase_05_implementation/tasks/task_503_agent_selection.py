@@ -45,20 +45,10 @@ def find_agent_repo(atomic_root: Path) -> Optional[Path]:
 
 
 def get_csv_model(agent_name: str, csv_path: Path) -> str:
-    """Get model assignment for agent from CSV."""
-    if not csv_path.exists():
-        return "opus"
+    """Get model tier for agent. CSV has no model column — return default.
 
-    try:
-        with open(csv_path, newline='') as f:
-            reader = csv.reader(f)
-            next(reader)  # Skip header
-            for row in reader:
-                if row and row[0] == agent_name:
-                    return row[3] if len(row) > 3 else "opus"
-    except:
-        pass
-
+    Model assignment is handled by pipeline config, not agent inventory.
+    """
     return "opus"
 
 
@@ -96,7 +86,7 @@ def analyze_project_patterns(specs_dir: Path) -> Dict[str, bool]:
     return patterns
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 503: Agent Selection.
 
@@ -108,9 +98,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
+    project_root = atomic_root.parent
     agents_file = output_dir / "selected-agents.json"
-    tasks_file = atomic_root / ".taskmaster" / "tasks" / "tasks.json"
-    specs_dir = atomic_root / ".claude" / "specs"
+    tasks_file = project_root / ".taskmaster" / "tasks" / "tasks.json"
+    specs_dir = project_root / ".claude" / "specs"
 
     # UAT Mode Bypass
     if uat_mode:
@@ -158,15 +149,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
         try:
             with open(csv_path, newline='') as f:
-                reader = csv.reader(f)
-                next(reader)  # Skip header
+                reader = csv.DictReader(f)
                 for row in reader:
-                    if len(row) >= 11 and row[5] == "06-09-implementation":
-                        name = row[0]
-                        tier = row[2]
-                        model = row[3]
-                        role = row[10]
-                        print(f"    {name:<28} [{tier:<6} {model:<6} {role}]")
+                    if row.get('category', '') == "06-09-implementation":
+                        name = row.get('name', '')
+                        tier = row.get('tier', '')
+                        role = row.get('role', '')
+                        print(f"    {name:<28} [{tier:<6} {role}]")
         except Exception as e:
             print(print_yellow(f"  ! Error reading agent inventory: {e}"))
 

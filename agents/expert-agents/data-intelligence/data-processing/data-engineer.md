@@ -3,26 +3,11 @@
 # EXPERT TIER - Data Engineer (~1500 tokens)
 # =============================================================================
 # Use for: ETL pipeline design, data warehouse architecture, data quality
-# Model: sonnet (data pipeline complexity manageable with strong reasoning)
 # Instructions: 18 maximum
 # =============================================================================
 
 name: data-engineer
 description: Architects data pipelines, ETL processes, and data warehouse systems with focus on scalability, data quality, and production reliability
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 tier: expert
 
 # -----------------------------------------------------------------------------

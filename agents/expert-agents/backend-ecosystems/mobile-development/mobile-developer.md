@@ -3,26 +3,11 @@
 # EXPERT TIER TEMPLATE (~1500 tokens)
 # =============================================================================
 # Use for: Cross-platform mobile development with React Native and Flutter
-# Model: sonnet (default for mobile implementation and architecture)
 # Instructions: 15-20 maximum
 # =============================================================================
 
 name: mobile-developer
 description: Specialist in cross-platform mobile development using React Native or Flutter with platform-adaptive UI, native integration, and performance optimization for iOS/Android
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 tier: expert
 
 # -----------------------------------------------------------------------------

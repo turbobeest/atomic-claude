@@ -3,26 +3,11 @@
 # EXPERT TIER - SQL Database Specialist (~1500 tokens)
 # =============================================================================
 # Use for: Complex SQL queries, schema design, execution plan optimization
-# Model: sonnet (query optimization, normalization analysis)
 # Instructions: 18 maximum
 # =============================================================================
 
 name: sql-pro
 description: Masters complex SQL queries, execution plan optimization, and normalized database schema design for high-performance relational systems
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 tier: expert
 
 tools:

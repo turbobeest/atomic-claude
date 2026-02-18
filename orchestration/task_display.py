@@ -22,6 +22,22 @@ from core.utils.cli_ui import (
 
 
 # ---------------------------------------------------------------------------
+# Infrastructure task detection
+# ---------------------------------------------------------------------------
+
+INFRASTRUCTURE_KEYWORDS = {"audit", "closeout"}
+
+
+def is_infrastructure_task(task_name: str) -> bool:
+    """Check if a task is infrastructure (no agent roster needed).
+
+    Audit and closeout tasks have their own internal logic and don't use
+    the agent roster resolved from phase selection files.
+    """
+    return any(kw in task_name.lower() for kw in INFRASTRUCTURE_KEYWORDS)
+
+
+# ---------------------------------------------------------------------------
 # Agent entry type
 # ---------------------------------------------------------------------------
 
@@ -151,7 +167,7 @@ def resolve_agent_roster(
     agents = discover_agents(output_dir)
     if not agents:
         # No agent file yet (pre-selection task, phase 0, etc.)
-        resolved = resolve_model(phase_id, task_id)
+        resolved = resolve_model(phase_id, task_id, agent_name="__default__")
         return [(AgentEntry(name="\u2014"), resolved)]
 
     roster = []
@@ -227,15 +243,11 @@ def display_task_roster(
     if uat_mode:
         return roster
 
-    # Interactive prompt
-    if len(roster) > 1 or roster[0][0].name != "\u2014":
-        clear_input_buffer()
-        choice = prompt_user("  Enter to continue, [m] to change model assignments: ").strip().lower()
-        if choice == "m":
-            roster = _handle_override(roster)
-    else:
-        clear_input_buffer()
-        prompt_user("  Enter to continue: ")
+    # Interactive prompt — always offer model override
+    clear_input_buffer()
+    choice = prompt_user("  Enter to continue, [m] to change model: ").strip().lower()
+    if choice == "m":
+        roster = _handle_override(roster)
 
     return roster
 
@@ -334,14 +346,10 @@ def _handle_override(
     5. Re-resolve and redisplay
     """
     resolver = get_resolver()
-
-    # Load available providers from project config
-    try:
-        config_path = resolver._atomic_root / ".outputs" / "0-setup" / "project-config.json"
-        config_data = json.loads(config_path.read_text())
-        chain = config_data.get("extracted", {}).get("providers", {}).get("chain_priority", [])
-    except (OSError, json.JSONDecodeError):
-        chain = []
+    defaults = resolver._defaults
+    tier_defs = defaults.get("tier_definitions", {})
+    model_ids_map = defaults.get("model_ids", {})
+    prov_overrides_map = defaults.get("provider_overrides", {})
 
     while True:
         print()
@@ -379,13 +387,17 @@ def _handle_override(
         print()
         print(print_bold("  SELECT MODEL TIER"))
         print()
-        tiers = [
-            ("opus",   "Most capable, 200K context"),
-            ("sonnet", "Balanced, 200K context"),
-            ("haiku",  "Fast, 200K context"),
-        ]
-        for i, (tier, desc) in enumerate(tiers):
-            print(f"    {i + 1}. {tier:<10} {print_dim(desc)}")
+        tier_descs = {"opus": "Most capable", "sonnet": "Balanced", "haiku": "Fast"}
+        tiers = []
+        for tier_name in ["opus", "sonnet", "haiku"]:
+            td = tier_defs.get(tier_name, {})
+            max_ctx = td.get("context_window", 200_000)
+            tiers.append((tier_name, max_ctx))
+
+        for i, (tier_name, max_ctx) in enumerate(tiers):
+            ctx_fmt = _fmt_context(max_ctx)
+            desc = tier_descs.get(tier_name, tier_name.capitalize())
+            print(f"    {i + 1}. {tier_name:<10} {print_dim(f'{desc}, {ctx_fmt} context')}")
 
         # Add Ollama models if available
         ollama_models = _get_ollama_models(resolver)
@@ -404,6 +416,8 @@ def _handle_override(
         new_tier = None
         new_provider = None
         new_model_id = None
+        new_context_window = None
+        new_effort_level = None
 
         try:
             tier_idx = int(tier_raw) - 1
@@ -426,6 +440,106 @@ def _handle_override(
             print(print_red("    Invalid selection"))
             continue
 
+        # For non-Ollama tiers, show provider selection
+        if new_provider != "ollama":
+            providers = _get_provider_options(
+                new_tier, tier_defs, model_ids_map, prov_overrides_map
+            )
+            if providers:
+                print()
+                print(print_bold("  SELECT PROVIDER"))
+                print()
+                for i, (pname, plabel, mid, ctx, effort) in enumerate(providers):
+                    ctx_fmt = _fmt_context(ctx)
+                    extras = []
+                    if effort:
+                        extras.append(f"effort: {EFFORT_LABELS.get(effort, effort.capitalize())}")
+                    extra_str = f"  ({', '.join(extras)})" if extras else ""
+                    print(f"    {i + 1}. {plabel:<18} {ctx_fmt} context{extra_str}")
+                    print(f"       {print_dim(mid)}")
+
+                print()
+                clear_input_buffer()
+                prov_raw = prompt_user("  Provider [cancel]: ").strip()
+                if not prov_raw or prov_raw.lower() in ("c", "cancel"):
+                    continue
+
+                try:
+                    prov_idx = int(prov_raw) - 1
+                    if 0 <= prov_idx < len(providers):
+                        new_provider = providers[prov_idx][0]
+                        new_model_id = providers[prov_idx][2]
+                    else:
+                        print(print_red("    Invalid selection"))
+                        continue
+                except ValueError:
+                    print(print_red("    Invalid selection"))
+                    continue
+
+        # Context window selection (skip for Ollama)
+        if new_provider and new_provider != "ollama":
+            td = tier_defs.get(new_tier, {})
+            max_ctx = td.get("context_window", 200_000)
+            po = prov_overrides_map.get(new_provider, {})
+            prov_ctx = po.get("context_window")
+            if prov_ctx:
+                max_ctx = prov_ctx
+
+            ctx_choices = [
+                (c, _fmt_context(c))
+                for c in [1_000_000, 200_000, 128_000]
+                if c <= max_ctx
+            ]
+
+            if len(ctx_choices) > 1:
+                print()
+                print(print_bold("  CONTEXT WINDOW"))
+                print()
+                for i, (ctx_val, ctx_label) in enumerate(ctx_choices):
+                    default_marker = " (default)" if i == 0 else ""
+                    print(f"    {i + 1}. {ctx_label}{default_marker}")
+                print()
+                clear_input_buffer()
+                ctx_raw = prompt_user(f"  Context [{ctx_choices[0][1]}]: ").strip()
+                if ctx_raw:
+                    try:
+                        ctx_idx = int(ctx_raw) - 1
+                        if 0 <= ctx_idx < len(ctx_choices):
+                            new_context_window = ctx_choices[ctx_idx][0]
+                        else:
+                            print(print_red("    Invalid selection, using default"))
+                    except ValueError:
+                        print(print_red("    Invalid selection, using default"))
+
+            # Effort level selection
+            effort_rank = {"low": 0, "medium": 1, "high": 2}
+            min_effort = po.get("min_effort")
+            min_rank = effort_rank.get(min_effort, 0) if min_effort else 0
+            all_efforts = [("high", "Max"), ("medium", "Med"), ("low", "Low")]
+            effort_choices = [(e, l) for e, l in all_efforts if effort_rank[e] >= min_rank]
+            default_effort = po.get("effort_level", "high")
+            default_label = EFFORT_LABELS.get(default_effort, "Max")
+
+            if effort_choices:
+                print()
+                print(print_bold("  EFFORT LEVEL"))
+                print()
+                for i, (eff_val, eff_label) in enumerate(effort_choices):
+                    default_marker = " (default)" if eff_val == default_effort else ""
+                    print(f"    {i + 1}. {eff_label}{default_marker}")
+                print()
+                clear_input_buffer()
+                eff_raw = prompt_user(f"  Effort [{default_label}]: ").strip()
+                if eff_raw:
+                    try:
+                        eff_idx = int(eff_raw) - 1
+                        if 0 <= eff_idx < len(effort_choices):
+                            new_effort_level = effort_choices[eff_idx][0]
+                        else:
+                            print(print_red("    Invalid selection, using default"))
+                    except ValueError:
+                        print(print_red("    Invalid selection, using default"))
+
         # Pick scope
         print()
         print(print_bold("  APPLY TO"))
@@ -439,24 +553,23 @@ def _handle_override(
         # Apply overrides
         for idx in targets:
             entry, _ = roster[idx]
-            if entry.name == "\u2014":
-                continue
+            override_name = "__default__" if entry.name == "\u2014" else entry.name
             resolver.set_override(
-                agent_name=entry.name,
+                agent_name=override_name,
                 tier=new_tier,
                 provider=new_provider,
                 model_id=new_model_id,
+                context_window=new_context_window,
+                effort_level=new_effort_level,
                 task_only=task_only,
             )
 
         # Re-resolve roster
         new_roster = []
         for entry, old_rm in roster:
-            if entry.name == "\u2014":
-                new_roster.append((entry, old_rm))
-            else:
-                rm = resolve_model(old_rm.phase_id, old_rm.task_id, agent_name=entry.name)
-                new_roster.append((entry, rm))
+            agent_key = "__default__" if entry.name == "\u2014" else entry.name
+            rm = resolve_model(old_rm.phase_id, old_rm.task_id, agent_name=agent_key)
+            new_roster.append((entry, rm))
         roster = new_roster
 
         # Redisplay
@@ -471,6 +584,32 @@ def _handle_override(
             break
 
     return roster
+
+
+def _get_provider_options(
+    tier: str,
+    tier_defs: Dict,
+    model_ids_map: Dict,
+    prov_overrides_map: Dict,
+) -> List[tuple]:
+    """Build provider options for a tier.
+
+    Returns list of (provider_id, label, model_id, context_window, effort).
+    """
+    providers = []
+    for prov_name in ["claude-code", "anthropic", "aws-bedrock"]:
+        mid = model_ids_map.get(prov_name, {}).get(tier)
+        if not mid:
+            continue
+        td = tier_defs.get(tier, {})
+        base_ctx = td.get("context_window", 200_000)
+        po = prov_overrides_map.get(prov_name, {})
+        prov_ctx = po.get("context_window")
+        effective_ctx = prov_ctx if prov_ctx else base_ctx
+        effort = po.get("effort_level")
+        label = PROVIDER_LABELS.get(prov_name, prov_name)
+        providers.append((prov_name, label, mid, effective_ctx, effort))
+    return providers
 
 
 def _get_ollama_models(resolver) -> List[str]:

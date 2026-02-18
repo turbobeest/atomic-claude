@@ -66,7 +66,7 @@ def find_agent_prompt(agent_name: str, agent_repo: Path) -> Optional[str]:
     return None
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 904: Release Execution.
 
@@ -78,7 +78,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
-    release_dir = atomic_root / ".claude" / "release"
+    project_root = atomic_root.parent
+
+    release_dir = project_root / ".claude" / "release"
     prompts_dir = release_dir / "prompts"
     setup_file = release_dir / "setup.json"
     execution_file = release_dir / "execution.json"
@@ -162,15 +164,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         except:
             pass
 
-    # Gather project context
-    prd_file = atomic_root / "docs" / "prd" / "PRD.md"
+    # Gather project context — load full content for informed release notes
+    prd_file = project_root / "docs" / "prd" / "PRD.md"
     changelog_file = atomic_root / "CHANGELOG.md"
     project_context = ""
 
     if prd_file.exists():
         try:
             with open(prd_file) as f:
-                prd_content = f.read()[:5000]  # First 5000 chars
+                prd_content = f.read()
             project_context += f"## PRD\n{prd_content}\n\n"
         except:
             pass
@@ -178,10 +180,35 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     if changelog_file.exists():
         try:
             with open(changelog_file) as f:
-                changelog_content = f.read()[:2500]  # First 2500 chars
+                changelog_content = f.read()
             project_context += f"## Changelog\n{changelog_content}\n\n"
         except:
             pass
+
+    # Load phase 5-8 summaries for release context
+    phase_summaries = []
+    for phase_num, phase_name in [(5, "implementation"), (6, "code-review"),
+                                   (7, "integration"), (8, "deployment-prep")]:
+        closeout_paths = [
+            project_root / ".claude" / "closeout" / f"phase-{phase_num:02d}-closeout.json",
+            project_root / ".outputs" / f"{phase_num}-{phase_name}" / "closeout.json",
+        ]
+        for cp in closeout_paths:
+            if cp.exists():
+                try:
+                    with open(cp) as f:
+                        closeout_data = json.load(f)
+                    phase_summaries.append(
+                        f"### Phase {phase_num} ({phase_name})\n"
+                        f"{json.dumps(closeout_data, indent=2)}"
+                    )
+                except:
+                    pass
+                break
+
+    if phase_summaries:
+        project_context += "## Phase Outcomes (Phases 5-8)\n\n"
+        project_context += "\n\n".join(phase_summaries) + "\n\n"
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
     # INTERNAL RELEASE NOTES

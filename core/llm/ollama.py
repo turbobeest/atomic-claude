@@ -32,6 +32,15 @@ class ProviderUnavailableException(LLMError):
     pass
 
 
+# Tier-to-model mapping for Ollama (mirrors config/models.json).
+# Allows tasks to use tier names (opus/sonnet/haiku) when running on Ollama.
+OLLAMA_TIER_MAP = {
+    "opus":   "qwen3:235b-a22b",
+    "sonnet": "llama3.1:70b",
+    "haiku":  "qwen2.5-coder:14b",
+}
+
+
 class OllamaProvider(BaseLLMProvider):
     """
     Ollama local LLM provider.
@@ -107,6 +116,10 @@ class OllamaProvider(BaseLLMProvider):
         """
         start_time = time.time()
         model = model or self.get_default_model() or self.default_model
+
+        # Resolve tier names (opus/sonnet/haiku) to Ollama model names
+        if model in OLLAMA_TIER_MAP:
+            model = OLLAMA_TIER_MAP[model]
 
         # Build combined prompt
         combined_prompt = prompt
@@ -236,6 +249,10 @@ class OllamaProvider(BaseLLMProvider):
         """
         model = model or self.get_default_model() or self.default_model
 
+        # Resolve tier names (opus/sonnet/haiku) to Ollama model names
+        if model in OLLAMA_TIER_MAP:
+            model = OLLAMA_TIER_MAP[model]
+
         # Build combined prompt
         combined_prompt = prompt
         if system_prompt:
@@ -306,9 +323,11 @@ class OllamaProvider(BaseLLMProvider):
         Returns:
             True if model is available
         """
+        # Resolve tier names first
+        resolved = OLLAMA_TIER_MAP.get(model_name, model_name)
         try:
             models = self.list_models()
-            return model_name in models
+            return resolved in models
         except Exception:
             return False
 

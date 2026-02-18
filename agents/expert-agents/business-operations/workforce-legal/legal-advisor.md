@@ -1,22 +1,7 @@
 ---
 name: legal-advisor
 description: Provides legal guidance and contract review with compliance focus and risk mitigation through legal best practices
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Kimi-K2-Thinking
-  - Qwen3-235B-A22B
-  - llama3.3:70b
 tier: expert
-
-model_selection:
-  priorities: [writing, quality, reasoning]
-  minimum_tier: medium
-  profiles:
-    default: documentation
-    interactive: interactive
-    batch: budget
 
 tools:
   audit: Read, Grep, Glob, Bash

@@ -25,7 +25,7 @@ YELLOW = "\033[93m"
 NC = "\033[0m"
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
     """
     Execute Task 901: Entry & Initialization.
 
@@ -37,6 +37,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
     Returns:
         True if task completed successfully, False otherwise
     """
+    project_root = atomic_root.parent
+
     # Display phase header
     print()
     print(f"{DIM}{'━' * 120}{NC}")
@@ -68,8 +70,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
 
     # Find Phase 8 closeout
     closeout_patterns = [
-        atomic_root / ".outputs" / "8-deployment-prep" / "closeout.json",
-        atomic_root / ".claude" / "closeout" / "phase-08-closeout.json"
+        atomic_root.parent / ".outputs" / "8-deployment-prep" / "closeout.json",
+        project_root / ".claude" / "closeout" / "phase-08-closeout.json"
     ]
 
     closeout_file = None
@@ -84,7 +86,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
             with open(closeout_file) as f:
                 closeout_data = json.load(f)
             phase_8_status = closeout_data.get("status", "unknown")
-            if phase_8_status == "complete":
+            if phase_8_status == "complete" or "tasks_completed" in closeout_data:
                 print(f"  {GREEN}[CRIT]{NC} {GREEN}✓{NC} Phase 8 (Deployment Prep) complete")
             else:
                 print(f"  {RED}[CRIT]{NC} {RED}✗{NC} Phase 8 not complete (status: {phase_8_status})")
@@ -111,7 +113,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False) -> bool
         print(f"  {YELLOW}[BLCK]{NC} {YELLOW}!{NC} dist/ directory not found")
 
     # Check project config
-    config_file = atomic_root / ".outputs" / "0-setup" / "project-config.json"
+    config_file = atomic_root.parent / ".outputs" / "0-setup" / "project-config.json"
     if config_file.exists():
         print(f"  {GREEN}[PASS]{NC} {GREEN}✓{NC} Project configuration found")
     else:

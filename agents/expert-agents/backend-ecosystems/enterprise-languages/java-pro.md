@@ -4,26 +4,11 @@
 # =============================================================================
 # Use for: Enterprise-scale applications, JVM optimization, concurrent systems
 # Domain: Enterprise languages, distributed systems, high-performance backends
-# Model: sonnet (use opus for complex concurrency patterns or critical architecture)
 # Instructions: 18 total
 # =============================================================================
 
 name: java-pro
 description: Java enterprise specialist for modern streams, concurrency patterns, JVM optimization, and enterprise-scale architecture
-model: opus
-model_fallbacks:
-  - us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
-  - DeepSeek-V3
-  - Qwen2.5-Coder-32B
-  - llama3.3:70b
-  - gemma3:27b
-model_selection:
-  priorities: [code_generation, code_debugging, quality]
-  minimum_tier: medium
-  profiles:
-    default: code_generation
-    review: code_review
-    batch: budget
 tier: expert
 
 # -----------------------------------------------------------------------------
