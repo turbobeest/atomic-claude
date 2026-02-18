@@ -216,8 +216,9 @@ def is_allowed_file(file_path: Path, acp_root: Path) -> bool:
 
     # Check if it's a root-level allowed file
     allowed_root_files = {
-        "main.py", "README.md", "CLAUDE.md", ".gitignore", ".DS_Store",
-        ".claudeignore", ".env.example",
+        "main.py", "README.md", "CLAUDE.md", "OPERATIONAL.md",
+        ".gitignore", ".DS_Store",
+        ".claudeignore", ".env.example", ".env",
         "setup.py", "MANIFEST.in",
         "pytest.ini", "coverage.xml",
         "requirements.txt", "requirements-dev.txt", "requirements-llm.txt",
