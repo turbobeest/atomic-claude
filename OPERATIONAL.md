@@ -12,6 +12,9 @@
 - **Location**: `/Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER/atomic-claude`
 - **Purpose**: Live operational testing against real projects
 - **Sync**: Bug fixes and features should be applied to BOTH repos
+- **Status**: ✅ Configured (2026-02-18)
+- **Setup**: Cloned from python branch, embedded in host project
+- **Dashboard**: Correctly detects host project context (verified)
 
 ## 🚨 Safety Rules
 
@@ -47,6 +50,76 @@ This includes:
 # Human: "Approved, execute rm command"
 # AI: [executes rm]
 ```
+
+## Operational Instance Setup
+
+### Initial Setup (Completed 2026-02-18)
+
+**Location**: `/Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER/`
+
+**Steps Performed**:
+```bash
+# 1. Initialize host project as git repo
+cd /Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER
+git init
+
+# 2. Clone atomic-claude
+git clone -b python https://github.com/turbobeest/atomic-claude.git
+
+# 3. Create project structure
+mkdir -p {.state,.outputs,.logs,src,docs,config,initialization}
+
+# 4. Configure .gitignore (runtime directories)
+echo ".state/
+.outputs/
+.logs/" > .gitignore
+
+# 5. Create initialization/setup.md (project overview)
+
+# 6. Commit setup
+git add -A && git commit -m "Initial project setup with atomic-claude"
+```
+
+### Path Detection Verification
+✅ **Dashboard correctly detects host project**:
+- ATOMIC_ROOT: `/Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER/atomic-claude`
+- PROJECT_ROOT: `/Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER`
+- PID files: `/Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER/.state/dashboard/`
+
+**Test commands**:
+```bash
+# Start dashboard from host project root
+cd /Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER
+bash atomic-claude/dashboard/start-dashboard.sh
+
+# Verify path detection
+curl http://127.0.0.1:5174/api/root
+# Returns: {"root":"/Users/.../CUI-ENGAGEMENT-MANAGER/atomic-claude"}
+
+# Check PID file location
+ls .state/dashboard/
+# Contains: main.pid, agents.pid, audits.pid, skills.pid
+```
+
+### Running Pipeline in Operational Instance
+```bash
+# From CUI-ENGAGEMENT-MANAGER root
+cd /Users/jamesterbeest/dev/CUI-ENGAGEMENT-MANAGER
+
+# Run phase
+python atomic-claude/main.py run <phase>
+
+# Check status
+python atomic-claude/main.py status
+
+# Backtrack if needed
+python atomic-claude/main.py backtrack <phase> <task>
+```
+
+**All artifacts go to host project**:
+- `.state/` - Pipeline state for CUI-ENGAGEMENT-MANAGER
+- `.outputs/` - Working artifacts for CUI-ENGAGEMENT-MANAGER
+- `.logs/` - Execution logs for CUI-ENGAGEMENT-MANAGER
 
 ## Workflow Best Practices
 
