@@ -262,6 +262,22 @@ When core systems change (config, state, LLM routing, orchestration):
 - **Applied To**: [x] Dev [ ] Operational
 - **Safety**: Established rm command approval requirement (see Safety Rules section)
 
+### Forcing Function False Positive - OPERATIONAL.md Blocked
+- **Date**: 2026-02-18
+- **Symptom**: Phase 0 blocked at startup with "OPERATIONAL.md → Should be in: ../docs/"
+- **Root Cause**: `orchestration/pre_task_validation.py` whitelist missing OPERATIONAL.md
+- **Impact**: Pipeline cannot start - forcing function blocks execution
+- **Fix**: Added OPERATIONAL.md and .env to `allowed_root_files` whitelist (line 219-224)
+- **Files Modified**: `orchestration/pre_task_validation.py`
+- **Testing**:
+  ```bash
+  # Verify fix
+  python orchestration/pre_task_validation.py
+  # Should output: ✅ Directory pristine
+  ```
+- **Applied To**: [x] Dev [x] Operational (pulled d5d196c)
+- **Note**: OPERATIONAL.md is tool documentation (dual-repo workflow), not project docs
+
 ### Issue Template
 ```
 ## [Issue Title]
