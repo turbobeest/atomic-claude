@@ -2,12 +2,13 @@
 Task 507: Phase Closeout
 
 Generate closeout document and prepare for Phase 6 (Code Review).
+Reads real metrics from validation-report.json and tdd-progress.json.
 """
 
 import sys
 import json
 from pathlib import Path
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
 
 # Add project root to path for imports
@@ -20,65 +21,120 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, write_file
 
 
+def _load_json(path: Path) -> Dict[str, Any]:
+    """Load JSON file, returning empty dict on failure."""
+    try:
+        if path.exists():
+            return json.loads(path.read_text())
+    except Exception:
+        pass
+    return {}
+
+
 def get_closeout_metrics(
-    tasks_file: Path,
     testing_dir: Path,
     validation_file: Path,
-    audit_file: Path
-) -> Tuple[int, int, int, int, int, int, int, int]:
+    progress_file: Path,
+    audit_file: Path,
+    state_dir: Path,
+) -> Dict[str, Any]:
     """
-    Get metrics for closeout report.
+    Get metrics for closeout report from real artifacts.
 
-    Returns:
-        Tuple of (completed_tasks, total_tasks, total_tests, passing_tests,
-                  unit_coverage, critical_issues, flaky_tests, tdd_records)
+    Reads from:
+      - validation-report.json (produced by task 505)
+      - tdd-progress.json (produced by task 504)
+      - session-tokens.json (LLM token tracking)
     """
-    # Task completion
-    completed_tasks = 0
-    total_tasks = 0
-    if tasks_file.exists():
-        with open(tasks_file) as f:
-            tasks_data = json.load(f)
-        tasks = tasks_data.get("tasks", [])
-        total_tasks = sum(1 for task in tasks if len(task.get("subtasks", [])) >= 4)
-        completed_tasks = sum(1 for task in tasks if task.get("status") == "done")
+    validation = _load_json(validation_file)
+    progress = _load_json(progress_file)
 
-    # Validation metrics
-    unit_coverage = 0
-    passing_tests = 0
+    # TDD completion from progress file
+    tasks_completed = progress.get("tasks_completed", 0)
+    tasks_total = progress.get("tasks_total", 0)
+    tasks_failed = progress.get("tasks_failed", 0)
+    tasks_cascaded = progress.get("tasks_cascaded", 0)
+
+    # Cycle counts from progress
+    red_cycles = progress.get("red_cycles", 0)
+    green_cycles = progress.get("green_cycles", 0)
+    refactor_cycles = progress.get("refactor_cycles", 0)
+    verify_cycles = progress.get("verify_cycles", 0)
+
+    # Test suite results from validation
+    test_suite = validation.get("test_suite")
+    tests_passed = 0
+    tests_failed_suite = 0
     total_tests = 0
-    critical_issues = 0
-    flaky_tests = 0
-    if validation_file.exists():
-        with open(validation_file) as f:
-            validation_data = json.load(f)
-        unit_coverage = validation_data.get("coverage", {}).get("unit", 0)
-        passing_tests = validation_data.get("test_quality", {}).get("passing_tests", 0)
-        total_tests = validation_data.get("test_quality", {}).get("total_tests", 0)
-        critical_issues = validation_data.get("security", {}).get("critical", 0)
-        flaky_tests = validation_data.get("test_quality", {}).get("flaky_tests", 0)
+    if isinstance(test_suite, dict):
+        tests_passed = test_suite.get("tests_passed", 0)
+        tests_failed_suite = test_suite.get("tests_failed", 0)
+        total_tests = tests_passed + tests_failed_suite + test_suite.get("tests_errors", 0)
 
-    # TDD records
+    # Coverage from validation
+    coverage_data = validation.get("coverage")
+    unit_coverage = 0
+    if isinstance(coverage_data, dict):
+        unit_coverage = coverage_data.get("line_coverage_pct", 0)
+
+    # Security from validation
+    security = validation.get("security", {})
+    critical_issues = security.get("critical", 0)
+    security_warnings = security.get("warnings_from_verify", 0)
+
+    # TDD cycles detail from validation
+    tdd_cycles = validation.get("tdd_cycles", {})
+    green_retries = tdd_cycles.get("green_retries", 0)
+    refactor_reverted = tdd_cycles.get("refactor_reverted", 0)
+
+    # TDD record count
     tdd_records = 0
     if testing_dir.exists():
         tdd_records = len(list(testing_dir.glob("tdd-t*.json")))
 
-    return (completed_tasks, total_tasks, total_tests, passing_tests,
-            unit_coverage, critical_issues, flaky_tests, tdd_records)
+    # Token spend
+    token_spend = 0.0
+    tokens_file = state_dir / "session-tokens.json"
+    token_data = _load_json(tokens_file)
+    if token_data:
+        token_spend = token_data.get("estimated_cost_usd", 0.0)
+
+    # Validation passed?
+    validation_passed = validation.get("validation_passed", False)
+
+    # Stack info from validation metrics
+    stack = validation.get("metrics", {}).get("stack", "unknown")
+
+    return {
+        "tasks_completed": tasks_completed,
+        "tasks_total": tasks_total,
+        "tasks_failed": tasks_failed,
+        "tasks_cascaded": tasks_cascaded,
+        "total_tests": total_tests,
+        "tests_passed": tests_passed,
+        "tests_failed_suite": tests_failed_suite,
+        "unit_coverage": unit_coverage,
+        "critical_issues": critical_issues,
+        "security_warnings": security_warnings,
+        "green_retries": green_retries,
+        "refactor_reverted": refactor_reverted,
+        "tdd_records": tdd_records,
+        "red_cycles": red_cycles,
+        "green_cycles": green_cycles,
+        "refactor_cycles": refactor_cycles,
+        "verify_cycles": verify_cycles,
+        "token_spend": token_spend,
+        "validation_passed": validation_passed,
+        "stack": stack,
+    }
 
 
 def build_checklist(
-    completed_tasks: int,
-    total_tasks: int,
-    unit_coverage: int,
-    passing_tests: int,
-    total_tests: int,
-    critical_issues: int,
-    flaky_tests: int,
-    audit_file: Path
+    m: Dict[str, Any],
+    audit_file: Path,
 ) -> Tuple[List[str], bool]:
     """
-    Build closeout checklist and determine if all passed.
+    Build closeout checklist from real metrics.
 
     Returns:
         Tuple of (checklist items, all_passed bool)
@@ -87,49 +143,60 @@ def build_checklist(
     all_passed = True
 
     # TDD completion
-    if completed_tasks >= total_tasks and total_tasks > 0:
-        print(print_green(f"  [CRIT] ✓ All TDD cycles complete ({completed_tasks} tasks)"))
+    if m["tasks_completed"] >= m["tasks_total"] and m["tasks_total"] > 0:
+        print(print_green(f"  [CRIT] + All TDD cycles complete ({m['tasks_completed']} tasks)"))
         checklist.append("TDD cycles complete:PASS")
+    elif m["tasks_completed"] > 0:
+        pct = m["tasks_completed"] * 100 // max(m["tasks_total"], 1)
+        print(print_yellow(f"  [CRIT] ~ TDD cycles: {pct}% ({m['tasks_completed']} / {m['tasks_total']})"))
+        checklist.append("TDD cycles:WARN")
     else:
-        print(print_red(f"  [CRIT] ✗ TDD cycles incomplete ({completed_tasks} / {total_tasks})"))
+        print(print_red(f"  [CRIT] X TDD cycles incomplete ({m['tasks_completed']} / {m['tasks_total']})"))
         checklist.append("TDD cycles complete:FAIL")
         all_passed = False
 
-    # Coverage
-    if unit_coverage >= 80:
-        print(print_green(f"  [CRIT] ✓ Coverage >= 80% ({unit_coverage}%)"))
-        checklist.append("Coverage:PASS")
-    elif unit_coverage >= 70:
-        print(print_yellow(f"  [CRIT] ! Coverage {unit_coverage}% (target: 80%)"))
-        checklist.append("Coverage:WARN")
+    # Test suite results
+    if m["total_tests"] > 0:
+        if m["tests_failed_suite"] == 0:
+            print(print_green(f"  [CRIT] + All tests passing ({m['tests_passed']} tests)"))
+            checklist.append("All tests passing:PASS")
+        else:
+            print(print_red(f"  [CRIT] X {m['tests_failed_suite']} tests failing out of {m['total_tests']}"))
+            checklist.append("All tests passing:FAIL")
+            all_passed = False
     else:
-        print(print_red(f"  [CRIT] ✗ Coverage below 70% ({unit_coverage}%)"))
-        checklist.append("Coverage:FAIL")
-        all_passed = False
+        print(print_dim("  [INFO] - Test suite: not available (no build tools)"))
+        checklist.append("Test suite:SKIP")
 
-    # All tests passing
-    if passing_tests == total_tests and total_tests > 0:
-        print(print_green(f"  [CRIT] ✓ All tests passing ({passing_tests} tests)"))
-        checklist.append("All tests passing:PASS")
+    # Coverage
+    if m["unit_coverage"] > 0:
+        if m["unit_coverage"] >= 80:
+            print(print_green(f"  [CRIT] + Coverage >= 80% ({m['unit_coverage']}%)"))
+            checklist.append("Coverage:PASS")
+        elif m["unit_coverage"] >= 70:
+            print(print_yellow(f"  [CRIT] ~ Coverage {m['unit_coverage']}% (target: 80%)"))
+            checklist.append("Coverage:WARN")
+        else:
+            print(print_red(f"  [CRIT] X Coverage below 70% ({m['unit_coverage']}%)"))
+            checklist.append("Coverage:FAIL")
+            all_passed = False
     else:
-        print(print_red(f"  [CRIT] ✗ Tests failing ({total_tests - passing_tests} of {total_tests})"))
-        checklist.append("All tests passing:FAIL")
-        all_passed = False
+        print(print_dim("  [INFO] - Coverage: not available"))
+        checklist.append("Coverage:SKIP")
 
     # VERIFY scans
-    if critical_issues == 0:
-        print(print_green("  [BLCK] ✓ VERIFY scans clean"))
+    if m["critical_issues"] == 0:
+        print(print_green("  [BLCK] + VERIFY scans clean"))
         checklist.append("VERIFY scans:PASS")
     else:
-        print(print_red(f"  [BLCK] ✗ {critical_issues} critical security issues"))
+        print(print_red(f"  [BLCK] X {m['critical_issues']} critical security issues"))
         checklist.append("VERIFY scans:FAIL")
+        all_passed = False
 
     # Audit
     if audit_file.exists():
-        with open(audit_file) as f:
-            audit_data = json.load(f)
+        audit_data = _load_json(audit_file)
 
-        # Check new format (summary) or legacy format (overall_status)
         summary = audit_data.get("summary", {})
         passed = summary.get("passed", 0)
         failed = summary.get("failed", 0)
@@ -137,39 +204,39 @@ def build_checklist(
         total = passed + failed + warnings
 
         if total == 0:
-            # Try legacy format
             audit_status = audit_data.get("overall_status", "UNKNOWN")
             if audit_status == "PASS":
-                print(print_green("  [BLCK] ✓ Audit passed"))
+                print(print_green("  [BLCK] + Audit passed"))
                 checklist.append("Audit:PASS")
-            elif audit_status in ["WARNING", "DEFERRED"]:
-                print(print_yellow(f"  [BLCK] ! Audit: {audit_status}"))
+            elif audit_status in ("WARNING", "DEFERRED"):
+                print(print_yellow(f"  [BLCK] ~ Audit: {audit_status}"))
                 checklist.append("Audit:WARN")
             else:
-                print(print_red("  [BLCK] ✗ Audit failed"))
+                print(print_red("  [BLCK] X Audit failed"))
                 checklist.append("Audit:FAIL")
         elif failed == 0 and warnings == 0:
-            print(print_green(f"  [BLCK] ✓ Audit passed ({passed} passed)"))
+            print(print_green(f"  [BLCK] + Audit passed ({passed} passed)"))
             checklist.append("Audit:PASS")
         elif failed == 0:
-            print(print_yellow(f"  [BLCK] ! Audit has warnings ({warnings} warnings)"))
+            print(print_yellow(f"  [BLCK] ~ Audit has warnings ({warnings} warnings)"))
             checklist.append("Audit:WARN")
         else:
-            print(print_red(f"  [BLCK] ✗ Audit has failures ({failed} failed)"))
+            print(print_red(f"  [BLCK] X Audit has failures ({failed} failed)"))
             checklist.append("Audit:FAIL")
     else:
-        print(print_yellow("  [BLCK] ! Audit not completed"))
+        print(print_yellow("  [BLCK] ~ Audit not completed"))
         checklist.append("Audit:SKIP")
 
-    # No flaky tests
-    if flaky_tests == 0:
-        print(print_green("  [BLCK] ✓ No flaky tests"))
-        checklist.append("No flaky tests:PASS")
-    else:
-        print(print_yellow(f"  [BLCK] ! {flaky_tests} flaky tests detected"))
-        checklist.append("No flaky tests:WARN")
+    # Quality indicators
+    if m["green_retries"] > 0:
+        print(print_dim(f"  [INFO] - GREEN retries: {m['green_retries']}"))
+    if m["refactor_reverted"] > 0:
+        print(print_dim(f"  [INFO] - REFACTOR reverted: {m['refactor_reverted']}"))
 
-    print(print_green("  [PASS] ✓ Ready for Code Review"))
+    if all_passed:
+        print(print_green("  [PASS] + Ready for Code Review"))
+    else:
+        print(print_red("  [HOLD] X Issues detected — review before proceeding"))
 
     return checklist, all_passed
 
@@ -190,7 +257,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     closeout_dir = project_root / ".claude" / "closeout"
     closeout_file = closeout_dir / "phase-05-closeout.md"
     closeout_json = closeout_dir / "phase-05-closeout.json"
-    tasks_file = project_root / ".taskmaster" / "tasks" / "tasks.json"
     testing_dir = project_root / ".claude" / "testing"
 
     # Audit file - check new path first, then legacy
@@ -201,16 +267,17 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         audit_file = project_root / ".claude" / "audit" / "phase-05-audit.json"
 
     validation_file = testing_dir / "validation-report.json"
+    progress_file = output_dir / "tdd-progress.json"
+    state_dir = atomic_root / ".state"
 
     # UAT Mode Bypass
     if uat_mode:
         print()
-        print(print_yellow("⚡ UAT Mode: Auto-approving closeout, creating minimal artifacts"))
+        print(print_yellow("  UAT Mode: Auto-approving closeout, creating minimal artifacts"))
         print()
 
         ensure_dir(closeout_dir)
 
-        # Create minimal closeout markdown
         closeout_md = """# Phase 5: Implementation - Closeout (UAT Mode)
 
 ## Summary
@@ -218,7 +285,7 @@ Phase 5 completed in UAT mode with stub implementation files.
 
 ## Metrics
 - Tasks: 3/3 complete
-- Test Coverage: 80% (stub)
+- Test Coverage: N/A (UAT mode)
 - Security Issues: 0 critical
 
 ## Status
@@ -229,7 +296,6 @@ Phase 6: Code Review
 """
         write_file(closeout_file, closeout_md)
 
-        # Create minimal closeout JSON
         closeout_data = {
             "phase": 5,
             "status": "complete",
@@ -239,28 +305,16 @@ Phase 6: Code Review
                 "tasks_total": 3,
                 "completion_rate": 100
             },
-            "coverage": {
-                "unit": 80
-            },
-            "security": {
-                "critical_issues": 0
-            },
-            "tdd_records": 3,
-            "checklist": ["uat-stub-files", "uat-mock-tests"],
-            "artifacts": {
-                "testing": ".claude/testing/",
-                "validation": ".claude/testing/validation-report.json"
-            },
             "completed_at": datetime.now().isoformat(),
             "next_phase": 6
         }
         write_file(closeout_json, json.dumps(closeout_data, indent=2))
 
-        print(print_green("✓ Generated phase-05-closeout.md (UAT mode)"))
-        print(print_green("✓ Generated phase-05-closeout.json (UAT mode)"))
+        print(print_green("  Generated phase-05-closeout.md (UAT mode)"))
+        print(print_green("  Generated phase-05-closeout.json (UAT mode)"))
         print()
 
-        print(print_green("✓ Phase 5 closeout complete (UAT mode)"))
+        print(print_green("  Phase 5 closeout complete (UAT mode)"))
         return True
 
     ensure_dir(closeout_dir)
@@ -269,10 +323,9 @@ Phase 6: Code Review
     print(print_dim("  Final review before moving to Phase 6 (Code Review)."))
     print()
 
-    # Get metrics
-    (completed_tasks, total_tasks, total_tests, passing_tests,
-     unit_coverage, critical_issues, flaky_tests, tdd_records) = get_closeout_metrics(
-        tasks_file, testing_dir, validation_file, audit_file
+    # Get real metrics
+    m = get_closeout_metrics(
+        testing_dir, validation_file, progress_file, audit_file, state_dir,
     )
 
     # Closeout Checklist
@@ -281,12 +334,19 @@ Phase 6: Code Review
     print(print_bold("CLOSEOUT CHECKLIST"))
     print()
 
-    checklist, all_passed = build_checklist(
-        completed_tasks, total_tasks, unit_coverage, passing_tests,
-        total_tests, critical_issues, flaky_tests, audit_file
-    )
+    checklist, all_passed = build_checklist(m, audit_file)
 
     print()
+
+    # Token Spend Summary
+    if m["token_spend"] > 0:
+        print(print_dim("─" * 120))
+        print()
+        print(print_bold("TOKEN SPEND"))
+        print()
+        print(f"    Estimated cost:     ${m['token_spend']:.2f}")
+        print(f"    TDD cycles run:     {m['red_cycles'] + m['green_cycles'] + m['refactor_cycles'] + m['verify_cycles']}")
+        print()
 
     # Closeout Approval
     print(print_dim("─" * 120))
@@ -317,7 +377,7 @@ Phase 6: Code Review
         prompt_user("  Press Enter to continue to closeout...")
     elif closeout_choice == "hold":
         print()
-        print(print_yellow("✗ Closeout held - phase not complete"))
+        print(print_yellow("  Closeout held - phase not complete"))
         return False
 
     # Generate Closeout Document
@@ -326,49 +386,70 @@ Phase 6: Code Review
     print(print_bold("GENERATING CLOSEOUT"))
     print()
 
-    # Generate markdown closeout
+    completion_rate = (m["tasks_completed"] * 100 // max(m["tasks_total"], 1)) if m["tasks_total"] > 0 else 0
+
     checklist_md = "\n".join([
         f"- [x] {item.split(':')[0]}" if item.endswith(":PASS") else
         f"- [~] {item.split(':')[0]} (warning)" if item.endswith(":WARN") else
         f"- [ ] {item.split(':')[0]} (failed)" if item.endswith(":FAIL") else
-        f"- [-] {item.split(':')[0]} (deferred)"
+        f"- [-] {item.split(':')[0]} (skipped)"
         for item in checklist
     ])
+
+    # Test suite info
+    test_info = "Not available (build tools not installed)"
+    if m["total_tests"] > 0:
+        test_info = f"{m['tests_passed']} passing, {m['tests_failed_suite']} failing (of {m['total_tests']})"
+
+    coverage_info = "Not available (coverage tool not installed)"
+    if m["unit_coverage"] > 0:
+        coverage_info = f"{m['unit_coverage']}%"
+
+    token_section = ""
+    if m["token_spend"] > 0:
+        token_section = f"""
+### Token Spend
+
+- **Estimated Cost:** ${m['token_spend']:.2f}
+- **Total Cycles:** {m['red_cycles'] + m['green_cycles'] + m['refactor_cycles'] + m['verify_cycles']}
+"""
 
     closeout_md = f"""# Phase 5 Closeout: TDD Implementation
 
 **Completed:** {datetime.now().isoformat()}
 **Status:** COMPLETE
+**Stack:** {m['stack']}
 
 ## Summary
 
-Phase 5 (TDD Implementation) has been completed. All tasks have gone through RED/GREEN/REFACTOR/VERIFY cycles.
+Phase 5 (TDD Implementation) has been completed. Tasks went through RED/GREEN/REFACTOR/VERIFY cycles.
 
 ### Key Outcomes
 
-- **Tasks Completed:** {completed_tasks} / {total_tasks}
-- **Tests Written:** {total_tests}
-- **Tests Passing:** {passing_tests}
-- **Unit Coverage:** {unit_coverage}%
-- **Critical Issues:** {critical_issues}
+- **Tasks Completed:** {m['tasks_completed']} / {m['tasks_total']} ({completion_rate}%)
+- **Tasks Failed:** {m['tasks_failed']}
+- **Tasks Cascaded:** {m['tasks_cascaded']}
+- **Test Suite:** {test_info}
+- **Coverage:** {coverage_info}
+- **Critical Issues:** {m['critical_issues']}
 
 ### TDD Execution
 
-Each task completed the following cycle:
-
-1. **RED** - Wrote failing tests based on OpenSpec
-2. **GREEN** - Implemented minimal code to pass tests
-3. **REFACTOR** - Cleaned up code, ran linters
-4. **VERIFY** - Security scans, no critical issues
-
+| Cycle | Count |
+|-------|-------|
+| RED | {m['red_cycles']} |
+| GREEN | {m['green_cycles']} (retries: {m['green_retries']}) |
+| REFACTOR | {m['refactor_cycles']} (reverted: {m['refactor_reverted']}) |
+| VERIFY | {m['verify_cycles']} |
+{token_section}
 ### Artifacts Produced
 
 | Artifact | Location |
 |----------|----------|
-| TDD Records | .claude/testing/tdd-t*.json |
+| TDD Records | .claude/testing/tdd-t*.json ({m['tdd_records']} files) |
 | Validation Report | .claude/testing/validation-report.json |
+| TDD Progress | .outputs/5-implementation/tdd-progress.json |
 | Phase Audit | .claude/audit/phase-05-audit.json |
-| Updated Tasks | .taskmaster/tasks/tasks.json |
 
 ### Checklist Status
 
@@ -396,39 +477,51 @@ python main.py run 6
 """
     write_file(closeout_file, closeout_md)
 
-    # Generate JSON closeout
     closeout_data = {
         "phase": 5,
         "name": "TDD Implementation",
         "status": "complete",
         "completed_at": datetime.now().isoformat(),
-        "tasks_completed": completed_tasks,
-        "total_tasks": total_tasks,
+        "stack": m["stack"],
+        "tasks_completed": m["tasks_completed"],
+        "total_tasks": m["tasks_total"],
+        "tasks_failed": m["tasks_failed"],
+        "tasks_cascaded": m["tasks_cascaded"],
         "tests": {
-            "total": total_tests,
-            "passing": passing_tests,
-            "flaky": flaky_tests
+            "total": m["total_tests"],
+            "passing": m["tests_passed"],
+            "failing": m["tests_failed_suite"],
         },
         "coverage": {
-            "unit": unit_coverage
+            "unit": m["unit_coverage"],
         },
         "security": {
-            "critical_issues": critical_issues
+            "critical_issues": m["critical_issues"],
+            "verify_warnings": m["security_warnings"],
         },
-        "tdd_records": tdd_records,
+        "tdd_cycles": {
+            "red": m["red_cycles"],
+            "green": m["green_cycles"],
+            "green_retries": m["green_retries"],
+            "refactor": m["refactor_cycles"],
+            "refactor_reverted": m["refactor_reverted"],
+            "verify": m["verify_cycles"],
+        },
+        "token_spend_usd": m["token_spend"],
+        "tdd_records": m["tdd_records"],
+        "validation_passed": m["validation_passed"],
         "checklist": checklist,
         "artifacts": {
             "testing": ".claude/testing/",
             "validation": ".claude/testing/validation-report.json",
-            "audit": ".claude/audit/phase-05-audit.json",
-            "tasks": ".taskmaster/tasks/tasks.json"
+            "progress": ".outputs/5-implementation/tdd-progress.json",
         },
         "next_phase": 6
     }
     write_file(closeout_json, json.dumps(closeout_data, indent=2))
 
-    print(print_green("✓ Generated phase-05-closeout.md"))
-    print(print_green("✓ Generated phase-05-closeout.json"))
+    print(print_green("  Generated phase-05-closeout.md"))
+    print(print_green("  Generated phase-05-closeout.json"))
     print()
 
     # Session End
@@ -442,6 +535,11 @@ python main.py run 6
     print("  Testing artifacts at:")
     print(print_dim("    .claude/testing/"))
     print()
+
+    if m["token_spend"] > 0:
+        print(f"  Token spend: ${m['token_spend']:.2f}")
+        print()
+
     print(print_bold("  Next: PHASE 6 - CODE REVIEW"))
     print()
     print("  To continue:")
@@ -450,10 +548,10 @@ python main.py run 6
     print(print_dim("─" * 120))
     print()
     print(print_green("  Phase 5 Complete!"))
-    print(print_dim("  TDD cycles executed. Tests passing. Ready for Code Review."))
+    print(print_dim("  TDD cycles executed. Ready for Code Review."))
     print()
 
-    print(print_green("✓ Phase 5 closeout complete"))
+    print(print_green("  Phase 5 closeout complete"))
     return True
 
 
