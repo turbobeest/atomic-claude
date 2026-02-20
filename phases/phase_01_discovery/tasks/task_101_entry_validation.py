@@ -120,7 +120,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # CHECK 3: Pipeline State
     # ═══════════════════════════════════════════════════════════════
 
-    state_file = project_root / ".claude" / "pipeline-state.json"
+    state_file = atomic_root / ".state" / "task-state.json"
     if state_file.exists():
         try:
             with open(state_file) as f:

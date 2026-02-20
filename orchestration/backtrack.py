@@ -28,7 +28,7 @@ PHASE_NAMES = {
 PROJECT_DELIVERABLES = {
     1: ["docs/diagrams", ".claude/needs"],
     2: ["docs/prd"],
-    4: [".claude/specs"],
+    4: [".openspec", ".claude/specs"],
     5: [".claude/testing", ".claude/config"],
     6: [".claude/reviews"],
     7: [".claude/integration"],

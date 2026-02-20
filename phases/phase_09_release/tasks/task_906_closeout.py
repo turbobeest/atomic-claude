@@ -232,7 +232,7 @@ The project has completed all phases successfully.
 
 For future projects:
 ```bash
-./orchestrator/pipeline new <project-name>
+python main.py run 0
 ```
 
 ---
@@ -297,7 +297,7 @@ For future projects:
     print(f"    {GREEN}Thank you for using ATOMIC CLAUDE!{NC}")
     print()
     print(f"    For future projects:")
-    print(f"      {CYAN}./orchestrator/pipeline new <project-name>{NC}")
+    print(f"      {CYAN}python main.py run 0{NC}")
     print()
     print(f"{GREEN}{'═' * 115}{NC}")
     print()

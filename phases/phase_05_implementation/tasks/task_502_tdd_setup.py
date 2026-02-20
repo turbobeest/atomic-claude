@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from core.utils.cli_ui import (
     print_bold, print_cyan, print_yellow, print_green,
-    print_red, print_dim, prompt_user
+    print_red, print_dim, print_magenta, prompt_user
 )
 from core.utils.file_ops import ensure_dir, write_file
 
@@ -43,12 +43,20 @@ def detect_cpu_count() -> int:
 
 
 def detect_tech_stack(atomic_root: Path) -> str:
-    """Detect project tech stack from configuration files."""
-    if (atomic_root / "pyproject.toml").exists() or (atomic_root / "requirements.txt").exists():
+    """Detect project tech stack from host project configuration files.
+
+    Checks the HOST project root (atomic_root.parent), not the atomic-claude
+    directory itself — atomic-claude has its own requirements.txt which would
+    always cause false "python" detection.
+    """
+    project_root = atomic_root.parent
+    if (project_root / "Cargo.toml").exists():
+        return "rust"
+    if (project_root / "pyproject.toml").exists() or (project_root / "requirements.txt").exists():
         return "python"
-    elif (atomic_root / "package.json").exists():
+    if (project_root / "package.json").exists():
         return "node"
-    elif (atomic_root / "go.mod").exists():
+    if (project_root / "go.mod").exists():
         return "go"
     return "unknown"
 
@@ -278,7 +286,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_bold("  Detected Tools"))
     print()
 
-    if detected_stack == "python":
+    if detected_stack == "rust":
+        print(print_red("    RED (Testing):") + "       cargo test")
+        print(print_cyan("    REFACTOR (Linting):") + "  cargo clippy, rustfmt")
+        print("    " + print_magenta("VERIFY (Security):") + "   cargo audit, cargo deny")
+    elif detected_stack == "python":
         print(print_red("    RED (Testing):") + "       pytest, coverage.py")
         print(print_cyan("    REFACTOR (Linting):") + "  ruff, black, mypy")
         print("    " + print_magenta("VERIFY (Security):") + "   bandit, safety, pip-audit")

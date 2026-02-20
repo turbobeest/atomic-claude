@@ -99,7 +99,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         checklist.append(("diagrams", "WARN"))
 
     # Check audit
-    audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-1-report.json"
+    audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-1" / "report.json"
+    if not audit_file.exists():
+        audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-1-report.json"
     if not audit_file.exists():
         audit_file = project_root / ".claude" / "audit" / "phase-01-audit.json"
 
@@ -217,7 +219,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print("║  Next: PHASE 2 - PRD                                          ║")
     print("║                                                               ║")
     print("║  To continue:                                                 ║")
-    print("║  ./orchestrator/pipeline resume                               ║")
+    print("║  python main.py run 2                               ║")
     print("║                                                               ║")
     print("║  ─────────────────────────────────────────────────────────── ║")
     print("║                                                               ║")
@@ -366,7 +368,7 @@ this phase serve as recommendations, not fixed assignments.
 ## To Continue
 
 ```bash
-./orchestrator/pipeline resume
+python main.py run 2
 ```
 
 ---

@@ -194,7 +194,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     testing_dir = project_root / ".claude" / "testing"
 
     # Audit file - check new path first, then legacy
-    audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-5-report.json"
+    audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-5" / "report.json"
+    if not audit_file.exists():
+        audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-5-report.json"
     if not audit_file.exists():
         audit_file = project_root / ".claude" / "audit" / "phase-05-audit.json"
 
@@ -385,7 +387,7 @@ In the next phase, we will:
 ## To Continue
 
 ```bash
-./orchestrator/pipeline resume
+python main.py run 6
 ```
 
 ---
@@ -443,7 +445,7 @@ In the next phase, we will:
     print(print_bold("  Next: PHASE 6 - CODE REVIEW"))
     print()
     print("  To continue:")
-    print(print_cyan("    ./orchestrator/pipeline resume"))
+    print(print_cyan("    python main.py run 6"))
     print()
     print(print_dim("─" * 120))
     print()

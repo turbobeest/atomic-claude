@@ -41,7 +41,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     refinement_file = review_dir / "refinement-report.json"
 
     # Find audit file (new path first, then legacy)
-    audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-6-report.json"
+    audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-6" / "report.json"
+    if not audit_file.exists():
+        audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-6-report.json"
     if not audit_file.exists():
         audit_file = project_root / ".claude" / "audit" / "phase-06-audit.json"
 
@@ -350,7 +352,7 @@ In the next phase, we will:
 ## To Continue
 
 ```bash
-./orchestrator/pipeline resume
+python main.py run 7
 ```
 
 ---
@@ -448,7 +450,7 @@ def _display_session_end(closeout_file: Path, review_dir: Path) -> None:
     print(print_bold("  Next: PHASE 7 - INTEGRATION TESTING"))
     print()
     print("  To continue:")
-    print(print_cyan("    ./orchestrator/pipeline resume"))
+    print(print_cyan("    python main.py run 7"))
     print()
     print(print_green("  Phase 6 Complete!"))
     print(print_dim("  Code reviewed and refined. Ready for Integration Testing."))

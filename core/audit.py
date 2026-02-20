@@ -678,6 +678,7 @@ def _run_parallel_evaluations(
     deliverables: str,
     phase_num: int,
     phase_id: str,
+    round_label: str = "",
 ) -> list[AuditEvaluation]:
     """Run audit evaluations in parallel with Rich live progress display."""
     from rich.console import Console
@@ -756,7 +757,10 @@ def _run_parallel_evaluations(
             )
 
         lines.append("")
-        return Panel("\n".join(lines), title=f"Phase {phase_num} Audit Evaluation")
+        title = f"Phase {phase_num} Audit Evaluation"
+        if round_label:
+            title += f" — {round_label}"
+        return Panel("\n".join(lines), title=title)
 
     with Live(_build_full_display(), console=console, refresh_per_second=2) as live:
         with ThreadPoolExecutor(max_workers=MAX_CONCURRENT) as executor:
@@ -877,11 +881,16 @@ def _display_rich_results(
     evaluations: list[AuditEvaluation],
     phase_num: int,
     audit_dir: Optional[Path] = None,
+    round_label: str = "",
+    prev_evaluations: list[AuditEvaluation] | None = None,
 ) -> None:
     """Display compact audit results — one line per audit with file references.
 
     Full analysis lives in the markdown files. Terminal shows just the
     verdict, category, and where to read the details.
+
+    When prev_evaluations is provided, shows a delta column indicating
+    what improved, regressed, or stayed the same since the previous round.
     """
     from rich.console import Console
     from rich.panel import Panel
@@ -895,15 +904,27 @@ def _display_rich_results(
     total_time = sum(e.duration_seconds for e in evaluations)
 
     STATUS_ICON = {"pass": "✅", "warn": "⚠️ ", "fail": "❌"}
+    STATUS_RANK = {"pass": 2, "warn": 1, "fail": 0}
+
+    # Build prev lookup for delta display
+    prev_by_id = {}
+    if prev_evaluations:
+        prev_by_id = {e.audit_id: e for e in prev_evaluations}
 
     # Compact table — every audit in one table
     table = Table(show_header=True, header_style="bold", box=None, pad_edge=False)
     table.add_column("#", width=4, justify="right")
     table.add_column("Result", width=10)
+    if prev_by_id:
+        table.add_column("Delta", width=6)
     table.add_column("Sev", width=8)
     table.add_column("Category", width=20, no_wrap=True)
     table.add_column("Audit", no_wrap=True)
     table.add_column("Time", width=7, justify="right")
+
+    improved = 0
+    regressed = 0
+    unchanged = 0
 
     for i, ev in enumerate(evaluations):
         icon = STATUS_ICON.get(ev.status, "?")
@@ -912,21 +933,49 @@ def _display_rich_results(
         if len(cat) > 19:
             cat = cat[:17] + "…"
 
-        table.add_row(
+        row = [
             str(i + 1),
             f"{icon} {label}",
+        ]
+
+        if prev_by_id:
+            prev = prev_by_id.get(ev.audit_id)
+            if prev:
+                cur_rank = STATUS_RANK.get(ev.status, 0)
+                prev_rank = STATUS_RANK.get(prev.status, 0)
+                if cur_rank > prev_rank:
+                    row.append("  ↑")
+                    improved += 1
+                elif cur_rank < prev_rank:
+                    row.append("  ↓")
+                    regressed += 1
+                else:
+                    row.append("  ·")
+                    unchanged += 1
+            else:
+                row.append("  ★")  # new audit (wasn't in previous)
+
+        row.extend([
             ev.severity,
             cat,
             ev.audit_name,
             f"{ev.duration_seconds:.1f}s",
-        )
+        ])
+        table.add_row(*row)
+
+    title = "Audit Results"
+    if round_label:
+        title += f" — {round_label}"
+
+    summary = (
+        f"  Passed: {passed}   Warnings: {warned}   Failed: {failed}   "
+        f"Total time: {total_time:.1f}s"
+    )
+    if prev_by_id:
+        summary += f"\n  Delta: {improved} improved ↑   {regressed} regressed ↓   {unchanged} unchanged ·"
 
     console.print()
-    console.print(Panel(
-        f"  Passed: {passed}   Warnings: {warned}   Failed: {failed}   "
-        f"Total time: {total_time:.1f}s",
-        title="Audit Results",
-    ))
+    console.print(Panel(summary, title=title))
     console.print(table)
 
     if audit_dir:
@@ -1019,12 +1068,19 @@ def _load_existing_evaluations(
 # AI-Automated Remediation (Stage 5a)
 # ---------------------------------------------------------------------------
 
-def _extract_remediation_guidance(evaluations: list[AuditEvaluation]) -> str:
+def _extract_remediation_guidance(
+    evaluations: list[AuditEvaluation],
+    failures_only: bool = False,
+) -> str:
     """Extract Gaps and Recommendations sections from failed/warned audit reports.
 
     Handles both numbered (## 3. Gaps) and unnumbered (## Gaps) heading styles.
     Falls back to last 1000 chars of analysis if headings not found.
     Caps total output at 30K chars.
+
+    Args:
+        evaluations: List of audit evaluations
+        failures_only: If True, only extract guidance from failures (skip warnings)
     """
     MAX_GUIDANCE_CHARS = 30_000
     heading_pattern = re.compile(
@@ -1034,11 +1090,13 @@ def _extract_remediation_guidance(evaluations: list[AuditEvaluation]) -> str:
     # Next heading pattern to find section boundaries
     next_heading = re.compile(r"^##\s", re.MULTILINE)
 
+    target_statuses = ("fail",) if failures_only else ("fail", "warn")
+
     parts: list[str] = []
     total = 0
 
     for ev in evaluations:
-        if ev.status not in ("fail", "warn"):
+        if ev.status not in target_statuses:
             continue
         if not ev.analysis:
             continue
@@ -1104,6 +1162,39 @@ def _build_remediation_prompt(
 
     return f"""You are a senior engineer fixing deliverables based on audit findings.
 
+CRITICAL: You MUST output your fixes using the exact delimited format shown below.
+Do NOT use markdown code blocks. Do NOT write prose without file blocks.
+
+## Required Output Format
+
+For EACH file you modify or create, output exactly:
+
+=== FILE: relative/path/to/file ===
+<complete file content here>
+=== END FILE ===
+
+After all file blocks, output:
+
+=== SUMMARY ===
+<brief description of what you changed and why>
+=== END SUMMARY ===
+
+Example (fixing a JSON deliverable):
+
+=== FILE: openspec-generation.json ===
+{{
+  "status": "complete",
+  "specs_generated": 118,
+  "security_coverage": "threat-model included"
+}}
+=== END FILE ===
+
+=== SUMMARY ===
+Added security_coverage field to address missing threat model audit finding.
+=== END SUMMARY ===
+
+---
+
 ## Audit Findings (Gaps & Recommendations)
 
 {guidance}
@@ -1126,25 +1217,14 @@ Rules:
 - For project deliverables, use paths starting with .taskmaster/, docs/, src/ etc.
 - For phase output artifacts, use bare filenames (relative to output dir)
 
-## Output Format
-
-For each file you modify or create, output:
-
-=== FILE: relative/path/to/file ===
-<complete file content>
-=== END FILE ===
-
-After all files, output:
-
-=== SUMMARY ===
-<brief description of what you changed and why>
-=== END SUMMARY ==="""
+REMINDER: You MUST use === FILE: path === and === END FILE === delimiters for every file you output."""
 
 
 def _parse_remediation_response(response: str) -> tuple[dict[str, str], str]:
     """Parse LLM remediation response into file updates and summary.
 
-    Extracts === FILE: path === ... === END FILE === blocks.
+    Primary: extracts === FILE: path === ... === END FILE === blocks.
+    Fallback: extracts ```lang\n// path: ...\n or ```lang:path blocks.
     Returns ({path: content}, summary). Returns ({}, "") on parse failure.
     """
     file_pattern = re.compile(
@@ -1162,6 +1242,34 @@ def _parse_remediation_response(response: str) -> tuple[dict[str, str], str]:
         content = match.group(2)
         if path:
             files[path] = content
+
+    # Fallback: extract from markdown code blocks with file paths
+    if not files:
+        # Pattern 1: ```lang\n// FILE: path\n or // path: ...\n
+        fb1 = re.compile(
+            r"```\w*\s*\n"
+            r"(?://|#)\s*(?:FILE|file|path):\s*(.+?)\s*\n"
+            r"(.*?)"
+            r"\n```",
+            re.DOTALL,
+        )
+        for match in fb1.finditer(response):
+            path = match.group(1).strip()
+            content = match.group(2)
+            if path:
+                files[path] = content
+
+    # Fallback 2: ```lang:filename\n...\n```
+    if not files:
+        fb2 = re.compile(
+            r"```\w+:(\S+)\s*\n(.*?)\n```",
+            re.DOTALL,
+        )
+        for match in fb2.finditer(response):
+            path = match.group(1).strip()
+            content = match.group(2)
+            if path:
+                files[path] = content
 
     summary = ""
     summary_match = summary_pattern.search(response)
@@ -1325,11 +1433,15 @@ def _auto_remediate(
     output_dir: Path,
     phase_num: int,
     phase_id: str,
+    failures_only: bool = False,
 ) -> bool:
     """Orchestrate AI-automated remediation. Returns True if changes applied.
 
     Writes patched files to both output_dir (for re-audit) and their
     canonical locations (pipeline source or project deliverables).
+
+    Args:
+        failures_only: If True, only remediate failures (skip warnings)
 
     Non-blocking: returns False on any error without raising.
     """
@@ -1340,16 +1452,21 @@ def _auto_remediate(
     atomic_root = _ATOMIC_ROOT
     project_root = _ATOMIC_ROOT.parent  # project being worked on
 
+    scope = "failures only" if failures_only else "failures + warnings"
+
     try:
         # 1. Extract guidance from failed/warned audits
-        guidance = _extract_remediation_guidance(evaluations)
+        guidance = _extract_remediation_guidance(evaluations, failures_only=failures_only)
         if not guidance.strip():
-            console.print("  No actionable guidance extracted from audit reports.")
+            console.print(f"  No actionable guidance extracted from audit reports ({scope}).")
             return False
 
         # 2. Gather current deliverables (with source context for remediation)
         source_dirs = _get_remediation_source_dirs(phase_num, atomic_root, project_root)
-        deliverables = _gather_deliverables(output_dir, source_dirs=source_dirs)
+        extra_dirs = _get_phase_deliverable_dirs(phase_num, project_root)
+        deliverables = _gather_deliverables(
+            output_dir, source_dirs=source_dirs, extra_dirs=extra_dirs,
+        )
 
         # 3. Build prompt (with file layout context)
         prompt = _build_remediation_prompt(
@@ -1360,13 +1477,25 @@ def _auto_remediate(
 
         # 4. Invoke LLM (opus for high-quality remediation, extended timeout)
         from core.llm.invoke import invoke_llm
-        console.print("  Invoking AI remediation (opus)...")
+        console.print(f"  Invoking AI remediation (opus, {scope})...")
         response = invoke_llm(prompt=prompt, model="opus", timeout=1800)
 
+        # Handle response object
+        if hasattr(response, 'content'):
+            response_text = response.content
+        else:
+            response_text = str(response)
+
         # 5. Parse response
-        file_updates, summary = _parse_remediation_response(response)
+        file_updates, summary = _parse_remediation_response(response_text)
         if not file_updates:
-            console.print("  AI returned no file updates — remediation skipped.")
+            # Show what the LLM actually returned so it's not a black box
+            preview = response_text[:500].strip()
+            if len(response_text) > 500:
+                preview += "..."
+            console.print("  AI returned no file updates (no === FILE: ... === blocks found).")
+            console.print(f"  Response preview ({len(response_text)} chars):")
+            console.print(f"  [dim]{preview}[/dim]")
             return False
 
         # 6. Apply changes (to output_dir + canonical locations)
@@ -1445,41 +1574,60 @@ def _remediation_loop(
             )
             return evaluations
 
+        # Build menu options — only show failures-only when both types present
+        menu_options = [
+            ("accept", "Accept results and continue"),
+            ("remediate", f"AI-remediate and re-audit ({remaining} rounds remaining)"),
+        ]
+        if fail_count > 0 and warn_count > 0:
+            menu_options.append(
+                ("failures", f"AI-remediate failures only, skip {warn_count} warnings ({remaining} rounds remaining)"),
+            )
+        menu_options.append(("skip", "Skip remediation"))
+
         choice = prompt_menu(
-            [
-                ("accept", "Accept results and continue"),
-                ("remediate", f"AI-remediate and re-audit ({remaining} rounds remaining)"),
-                ("skip", "Skip remediation"),
-            ],
+            menu_options,
             header="  Remediation options:",
             default=1,
         )
 
-        if choice != "remediate":
+        if choice not in ("remediate", "failures"):
             return evaluations
 
+        failures_only = (choice == "failures")
+
+        # Snapshot current evaluations for delta comparison
+        prev_evaluations = list(evaluations)
+
         # AI-automated remediation
-        success = _auto_remediate(evaluations, output_dir, phase_num, phase_id)
+        success = _auto_remediate(evaluations, output_dir, phase_num, phase_id,
+                                  failures_only=failures_only)
         if not success:
             console.print("  AI remediation did not produce changes. You can accept or retry.")
             round_num += 1
             continue
 
         # Re-gather deliverables (AI may have changed them)
-        fresh_deliverables = _gather_deliverables(output_dir)
+        project_root = _ATOMIC_ROOT.parent
+        extra_dirs = _get_phase_deliverable_dirs(phase_num, project_root)
+        fresh_deliverables = _gather_deliverables(output_dir, extra_dirs=extra_dirs)
 
-        # Re-audit only failed/warned
-        failed_ids = {e.audit_id for e in evaluations if e.status in ("fail", "warn")}
-        re_configs = [c for c in audit_configs if c.audit.get("audit_id") in failed_ids]
+        # Re-audit only the audits that were targeted for remediation
+        reaudit_statuses = ("fail",) if failures_only else ("fail", "warn")
+        reaudit_ids = {e.audit_id for e in evaluations if e.status in reaudit_statuses}
+        re_configs = [c for c in audit_configs if c.audit.get("audit_id") in reaudit_ids]
 
         if not re_configs:
             console.print("  No audits to re-evaluate")
             return evaluations
 
-        console.print(f"  Re-auditing {len(re_configs)} audits...")
+        scope_label = "failed" if failures_only else "failed/warned"
+        round_label = f"Re-Audit Round {round_num + 1} ({len(re_configs)} {scope_label})"
+        console.print(f"  {round_label}...")
 
         new_evals = _run_parallel_evaluations(
-            re_configs, fresh_deliverables, phase_num, phase_id
+            re_configs, fresh_deliverables, phase_num, phase_id,
+            round_label=round_label,
         )
 
         # Merge: replace old evaluations with new ones
@@ -1488,9 +1636,13 @@ def _remediation_loop(
             new_by_id.get(e.audit_id, e) for e in evaluations
         ]
 
-        # Save updated markdowns and show compact results
+        # Save updated markdowns and show compact results with delta
         audit_dir = _save_audit_markdowns(evaluations, phase_num)
-        _display_rich_results(evaluations, phase_num, audit_dir)
+        _display_rich_results(
+            evaluations, phase_num, audit_dir,
+            round_label=round_label,
+            prev_evaluations=prev_evaluations,
+        )
 
         round_num += 1
 
@@ -1631,6 +1783,27 @@ def _curate_audit_selection(
     return result
 
 
+def _get_phase_deliverable_dirs(
+    phase_num: int,
+    project_root: Path,
+) -> list[Path]:
+    """Return additional deliverable directories for a given phase.
+
+    These are phase-specific directories that contain actual deliverables
+    (not just summaries) that the audit evaluator and remediation LLM
+    need to see.  For example, Phase 4 generates OpenSpec files in
+    project_root/.openspec/ rather than in .outputs/4-specification/.
+    """
+    dirs: list[Path] = []
+
+    if phase_num == 4:
+        openspec = project_root / ".openspec"
+        if openspec.is_dir():
+            dirs.append(openspec)
+
+    return dirs
+
+
 def _get_remediation_source_dirs(
     phase_num: int,
     atomic_root: Path,
@@ -1654,6 +1827,9 @@ def _get_remediation_source_dirs(
     if taskmaster.is_dir():
         dirs.append(taskmaster)
 
+    # Phase-specific deliverable directories (e.g., .openspec for phase 4)
+    dirs.extend(_get_phase_deliverable_dirs(phase_num, project_root))
+
     return dirs
 
 
@@ -1661,12 +1837,17 @@ def _gather_deliverables(
     output_dir: Path,
     max_chars: int = 50_000,
     source_dirs: list[Path] | None = None,
+    extra_dirs: list[Path] | None = None,
 ) -> str:
     """Read deliverable files from the phase output directory.
 
-    When source_dirs is provided, also reads source files from those
-    directories (for remediation context). Source files are labeled
-    with their full path so the LLM knows where they live.
+    Args:
+        output_dir: Primary phase output directory (.outputs/N-phase/)
+        max_chars: Total character budget for all deliverables
+        source_dirs: Additional source code directories for remediation context
+            (labeled [source] or [project], separate 30K budget)
+        extra_dirs: Additional deliverable directories (e.g., .openspec/)
+            that share the main deliverable budget with output_dir
     """
     extensions = {".json", ".md", ".txt", ".py"}
     parts: list[str] = []
@@ -1693,6 +1874,36 @@ def _gather_deliverables(
                 break
             parts.append(chunk)
             total += len(chunk)
+
+    # Extra deliverable directories (same budget as output artifacts)
+    if extra_dirs and total < max_chars:
+        deliverable_extensions = {".json", ".md", ".txt"}
+        for extra_dir in extra_dirs:
+            if not extra_dir.is_dir() or total >= max_chars:
+                break
+            try:
+                dir_name = extra_dir.relative_to(_ATOMIC_ROOT.parent)
+            except ValueError:
+                dir_name = extra_dir.name
+            for fp in sorted(extra_dir.rglob("*")):
+                if not fp.is_file() or fp.suffix.lower() not in deliverable_extensions:
+                    continue
+                try:
+                    text = fp.read_text(encoding="utf-8", errors="replace")
+                except Exception:
+                    continue
+
+                rel = fp.relative_to(extra_dir)
+                header = f"--- [{dir_name}] {rel} ---\n"
+                chunk = header + text + "\n"
+                if total + len(chunk) > max_chars:
+                    remaining = max_chars - total
+                    if remaining > len(header) + 100:
+                        parts.append(chunk[:remaining] + "\n[...truncated]")
+                        total = max_chars
+                    break
+                parts.append(chunk)
+                total += len(chunk)
 
     # Source context (for remediation)
     if source_dirs and total < max_chars:
@@ -1906,7 +2117,11 @@ def run_phase_audit(
         return True
 
     # 2. Gather deliverables early — LLM curation needs them
-    deliverables = _gather_deliverables(output_dir)
+    #    Include phase-specific dirs (e.g., .openspec for phase 4) so audits
+    #    evaluate actual deliverables, not just summary reports.
+    project_root = _ATOMIC_ROOT.parent
+    extra_dirs = _get_phase_deliverable_dirs(phase_num, project_root)
+    deliverables = _gather_deliverables(output_dir, extra_dirs=extra_dirs)
 
     # 3. LLM-curated audit selection
     audits = _curate_audit_selection(audits, deliverables, phase_num, phase_id, uat_mode)

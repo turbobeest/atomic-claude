@@ -188,9 +188,11 @@ def run_closeout_checklist(
 
     # Check audit (project deliverable in project_root, fallback in atomic_root)
     project_root = atomic_root.parent
-    audit_file = project_root / ".claude" / "audit" / "phase-02-audit.json"
+    audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-2" / "report.json"
     if not audit_file.exists():
         audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-2-report.json"
+    if not audit_file.exists():
+        audit_file = project_root / ".claude" / "audit" / "phase-02-audit.json"
 
     if audit_file.exists():
         try:

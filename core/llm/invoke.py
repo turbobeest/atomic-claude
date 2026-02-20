@@ -469,10 +469,15 @@ def invoke_llm(
     if actual_prompt is None and prompt_file is not None:
         actual_prompt = Path(prompt_file).read_text()
     if actual_prompt is None and prompt_or_file is not None:
-        p = Path(str(prompt_or_file))
-        if p.exists() and p.is_file():
-            actual_prompt = p.read_text()
-        else:
+        try:
+            p = Path(str(prompt_or_file))
+            if p.exists() and p.is_file():
+                actual_prompt = p.read_text()
+            else:
+                actual_prompt = str(prompt_or_file)
+        except OSError:
+            # Handles ENAMETOOLONG and similar OS errors when the string
+            # is clearly prompt text, not a file path
             actual_prompt = str(prompt_or_file)
     if actual_prompt is None:
         raise ValueError("No prompt provided")

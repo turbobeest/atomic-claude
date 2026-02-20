@@ -237,7 +237,7 @@ In the next phase, we will:
 ## To Continue
 
 ```bash
-./orchestrator/pipeline resume
+python main.py run 9
 ```
 
 ---
@@ -286,7 +286,7 @@ In the next phase, we will:
     print(print_bold("  Next: PHASE 9 - RELEASE"))
     print()
     print("  To continue:")
-    print(print_cyan("    ./orchestrator/pipeline resume"))
+    print(print_cyan("    python main.py run 9"))
     print()
     print(print_green("  Phase 8 Complete!"))
     print(print_dim("  Package ready. Launch imminent."))

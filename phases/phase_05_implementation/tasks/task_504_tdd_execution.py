@@ -1,21 +1,26 @@
 """
-Task 504: TDD Execution
+Task 504: TDD Execution — Stack-Aware Parallel DAG Engine
 
 Execute RED/GREEN/REFACTOR/VERIFY cycles for each task.
 
-Sequential TDD engine that:
+Parallel DAG engine that:
   - Loads tasks, OpenSpecs, agents, and TDD setup from prior phases
-  - For each TDD-eligible task, runs RED → GREEN → REFACTOR → VERIFY
+  - Detects host-project tech stack and uses stack-specific prompts/commands
+  - Resolves task dependencies into a DAG and runs independent tasks in parallel
+  - Shows Rich Live progress panel (mirrors task 403/404 pattern)
   - Writes test and implementation files to .claude/testing/task-{id}/
   - Tracks per-task records and overall progress with resume support
 """
 
+import os
 import re
 import sys
 import json
-import shutil
+import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Set
 from datetime import datetime
 
 # Add project root to path for imports
@@ -31,14 +36,106 @@ from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
 # ---------------------------------------------------------------------------
+# Stack Profiles — single source of truth for language-specific behaviour
+# ---------------------------------------------------------------------------
+
+STACK_PROFILES: Dict[str, Dict[str, Any]] = {
+    "python": {
+        "language": "python",
+        "test_file": "test_task_{id}.py",
+        "impl_file": "task_{id}_impl.py",
+        "backup_suffix": ".pre_refactor.py",
+        "fence_lang": "python",
+        "test_framework": "pytest",
+        "test_conventions": "Uses pytest conventions (functions named test_*)",
+        "import_pattern": "Imports from `task_{id}_impl`",
+        "impl_instructions": "Write the implementation module `task_{id}_impl.py`",
+        "commands": {
+            "test": "python -m pytest -xvs",
+            "lint": "python -m py_compile",
+            "security": "python -m py_compile",
+        },
+        "verify_cmd": "python -m py_compile {impl_file}",
+    },
+    "rust": {
+        "language": "rust",
+        "test_file": "test_task_{id}.rs",
+        "impl_file": "task_{id}_impl.rs",
+        "backup_suffix": ".pre_refactor.rs",
+        "fence_lang": "rust",
+        "test_framework": "cargo test",
+        "test_conventions": "Uses Rust #[test] attribute on functions",
+        "import_pattern": "Uses `mod task_{id}_impl;` to reference the implementation",
+        "impl_instructions": "Write the implementation module `task_{id}_impl.rs`",
+        "commands": {
+            "test": "cargo test",
+            "lint": "cargo clippy -- -D warnings",
+            "security": "cargo audit",
+        },
+        "verify_cmd": "cargo clippy -- -D warnings",
+    },
+    "node": {
+        "language": "javascript",
+        "test_file": "test_task_{id}.test.js",
+        "impl_file": "task_{id}_impl.js",
+        "backup_suffix": ".pre_refactor.js",
+        "fence_lang": "javascript",
+        "test_framework": "jest",
+        "test_conventions": "Uses Jest describe/it blocks",
+        "import_pattern": "Requires `./task_{id}_impl`",
+        "impl_instructions": "Write the implementation module `task_{id}_impl.js`",
+        "commands": {
+            "test": "npx jest --no-coverage",
+            "lint": "npx eslint",
+            "security": "npm audit --audit-level=high",
+        },
+        "verify_cmd": "npx eslint {impl_file}",
+    },
+    "go": {
+        "language": "go",
+        "test_file": "task_{id}_test.go",
+        "impl_file": "task_{id}_impl.go",
+        "backup_suffix": ".pre_refactor.go",
+        "fence_lang": "go",
+        "test_framework": "go test",
+        "test_conventions": "Uses Go testing.T with TestXxx function names",
+        "import_pattern": "Imports from the same package",
+        "impl_instructions": "Write the implementation file `task_{id}_impl.go`",
+        "commands": {
+            "test": "go test -v",
+            "lint": "go vet",
+            "security": "go vet",
+        },
+        "verify_cmd": "go vet {impl_file}",
+    },
+}
+
+
+def get_stack_profile(stack: str) -> Dict[str, Any]:
+    """Return the profile for a stack, falling back to python."""
+    return STACK_PROFILES.get(stack, STACK_PROFILES["python"])
+
+
+# ---------------------------------------------------------------------------
 # Helper: safe JSON loader
 # ---------------------------------------------------------------------------
 
 def load_json_safe(path: Path) -> Dict[str, Any]:
-    """Load JSON file, returning empty dict on any failure."""
+    """Load JSON file, returning empty dict on any failure.
+
+    Handles OpenSpec files that may be wrapped in markdown code fences.
+    """
     try:
         if path.exists():
-            return json.loads(path.read_text())
+            text = path.read_text()
+            stripped = text.strip()
+            # Strip markdown code fences if present
+            if stripped.startswith("```"):
+                first_nl = stripped.index("\n")
+                stripped = stripped[first_nl + 1:]
+                if stripped.endswith("```"):
+                    stripped = stripped[:-3].strip()
+            return json.loads(stripped)
     except Exception:
         pass
     return {}
@@ -103,7 +200,6 @@ def load_agent_prompt(name: str, atomic_root: Path) -> str:
     Read an agent .md file from the agents directory.
     Strips YAML frontmatter (between --- delimiters) and returns body text.
     """
-    # Search in pipeline-agents/06-09-implementation/ first
     agent_dirs = [
         atomic_root / "agents" / "pipeline-agents" / "06-09-implementation",
         atomic_root / "agents" / "pipeline-agents",
@@ -113,11 +209,9 @@ def load_agent_prompt(name: str, atomic_root: Path) -> str:
     for base_dir in agent_dirs:
         if not base_dir.exists():
             continue
-        # Direct match
         candidate = base_dir / f"{name}.md"
         if candidate.exists():
             return _strip_frontmatter(candidate.read_text())
-        # Recursive search
         for md_file in base_dir.rglob(f"{name}.md"):
             return _strip_frontmatter(md_file.read_text())
 
@@ -140,7 +234,7 @@ def _strip_frontmatter(text: str) -> str:
 def get_tool_commands(setup: Dict[str, Any], project_root: Path) -> Dict[str, str]:
     """
     Map detected_stack to test/lint/security commands.
-    Checks for custom tdd-tools.json first, then falls back to defaults.
+    Checks for custom tdd-tools.json first, then falls back to stack profile.
     """
     # Check for custom config
     config_file = project_root / ".claude" / "config" / "tdd-tools.json"
@@ -154,27 +248,8 @@ def get_tool_commands(setup: Dict[str, Any], project_root: Path) -> Dict[str, st
             }
 
     stack = setup.get("detected_stack", "python")
-
-    if stack == "python":
-        return {
-            "test": "python -m pytest -xvs",
-            "lint": "python -m py_compile",
-            "security": "python -m py_compile",  # fallback if bandit unavailable
-        }
-    elif stack == "node":
-        return {
-            "test": "npx jest --no-coverage",
-            "lint": "npx eslint",
-            "security": "npm audit --audit-level=high",
-        }
-    elif stack == "go":
-        return {
-            "test": "go test -v",
-            "lint": "go vet",
-            "security": "go vet",
-        }
-
-    return {"test": "", "lint": "", "security": ""}
+    profile = get_stack_profile(stack)
+    return dict(profile["commands"])
 
 
 # ---------------------------------------------------------------------------
@@ -190,12 +265,9 @@ def verify_test_runner(commands: Dict[str, str], project_root: Path) -> bool:
     if not test_cmd:
         return False
 
-    # Extract the base command (first word)
     base = test_cmd.split()[0]
 
-    # Check if it's a python -m style command
     if base == "python":
-        # Check the module
         parts = test_cmd.split()
         if len(parts) >= 3 and parts[1] == "-m":
             check_cmd = f"python -m {parts[2]} --version"
@@ -205,11 +277,25 @@ def verify_test_runner(commands: Dict[str, str], project_root: Path) -> bool:
         check_cmd = "npx --yes jest --version 2>/dev/null || echo unavailable"
     elif base == "go":
         check_cmd = "go version"
+    elif base == "cargo":
+        check_cmd = "cargo --version"
     else:
         check_cmd = f"which {base}"
 
     exit_code, _, _ = run_bash_command(check_cmd, "5-implementation", "504", timeout=15)
     return exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# Helper: make a command that runs in the project directory
+# ---------------------------------------------------------------------------
+
+def _make_project_cmd(cmd: str, project_root: Path) -> str:
+    """Prefix a command with cd to the project root.
+
+    So that `cargo test`, `go test`, etc. run in the right directory.
+    """
+    return f"cd {project_root} && {cmd}"
 
 
 # ---------------------------------------------------------------------------
@@ -224,8 +310,8 @@ def extract_code_from_response(response: str, language: str = "python") -> str:
     if not response:
         return ""
 
-    # Try to find fenced code blocks
-    pattern = rf"```(?:{language}|{language}\n)?\s*\n(.*?)```"
+    # Try to find fenced code blocks for the specific language
+    pattern = rf"```(?:{re.escape(language)}|{re.escape(language)}\n)?\s*\n(.*?)```"
     blocks = re.findall(pattern, response, re.DOTALL)
 
     if blocks:
@@ -250,6 +336,7 @@ def show_overview(
     agents: Dict,
     setup: Dict,
     skip_execution: bool,
+    profile: Dict[str, Any],
 ) -> None:
     """Display execution plan to user."""
     print()
@@ -259,8 +346,13 @@ def show_overview(
     print(f"    Tasks to execute:   {len(tasks)}")
     print(f"    Specs available:    {len(specs)}")
     print(f"    Stack:              {setup.get('detected_stack', 'unknown')}")
+    print(f"    Language:           {profile['language']}")
+    print(f"    Test framework:     {profile['test_framework']}")
 
-    # Show agent summary
+    # Worker count
+    workers = setup.get("execution", {}).get("workers", 4)
+    print(f"    Parallel workers:   {workers}")
+
     agent_names = []
     for role in ["red_agents", "green_agents", "refactor_agents", "verify_agents"]:
         agent_names.extend(agents.get(role, []))
@@ -290,6 +382,9 @@ def run_red_phase(
     commands: Dict[str, str],
     skip_execution: bool,
     atomic_root: Path,
+    profile: Dict[str, Any],
+    project_root: Path,
+    quiet: bool = False,
 ) -> Dict[str, Any]:
     """
     RED phase: LLM writes failing tests. Run them and verify they fail.
@@ -308,7 +403,10 @@ def run_red_phase(
     if isinstance(spec_interfaces, dict):
         spec_interfaces = json.dumps(spec_interfaces, indent=2)
 
-    language = "python"  # determined from setup, but default python
+    language = profile["language"]
+    fence_lang = profile["fence_lang"]
+    test_conventions = profile["test_conventions"]
+    import_pattern = profile["import_pattern"].format(id=task_id)
 
     prompt = f"""{agent_prompt}
 
@@ -326,33 +424,37 @@ Description: {description}
 {spec_interfaces}
 
 ## Instructions
-Write a test file that:
-1. Imports from `task_{task_id}_impl` (a module that does NOT exist yet)
+Write a test file ({language}) that:
+1. {import_pattern} (a module that does NOT exist yet)
 2. Tests the expected behavior described in the task and spec
-3. Uses pytest conventions (functions named test_*)
+3. {test_conventions}
 4. Each test should be focused and test one behavior
 5. Include at least 3 test functions covering core functionality
 
-The tests MUST fail when run because task_{task_id}_impl does not exist yet.
+The tests MUST fail when run because the implementation module does not exist yet.
 
-Output ONLY the Python test code, no explanations. Wrap in ```python fences.
+Output ONLY the {language} test code, no explanations. Wrap in ```{fence_lang} fences.
 """
 
-    print(print_red(f"    RED  ") + f"Writing tests for task {task_id}...")
-
-    test_file = task_dir / f"test_task_{task_id}.py"
+    test_filename = profile["test_file"].format(id=task_id)
+    test_file = task_dir / test_filename
     record: Dict[str, Any] = {"status": "failed", "test_file": str(test_file)}
+
+    if not quiet:
+        print(print_red(f"    RED  ") + f"Writing tests for task {task_id}...")
 
     try:
         response = invoke(prompt=prompt, model="sonnet")
     except Exception as e:
-        print(print_dim(f"         LLM error: {e}"))
+        if not quiet:
+            print(print_dim(f"         LLM error: {e}"))
         record["error"] = str(e)
         return record
 
-    code = extract_code_from_response(response, language)
+    code = extract_code_from_response(response, fence_lang)
     if not code:
-        print(print_yellow("         Empty response from LLM, skipping RED"))
+        if not quiet:
+            print(print_yellow("         Empty response from LLM, skipping RED"))
         record["error"] = "empty_response"
         return record
 
@@ -360,23 +462,28 @@ Output ONLY the Python test code, no explanations. Wrap in ```python fences.
     record["test_file"] = str(test_file)
 
     if skip_execution:
-        print(print_dim("         (skip_execution) Tests written but not run"))
+        if not quiet:
+            print(print_dim("         (skip_execution) Tests written but not run"))
         record["status"] = "written"
         return record
 
     # Run tests — expect them to FAIL (ImportError or assertion error)
     test_cmd = f"{commands['test']} {test_file}"
+    # For cargo/go, run in project dir
+    if commands["test"].startswith(("cargo", "go")):
+        test_cmd = _make_project_cmd(f"{commands['test']} -- {test_file.stem}", project_root)
+
     exit_code, stdout, stderr = run_bash_command(
         test_cmd, "5-implementation", "504", timeout=30
     )
 
     if exit_code != 0:
-        # Expected! Tests should fail in RED phase
-        print(print_green("         ✓ Tests fail as expected (RED confirmed)"))
+        if not quiet:
+            print(print_green("         ✓ Tests fail as expected (RED confirmed)"))
         record["status"] = "complete"
     else:
-        # Tests passed — this is unexpected but not fatal
-        print(print_yellow("         ⚠ Tests passed unexpectedly (no impl exists?)"))
+        if not quiet:
+            print(print_yellow("         ⚠ Tests passed unexpectedly (no impl exists?)"))
         record["status"] = "complete"
         record["note"] = "tests_passed_unexpectedly"
 
@@ -396,6 +503,9 @@ def run_green_phase(
     commands: Dict[str, str],
     skip_execution: bool,
     atomic_root: Path,
+    profile: Dict[str, Any],
+    project_root: Path,
+    quiet: bool = False,
     max_retries: int = 2,
 ) -> Dict[str, Any]:
     """
@@ -411,8 +521,14 @@ def run_green_phase(
     if isinstance(spec_interfaces, dict):
         spec_interfaces = json.dumps(spec_interfaces, indent=2)
 
-    impl_file = task_dir / f"task_{task_id}_impl.py"
-    test_file = task_dir / f"test_task_{task_id}.py"
+    language = profile["language"]
+    fence_lang = profile["fence_lang"]
+    impl_filename = profile["impl_file"].format(id=task_id)
+    test_filename = profile["test_file"].format(id=task_id)
+    impl_instructions = profile["impl_instructions"].format(id=task_id)
+
+    impl_file = task_dir / impl_filename
+    test_file = task_dir / test_filename
     record: Dict[str, Any] = {"status": "failed", "impl_file": str(impl_file)}
 
     error_context = ""
@@ -444,50 +560,58 @@ Description: {description}
 {spec_interfaces}
 
 ## Test Code (must pass)
-```python
+```{fence_lang}
 {test_code}
 ```
 {retry_note}
 ## Instructions
-Write the implementation module `task_{task_id}_impl.py` that makes ALL tests pass.
+{impl_instructions} that makes ALL tests pass.
 1. Implement only what is needed to pass the tests — no extra features
 2. Use clear, readable code
 3. Export the functions/classes that the tests import
 
-Output ONLY the Python implementation code. Wrap in ```python fences.
+Output ONLY the {language} implementation code. Wrap in ```{fence_lang} fences.
 """
 
         attempt_label = f" (retry {attempt})" if attempt > 0 else ""
-        print(print_green(f"    GREEN") + f" Writing implementation{attempt_label}...")
+        if not quiet:
+            print(print_green(f"    GREEN") + f" Writing implementation{attempt_label}...")
 
         try:
             response = invoke(prompt=prompt, model="sonnet")
         except Exception as e:
-            print(print_dim(f"         LLM error: {e}"))
+            if not quiet:
+                print(print_dim(f"         LLM error: {e}"))
             record["error"] = str(e)
             continue
 
-        code = extract_code_from_response(response, "python")
+        code = extract_code_from_response(response, fence_lang)
         if not code:
-            print(print_yellow("         Empty response, retrying..."))
+            if not quiet:
+                print(print_yellow("         Empty response, retrying..."))
             error_context = "LLM returned empty response"
             continue
 
         write_file(impl_file, code)
 
         if skip_execution:
-            print(print_dim("         (skip_execution) Impl written but not tested"))
+            if not quiet:
+                print(print_dim("         (skip_execution) Impl written but not tested"))
             record["status"] = "written"
             return record
 
         # Run tests
         test_cmd = f"{commands['test']} {test_file}"
+        if commands["test"].startswith(("cargo", "go")):
+            test_cmd = _make_project_cmd(f"{commands['test']} -- {test_file.stem}", project_root)
+
         exit_code, stdout, stderr = run_bash_command(
             test_cmd, "5-implementation", "504", timeout=60
         )
 
         if exit_code == 0:
-            print(print_green("         ✓ All tests pass (GREEN confirmed)"))
+            if not quiet:
+                print(print_green("         ✓ All tests pass (GREEN confirmed)"))
             record["status"] = "complete"
             record["attempts"] = attempt + 1
             return record
@@ -495,9 +619,11 @@ Output ONLY the Python implementation code. Wrap in ```python fences.
             combined_output = (stdout + "\n" + stderr).strip()
             error_context = combined_output
             if attempt < max_retries:
-                print(print_yellow(f"         Tests failed, will retry ({attempt + 1}/{max_retries})"))
+                if not quiet:
+                    print(print_yellow(f"         Tests failed, will retry ({attempt + 1}/{max_retries})"))
             else:
-                print(print_red(f"         ✗ Tests failed after {max_retries + 1} attempts"))
+                if not quiet:
+                    print(print_red(f"         ✗ Tests failed after {max_retries + 1} attempts"))
                 record["error"] = error_context[-500:]
 
     record["attempts"] = max_retries + 1
@@ -515,6 +641,9 @@ def run_refactor_phase(
     commands: Dict[str, str],
     skip_execution: bool,
     atomic_root: Path,
+    profile: Dict[str, Any],
+    project_root: Path,
+    quiet: bool = False,
 ) -> Dict[str, Any]:
     """
     REFACTOR phase: LLM refactors implementation. If tests break, auto-revert.
@@ -522,9 +651,15 @@ def run_refactor_phase(
     Returns dict with status.
     """
     task_id = task.get("id", "0")
-    impl_file = task_dir / f"task_{task_id}_impl.py"
-    test_file = task_dir / f"test_task_{task_id}.py"
-    backup_file = task_dir / f"task_{task_id}_impl.pre_refactor.py"
+    language = profile["language"]
+    fence_lang = profile["fence_lang"]
+    impl_filename = profile["impl_file"].format(id=task_id)
+    test_filename = profile["test_file"].format(id=task_id)
+    backup_suffix = profile["backup_suffix"]
+
+    impl_file = task_dir / impl_filename
+    test_file = task_dir / test_filename
+    backup_file = task_dir / (impl_file.stem + backup_suffix)
 
     record: Dict[str, Any] = {"status": "skipped"}
 
@@ -542,12 +677,12 @@ def run_refactor_phase(
 You are REFACTORING an implementation that already passes its tests.
 
 ## Implementation Code
-```python
+```{fence_lang}
 {impl_code}
 ```
 
 ## Test Code (must still pass after refactoring)
-```python
+```{fence_lang}
 {test_code}
 ```
 
@@ -555,46 +690,55 @@ You are REFACTORING an implementation that already passes its tests.
 Refactor the implementation for:
 1. Readability — clear variable names, logical flow
 2. DRY — eliminate duplication
-3. Docstrings — add brief docstrings to public functions
+3. Brief documentation for public functions
 4. Keep the same public API so all tests still pass
 
-Output ONLY the refactored Python code. Wrap in ```python fences.
+Output ONLY the refactored {language} code. Wrap in ```{fence_lang} fences.
 """
 
-    print(print_cyan(f"    REFACTOR") + f" Improving code quality...")
+    if not quiet:
+        print(print_cyan(f"    REFACTOR") + f" Improving code quality...")
 
     try:
         response = invoke(prompt=prompt, model="sonnet")
     except Exception as e:
-        print(print_dim(f"         LLM error: {e} — keeping original"))
+        if not quiet:
+            print(print_dim(f"         LLM error: {e} — keeping original"))
         record["status"] = "skipped"
         record["error"] = str(e)
         return record
 
-    code = extract_code_from_response(response, "python")
+    code = extract_code_from_response(response, fence_lang)
     if not code:
-        print(print_dim("         Empty response — keeping original"))
+        if not quiet:
+            print(print_dim("         Empty response — keeping original"))
         return record
 
     write_file(impl_file, code)
 
     if skip_execution:
-        print(print_dim("         (skip_execution) Refactored but not verified"))
+        if not quiet:
+            print(print_dim("         (skip_execution) Refactored but not verified"))
         record["status"] = "written"
         return record
 
     # Verify tests still pass
     test_cmd = f"{commands['test']} {test_file}"
+    if commands["test"].startswith(("cargo", "go")):
+        test_cmd = _make_project_cmd(f"{commands['test']} -- {test_file.stem}", project_root)
+
     exit_code, _, _ = run_bash_command(
         test_cmd, "5-implementation", "504", timeout=60
     )
 
     if exit_code == 0:
-        print(print_green("         ✓ Tests still pass after refactor"))
+        if not quiet:
+            print(print_green("         ✓ Tests still pass after refactor"))
         record["status"] = "complete"
     else:
         # Revert!
-        print(print_yellow("         ⚠ Refactor broke tests — reverting to backup"))
+        if not quiet:
+            print(print_yellow("         ⚠ Refactor broke tests — reverting to backup"))
         write_file(impl_file, backup_file.read_text())
         record["status"] = "reverted"
 
@@ -611,56 +755,74 @@ def run_verify_phase(
     commands: Dict[str, str],
     skip_execution: bool,
     atomic_root: Path,
+    profile: Dict[str, Any],
+    project_root: Path,
+    quiet: bool = False,
 ) -> Dict[str, Any]:
     """
-    VERIFY phase: syntax check + optional haiku security review.
+    VERIFY phase: syntax/lint check + optional haiku security review.
     Non-blocking — warnings logged but don't fail the task.
     """
     task_id = task.get("id", "0")
-    impl_file = task_dir / f"task_{task_id}_impl.py"
+    language = profile["language"]
+    fence_lang = profile["fence_lang"]
+    impl_filename = profile["impl_file"].format(id=task_id)
+    verify_cmd_template = profile["verify_cmd"]
+
+    impl_file = task_dir / impl_filename
     record: Dict[str, Any] = {"status": "skipped", "warnings": []}
 
     if not impl_file.exists():
         return record
 
-    print(print_magenta(f"    VERIFY") + f" Running verification checks...")
+    if not quiet:
+        print(print_magenta(f"    VERIFY") + f" Running verification checks...")
 
-    # 1. Syntax check with py_compile
-    compile_cmd = f"python -m py_compile {impl_file}"
+    # 1. Syntax / lint check
+    verify_cmd = verify_cmd_template.format(impl_file=impl_file)
+    if verify_cmd.startswith(("cargo", "go")):
+        verify_cmd = _make_project_cmd(verify_cmd, project_root)
+
     exit_code, stdout, stderr = run_bash_command(
-        compile_cmd, "5-implementation", "504", timeout=15
+        verify_cmd, "5-implementation", "504", timeout=15
     )
 
     if exit_code == 0:
-        print(print_green("         ✓ Syntax check passed"))
+        if not quiet:
+            print(print_green("         ✓ Verification check passed"))
     else:
         msg = (stderr or stdout).strip()[:200]
-        print(print_yellow(f"         ⚠ Syntax issue: {msg}"))
-        record["warnings"].append(f"syntax: {msg}")
+        if not quiet:
+            print(print_yellow(f"         ⚠ Verification issue: {msg}"))
+        record["warnings"].append(f"verify: {msg}")
 
     # 2. Optional haiku security review (only for small files, cost control)
     impl_content = impl_file.read_text()
     if len(impl_content) < 5000:
         try:
-            security_prompt = f"""Review this Python code for security issues. Be brief.
-Report ONLY actual security concerns (injection, eval, exec, pickle, etc.).
+            security_prompt = f"""Review this {language} code for security issues. Be brief.
+Report ONLY actual security concerns (injection, unsafe, eval, exec, etc.).
 If the code is safe, respond with just "PASS".
 
-```python
+```{fence_lang}
 {impl_content}
 ```"""
             sec_response = invoke(prompt=security_prompt, model="haiku")
             sec_text = sec_response.strip() if isinstance(sec_response, str) else str(sec_response).strip()
 
             if sec_text.upper().startswith("PASS") or len(sec_text) < 10:
-                print(print_green("         ✓ Security review: clean"))
+                if not quiet:
+                    print(print_green("         ✓ Security review: clean"))
             else:
-                print(print_yellow(f"         ⚠ Security note: {sec_text[:120]}"))
+                if not quiet:
+                    print(print_yellow(f"         ⚠ Security note: {sec_text[:120]}"))
                 record["warnings"].append(f"security: {sec_text[:300]}")
         except Exception as e:
-            print(print_dim(f"         Security review skipped: {e}"))
+            if not quiet:
+                print(print_dim(f"         Security review skipped: {e}"))
     else:
-        print(print_dim("         Security review skipped (file > 5000 chars)"))
+        if not quiet:
+            print(print_dim("         Security review skipped (file > 5000 chars)"))
 
     record["status"] = "complete"
     return record
@@ -688,6 +850,394 @@ def save_progress(progress_file: Path, stats: Dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# DAGScheduler — thread-safe dependency resolver
+# ---------------------------------------------------------------------------
+
+class DAGScheduler:
+    """Thread-safe DAG-based task scheduler.
+
+    Resolves dependencies so that tasks whose prerequisites are all met
+    can be claimed and executed in parallel.
+    """
+
+    def __init__(self, tasks: List[Dict[str, Any]], completed_ids: Set[str]):
+        self._lock = threading.Lock()
+        self._deps: Dict[str, Set[str]] = {}
+        self._rdeps: Dict[str, Set[str]] = {}
+        self._all_ids: Set[str] = set()
+        self._completed: Set[str] = set(completed_ids)
+        self._failed: Set[str] = set()
+        self._in_progress: Set[str] = set()
+
+        for task in tasks:
+            tid = str(task.get("id", "0"))
+            self._all_ids.add(tid)
+            deps = set()
+            for d in task.get("dependencies", []):
+                ds = str(d)
+                deps.add(ds)
+                self._rdeps.setdefault(ds, set()).add(tid)
+            self._deps[tid] = deps
+
+    def _get_ready(self) -> List[str]:
+        """Return ready task IDs. MUST be called with self._lock held."""
+        ready = []
+        for tid in self._all_ids:
+            if tid in self._completed or tid in self._in_progress or tid in self._failed:
+                continue
+            unmet = self._deps[tid] - self._completed
+            # Deps outside our task set are assumed already met
+            unmet = unmet & self._all_ids
+            if not unmet:
+                ready.append(tid)
+        return ready
+
+    def get_ready(self) -> List[str]:
+        """Return task IDs whose dependencies are all met and aren't started/done/failed."""
+        with self._lock:
+            return self._get_ready()
+
+    def claim(self, task_id: str) -> bool:
+        """Mark a task as in-progress. Returns False if already claimed/done."""
+        with self._lock:
+            if task_id in self._in_progress or task_id in self._completed or task_id in self._failed:
+                return False
+            self._in_progress.add(task_id)
+            return True
+
+    def complete(self, task_id: str) -> None:
+        """Mark a task as completed."""
+        with self._lock:
+            self._in_progress.discard(task_id)
+            self._completed.add(task_id)
+
+    def fail(self, task_id: str) -> Set[str]:
+        """Mark a task as failed. Returns set of cascade-failed task IDs.
+
+        A downstream task is cascade-failed if ALL of its in-set deps are failed.
+        """
+        with self._lock:
+            self._in_progress.discard(task_id)
+            self._failed.add(task_id)
+
+            cascaded: Set[str] = set()
+            changed = True
+            while changed:
+                changed = False
+                for tid in self._all_ids:
+                    if tid in self._completed or tid in self._failed:
+                        continue
+                    deps_in_set = self._deps[tid] & self._all_ids
+                    if deps_in_set and deps_in_set.issubset(self._failed):
+                        self._failed.add(tid)
+                        self._in_progress.discard(tid)
+                        cascaded.add(tid)
+                        changed = True
+            return cascaded
+
+    def is_done(self) -> bool:
+        """True when no more tasks can possibly run."""
+        with self._lock:
+            remaining = self._all_ids - self._completed - self._failed
+            if not remaining:
+                return True
+            return len(self._in_progress) == 0 and not self._get_ready()
+
+    @property
+    def completed_ids(self) -> Set[str]:
+        with self._lock:
+            return set(self._completed)
+
+    @property
+    def failed_ids(self) -> Set[str]:
+        with self._lock:
+            return set(self._failed)
+
+
+# ---------------------------------------------------------------------------
+# TDD Cycle Worker — runs full RED→GREEN→REFACTOR→VERIFY for one task
+# ---------------------------------------------------------------------------
+
+def _tdd_cycle_worker(
+    task: Dict[str, Any],
+    spec: Dict[str, Any],
+    testing_dir: Path,
+    agents: Dict[str, str],
+    commands: Dict[str, str],
+    skip_execution: bool,
+    atomic_root: Path,
+    profile: Dict[str, Any],
+    project_root: Path,
+) -> Tuple[str, str, Dict[str, Any], float, Optional[str]]:
+    """Run full TDD cycle for one task. Never raises.
+
+    Returns (task_id, status, record, duration_seconds, error_or_None).
+    """
+    task_id = str(task.get("id", "0"))
+    start = time.monotonic()
+
+    task_dir = testing_dir / f"task-{task_id}"
+    ensure_dir(task_dir)
+
+    record: Dict[str, Any] = {"task_id": task_id, "title": task.get("title", "")}
+
+    try:
+        # --- RED ---
+        red_record = run_red_phase(
+            task, spec, task_dir, agents.get("red", ""), commands,
+            skip_execution, atomic_root, profile, project_root, quiet=True,
+        )
+        record["red"] = red_record
+
+        if red_record["status"] == "failed" and "error" in red_record:
+            record["status"] = "failed"
+            return (task_id, "failed", record, time.monotonic() - start, red_record.get("error"))
+
+        # Load test code for GREEN phase
+        test_filename = profile["test_file"].format(id=task_id)
+        test_file = task_dir / test_filename
+        test_code = test_file.read_text() if test_file.exists() else ""
+
+        # --- GREEN ---
+        green_record = run_green_phase(
+            task, spec, task_dir, test_code, agents.get("green", ""), commands,
+            skip_execution, atomic_root, profile, project_root, quiet=True,
+        )
+        record["green"] = green_record
+
+        if green_record["status"] == "failed":
+            record["status"] = "failed"
+            return (task_id, "failed", record, time.monotonic() - start, green_record.get("error"))
+
+        # --- REFACTOR ---
+        refactor_record = run_refactor_phase(
+            task, task_dir, agents.get("refactor", ""), commands,
+            skip_execution, atomic_root, profile, project_root, quiet=True,
+        )
+        record["refactor"] = refactor_record
+
+        # --- VERIFY ---
+        verify_record = run_verify_phase(
+            task, task_dir, commands, skip_execution, atomic_root,
+            profile, project_root, quiet=True,
+        )
+        record["verify"] = verify_record
+
+        record["status"] = "complete"
+        return (task_id, "complete", record, time.monotonic() - start, None)
+
+    except Exception as e:
+        record["status"] = "failed"
+        record["error"] = str(e)
+        return (task_id, "failed", record, time.monotonic() - start, str(e))
+
+
+# ---------------------------------------------------------------------------
+# Parallel DAG Executor with Rich Live panel
+# ---------------------------------------------------------------------------
+
+def _run_dag_parallel(
+    tasks: List[Dict[str, Any]],
+    specs: Dict[str, Dict[str, Any]],
+    completed_ids: Set[str],
+    testing_dir: Path,
+    agents: Dict[str, str],
+    commands: Dict[str, str],
+    skip_execution: bool,
+    atomic_root: Path,
+    profile: Dict[str, Any],
+    project_root: Path,
+    progress_file: Path,
+    max_workers: int = 4,
+) -> Dict[str, Any]:
+    """Run TDD cycles in parallel respecting DAG dependencies.
+
+    Uses Rich Live panel to show progress. Returns final stats dict.
+    """
+    from rich.console import Console
+    from rich.live import Live
+    from rich.panel import Panel
+
+    console = Console()
+    task_map = {str(t.get("id", "0")): t for t in tasks}
+    total = len(tasks)
+
+    # Results tracking
+    results: Dict[str, Optional[Tuple]] = {}  # task_id -> result tuple
+    task_status: Dict[str, str] = {}  # task_id -> display status
+
+    for t in tasks:
+        tid = str(t.get("id", "0"))
+        if tid in completed_ids:
+            task_status[tid] = "done"
+        else:
+            task_status[tid] = "pending"
+
+    scheduler = DAGScheduler(tasks, completed_ids)
+
+    stats = {
+        "tasks_total": total,
+        "tasks_completed": len(completed_ids),
+        "tasks_failed": 0,
+        "tasks_cascaded": 0,
+        "red_cycles": 0,
+        "green_cycles": 0,
+        "refactor_cycles": 0,
+        "verify_cycles": 0,
+        "completed_ids": list(completed_ids),
+        "mode": "live",
+        "skip_execution": skip_execution,
+        "started_at": datetime.now().isoformat(),
+    }
+
+    STATUS_ICON = {
+        "pending": "⏳",
+        "running": "🔄",
+        "done": "✅",
+        "failed": "❌",
+        "cascaded": "⛔",
+    }
+
+    def _build_display() -> Panel:
+        done_count = sum(1 for s in task_status.values() if s == "done")
+        failed_count = sum(1 for s in task_status.values() if s == "failed")
+        cascaded_count = sum(1 for s in task_status.values() if s == "cascaded")
+        running_count = sum(1 for s in task_status.values() if s == "running")
+        pending_count = sum(1 for s in task_status.values() if s == "pending")
+
+        completed_total = done_count + failed_count + cascaded_count
+        pct = int(completed_total / total * 100) if total else 100
+        bar_filled = int(pct / 100 * 30)
+        bar = "█" * bar_filled + "░" * (30 - bar_filled)
+
+        lines = [""]
+        lines.append(f"  {done_count} done  {failed_count} failed  "
+                     f"{cascaded_count} cascaded  {running_count} running  "
+                     f"{pending_count} pending")
+
+        if completed_total < total:
+            lines.append(f"  ⠸ Executing {bar} {pct}%")
+        else:
+            lines.append(f"  ✓ Complete  {bar} {pct}%")
+        lines.append("")
+
+        lines.append(
+            f"  {'#':>4}  {'Status':<10} {'Task':>5}  {'Title':<45} {'Time':>8}"
+        )
+
+        for i, task in enumerate(tasks):
+            tid = str(task.get("id", "0"))
+            title = task.get("title", f"Task {tid}")
+            if len(title) > 44:
+                title = title[:42] + "…"
+
+            status = task_status.get(tid, "pending")
+            icon = STATUS_ICON.get(status, "?")
+
+            r = results.get(tid)
+            if r is not None:
+                time_str = f"{r[3]:.1f}s"
+                lines.append(
+                    f"  {i+1:>4}  {icon} {status:<8} T{tid:>4}  {title:<45} {time_str:>8}"
+                )
+            else:
+                lines.append(
+                    f"  {i+1:>4}  {icon} {status:<8} T{tid:>4}  {title:<45}"
+                )
+
+        lines.append("")
+        stack = profile["language"]
+        return Panel("\n".join(lines),
+                     title=f"TDD Execution ({stack}, {max_workers} workers, DAG)")
+
+    with Live(_build_display(), console=console, refresh_per_second=2) as live:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            active_futures: Dict[Future, str] = {}
+
+            while not scheduler.is_done():
+                # Submit ready tasks
+                ready = scheduler.get_ready()
+                for tid in ready:
+                    if tid in completed_ids:
+                        continue
+                    if not scheduler.claim(tid):
+                        continue
+
+                    task_status[tid] = "running"
+                    live.update(_build_display())
+
+                    task = task_map[tid]
+                    spec = specs.get(tid, {})
+
+                    future = executor.submit(
+                        _tdd_cycle_worker,
+                        task, spec, testing_dir, agents, commands,
+                        skip_execution, atomic_root, profile, project_root,
+                    )
+                    active_futures[future] = tid
+
+                if not active_futures:
+                    # Nothing running, nothing ready — might be stuck
+                    if scheduler.is_done():
+                        break
+                    time.sleep(0.2)
+                    continue
+
+                # Wait for at least one completion
+                done_futures = []
+                for future in as_completed(active_futures):
+                    done_futures.append(future)
+                    break  # Process one at a time to check for newly ready tasks
+
+                for future in done_futures:
+                    tid = active_futures.pop(future)
+                    result = future.result()
+                    results[tid] = result
+
+                    task_id, status, record, duration, error = result
+
+                    # Save per-task record
+                    save_tdd_record(testing_dir, task_id, record)
+
+                    if status == "complete":
+                        scheduler.complete(tid)
+                        task_status[tid] = "done"
+                        stats["tasks_completed"] += 1
+                        completed_ids.add(tid)
+
+                        # Count cycles from record
+                        if "red" in record:
+                            stats["red_cycles"] += 1
+                        if "green" in record:
+                            stats["green_cycles"] += 1
+                        if "refactor" in record:
+                            stats["refactor_cycles"] += 1
+                        if "verify" in record:
+                            stats["verify_cycles"] += 1
+                    else:
+                        cascaded = scheduler.fail(tid)
+                        task_status[tid] = "failed"
+                        stats["tasks_failed"] += 1
+
+                        # Count partial cycles
+                        if "red" in record:
+                            stats["red_cycles"] += 1
+                        if "green" in record:
+                            stats["green_cycles"] += 1
+
+                        for ctid in cascaded:
+                            task_status[ctid] = "cascaded"
+                            stats["tasks_cascaded"] = stats.get("tasks_cascaded", 0) + 1
+
+                    # Save progress after each completion
+                    stats["completed_ids"] = list(completed_ids)
+                    save_progress(progress_file, stats)
+                    live.update(_build_display())
+
+    return stats
+
+
+# ---------------------------------------------------------------------------
 # Main execute function
 # ---------------------------------------------------------------------------
 
@@ -695,7 +1245,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     """
     Execute Task 504: TDD Execution.
 
-    Runs RED/GREEN/REFACTOR/VERIFY cycles for each TDD-eligible task.
+    Runs RED/GREEN/REFACTOR/VERIFY cycles for each TDD-eligible task
+    in parallel respecting the DAG from task dependencies.
 
     Args:
         atomic_root: Path to atomic-claude root directory
@@ -708,7 +1259,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     project_root = atomic_root.parent
     testing_dir = project_root / ".claude" / "testing"
     progress_file = output_dir / "tdd-progress.json"
-    src_dir = atomic_root / "src"
 
     # UAT Mode Bypass
     if uat_mode:
@@ -717,7 +1267,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print()
 
         ensure_dir(testing_dir)
-        ensure_dir(src_dir)
 
         # Create minimal TDD progress file
         progress_data = {
@@ -736,14 +1285,13 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
         # Create stub test and implementation files for 3 tasks
         for task_id in range(1, 4):
-            task_dir = src_dir / f"task-{task_id}"
+            task_dir = testing_dir / f"task-{task_id}"
             ensure_dir(task_dir)
-            ensure_dir(testing_dir / f"task-{task_id}")
 
             impl_file = task_dir / "implementation.py"
             write_file(impl_file, "# Stub Implementation (UAT Mode)\ndef stub_function(): pass\n")
 
-            test_file = testing_dir / f"task-{task_id}" / "test_stub.py"
+            test_file = task_dir / "test_stub.py"
             write_file(test_file, "# Stub Test (UAT Mode)\ndef test_stub(): assert True\n")
 
             # Create minimal TDD record
@@ -785,6 +1333,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print(print_yellow("⚠ No OpenSpec files found — proceeding with task descriptions only"))
         print()
 
+    # --- Stack profile ---
+    stack = setup.get("detected_stack", "python")
+    profile = get_stack_profile(stack)
+
     # --- Tool commands ---
     commands = get_tool_commands(setup, project_root)
 
@@ -810,13 +1362,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     red_agent = load_agent_prompt("test-strategist", atomic_root)
     green_agent = load_agent_prompt("tdd-implementation-agent", atomic_root)
     refactor_agent = load_agent_prompt("code-review-gate", atomic_root)
+    agents = {"red": red_agent, "green": green_agent, "refactor": refactor_agent}
 
     # --- Show overview ---
-    show_overview(tasks, specs, agents_data, setup, skip_execution)
+    show_overview(tasks, specs, agents_data, setup, skip_execution, profile)
 
     # --- Resume check ---
     existing_progress = load_json_safe(progress_file)
-    completed_ids: set = set()
+    completed_ids: Set[str] = set()
 
     if existing_progress.get("completed_ids"):
         completed_ids = set(str(i) for i in existing_progress["completed_ids"])
@@ -836,128 +1389,58 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     ensure_dir(testing_dir)
     ensure_dir(output_dir)
 
-    # --- Execution stats ---
-    stats = {
-        "tasks_total": len(tasks),
-        "tasks_completed": len(completed_ids),
-        "tasks_failed": 0,
-        "tasks_skipped": 0,
-        "red_cycles": 0,
-        "green_cycles": 0,
-        "refactor_cycles": 0,
-        "verify_cycles": 0,
-        "completed_ids": list(completed_ids),
-        "mode": "live",
-        "skip_execution": skip_execution,
-        "started_at": datetime.now().isoformat(),
-    }
+    # --- Check remaining ---
+    remaining_tasks = [t for t in tasks if str(t.get("id", "")) not in completed_ids]
+    remaining_count = len(remaining_tasks)
 
-    # --- Execute TDD cycles ---
-    for idx, task in enumerate(tasks):
-        task_id = str(task.get("id", idx))
-        title = task.get("title", "untitled")
-
-        if task_id in completed_ids:
-            continue
-
-        print()
-        print(print_bold(f"  ━━━ Task {task_id}: {title} ━━━"))
-        print()
-
-        # Interactive prompt
-        clear_input_buffer()
-        print(print_dim(f"    [Enter] Execute  |  [s] Skip  |  [q] Abort"))
-        choice = prompt_user("    > ").strip().lower()
-
-        if choice == "q":
-            print()
-            print(print_yellow("  Aborting TDD execution. Progress saved."))
-            save_progress(progress_file, stats)
-            return stats["tasks_completed"] > 0
-
-        if choice == "s":
-            print(print_dim(f"    Skipping task {task_id}"))
-            stats["tasks_skipped"] += 1
-            continue
-
-        # Setup task directory
-        task_dir = testing_dir / f"task-{task_id}"
-        ensure_dir(task_dir)
-
-        # Get spec for this task
-        spec = specs.get(task_id, {})
-
-        # --- RED ---
-        red_record = run_red_phase(
-            task, spec, task_dir, red_agent, commands, skip_execution, atomic_root
-        )
-        stats["red_cycles"] += 1
-
-        if red_record["status"] in ("failed",) and not red_record.get("error", "").startswith("empty"):
-            # If RED itself failed catastrophically (LLM error), mark failed and continue
-            if "error" in red_record and "LLM" in str(red_record.get("error", "")):
-                print(print_red(f"    ✗ RED phase failed — skipping task {task_id}"))
-                stats["tasks_failed"] += 1
-                tdd_record = {"task_id": task_id, "red": red_record, "status": "failed"}
-                save_tdd_record(testing_dir, task_id, tdd_record)
-                continue
-
-        # Load test code for GREEN phase
-        test_file = task_dir / f"test_task_{task_id}.py"
-        test_code = test_file.read_text() if test_file.exists() else ""
-
-        # --- GREEN ---
-        green_record = run_green_phase(
-            task, spec, task_dir, test_code, green_agent, commands,
-            skip_execution, atomic_root
-        )
-        stats["green_cycles"] += 1
-
-        if green_record["status"] == "failed":
-            print(print_red(f"    ✗ GREEN phase failed — marking task {task_id} as failed"))
-            stats["tasks_failed"] += 1
-            tdd_record = {
-                "task_id": task_id,
-                "red": red_record,
-                "green": green_record,
-                "status": "failed",
-            }
-            save_tdd_record(testing_dir, task_id, tdd_record)
-            save_progress(progress_file, stats)
-            continue
-
-        # --- REFACTOR ---
-        refactor_record = run_refactor_phase(
-            task, task_dir, refactor_agent, commands, skip_execution, atomic_root
-        )
-        stats["refactor_cycles"] += 1
-
-        # --- VERIFY ---
-        verify_record = run_verify_phase(
-            task, task_dir, commands, skip_execution, atomic_root
-        )
-        stats["verify_cycles"] += 1
-
-        # --- Save per-task record ---
-        tdd_record = {
-            "task_id": task_id,
-            "title": title,
-            "red": red_record,
-            "green": green_record,
-            "refactor": refactor_record,
-            "verify": verify_record,
-            "status": "complete",
-        }
-        save_tdd_record(testing_dir, task_id, tdd_record)
-
-        # --- Update progress ---
-        completed_ids.add(task_id)
-        stats["tasks_completed"] = len(completed_ids)
-        stats["completed_ids"] = list(completed_ids)
+    if remaining_count == 0:
+        print(print_green("  All tasks already completed."))
+        stats = existing_progress
+        stats["completed_at"] = datetime.now().isoformat()
         save_progress(progress_file, stats)
+        return True
 
-        print()
-        print(print_green(f"    ✓ Task {task_id} complete"))
+    # --- Worker count ---
+    workers = setup.get("execution", {}).get("workers", min(4, os.cpu_count() or 4))
+    workers = min(workers, remaining_count)  # Don't spawn more workers than tasks
+
+    print(f"  Ready to execute {remaining_count} TDD cycles.")
+    print(print_dim(f"  {workers} parallel workers, DAG-ordered, {profile['language']} stack."))
+    print(print_dim(f"  Progress is saved after each task — interrupt with Ctrl+C to pause."))
+    print()
+
+    clear_input_buffer()
+    choice = prompt_user(f"  Run all {remaining_count} tasks? [Enter] Continue  |  [q] Abort: ").strip().lower()
+    if choice == "q":
+        print(print_yellow("  Aborted."))
+        return False
+
+    # --- LLM warm-up (same pattern as task 404) ---
+    print()
+    print(print_dim("  Warming up LLM provider..."))
+    try:
+        from core.llm.invoke import invoke_llm
+        invoke_llm(prompt="Reply with OK", model="haiku", timeout=30)
+        print(print_green("  ✓ LLM provider ready"))
+    except Exception as e:
+        print(print_yellow(f"  ⚠ LLM warm-up issue: {e} — continuing anyway"))
+    print()
+
+    # --- Execute TDD cycles via DAG parallel executor ---
+    stats = _run_dag_parallel(
+        tasks=tasks,
+        specs=specs,
+        completed_ids=completed_ids,
+        testing_dir=testing_dir,
+        agents=agents,
+        commands=commands,
+        skip_execution=skip_execution,
+        atomic_root=atomic_root,
+        profile=profile,
+        project_root=project_root,
+        progress_file=progress_file,
+        max_workers=workers,
+    )
 
     # --- Final summary ---
     print()
@@ -965,17 +1448,20 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_dim("  " + "─" * 40))
     print(f"    Completed: {stats['tasks_completed']}/{stats['tasks_total']}")
     print(f"    Failed:    {stats['tasks_failed']}")
-    print(f"    Skipped:   {stats['tasks_skipped']}")
+    cascaded = stats.get('tasks_cascaded', 0)
+    if cascaded:
+        print(f"    Cascaded:  {cascaded}")
     print(f"    RED:       {stats['red_cycles']} cycles")
     print(f"    GREEN:     {stats['green_cycles']} cycles")
     print(f"    REFACTOR:  {stats['refactor_cycles']} cycles")
     print(f"    VERIFY:    {stats['verify_cycles']} cycles")
+    print(f"    Stack:     {profile['language']}")
     print()
 
     stats["completed_at"] = datetime.now().isoformat()
     save_progress(progress_file, stats)
 
-    success = stats["tasks_completed"] > 0 or stats["tasks_skipped"] > 0
+    success = stats["tasks_completed"] > 0
     if success:
         print(print_green("✓ TDD Execution complete"))
     else:

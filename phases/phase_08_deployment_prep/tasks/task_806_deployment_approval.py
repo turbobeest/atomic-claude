@@ -166,7 +166,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     elif approval_choice == "revise":
         print()
         print(print_yellow("⚠  Make revisions and re-run artifact generation"))
-        print(print_dim("  After revisions, run: ./orchestrator/pipeline resume"))
+        print(print_dim("  After revisions, run: python main.py run 8"))
         print()
         return False
 

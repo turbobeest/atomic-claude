@@ -39,7 +39,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     integration_dir = project_root / ".claude" / "integration"
     report_file = integration_dir / "integration-report.json"
     approval_file = integration_dir / "approval.json"
-    audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-7-report.json"
+    audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-7" / "report.json"
+    if not audit_file.exists():
+        audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-7-report.json"
 
     ensure_dir(closeout_dir)
 

@@ -205,7 +205,9 @@ def _run_checklist(
         checklist.append(("Dependencies mapped", "SKIP"))
 
     # Check audit
-    audit_file = project_root / ".outputs" / "audits" / "phase-3-report.json"
+    audit_file = project_root / ".outputs" / "audits" / "phase-3" / "report.json"
+    if not audit_file.exists():
+        audit_file = project_root / ".outputs" / "audits" / "phase-3-report.json"
     if not audit_file.exists():
         audit_file = project_root / ".claude" / "audit" / "phase-03-audit.json"
 
@@ -376,7 +378,7 @@ In the next phase, we will:
 ## To Continue
 
 ```bash
-./orchestrator/pipeline resume
+python main.py run 4
 ```
 
 ---
@@ -452,7 +454,7 @@ def _show_session_end(closeout_file: Path, tasks_file: Path) -> None:
     print(print_bold("Next: PHASE 4 - SPECIFICATION"))
     print()
     print("To continue:")
-    print(print_cyan("  ./orchestrator/pipeline resume"))
+    print(print_cyan("  python main.py run 4"))
     print()
     print(print_dim("─" * 100))
     print()

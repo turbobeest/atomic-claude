@@ -51,7 +51,8 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     project_root = atomic_root.parent
     tasks_file = project_root / ".taskmaster" / "tasks" / "tasks.json"
     packages_file = project_root / ".taskmaster" / "reports" / "work-packages.json"
-    specs_dir = project_root / ".claude" / "specs"
+    # OpenSpec files: use .openspec/ (current), create if needed
+    specs_dir = project_root / ".openspec"
     init_file = output_dir / "initialization.json"
 
     # Display phase banner
@@ -195,7 +196,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         else:
             print(print_green("  ✓ Keeping existing specs"))
     else:
-        print(print_green("  ✓ Spec directory initialized: .claude/specs/"))
+        print(print_green("  ✓ Spec directory initialized: .openspec/"))
     print()
 
     # OpenSpec Introduction

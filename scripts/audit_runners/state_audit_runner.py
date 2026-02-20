@@ -23,7 +23,7 @@ from datetime import datetime
 
 # Repo root
 REPO_ROOT = Path(__file__).parent.parent.resolve()
-STATE_FILE = REPO_ROOT / ".claude" / "task-state.json"
+STATE_FILE = REPO_ROOT / ".state" / "task-state.json"
 OUTPUT_DIR = REPO_ROOT / ".outputs"
 
 # Colors for output

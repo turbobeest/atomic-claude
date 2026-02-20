@@ -265,16 +265,20 @@ def _address_issues(findings_data: Dict, severity: str, fixes_dir: Path, atomic_
 
 def _apply_fix(finding: Dict, output_prefix: Path, atomic_root: Path) -> bool:
     """Apply a fix for a finding."""
+    project_root = atomic_root.parent
     # Load actual source code around the finding's line number
     source_context = ""
     finding_file = finding.get('file', 'unknown')
     finding_line = finding.get('line', 0)
 
     if finding_file and finding_file != 'unknown':
-        # Try to find the file relative to project root
-        source_path = atomic_root / finding_file
+        # Try to find the file relative to host project root first
+        source_path = project_root / finding_file
         if not source_path.exists():
-            source_path = atomic_root.parent / finding_file
+            # Try .claude/testing (TDD output)
+            source_path = project_root / ".claude" / "testing" / finding_file
+        if not source_path.exists():
+            source_path = project_root / "src" / finding_file
         if not source_path.exists():
             # Try as-is (absolute or relative to cwd)
             source_path = Path(finding_file)
@@ -342,7 +346,7 @@ If you cannot safely generate a fix, set can_fix to false and explain why.
 """
 
     try:
-        response = invoke_llm(prompt, model="sonnet")
+        response = invoke_llm(prompt=prompt, model="sonnet")
 
         # Parse JSON
         if "```json" in response:
@@ -363,39 +367,61 @@ If you cannot safely generate a fix, set can_fix to false and explain why.
 
 
 def _run_test_verification(atomic_root: Path) -> tuple:
-    """Run test verification."""
+    """Run test verification against the host project."""
+    project_root = atomic_root.parent
+
     print()
     print(print_bold("- TEST VERIFICATION"))
     print()
     print(print_dim("Running full test suite to verify refinements..."))
     print()
 
-    # Detect and run tests
+    # Detect and run tests in the HOST project
     tests_passing = True
     tests_total = 0
     tests_passed = 0
 
     try:
-        # Try npm test
-        if (atomic_root / "package.json").exists():
+        # Try cargo test (Rust)
+        if (project_root / "Cargo.toml").exists():
+            result = subprocess.run(
+                ["cargo", "test"],
+                cwd=project_root,
+                capture_output=True,
+                timeout=120
+            )
+            tests_passing = (result.returncode == 0)
+
+        # Try npm test (Node)
+        elif (project_root / "package.json").exists():
             result = subprocess.run(
                 ["npm", "test"],
-                cwd=atomic_root,
+                cwd=project_root,
                 capture_output=True,
                 timeout=60
             )
             tests_passing = (result.returncode == 0)
 
-        # Try pytest
-        elif (atomic_root / "pytest.ini").exists() or (atomic_root / "tests").exists():
+        # Try go test (Go)
+        elif (project_root / "go.mod").exists():
+            result = subprocess.run(
+                ["go", "test", "./..."],
+                cwd=project_root,
+                capture_output=True,
+                timeout=120
+            )
+            tests_passing = (result.returncode == 0)
+
+        # Try pytest (Python)
+        elif (project_root / "pytest.ini").exists() or (project_root / "pyproject.toml").exists():
             result = subprocess.run(
                 ["python", "-m", "pytest", "-v"],
-                cwd=atomic_root,
+                cwd=project_root,
                 capture_output=True,
                 timeout=60
             )
             tests_passing = (result.returncode == 0)
-    except:
+    except Exception:
         pass
 
     print("  ─" * 50)

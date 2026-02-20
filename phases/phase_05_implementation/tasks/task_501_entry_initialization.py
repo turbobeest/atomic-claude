@@ -35,7 +35,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     project_root = atomic_root.parent
     phase4_closeout = atomic_root.parent / ".outputs" / "4-specification" / "closeout.json"
     tasks_file = project_root / ".taskmaster" / "tasks" / "tasks.json"
-    specs_dir = project_root / ".claude" / "specs"
+    # OpenSpec files: check .openspec/ first (current), then legacy .claude/specs/
+    specs_dir = project_root / ".openspec"
+    if not specs_dir.exists() or not list(specs_dir.glob("spec-*.json")):
+        specs_dir = project_root / ".claude" / "specs"
     testing_dir = project_root / ".claude" / "testing"
     init_file = output_dir / "initialization.json"
 

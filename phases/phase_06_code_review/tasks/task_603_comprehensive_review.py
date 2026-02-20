@@ -42,7 +42,6 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     review_dir = project_root / ".claude" / "reviews"
     findings_file = review_dir / "findings.json"
     prompts_dir = output_dir / "prompts"
-    src_dir = atomic_root / "src"
 
     print()
     print(print_dim("Executing parallel code review across all dimensions."))
@@ -89,14 +88,14 @@ None (UAT stub)
     agents_file = output_dir / "review-agents.json"
     agents = _load_agents(agents_file, atomic_root)
 
-    # Discover review scope
-    source_files, test_files = _discover_review_scope(atomic_root, src_dir)
+    # Discover review scope (host project, not atomic-claude)
+    source_files, test_files = _discover_review_scope(project_root, atomic_root)
     print()
     print(print_dim(f"Review scope: {len(source_files)} source files, {len(test_files)} test files"))
     print()
 
     # Gather code context
-    code_sample = _gather_code_sample(source_files, atomic_root, prompts_dir)
+    code_sample = _gather_code_sample(source_files, project_root, prompts_dir)
     test_sample = _gather_test_sample(test_files, prompts_dir)
 
     # Load project context for review grounding
@@ -141,26 +140,76 @@ def _load_agents(agents_file: Path, atomic_root: Path) -> Dict[str, str]:
     return agents
 
 
-def _discover_review_scope(atomic_root: Path, src_dir: Path) -> Tuple[List[Path], List[Path]]:
-    """Discover source and test files for review."""
+def _discover_review_scope(project_root: Path, atomic_root: Path) -> Tuple[List[Path], List[Path]]:
+    """Discover source and test files for review.
+
+    Searches the HOST project (project_root) for source code, plus any
+    TDD-generated code in .claude/testing/. Also checks the host project's
+    src/ directory and common Rust/Go/Node/Python source locations.
+    """
     source_files = []
     test_files = []
+    seen = set()
 
-    # Find source files
-    if src_dir.exists():
-        for ext in ["*.ts", "*.js", "*.py", "*.go", "*.rs", "*.java"]:
-            source_files.extend(list(src_dir.rglob(ext))[:50])
+    # Common source directories in the host project
+    source_dirs = [
+        project_root / "src",
+        project_root / "lib",
+        project_root / "app",
+        project_root / "pkg",
+        project_root / "cmd",
+    ]
 
-    # Find test files
-    test_dir = atomic_root / "tests"
-    if test_dir.exists():
-        for pattern in ["*.test.*", "*_test.*", "test_*"]:
-            test_files.extend(list(test_dir.rglob(pattern))[:30])
+    # TDD-generated code
+    tdd_dir = project_root / ".claude" / "testing"
+    if tdd_dir.exists():
+        source_dirs.append(tdd_dir)
+
+    source_exts = ["*.rs", "*.py", "*.ts", "*.js", "*.go", "*.java"]
+
+    for src_dir in source_dirs:
+        if not src_dir.exists():
+            continue
+        for ext in source_exts:
+            for f in src_dir.rglob(ext):
+                if f not in seen and len(source_files) < 50:
+                    # Skip test files from source list
+                    if "test" in f.stem.lower() and src_dir != tdd_dir:
+                        continue
+                    source_files.append(f)
+                    seen.add(f)
+
+    # Also check for top-level Rust files (common in small crates)
+    for ext in source_exts:
+        for f in project_root.glob(ext):
+            if f not in seen and len(source_files) < 50:
+                source_files.append(f)
+                seen.add(f)
+
+    # Find test files in host project
+    test_patterns = ["*.test.*", "*_test.*", "test_*"]
+    test_dirs = [
+        project_root / "tests",
+        project_root / "test",
+        project_root / "src",  # Rust inline tests
+    ]
+    # Also include TDD test files
+    if tdd_dir.exists():
+        test_dirs.append(tdd_dir)
+
+    for td in test_dirs:
+        if not td.exists():
+            continue
+        for pattern in test_patterns:
+            for f in td.rglob(pattern):
+                if f not in seen and len(test_files) < 30:
+                    test_files.append(f)
+                    seen.add(f)
 
     return source_files, test_files
 
 
-def _gather_code_sample(files: List[Path], atomic_root: Path, prompts_dir: Path) -> Path:
+def _gather_code_sample(files: List[Path], project_root: Path, prompts_dir: Path) -> Path:
     """Gather code sample for review."""
     sample_file = prompts_dir / "code-sample.txt"
     max_lines = 100
@@ -171,7 +220,12 @@ def _gather_code_sample(files: List[Path], atomic_root: Path, prompts_dir: Path)
         if not file.exists():
             continue
 
-        content.append(f"\n## File: {file.relative_to(atomic_root)}\n")
+        try:
+            rel = file.relative_to(project_root)
+        except ValueError:
+            rel = file.name
+
+        content.append(f"\n## File: {rel}\n")
         content.append("```\n")
         try:
             lines = read_file(file).splitlines()
@@ -246,7 +300,15 @@ def _load_project_context(atomic_root: Path) -> str:
             spec_summary = []
             for sf in spec_files[:10]:
                 try:
-                    spec = json.loads(read_file(sf))
+                    raw = read_file(sf)
+                    stripped = raw.strip()
+                    # Strip markdown code fences if present
+                    if stripped.startswith("```"):
+                        first_nl = stripped.index("\n")
+                        stripped = stripped[first_nl + 1:]
+                        if stripped.endswith("```"):
+                            stripped = stripped[:-3].strip()
+                    spec = json.loads(stripped)
                     title = spec.get("task_title", sf.stem)
                     spec_summary.append(f"  - {title}")
                 except Exception:
@@ -525,7 +587,7 @@ Respond with ONLY valid JSON (no markdown wrapper):
 def _execute_review(prompt: str, output_file: Path, model: str) -> Dict[str, Any]:
     """Execute a review by calling LLM."""
     try:
-        response = invoke_llm(prompt, model=model)
+        response = invoke_llm(prompt=prompt, model=model)
 
         # Parse JSON from response
         # Try to extract JSON from markdown if present

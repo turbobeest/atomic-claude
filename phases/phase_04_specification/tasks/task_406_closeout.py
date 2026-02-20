@@ -104,14 +104,22 @@ def check_closeout_items(
             print(print_yellow("  [BLCK] ! Audit not completed"))
             checklist.append(("Audit", "SKIP"))
 
-        # Check spec quality
+        # Check spec quality (specs may be wrapped in markdown fences)
         specs_with_tests = 0
         for spec_file in specs_dir.glob("spec-*.json"):
             try:
-                spec_data = json.loads(read_file(spec_file))
+                raw = read_file(spec_file)
+                # Strip markdown code fences if present
+                stripped = raw.strip()
+                if stripped.startswith("```"):
+                    first_nl = stripped.index("\n")
+                    stripped = stripped[first_nl + 1:]
+                    if stripped.endswith("```"):
+                        stripped = stripped[:-3].strip()
+                spec_data = json.loads(stripped)
                 if len(spec_data.get("test_strategy", {}).get("unit_tests", [])) > 0:
                     specs_with_tests += 1
-            except:
+            except Exception:
                 pass
 
         if specs_with_tests >= spec_count and spec_count > 0:
@@ -200,9 +208,9 @@ Phase 4 (Specification) has been completed. Tasks have been expanded into OpenSp
 
 | Artifact | Location |
 |----------|----------|
-| OpenSpecs | .claude/specs/spec-*.json |
+| OpenSpecs | .openspec/spec-*.json |
 | Tasks (updated) | .taskmaster/tasks/tasks.json |
-| Phase Audit | .claude/audit/phase-04-audit.json |
+| Phase Audit | .outputs/audits/phase-4/report.json |
 
 ### TDD Subtask Structure
 
@@ -231,7 +239,7 @@ In the next phase, we will:
 ## To Continue
 
 ```bash
-./orchestrator/pipeline resume
+python main.py run 5
 ```
 
 ---
@@ -253,9 +261,9 @@ In the next phase, we will:
         "task_count": task_count,
         "checklist": [{"name": name, "status": status} for name, status in checklist],
         "artifacts": {
-            "specs": ".claude/specs/",
+            "specs": str(specs_dir.name) + "/",
             "tasks": ".taskmaster/tasks/tasks.json",
-            "audit": ".claude/audit/phase-04-audit.json"
+            "audit": ".outputs/audits/phase-4/"
         },
         "next_phase": 5
     }
@@ -280,10 +288,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     project_root = atomic_root.parent
     closeout_dir = project_root / ".claude" / "closeout"
     tasks_file = project_root / ".taskmaster" / "tasks" / "tasks.json"
-    specs_dir = project_root / ".claude" / "specs"
 
-    # Check audit file (new path first, then legacy)
-    audit_file = atomic_root.parent / ".outputs" / "audits" / "phase-4-report.json"
+    # OpenSpec files: check .openspec/ first (current), then legacy .claude/specs/
+    specs_dir = project_root / ".openspec"
+    if not specs_dir.exists() or not list(specs_dir.glob("spec-*.json")):
+        specs_dir = project_root / ".claude" / "specs"
+
+    # Audit report: check structured path first, then flat, then legacy
+    audit_file = project_root / ".outputs" / "audits" / "phase-4" / "report.json"
+    if not audit_file.exists():
+        audit_file = project_root / ".outputs" / "audits" / "phase-4-report.json"
     if not audit_file.exists():
         audit_file = project_root / ".claude" / "audit" / "phase-04-audit.json"
 
@@ -337,9 +351,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     if closeout_choice == "review":
         print()
         print(print_dim("  Key artifacts:"))
-        print("    .claude/specs/                    - OpenSpec definitions")
-        print("    .taskmaster/tasks/tasks.json      - Tasks with TDD subtasks")
-        print("    .claude/audit/phase-04-audit.json - Audit results")
+        print(f"    {specs_dir.relative_to(project_root)}/                     - OpenSpec definitions")
+        print("    .taskmaster/tasks/tasks.json       - Tasks with TDD subtasks")
+        print("    .outputs/audits/phase-4/           - Audit results")
         print()
         if specs_dir.exists():
             print(print_dim("  Spec files:"))
@@ -387,7 +401,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_dim("    .claude/closeout/phase-04-closeout.md"))
     print()
     print("  Specifications saved to:")
-    print(print_dim("    .claude/specs/spec-*.json"))
+    print(print_dim(f"    {specs_dir.relative_to(project_root)}/spec-*.json"))
     print()
     print("  Tasks updated at:")
     print(print_dim("    .taskmaster/tasks/tasks.json"))
@@ -395,7 +409,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_bold("  Next: PHASE 5 - TDD IMPLEMENTATION"))
     print()
     print("  To continue:")
-    print(print_cyan("    ./orchestrator/pipeline resume"))
+    print(print_cyan("    python main.py run 5"))
     print()
     print(print_dim("─" * 109))
     print()
