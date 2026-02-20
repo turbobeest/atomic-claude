@@ -278,6 +278,35 @@ When core systems change (config, state, LLM routing, orchestration):
 - **Applied To**: [x] Dev [x] Operational (pulled d5d196c)
 - **Note**: OPERATIONAL.md is tool documentation (dual-repo workflow), not project docs
 
+### Dependabot Security Vulnerabilities - All Fixed
+- **Date**: 2026-02-18
+- **Symptom**: Enterprise GitHub reported 23 vulnerabilities (16 moderate, 7 low)
+- **Root Cause**: Outdated Svelte/SvelteKit dependencies with known XSS and DoS vulnerabilities
+- **Affected Apps**: All three Svelte sub-apps (agent-manager, audit-browser, skills-browser)
+- **Impact**: LOW risk (apps run on 127.0.0.1 only, not exposed to internet)
+- **Fix**:
+  1. Ran `npm update` on each sub-app → fixed moderate vulnerabilities
+  2. Added `"overrides": {"cookie": "^1.1.1"}` to package.json → fixed low vulnerabilities
+- **Vulnerabilities Resolved**:
+  - @sveltejs/kit: CPU/memory exhaustion (MODERATE) ✅
+  - svelte: Multiple SSR XSS issues (MODERATE) ✅
+  - cookie: Out of bounds characters (LOW) ✅
+  - devalue: CPU amplification & prototype pollution (LOW) ✅
+- **Python**: Scanned with pip-audit → 0 vulnerabilities ✅
+- **Files Modified**:
+  - `agents/agent-manager/package.json` + package-lock.json
+  - `audits/audit-browser/package.json` + package-lock.json
+  - `skills/skills-browser/package.json` + package-lock.json
+- **Testing**:
+  ```bash
+  cd agents/agent-manager && npm audit  # 0 vulnerabilities
+  cd audits/audit-browser && npm audit  # 0 vulnerabilities
+  cd skills/skills-browser && npm audit  # 0 vulnerabilities
+  pip-audit -r requirements*.txt         # No known vulnerabilities
+  ```
+- **Applied To**: [x] Dev [x] Operational (commit 76b5ca0)
+- **Note**: Enterprise Dependabot may take time to rescan and clear alerts
+
 ### Issue Template
 ```
 ## [Issue Title]
