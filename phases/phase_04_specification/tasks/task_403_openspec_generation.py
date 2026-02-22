@@ -8,6 +8,7 @@ Uses ThreadPoolExecutor for concurrent spec generation with Rich live progress.
 """
 
 import json
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -146,19 +147,62 @@ def _load_project_context(atomic_root: Path) -> str:
     return "\n".join(context_parts) if context_parts else "No project context available."
 
 
-def _build_spec_prompt(task: Dict, project_context: str) -> str:
+def _extract_canonical_layout(atomic_root: Path) -> str:
+    """Extract the canonical project layout (Section 7) from the approved PRD."""
+    project_root = atomic_root.parent
+    prd_file = project_root / "docs" / "prd" / "PRD.md"
+    if not prd_file.exists():
+        # Try prd-approved.json pointer
+        approved = project_root / ".outputs" / "2-prd" / "prd-approved.json"
+        if approved.exists():
+            try:
+                data = json.loads(read_file(approved))
+                prd_path = data.get("prd_file", "")
+                if prd_path:
+                    prd_file = Path(prd_path)
+            except Exception:
+                pass
+
+    if not prd_file.exists():
+        return ""
+
+    try:
+        content = read_file(prd_file)
+        match = re.search(r'^#{1,2} 7\. Code (Structure|Organization)(.+?)^#{1,2} 8\.',
+                         content, re.MULTILINE | re.DOTALL)
+        if match:
+            layout = match.group(2).strip()
+            return layout[:5000] if len(layout) > 5000 else layout
+    except Exception:
+        pass
+    return ""
+
+
+def _build_spec_prompt(task: Dict, project_context: str, canonical_layout: str = "") -> str:
     """Build the OpenSpec generation prompt for a single task."""
     task_id = task.get("id", 0)
     task_title = task.get("title", f"Task {task_id}")
     task_desc = task.get("description", "")
     acceptance = task.get("acceptance_criteria", "")
 
+    layout_section = ""
+    if canonical_layout:
+        layout_section = f"""
+## Canonical Project Layout
+
+This project uses the following structure (from PRD Section 7).
+ALL file paths, module references, and import paths in your spec MUST align with this layout:
+
+{canonical_layout}
+
+"""
+
     return f"""Generate an OpenSpec specification for the following task.
 IMPORTANT: This is for the user's project described below, NOT for the development tool/framework.
 
 ## Project Context
 {project_context}
-
+{layout_section}
 ## Task to Specify
 
 Task ID: {task_id}
@@ -195,6 +239,7 @@ def _spec_worker(
     project_context: str,
     openspec_dir: Path,
     invoke_llm,
+    canonical_layout: str = "",
 ) -> tuple[int, str, float, Optional[str]]:
     """Generate spec for a single task. Runs in thread pool. Never raises.
 
@@ -205,7 +250,7 @@ def _spec_worker(
     spec_file = openspec_dir / f"spec-t{task_id}.json"
 
     try:
-        prompt = _build_spec_prompt(task, project_context)
+        prompt = _build_spec_prompt(task, project_context, canonical_layout)
         invoke_llm(
             prompt=prompt,
             output_file=str(spec_file),
@@ -225,6 +270,7 @@ def _run_parallel_specs(
     project_context: str,
     openspec_dir: Path,
     invoke_llm,
+    canonical_layout: str = "",
 ) -> tuple[int, int]:
     """Run spec generation in parallel with Rich live progress.
 
@@ -291,7 +337,8 @@ def _run_parallel_specs(
             future_to_idx = {}
             for i, task in enumerate(tasks):
                 future = executor.submit(
-                    _spec_worker, task, project_context, openspec_dir, invoke_llm
+                    _spec_worker, task, project_context, openspec_dir, invoke_llm,
+                    canonical_layout,
                 )
                 future_to_idx[future] = i
 
@@ -380,11 +427,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # Load project context for LLM prompts
     project_context = _load_project_context(atomic_root)
 
+    # Extract canonical layout from PRD Section 7 for path consistency
+    canonical_layout = _extract_canonical_layout(atomic_root)
+    if canonical_layout:
+        print(print_green("  ✓ Canonical project layout extracted from PRD Section 7"))
+
     try:
         from core.llm.invoke import invoke_llm
 
         generated, failed = _run_parallel_specs(
-            tasks, project_context, openspec_dir, invoke_llm
+            tasks, project_context, openspec_dir, invoke_llm, canonical_layout
         )
 
         # Write generation report

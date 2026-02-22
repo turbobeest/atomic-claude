@@ -349,6 +349,40 @@ def extract_multi_file_response(response: str) -> Dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Helper: scan project tree for LLM context
+# ---------------------------------------------------------------------------
+
+def _scan_project_tree(project_root: Path, stack: str, max_depth: int = 4) -> str:
+    """Scan actual project tree and return a manifest for LLM context."""
+    manifest_lines = []
+
+    if stack == "rust":
+        tomls = sorted(project_root.rglob("Cargo.toml"))
+        files = sorted(project_root.rglob("*.rs"))
+        manifest_lines = [str(f.relative_to(project_root)) for f in tomls + files
+                         if "target" not in str(f)]
+    elif stack == "python":
+        files = sorted(project_root.rglob("*.py"))
+        manifest_lines = [str(f.relative_to(project_root)) for f in files
+                         if "__pycache__" not in str(f)]
+    elif stack in ("node", "javascript", "typescript"):
+        files = sorted(project_root.rglob("*.js")) + sorted(project_root.rglob("*.ts"))
+        pkg = sorted(project_root.rglob("package.json"))
+        manifest_lines = [str(f.relative_to(project_root)) for f in pkg + files
+                         if "node_modules" not in str(f)]
+    elif stack == "go":
+        files = sorted(project_root.rglob("*.go"))
+        mods = sorted(project_root.rglob("go.mod"))
+        manifest_lines = [str(f.relative_to(project_root)) for f in mods + files]
+    else:
+        return ""
+
+    if len(manifest_lines) > 100:
+        manifest_lines = manifest_lines[:100] + [f"... and {len(manifest_lines) - 100} more"]
+    return "\n".join(manifest_lines)
+
+
+# ---------------------------------------------------------------------------
 # Helper: safe JSON loader
 # ---------------------------------------------------------------------------
 
@@ -514,7 +548,11 @@ def verify_test_runner(commands: Dict[str, str], project_root: Path) -> bool:
     else:
         check_cmd = f"which {base}"
 
-    exit_code, _, _ = run_bash_command(check_cmd, "5-implementation", "504", timeout=15)
+    # Source common env files so tools installed in user profile are found
+    env_prefix = 'test -f "$HOME/.cargo/env" && . "$HOME/.cargo/env"; '
+    exit_code, _, _ = run_bash_command(
+        env_prefix + check_cmd, "5-implementation", "504", timeout=15,
+    )
     return exit_code == 0
 
 
@@ -525,9 +563,11 @@ def verify_test_runner(commands: Dict[str, str], project_root: Path) -> bool:
 def _make_project_cmd(cmd: str, project_root: Path) -> str:
     """Prefix a command with cd to the project root.
 
+    Sources cargo env so tools installed via rustup are on PATH.
     So that `cargo test`, `go test`, etc. run in the right directory.
     """
-    return f"cd '{project_root}' && {cmd}"
+    env_source = 'test -f "$HOME/.cargo/env" && . "$HOME/.cargo/env"; '
+    return f"{env_source}cd '{project_root}' && {cmd}"
 
 
 # ---------------------------------------------------------------------------
@@ -649,6 +689,7 @@ def run_red_phase(
     quiet: bool = False,
     dep_context: str = "",
     task_classification: str = "feature",
+    project_manifest: str = "",
 ) -> Dict[str, Any]:
     """
     RED phase: LLM writes failing tests. Run them and verify they fail.
@@ -684,6 +725,13 @@ The following code has been implemented by prior tasks.
 Import from and build on these modules — do not redefine them.
 
 {dep_context}
+"""
+    if project_manifest:
+        dep_section += f"""
+## Actual Project Tree
+These files currently exist in the project. Reference correct paths in your tests:
+
+{project_manifest}
 """
 
     # Bootstrap tasks get a verification script instead of unit tests
@@ -782,9 +830,10 @@ Output ONLY the {language} test code, no explanations. Wrap in ```{fence_lang} f
 
     # Run compilation gate for RED phase
     if task_classification == "bootstrap":
-        # Run the verification script — should fail (scaffold doesn't exist yet)
+        # Run the verification script from project root (uses relative paths)
+        env_source = 'test -f "$HOME/.cargo/env" && . "$HOME/.cargo/env"; '
         exit_code, stdout, stderr = run_bash_command(
-            f"bash {test_file}", "5-implementation", "504", timeout=30,
+            f"{env_source}cd '{project_root}' && bash '{test_file}'", "5-implementation", "504", timeout=30,
         )
     else:
         # Standard: run tests — expect them to FAIL
@@ -829,6 +878,7 @@ def run_green_phase(
     dep_context: str = "",
     task_classification: str = "feature",
     source_registry: Optional['ProjectSourceRegistry'] = None,
+    project_manifest: str = "",
 ) -> Dict[str, Any]:
     """
     GREEN phase: LLM writes minimal implementation. Run tests, retry on failure.
@@ -868,6 +918,13 @@ The following code has been implemented by prior tasks.
 Import from and build on these modules — do not redefine them.
 
 {dep_context}
+"""
+    if project_manifest:
+        dep_section += f"""
+## Actual Project Tree
+These files currently exist in the project. Place your code in the correct location:
+
+{project_manifest}
 """
 
     error_context = ""
@@ -934,12 +991,23 @@ Description: {description}
 ```
 {dep_section}{retry_note}
 ## Instructions
-{impl_instructions} that makes ALL tests pass.
+Implement the code that makes ALL tests pass.
 1. Implement only what is needed to pass the tests — no extra features
 2. Use clear, readable code
 3. Export the functions/classes that the tests import
 
-Output ONLY the {language} implementation code. Wrap in ```{fence_lang} fences.
+Output your implementation using this EXACT format:
+
+=== FILE: path/relative/to/project/root ===
+[file content]
+=== FILE: another/path ===
+[content]
+=== END ===
+
+Place files in the correct project location based on the canonical layout.
+For example, domain types go in the appropriate crate/module directory.
+You may create or modify multiple files. Use paths relative to the project root.
+If unsure of the project layout, place files in src/ or the appropriate module directory.
 """
 
         attempt_label = f" (retry {attempt})" if attempt > 0 else ""
@@ -982,11 +1050,12 @@ Output ONLY the {language} implementation code. Wrap in ```{fence_lang} fences.
                 record["status"] = "written"
                 return record
 
-            # Run verification script
+            # Run verification script from project root (uses relative paths)
             verify_script = task_dir / f"verify_scaffold_{task_id}.sh"
             if verify_script.exists():
+                env_source = 'test -f "$HOME/.cargo/env" && . "$HOME/.cargo/env"; '
                 exit_code, stdout, stderr = run_bash_command(
-                    f"bash {verify_script}", "5-implementation", "504", timeout=30,
+                    f"{env_source}cd '{project_root}' && bash '{verify_script}'", "5-implementation", "504", timeout=30,
                 )
                 if exit_code == 0:
                     if not quiet:
@@ -1000,25 +1069,46 @@ Output ONLY the {language} implementation code. Wrap in ```{fence_lang} fences.
                         if not quiet:
                             print(print_yellow(f"         Scaffold verify failed, retrying ({attempt + 1}/{max_retries})"))
                         continue
+                    else:
+                        if not quiet:
+                            print(print_red(f"         Scaffold verify failed after {max_retries + 1} attempts"))
+                        record["error"] = error_context[-500:] if error_context else "scaffold verification failed"
             else:
                 # No verify script — trust the files were written
                 record["status"] = "complete"
                 record["attempts"] = attempt + 1
                 return record
         else:
-            # Standard library/feature task
-            code = extract_code_from_response(response, fence_lang)
-            if not code:
+            # Standard library/feature task — try multi-file first, fall back to single
+            files = extract_multi_file_response(response)
+            if files and "__single_block__" not in files:
+                # Multi-file output — write to project tree
+                written_files = []
+                for rel_path, content in files.items():
+                    abs_path = project_root / rel_path
+                    ensure_dir(abs_path.parent)
+                    write_file(abs_path, content)
+                    written_files.append(rel_path)
+                    if source_registry:
+                        source_registry.register(str(task_id), rel_path, content)
+                record["impl_file"] = str(project_root)
+                record["files_written"] = written_files
                 if not quiet:
-                    print(print_yellow("         Empty response, retrying..."))
-                error_context = "LLM returned empty response"
-                continue
+                    print(print_dim(f"         Wrote {len(written_files)} files to project tree"))
+            else:
+                # Fallback: single code block → write to task dir (legacy behavior)
+                code = extract_code_from_response(response, fence_lang)
+                if not code:
+                    if not quiet:
+                        print(print_yellow("         Empty response, retrying..."))
+                    error_context = "LLM returned empty response"
+                    continue
 
-            write_file(impl_file, code)
+                write_file(impl_file, code)
 
-            # Register in source registry
-            if source_registry:
-                source_registry.register(str(task_id), str(impl_file), code)
+                # Register in source registry
+                if source_registry:
+                    source_registry.register(str(task_id), str(impl_file), code)
 
             if skip_execution:
                 if not quiet:
@@ -1053,6 +1143,8 @@ Output ONLY the {language} implementation code. Wrap in ```{fence_lang} fences.
                     record["error"] = error_context[-500:]
 
     record["attempts"] = max_retries + 1
+    if "error" not in record:
+        record["error"] = error_context[-500:] if error_context else "all retries exhausted"
     return record
 
 
@@ -1472,11 +1564,15 @@ def _tdd_cycle_worker(
         dep_context = source_registry.get_dependency_context(task)
 
     try:
+        # Scan project tree for context (populated after bootstrap runs)
+        project_manifest = _scan_project_tree(project_root, stack_name)
+
         # --- RED ---
         red_record = run_red_phase(
             task, spec, task_dir, agents.get("red", ""), commands,
             skip_execution, atomic_root, profile, project_root, quiet=True,
             dep_context=dep_context, task_classification=classification,
+            project_manifest=project_manifest,
         )
         record["red"] = red_record
 
@@ -1497,7 +1593,7 @@ def _tdd_cycle_worker(
             task, spec, task_dir, test_code, agents.get("green", ""), commands,
             skip_execution, atomic_root, profile, project_root, quiet=True,
             dep_context=dep_context, task_classification=classification,
-            source_registry=source_registry,
+            source_registry=source_registry, project_manifest=project_manifest,
         )
         record["green"] = green_record
 

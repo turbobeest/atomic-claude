@@ -329,6 +329,11 @@ def _extract_prd_sections(content: str) -> Dict[str, str]:
     if match:
         sections["phases"] = match.group(1).strip()
 
+    # Extract Section 7: Code Structure / Code Organization
+    match = re.search(r'^#{1,2} 7\. Code (Structure|Organization)(.+?)^#{1,2} 8\.', content, re.MULTILINE | re.DOTALL)
+    if match:
+        sections["code_structure"] = match.group(2).strip()
+
     # Extract Tech Stack — support ## 2.1 and ### 2.1 heading levels
     match = re.search(r'^#{2,3} 2\.1 Tech Stack(.+?)^#{2,3} 2\.2', content, re.MULTILINE | re.DOTALL)
     if match:
@@ -421,6 +426,36 @@ def _merge_feature_tasks(
                 # else: cross-feature dep — leave for task 304 dependency mapper
             task["dependencies"] = new_deps
             all_tasks.append(task)
+
+    # Third pass: deduplicate bootstrap/scaffold tasks
+    # Keep the first one, remove duplicates, remap any deps pointing to removed tasks
+    bootstrap_keywords = ["scaffold", "project setup", "ci pipeline", "ci foundation",
+                          "project layout", "workspace setup", "cargo workspace"]
+    first_bootstrap_id = None
+    duplicate_ids = set()
+
+    for task in all_tasks:
+        title_lower = task.get("title", "").lower()
+        category = task.get("category", "").lower()
+        is_bootstrap = (
+            category == "infrastructure"
+            and not task.get("dependencies")
+            and any(kw in title_lower for kw in bootstrap_keywords)
+        )
+        if is_bootstrap:
+            if first_bootstrap_id is None:
+                first_bootstrap_id = task["id"]
+            else:
+                duplicate_ids.add(task["id"])
+
+    if duplicate_ids:
+        # Remove duplicate bootstrap tasks; remap deps pointing to them → first_bootstrap_id
+        all_tasks = [t for t in all_tasks if t["id"] not in duplicate_ids]
+        for task in all_tasks:
+            task["dependencies"] = [
+                first_bootstrap_id if d in duplicate_ids else d
+                for d in task.get("dependencies", [])
+            ]
 
     return {
         "meta": {
@@ -543,7 +578,25 @@ Before outputting, verify:
 - [ ] No circular dependencies (valid DAG)
 - [ ] ID 1 is always foundation/setup
 
-## Output Format
+"""
+
+    # Inject canonical project layout from Section 7 (if available)
+    if "code_structure" in sections:
+        prompt += """## Canonical Project Layout (from PRD Section 7)
+
+IMPORTANT: This is the AUTHORITATIVE project structure. ALL tasks you generate MUST reference
+paths within this layout. Do NOT generate scaffold, bootstrap, or project-setup tasks —
+a single foundation task (Task ID 1) already handles all project scaffolding.
+
+Your tasks should ASSUME this structure exists and specify which module/crate they modify.
+
+"""
+        code_struct = sections["code_structure"]
+        if len(code_struct) > 4000:
+            code_struct = code_struct[:4000] + "\n\n... (truncated)"
+        prompt += code_struct + "\n\n"
+
+    prompt += """## Output Format
 
 Generate ONLY valid JSON. No markdown wrapper, no explanations.
 Start with `{` and end with `}`.
