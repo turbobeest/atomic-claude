@@ -133,8 +133,11 @@ app.get('/api/config', (req, res) => {
     // If project name is a test value or missing, read directly from setup.md
     if (!projectName || projectName === 'atomic-test' || projectName === 'test-project') {
       const setupFile = path.join(ATOMIC_ROOT, 'initialization', 'setup.md');
-      if (fs.existsSync(setupFile)) {
-        const setupContent = fs.readFileSync(setupFile, 'utf8');
+      const setupGuideFile = path.join(ATOMIC_ROOT, 'initialization', 'SETUP-GUIDE.md');
+      const actualSetupFile = fs.existsSync(setupFile) ? setupFile
+        : fs.existsSync(setupGuideFile) ? setupGuideFile : null;
+      if (actualSetupFile) {
+        const setupContent = fs.readFileSync(actualSetupFile, 'utf8');
 
         // First priority: Look for **name** field
         const nameMatch = setupContent.match(/^\*\*name\*\*:\s*(.+)$/m);
@@ -155,11 +158,14 @@ app.get('/api/config', (req, res) => {
         }
       }
 
-      // Ultimate fallback: use repo directory name, prettified
+      // Ultimate fallback: use project directory name, prettified
+      // When deployed inside a host project (PROJECT_ROOT != ATOMIC_ROOT),
+      // use the host project name, not "atomic-claude"
       if (!projectName || projectName === 'atomic-test' || projectName === 'test-project') {
-        const repoName = path.basename(ATOMIC_ROOT);
+        const nameSource = (PROJECT_ROOT !== ATOMIC_ROOT) ? PROJECT_ROOT : ATOMIC_ROOT;
+        const repoName = path.basename(nameSource);
         projectName = repoName
-          .split('-')
+          .split(/[-_]/)
           .map(w => w.charAt(0).toUpperCase() + w.slice(1))
           .join(' ');
       }
