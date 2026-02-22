@@ -115,6 +115,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     _scan_tests(manifest, project_root, exclude_dirs)
     _calculate_totals(manifest)
     _display_summary(manifest)
+    _prompt_exclusions(manifest, project_root, uat_mode)
 
     # ── Part 2: Collect reference materials ────────────────────────────────
 
@@ -360,16 +361,11 @@ def _scan_documentation(manifest: Dict[str, Any], project_root: Path, exclude_di
     ], max_depth=4, max_files=50, exclude_dirs=exclude_dirs)
 
     count = len(docs)
-    sample = docs[:5]
     loc = _count_lines(docs[:20]) if docs else 0
 
-    print(print_cyan("  Documentation"))
-    print(print_dim(f"  {count} files"))
+    print(print_cyan(f"  Documentation ({count} files)"))
     if count > 0:
-        for f in sample:
-            print(print_dim(f"    {f.relative_to(project_root)}"))
-        if count > 5:
-            print(print_dim(f"    ... and {count - 5} more"))
+        _display_file_tree(docs, project_root)
     print()
 
     manifest['summary']['documentation'] = {"count": count, "lines": loc}
@@ -389,15 +385,10 @@ def _scan_configuration(manifest: Dict[str, Any], project_root: Path, exclude_di
     )]
 
     count = len(configs)
-    sample = configs[:5]
 
-    print(print_cyan("  Configuration"))
-    print(print_dim(f"  {count} files"))
+    print(print_cyan(f"  Configuration ({count} files)"))
     if count > 0:
-        for f in sample:
-            print(print_dim(f"    {f.relative_to(project_root)}"))
-        if count > 5:
-            print(print_dim(f"    ... and {count - 5} more"))
+        _display_file_tree(configs, project_root)
     print()
 
     manifest['summary']['configuration'] = {"count": count}
@@ -419,16 +410,11 @@ def _scan_source_code(manifest: Dict[str, Any], project_root: Path, exclude_dirs
     )]
 
     count = len(code)
-    sample = code[:5]
     loc = _count_lines(code[:50]) if code else 0
 
-    print(print_cyan("  Source Code"))
-    print(print_dim(f"  {count} files (~{loc} lines)"))
+    print(print_cyan(f"  Source Code ({count} files, ~{loc} lines)"))
     if count > 0:
-        for f in sample:
-            print(print_dim(f"    {f.relative_to(project_root)}"))
-        if count > 5:
-            print(print_dim(f"    ... and {count - 5} more"))
+        _display_file_tree(code, project_root)
 
     # Warn if file count is high
     if count > 100:
@@ -450,15 +436,10 @@ def _scan_tests(manifest: Dict[str, Any], project_root: Path, exclude_dirs: Opti
     ], max_depth=5, max_files=30, exclude_dirs=exclude_dirs)
 
     count = len(tests)
-    sample = tests[:3]
 
-    print(print_cyan("  Tests"))
-    print(print_dim(f"  {count} files"))
+    print(print_cyan(f"  Tests ({count} files)"))
     if count > 0:
-        for f in sample:
-            print(print_dim(f"    {f.relative_to(project_root)}"))
-        if count > 3:
-            print(print_dim(f"    ... and {count - 3} more"))
+        _display_file_tree(tests, project_root)
     else:
         # Check for test directories
         test_dirs = []
@@ -503,6 +484,150 @@ def _display_summary(manifest: Dict[str, Any]) -> None:
     print(print_bold(f"  Total: {total_files} files, ~{total_loc} lines"))
     print(print_bold(f"  Key files: {key_count} identified"))
     print()
+
+
+def _prompt_exclusions(manifest: Dict[str, Any], project_root: Path, uat_mode: bool = False) -> None:
+    """
+    Prompt the user to exclude directories or files from the material scan.
+
+    Supports commands:
+        dir:<path>   — exclude all files under a directory prefix
+        file:<path>  — exclude a single file by relative path
+        cat:<name>   — exclude an entire category (documentation, configuration, source_code, tests)
+        done         — finish excluding
+        (Enter)      — skip exclusions entirely
+
+    Stores exclusions in manifest['exclusions'] and preserves originals
+    in manifest['files']['all_scanned'].
+
+    Args:
+        manifest: The material manifest dict (modified in-place)
+        project_root: Project root for display
+        uat_mode: If True, skip entirely
+    """
+    if uat_mode:
+        return
+
+    print(print_dim("  Exclude files from context? [Enter to skip]"))
+    print(print_dim("  Commands: dir:<path>  file:<path>  cat:<name>  done"))
+    print()
+
+    clear_input_buffer()
+    first_input = prompt_user("  > ").strip()
+
+    if not first_input:
+        # User pressed Enter — no exclusions
+        return
+
+    # Preserve originals before any exclusions
+    manifest['files']['all_scanned'] = {
+        cat: list(files) for cat, files in manifest['files'].items()
+        if cat != 'all_scanned' and cat != 'external_references'
+    }
+
+    categories = ['documentation', 'configuration', 'source_code', 'tests']
+    excluded_files: List[str] = []
+    excluded_dirs: List[str] = []
+    excluded_cats: List[str] = []
+
+    def _apply_command(cmd: str) -> None:
+        """Process a single exclusion command."""
+        cmd = cmd.strip()
+        if not cmd or cmd == 'done':
+            return
+
+        if cmd.startswith('dir:'):
+            dir_prefix = cmd[4:].strip().rstrip('/')
+            if not dir_prefix:
+                print(print_yellow("    Missing directory path"))
+                return
+            count = 0
+            for cat in categories:
+                files = manifest['files'].get(cat, [])
+                before = len(files)
+                manifest['files'][cat] = [
+                    f for f in files if not f.startswith(dir_prefix + '/') and f != dir_prefix
+                ]
+                count += before - len(manifest['files'][cat])
+            excluded_dirs.append(dir_prefix)
+            if count:
+                print(print_dim(f"    Excluded {count} file(s) from {dir_prefix}/"))
+            else:
+                print(print_yellow(f"    No files matched {dir_prefix}/"))
+
+        elif cmd.startswith('file:'):
+            file_path = cmd[5:].strip()
+            if not file_path:
+                print(print_yellow("    Missing file path"))
+                return
+            found = False
+            for cat in categories:
+                files = manifest['files'].get(cat, [])
+                if file_path in files:
+                    manifest['files'][cat] = [f for f in files if f != file_path]
+                    found = True
+            excluded_files.append(file_path)
+            if found:
+                print(print_dim(f"    Excluded {file_path}"))
+            else:
+                print(print_yellow(f"    Not found: {file_path}"))
+
+        elif cmd.startswith('cat:'):
+            cat_name = cmd[4:].strip()
+            if cat_name not in categories:
+                print(print_yellow(f"    Unknown category: {cat_name}"))
+                print(print_dim(f"    Valid: {', '.join(categories)}"))
+                return
+            count = len(manifest['files'].get(cat_name, []))
+            manifest['files'][cat_name] = []
+            excluded_cats.append(cat_name)
+            print(print_dim(f"    Excluded {count} file(s) from {cat_name}"))
+
+        else:
+            print(print_yellow(f"    Unknown command: {cmd}"))
+            print(print_dim("    Use dir:<path>, file:<path>, cat:<name>, or done"))
+
+    # Process first input
+    _apply_command(first_input)
+
+    # Continue reading commands until 'done' or empty
+    if first_input != 'done':
+        while True:
+            clear_input_buffer()
+            cmd = prompt_user("  > ").strip()
+            if not cmd or cmd == 'done':
+                break
+            _apply_command(cmd)
+
+    # Recalculate totals
+    _calculate_totals(manifest)
+
+    # Store exclusion metadata
+    manifest['exclusions'] = {
+        'dirs': excluded_dirs,
+        'files': excluded_files,
+        'categories': excluded_cats,
+    }
+
+    # Show after-exclusion summary
+    total_original = sum(
+        len(manifest['files']['all_scanned'].get(cat, []))
+        for cat in categories
+    )
+    total_remaining = sum(
+        len(manifest['files'].get(cat, []))
+        for cat in categories
+    )
+    total_excluded = total_original - total_remaining
+
+    if total_excluded > 0:
+        print()
+        summary = manifest.get('summary', {}).get('total', {})
+        print(print_bold(
+            f"  After exclusions: {total_remaining} files "
+            f"(excluded {total_excluded})"
+        ))
+        print()
 
 
 # ===========================================================================
@@ -913,6 +1038,46 @@ def _find_files(
             break
 
     return sorted(files)[:max_files]
+
+
+def _display_file_tree(files: List[Path], project_root: Path, indent: str = "    ") -> None:
+    """
+    Display files grouped by parent directory as a compact tree.
+
+    Groups files by their immediate parent directory relative to project_root.
+    Root-level files appear under './'. Directories with >15 files are collapsed
+    to a count summary.
+
+    Args:
+        files: List of absolute file paths
+        project_root: Project root for computing relative paths
+        indent: Indentation prefix for each line
+    """
+    from collections import defaultdict
+
+    groups: Dict[str, List[str]] = defaultdict(list)
+
+    for f in files:
+        try:
+            rel = f.relative_to(project_root)
+        except ValueError:
+            rel = Path(f.name)
+
+        parent = str(rel.parent) if rel.parent != Path(".") else "."
+        groups[parent].append(rel.name)
+
+    # Sort: root first, then alphabetical
+    sorted_dirs = sorted(groups.keys(), key=lambda d: ("" if d == "." else d))
+
+    for dir_path in sorted_dirs:
+        filenames = sorted(groups[dir_path])
+        label = "./" if dir_path == "." else f"{dir_path}/"
+        if len(filenames) > 15:
+            print(print_dim(f"{indent}{label} ({len(filenames)} files)"))
+        else:
+            print(print_dim(f"{indent}{label}"))
+            for name in filenames:
+                print(print_dim(f"{indent}  {name}"))
 
 
 def _count_lines(files: List[Path]) -> int:

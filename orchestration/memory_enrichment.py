@@ -440,6 +440,16 @@ def _summarize_material_manifest(data: dict) -> Optional[str]:
     if ext_refs:
         parts.append(f"{len(ext_refs)} external references")
 
+    exclusions = data.get("exclusions", {})
+    if exclusions:
+        all_scanned = files.get("all_scanned", {})
+        if all_scanned:
+            original = sum(len(v) for v in all_scanned.values())
+            current = total.get("files", 0) if total else 0
+            excluded = original - current
+            if excluded > 0:
+                parts.append(f"{excluded} excluded")
+
     stack = data.get("detected_stack", {})
     langs = stack.get("languages", [])
     frameworks = stack.get("frameworks", [])
