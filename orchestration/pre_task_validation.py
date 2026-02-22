@@ -227,6 +227,14 @@ def is_allowed_file(file_path: Path, acp_root: Path) -> bool:
     if str(rel_path) in allowed_root_files:
         return True
 
+    # Allow root-level tool planning/config files by prefix
+    if len(rel_path.parts) == 1 and (
+        file_path.name.startswith("PLAN-")
+        or file_path.name.startswith("REFACTORING-")
+        or file_path.name == "PROJECT-STRUCTURE.md"
+    ):
+        return True
+
     # Allow log files at root (e.g., excalidraw.log)
     if len(rel_path.parts) == 1 and file_path.suffix == ".log":
         return True
