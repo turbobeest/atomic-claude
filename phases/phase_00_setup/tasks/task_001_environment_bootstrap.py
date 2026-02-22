@@ -138,6 +138,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # Launch web companion dashboard
     _launch_dashboard(atomic_root)
 
+    # Start FalkorDB knowledge graph
+    _start_falkordb(atomic_root, uat_mode)
+
     # Record environment to config
     _record_environment(config_file, os_type)
 
@@ -149,6 +152,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         mem.finding(f"Required tools: {REQUIRED_INSTALLED}/{REQUIRED_TOTAL} verified")
         mem.finding(f"Recommended tools: {RECOMMENDED_INSTALLED}/{RECOMMENDED_TOTAL} available")
         mem.configuration(f"Dashboard launched from {atomic_root / 'dashboard'}")
+        mem.configuration("FalkorDB knowledge graph started via docker compose")
 
     print(print_green("✓ Environment bootstrap complete"))
     return True
@@ -618,6 +622,79 @@ def _get_hostname() -> str:
         return socket.gethostname()
     except Exception:
         return "localhost"
+
+
+# ---------------------------------------------------------------------------
+# FalkorDB knowledge graph
+# ---------------------------------------------------------------------------
+
+def _start_falkordb(atomic_root: Path, uat_mode: bool = False) -> None:
+    """Start FalkorDB via docker compose and verify it's healthy."""
+    import time
+
+    compose_file = atomic_root / "docker-compose.yml"
+    if not compose_file.exists():
+        print(print_red("  ✗ docker-compose.yml not found — cannot start FalkorDB"))
+        return
+
+    graph_port = os.environ.get("ATOMIC_GRAPH_PORT", "6379")
+    browser_port = os.environ.get("ATOMIC_GRAPH_BROWSER_PORT", "3001")
+
+    print(print_cyan("  Starting FalkorDB knowledge graph..."))
+    print()
+
+    try:
+        # Start FalkorDB container
+        result = subprocess.run(
+            ["docker", "compose", "-f", str(compose_file), "up", "-d", "falkordb"],
+            capture_output=True, text=True, timeout=60,
+            cwd=str(atomic_root),
+        )
+
+        if result.returncode != 0:
+            print(print_red(f"  ✗ docker compose up failed: {result.stderr.strip()}"))
+            if uat_mode:
+                print(print_yellow("  UAT Mode: Continuing without FalkorDB"))
+                return
+            print(print_yellow("  Ensure Docker is running and try again."))
+            return
+
+        # Wait for FalkorDB to be healthy (up to 15s)
+        ready = False
+        for attempt in range(15):
+            try:
+                check = subprocess.run(
+                    ["docker", "compose", "-f", str(compose_file),
+                     "exec", "-T", "falkordb", "redis-cli", "ping"],
+                    capture_output=True, text=True, timeout=5,
+                    cwd=str(atomic_root),
+                )
+                if check.returncode == 0 and "PONG" in check.stdout:
+                    ready = True
+                    break
+            except Exception:
+                pass
+            time.sleep(1)
+
+        if ready:
+            print(print_green(f"  ✓ FalkorDB running (Redis: {graph_port}, Browser: {browser_port})"))
+            hostname = _get_hostname()
+            print(print_dim(f"    Graph browser: http://{hostname}:{browser_port}"))
+        else:
+            print(print_yellow(f"  ! FalkorDB started but not yet responding on port {graph_port}"))
+            print(print_dim("    It may need a few more seconds. The pipeline will retry on first use."))
+
+        print()
+
+    except FileNotFoundError:
+        print(print_red("  ✗ docker not found — install Docker to use the knowledge graph"))
+        print()
+    except subprocess.TimeoutExpired:
+        print(print_yellow("  ! docker compose timed out — FalkorDB may still be starting"))
+        print()
+    except Exception as e:
+        print(print_yellow(f"  ! FalkorDB startup error: {e}"))
+        print()
 
 
 # ---------------------------------------------------------------------------
