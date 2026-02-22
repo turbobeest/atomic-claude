@@ -337,6 +337,7 @@ def _show_required_tools(os_type: str) -> None:
         ("jq", None),
         ("node", 18),  # Minimum version
         ("claude", None),
+        ("docker", None),  # Required for FalkorDB knowledge graph
         ("dot", None),  # graphviz
         ("cargo", None),  # Rust toolchain (installed via rustup)
     ]
@@ -381,7 +382,7 @@ def _recheck_required(os_type: str) -> None:
     """Recheck required tools (silent, just updates counters)."""
     global REQUIRED_TOTAL, REQUIRED_INSTALLED
 
-    tools = ["git", "jq", "node", "claude", "dot", "cargo"]
+    tools = ["git", "jq", "node", "claude", "docker", "dot", "cargo"]
 
     for tool in tools:
         REQUIRED_TOTAL += 1
@@ -405,7 +406,7 @@ def _show_recommended_tools(os_type: str) -> None:
     print(print_cyan("  RECOMMENDED TOOLS:"))
     print()
 
-    tools = ["gh", "docker"]
+    tools = ["gh"]
 
     for tool in tools:
         RECOMMENDED_TOTAL += 1
