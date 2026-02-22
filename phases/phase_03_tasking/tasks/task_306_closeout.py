@@ -13,9 +13,12 @@ Creates comprehensive closeout documentation including:
 
 import sys
 import json
+import logging
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -29,7 +32,7 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 306: Phase Closeout.
 
@@ -37,6 +40,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
         uat_mode: If True, bypass interactive prompts for testing
+        graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
         True if task completed successfully, False otherwise
@@ -124,6 +128,16 @@ Phase 3 closeout auto-approved in UAT mode.
         print()
         print(print_yellow("⚠ Closeout held - phase not complete"))
         return False
+
+    # Export tasks from graph (if available)
+    if graph:
+        try:
+            graph_tasks_export = output_dir / "tasks.json"
+            graph.export_tasks_json(graph_tasks_export)
+            logger.info(f"Graph tasks exported to {graph_tasks_export}")
+            print(print_green("  ✓ Tasks exported from knowledge graph"))
+        except Exception as e:
+            logger.warning(f"Graph tasks export failed: {e}")
 
     # Generate Closeout Document
     print(print_dim("─" * 100))

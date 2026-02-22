@@ -36,7 +36,7 @@ from phases.phase_02_prd.tasks.task_206b_prd_revision import prd_revision_flow, 
 from phases.phase_02_prd.tasks.task_206_prd_validation import validate_content
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 207: PRD Approval.
 
@@ -44,6 +44,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
         uat_mode: If True, auto-approve for testing
+        graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
         True if task completed successfully, False otherwise

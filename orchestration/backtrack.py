@@ -9,12 +9,15 @@ Allows users to go back to any point and start fresh by:
 3. Optionally clearing generated code
 """
 
+import logging
 from pathlib import Path
 import shutil
 import json
 from typing import Optional
 
 from core.memory import memory_init, memory_handle_backtrack
+
+logger = logging.getLogger(__name__)
 
 
 PHASE_NAMES = {
@@ -294,6 +297,38 @@ def backtrack_to(phase: int, task: Optional[str] = None):
     if llm_cache_dir.exists():
         shutil.rmtree(llm_cache_dir)
         print("   ✓ Cleared LLM response cache")
+
+    # Clear graph data for rolled-back phases
+    try:
+        from core.graph import get_graph
+        graph_cleaned = False
+        for p in phases_to_clear:
+            p_id = f"{p}-{PHASE_NAMES[p]}"
+            graph = get_graph(phase_id=p_id)
+            if graph:
+                try:
+                    deleted = graph.delete_phase_data(p_id)
+                    logger.info(f"Deleted {deleted} graph nodes/edges for phase {p_id}")
+                    if deleted:
+                        print(f"   ✓ Cleared {deleted} graph nodes/edges for {p_id}")
+                        graph_cleaned = True
+                except Exception as e:
+                    logger.warning(f"Graph cleanup failed for phase {p_id}: {e}")
+        if first_task:
+            graph = get_graph(phase_id=target_phase_id)
+            if graph:
+                try:
+                    deleted = graph.delete_phase_data(target_phase_id)
+                    logger.info(f"Deleted {deleted} graph nodes/edges for phase {target_phase_id}")
+                    if deleted:
+                        print(f"   ✓ Cleared {deleted} graph nodes/edges for {target_phase_id}")
+                        graph_cleaned = True
+                except Exception as e:
+                    logger.warning(f"Graph cleanup failed for phase {target_phase_id}: {e}")
+        if not graph_cleaned:
+            print("   ℹ No graph data to clear (graph disabled or empty)")
+    except ImportError:
+        pass  # Graph module not available
 
     # Prompt to clear generated code
     print("\n🗂️  Generated code...")

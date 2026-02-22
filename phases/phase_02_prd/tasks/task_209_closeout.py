@@ -6,6 +6,7 @@ Generates closeout document and prepares for Phase 3.
 Final review before moving to Phase 3 (Tasking).
 """
 
+import logging
 import os
 import re
 import sys
@@ -13,6 +14,8 @@ import json
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -26,7 +29,7 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 209: Phase Closeout.
 
@@ -34,6 +37,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
         uat_mode: If True, auto-approve closeout for testing
+        graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
         True if task completed successfully, False otherwise
@@ -63,6 +67,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     if uat_mode:
         print(print_yellow("  UAT mode: Auto-approving closeout..."))
         generate_closeout_documents(closeout_file, closeout_json, prd_file, checklist)
+
+        # Export PRD from graph if available
+        if graph:
+            try:
+                graph_prd_export = project_root / "docs" / "prd" / "PRD-graph.md"
+                graph.export_prd_md(graph_prd_export)
+                logger.info(f"Graph PRD export: {graph_prd_export}")
+            except Exception as e:
+                logger.warning(f"Graph export failed, using file-based export: {e}")
+
         print(print_green("✓ UAT mode: Closeout auto-approved"))
         return True
 
@@ -110,6 +124,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
 
     generate_closeout_documents(closeout_file, closeout_json, prd_file, checklist)
+
+    # Export PRD from graph if available
+    if graph:
+        try:
+            graph_prd_export = project_root / "docs" / "prd" / "PRD-graph.md"
+            graph.export_prd_md(graph_prd_export)
+            logger.info(f"Graph PRD export: {graph_prd_export}")
+        except Exception as e:
+            logger.warning(f"Graph export failed, using file-based export: {e}")
 
     print()
     print(print_green("✓ Phase 2 closeout complete"))

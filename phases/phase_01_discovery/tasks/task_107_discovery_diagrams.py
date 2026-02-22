@@ -43,7 +43,7 @@ DIAGRAM_TYPES = {
 }
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 107: Discovery Diagrams.
 

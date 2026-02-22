@@ -15,7 +15,7 @@ from core.audit import run_phase_audit
 from core.utils.cli_ui import print_green, print_yellow
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 208: Phase Audit.
 
@@ -24,6 +24,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         output_dir: Path to phase output directory
         uat_mode: If True, skip audit for testing
         mem: Optional TaskMemory instance for recording substantive memory
+        graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
         True if audit completed or skipped (non-blocking)

@@ -79,6 +79,58 @@ def do_backtrack(phase_num: int, task: str = None):
     backtrack_to(phase_num, task)
 
 
+def do_task(args):
+    """Graph-powered task management operations."""
+    from core.graph import get_graph
+
+    graph = get_graph(phase_id="3-tasking")
+    if not graph:
+        print("Error: Graph not available. Ensure ATOMIC_GRAPH_ENABLED=true and FalkorDB is running.")
+        sys.exit(1)
+
+    subcmd = args.task_command
+
+    if subcmd == "update":
+        affected = graph.update_from(args.task_id, args.prompt)
+        print(f"Updated task {args.task_id}. Affected downstream tasks: {affected}")
+
+    elif subcmd == "research":
+        finding_id = graph.research_save_to(args.task_id, args.content)
+        print(f"Research saved as finding {finding_id}, linked to task {args.task_id}")
+
+    elif subcmd == "add":
+        new_id = graph.add_new_task(
+            args.title, args.description,
+            list(args.depends_on) if args.depends_on else None,
+            list(args.implements) if args.implements else None,
+        )
+        print(f"Created task {new_id}: {args.title}")
+
+    elif subcmd == "complexity":
+        report = graph.analyze_complexity(refine_with_llm=args.llm)
+        print(f"Complexity analysis complete: {len(report.get('tasks', []))} tasks scored")
+        for task_info in report.get("tasks", []):
+            print(f"  Task {task_info.get('id')}: {task_info.get('score', 'N/A')}/10 - {task_info.get('title', '')}")
+
+    elif subcmd == "validate":
+        report = graph.validate_dependencies()
+        if report.get("valid"):
+            print("Dependency graph is valid. No cycles or orphans detected.")
+        else:
+            if report.get("cycles"):
+                print(f"Cycles detected: {report['cycles']}")
+            if report.get("orphans"):
+                print(f"Orphan tasks: {report['orphans']}")
+
+    elif subcmd == "fix":
+        report = graph.fix_dependencies()
+        print(f"Fixed {report.get('fixed_cycles', 0)} cycles, {report.get('fixed_orphans', 0)} orphans")
+
+    else:
+        print("Unknown task subcommand. Use: update, research, add, complexity, validate, fix")
+        sys.exit(1)
+
+
 def do_reset():
     """Full pipeline reset."""
     import shutil
@@ -124,6 +176,9 @@ Examples:
   python main.py backtrack 1             # Reset to Phase 1, clear Phase 2+
   python main.py backtrack 0 005         # Reset Phase 0 to Task 005
   python main.py reset                   # Full reset (clears everything)
+  python main.py task complexity         # Analyze task complexity
+  python main.py task validate           # Check dependency graph
+  python main.py task add "Title" "Desc" # Add a new task
         """
     )
 
@@ -148,6 +203,58 @@ Examples:
     # Reset command
     subparsers.add_parser("reset", help="Full pipeline reset")
 
+    # Task command group (graph-powered task management)
+    task_parser = subparsers.add_parser(
+        "task", help="Graph-powered task management operations",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Subcommands:
+  update <id> <prompt>       Update a task, show affected downstream tasks
+  research <id> <content>    Save research findings linked to a task
+  add <title> <desc>         Add a new task mid-project
+  complexity [--llm]         Analyze task complexity using graph topology
+  validate                   Validate task dependency graph
+  fix                        Auto-repair dependency graph issues
+        """,
+    )
+    task_subparsers = task_parser.add_subparsers(dest="task_command", help="Task operation")
+
+    # task update
+    task_update = task_subparsers.add_parser("update", help="Update a task and show affected downstream tasks")
+    task_update.add_argument("task_id", type=int, help="Task ID to update")
+    task_update.add_argument("prompt", help="Description of the change")
+
+    # task research
+    task_research = task_subparsers.add_parser("research", help="Save research findings linked to a task")
+    task_research.add_argument("task_id", type=int, help="Task ID to attach research to")
+    task_research.add_argument("content", help="Research content to save")
+
+    # task add
+    task_add = task_subparsers.add_parser("add", help="Add a new task mid-project")
+    task_add.add_argument("title", help="Task title")
+    task_add.add_argument("description", help="Task description")
+    task_add.add_argument(
+        "--depends-on", "-d", type=int, nargs="*", default=[],
+        help="Task IDs this depends on",
+    )
+    task_add.add_argument(
+        "--implements", "-i", nargs="*", default=[],
+        help="Requirement IDs this implements",
+    )
+
+    # task complexity
+    task_complexity = task_subparsers.add_parser("complexity", help="Analyze task complexity using graph topology")
+    task_complexity.add_argument(
+        "--llm", action="store_true", default=False,
+        help="Use LLM to refine complexity scores",
+    )
+
+    # task validate
+    task_subparsers.add_parser("validate", help="Validate task dependency graph")
+
+    # task fix
+    task_subparsers.add_parser("fix", help="Auto-repair dependency graph issues")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -162,6 +269,11 @@ Examples:
         do_backtrack(args.phase, args.task)
     elif args.command == "reset":
         do_reset()
+    elif args.command == "task":
+        if not getattr(args, "task_command", None):
+            task_parser.print_help()
+            sys.exit(1)
+        do_task(args)
 
 
 if __name__ == "__main__":

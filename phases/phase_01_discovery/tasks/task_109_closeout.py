@@ -23,7 +23,7 @@ from core.state import StateManager
 from core.ui import phase_header, success, error, warning, info, step
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 109: Phase Closeout.
 
@@ -238,6 +238,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         mem.finding(f"Approach: {approach_name}")
         mem.finding(f"Corpus: {corpus_count} materials | Agents: {agent_count} selected")
         mem.finding("Phase 2 readiness: confirmed")
+
+    # Export needs index from graph if available
+    if graph:
+        try:
+            needs_export = output_dir / "needs-index-graph.json"
+            graph.export_needs_index(needs_export)
+        except Exception:
+            pass  # Graph export failure is non-blocking
 
     success("Phase 1 closeout complete")
     return True

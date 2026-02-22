@@ -12,10 +12,13 @@ This task:
 
 import sys
 import json
+import logging
 from pathlib import Path
 from typing import Dict, Any, List, Set, Tuple
 from datetime import datetime
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -29,7 +32,7 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 304: Dependency Analysis.
 
@@ -37,6 +40,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
         uat_mode: If True, bypass interactive prompts for testing
+        graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
         True if task completed successfully, False otherwise
@@ -129,7 +133,20 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         print(print_dim("Edit .taskmaster/tasks/tasks.json to fix dependency issues."))
         print(print_dim("Press Enter when ready to re-validate..."))
         input()
-        return execute(atomic_root, output_dir, uat_mode)
+        return execute(atomic_root, output_dir, uat_mode, graph=graph)
+
+    # Graph-based dependency validation (if available)
+    if graph:
+        try:
+            validation = graph.validate_dependencies()
+            if not validation.get("valid", True):
+                fix_report = graph.fix_dependencies()
+                logger.info(f"Graph dependency fix: {fix_report}")
+                print(print_green("  ✓ Graph dependencies validated and fixed"))
+            else:
+                print(print_green("  ✓ Graph dependency validation passed"))
+        except Exception as e:
+            logger.warning(f"Graph dependency validation failed: {e}")
 
     # Compute Execution Levels
     levels = _compute_levels(tasks)

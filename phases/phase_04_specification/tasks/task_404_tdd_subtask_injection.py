@@ -363,7 +363,7 @@ def _run_parallel_tdd(
     return [r for r in results if r is not None]
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 404: TDD Subtask Injection.
 
@@ -371,6 +371,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
         uat_mode: If True, generate generic subtasks without LLM
+        graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
         True if task completed successfully, False otherwise
@@ -494,7 +495,22 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         }, indent=2))
         return True
 
-    # Check OpenSpec availability
+    # Check OpenSpec availability (supplement from graph if available)
+    if graph:
+        for t in tasks_to_process:
+            task_id = t.get("id", 0)
+            spec_file = openspec_dir / f"spec-t{task_id}.json"
+            if not spec_file.exists():
+                try:
+                    spec_node = graph.reader.get_node("Spec", task_id)
+                    if spec_node:
+                        import logging
+                        logging.getLogger(__name__).info(f"Loaded spec for T{task_id} from graph")
+                        write_file(spec_file, json.dumps(spec_node, indent=2))
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Graph spec query failed for T{task_id}: {e}")
+
     spec_count = sum(1 for t in tasks_to_process
                      if (openspec_dir / f"spec-t{t.get('id', 0)}.json").exists())
 

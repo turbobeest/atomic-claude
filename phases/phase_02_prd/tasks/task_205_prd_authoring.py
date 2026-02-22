@@ -10,6 +10,7 @@ This is a complex task that orchestrates multiple LLM calls to build
 a comprehensive PRD document section by section.
 """
 
+import logging
 import os
 import sys
 import json
@@ -17,6 +18,8 @@ import re
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -48,7 +51,7 @@ PRD_SECTIONS = [
 ]
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 205: PRD Authoring.
 
@@ -56,6 +59,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
         uat_mode: If True, create minimal PRD for testing
+        graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
         True if task completed successfully, False otherwise
@@ -178,11 +182,23 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
         print(f"  [{gen_num}/12] {section_name}...")
 
+        # Use graph context if available (focused context instead of full prior_content)
+        effective_prior = prd_content
+        if graph:
+            try:
+                graph_context = graph.query_prd_context(section=section_name, max_tokens=8000)
+                if graph_context:
+                    effective_prior = graph_context
+                    logger.info(f"Using graph context for section '{section_name}'")
+            except Exception as e:
+                logger.warning(f"Graph query failed, falling back to file context: {e}")
+                effective_prior = prd_content  # fallback
+
         # Generate section
         section_content = generate_section(
             section_def,
             context,
-            prd_content,
+            effective_prior,
             prompts_dir,
             atomic_root,
             output_dir
@@ -191,6 +207,18 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         if section_content:
             prd_content += section_content + "\n\n"
             print(print_green(f"    ✓ {section_name} complete"))
+
+            # Write Feature node to graph for this section
+            if graph:
+                try:
+                    graph.add_feature(
+                        id=f"F-{gen_num}",
+                        title=section_name,
+                        description=section_content[:500],
+                    )
+                    logger.info(f"Wrote Feature node F-{gen_num} to graph")
+                except Exception as e:
+                    logger.warning(f"Graph write failed for section '{section_name}': {e}")
         else:
             print(print_red(f"    ✗ Failed to generate {section_name}"))
             return False

@@ -30,7 +30,7 @@ from core.llm import invoke_llm as invoke
 from core.ui import phase_header, success, error, warning, info, step, wrap_text
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 105: Discovery Conversation.
 
@@ -320,6 +320,38 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         open_items = consensus.get("open_items", [])
         if open_items:
             mem.warning(f"Open items: {', '.join(str(i) for i in open_items[:5])}")
+
+    # Write to knowledge graph
+    if graph:
+        graph.add_source(
+            id="S-105-deliberation",
+            type="meeting",
+            title=f"Discovery Deliberation ({turn} exchanges)",
+        )
+        direction = consensus.get("agreed_direction", {}).get("approach", "")
+        if direction:
+            graph.add_finding(
+                id="F-105-direction",
+                category="vision",
+                title="Agreed Direction",
+                content=str(direction),
+                source_id="S-105-deliberation",
+            )
+        for i, decision in enumerate(consensus.get("key_decisions", [])[:10]):
+            graph.add_decision(
+                id=f"DEC-105-{i+1}",
+                title=f"Key Decision {i+1}",
+                rationale=str(decision),
+                status="proposed",
+            )
+        for i, item in enumerate(consensus.get("open_items", [])[:10]):
+            graph.add_finding(
+                id=f"F-105-open-{i+1}",
+                category="open_question",
+                title=f"Open Item {i+1}",
+                content=str(item),
+                source_id="S-105-deliberation",
+            )
 
     success("Discovery conversation complete")
     return True

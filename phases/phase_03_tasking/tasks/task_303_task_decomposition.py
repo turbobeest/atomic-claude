@@ -16,10 +16,13 @@ Task priorities derived from PRD RFC 2119 keywords:
 
 import sys
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -33,7 +36,7 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 303: Task Decomposition.
 
@@ -41,6 +44,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
         uat_mode: If True, bypass interactive prompts for testing
+        graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
         True if task completed successfully, False otherwise
@@ -86,6 +90,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     else:
         print(print_dim("No agent selection found - using built-in decomposition logic"))
         print()
+
+    # Graph-powered context (if available)
+    graph_context = None
+    if graph:
+        try:
+            graph_context = graph.query_task_context()
+            logger.info("Graph context loaded for task decomposition")
+        except Exception as e:
+            logger.warning(f"Graph query failed, using file context: {e}")
 
     # PRD Extraction
     print(print_dim("─" * 100))
@@ -245,6 +258,26 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     # Task Validation
     _show_task_validation(raw_tasks_file)
+
+    # Write tasks to knowledge graph (if available)
+    if graph:
+        try:
+            tasks_data = json.loads(read_file(raw_tasks_file))
+            tasks = tasks_data.get("tasks", [])
+            graph_count = 0
+            for task in tasks:
+                graph.add_task(
+                    id=task["id"],
+                    title=task["title"],
+                    description=task.get("description", ""),
+                    requirements=task.get("requirements", []),
+                    depends_on=task.get("dependencies", [])
+                )
+                graph_count += 1
+            logger.info(f"Wrote {graph_count} tasks to knowledge graph")
+            print(print_green(f"  ✓ {graph_count} tasks written to knowledge graph"))
+        except Exception as e:
+            logger.warning(f"Graph task write failed: {e}")
 
     # TaskMaster Integration
     print(print_dim("─" * 100))

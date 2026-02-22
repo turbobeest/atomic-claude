@@ -34,7 +34,7 @@ from core.ui import phase_header, success, error, warning, info, step
 SUPPORTED_EXTS = {'.md', '.txt', '.rst', '.pdf', '.json', '.yaml', '.yml', '.dot', '.svg'}
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 101: Entry Validation & Corpus Analysis.
 
@@ -212,6 +212,17 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     # Save corpus data
     _save_corpus(output_dir / "corpus.json", corpus_data, analysis_file)
+
+    # Write to knowledge graph
+    if graph:
+        for material in corpus_data.get("materials", []):
+            graph.add_source(
+                id=f"S-101-{material.get('name', 'unknown')[:50]}",
+                type="corpus",
+                title=material.get("name", "unknown"),
+                file_path=material.get("path", ""),
+                content_hash=str(hash(material.get("content", "")))[:16],
+            )
 
     # Record substantive memory
     if mem:

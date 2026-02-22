@@ -13,6 +13,7 @@ Includes a validate-revise loop: if the user chooses "revise",
 the LLM-assisted revision flow (206b) runs, then validation re-runs automatically.
 """
 
+import logging
 import os
 import sys
 import json
@@ -20,6 +21,8 @@ import re
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -55,7 +58,7 @@ EXPECTED_SECTIONS = [
 ]
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 206: PRD Validation.
 
@@ -63,6 +66,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
         uat_mode: If True, auto-pass validation for testing
+        graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
         True if task completed successfully, False otherwise
@@ -91,6 +95,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     if not prd_file.exists():
         print(print_red(f"  ✗ PRD file not found: {prd_file}"))
         return False
+
+    # Query graph for requirement coverage data (supplemental)
+    if graph:
+        try:
+            validation_context = graph.reader.get_nodes("Requirement")
+            if validation_context:
+                logger.info(f"Loaded {len(validation_context)} requirements from graph for validation")
+        except Exception as e:
+            logger.warning(f"Graph query failed: {e}")
 
     # Validate-revise loop
     iteration = 0

@@ -352,7 +352,7 @@ def _run_parallel_specs(
     return generated, failed
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 403: OpenSpec Generation.
 
@@ -360,6 +360,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
         uat_mode: If True, generate stub specs without LLM calls
+        graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
         True if task completed successfully, False otherwise
@@ -403,6 +404,14 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
             write_file(spec_file, json.dumps(spec, indent=2))
             print(print_green(f"    Stub spec created: spec-t{task_id}.json"))
 
+            # Write stub spec to knowledge graph
+            if graph:
+                try:
+                    graph.add_spec(task_id=task_id, spec_data=spec)
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Graph spec write failed for T{task_id}: {e}")
+
         # Write generation report
         report = {
             "status": "complete",
@@ -425,6 +434,21 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print()
 
     # Load project context for LLM prompts
+    # If graph is available, use it for task-specific context enrichment
+    graph_context_cache = {}
+    if graph:
+        try:
+            for task in tasks:
+                task_id = task.get("id", 0)
+                context = graph.query_spec_context(task_id=task_id)
+                if context:
+                    graph_context_cache[task_id] = context
+            if graph_context_cache:
+                print(print_green(f"  ✓ Graph context loaded for {len(graph_context_cache)} tasks"))
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Graph spec context query failed, using file context: {e}")
+
     project_context = _load_project_context(atomic_root)
 
     # Extract canonical layout from PRD Section 7 for path consistency
@@ -438,6 +462,30 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         generated, failed = _run_parallel_specs(
             tasks, project_context, openspec_dir, invoke_llm, canonical_layout
         )
+
+        # Write generated specs to knowledge graph
+        if graph:
+            graph_written = 0
+            for task in tasks:
+                task_id = task.get("id", 0)
+                spec_file = openspec_dir / f"spec-t{task_id}.json"
+                if spec_file.exists():
+                    try:
+                        raw = read_file(spec_file).strip()
+                        # Handle markdown-fenced JSON
+                        if raw.startswith("```"):
+                            first_nl = raw.index("\n")
+                            raw = raw[first_nl + 1:]
+                            if raw.endswith("```"):
+                                raw = raw[:-3].strip()
+                        spec_data = json.loads(raw)
+                        graph.add_spec(task_id=task_id, spec_data=spec_data)
+                        graph_written += 1
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).warning(f"Graph spec write failed for T{task_id}: {e}")
+            if graph_written > 0:
+                print(print_green(f"  ✓ {graph_written} specs written to knowledge graph"))
 
         # Write generation report
         report = {

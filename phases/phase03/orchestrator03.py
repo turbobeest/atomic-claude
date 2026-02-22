@@ -33,6 +33,7 @@ from orchestration.memory_enrichment import summarize_task_artifacts, enrich_mem
 from orchestration.task_memory import TaskMemory
 from orchestration.task_display import display_task_roster, resolve_agent_roster, is_infrastructure_task
 from core.llm.resolver import resolve_model, get_resolver
+from core.graph import get_graph
 
 
 def _make_flush_fn(phase_id: str, task_id: str):
@@ -79,6 +80,11 @@ def run_phase(resume_at: str = None) -> bool:
 
     state = StateManager()
     phase_id = "3-tasking"
+
+    # Initialize knowledge graph (None if disabled/unavailable)
+    graph = get_graph(phase_id=phase_id)
+    if graph:
+        graph.ensure_schema()
 
     # Register active phase in task-state.json so dashboard always knows
     state.set_current_phase(phase_id)
@@ -139,7 +145,7 @@ def run_phase(resume_at: str = None) -> bool:
         mem = TaskMemory(phase_id, task_id, task_name,
                          flush_fn=_make_flush_fn(phase_id, task_id))
         try:
-            success = task_func(mem)
+            success = task_func(mem, graph=graph)
             if not success:
                 state.mark_task_failed(phase_id, task_id, task_name)
                 print(f"\n❌ Task {task_id} failed")
@@ -215,34 +221,34 @@ def run_phase(resume_at: str = None) -> bool:
 
 # Task wrapper functions (call Python modules)
 
-def task_301_entry_initialization(mem=None) -> bool:
+def task_301_entry_initialization(mem=None, graph=None) -> bool:
     """Task 301: Entry initialization"""
-    return task_301(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_301(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
-def task_302_agent_selection(mem=None) -> bool:
+def task_302_agent_selection(mem=None, graph=None) -> bool:
     """Task 302: Agent selection"""
-    return task_302(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_302(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
-def task_303_task_decomposition(mem=None) -> bool:
+def task_303_task_decomposition(mem=None, graph=None) -> bool:
     """Task 303: Task decomposition"""
-    return task_303(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_303(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
-def task_304_dependency_analysis(mem=None) -> bool:
+def task_304_dependency_analysis(mem=None, graph=None) -> bool:
     """Task 304: Dependency analysis"""
-    return task_304(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_304(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
-def task_305_phase_audit(mem=None) -> bool:
+def task_305_phase_audit(mem=None, graph=None) -> bool:
     """Task 305: Phase audit"""
-    return task_305(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_305(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
-def task_306_closeout(mem=None) -> bool:
+def task_306_closeout(mem=None, graph=None) -> bool:
     """Task 306: Closeout"""
-    return task_306(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_306(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
 def create_closeout(phase_id: str, tasks: list):

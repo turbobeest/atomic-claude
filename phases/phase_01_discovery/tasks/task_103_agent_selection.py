@@ -32,7 +32,7 @@ from core.llm import invoke_llm as invoke
 from core.ui import phase_header, success, error, warning, info, step, wrap_text
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 103: Agent Selection.
 

@@ -26,7 +26,7 @@ from core.state import StateManager
 from core.ui import phase_header, success, error, warning, info, step, wrap_text
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 106: Approach Selection.
 
@@ -353,6 +353,25 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         if open_items:
             mem.warning(f"Open items: {', '.join(open_items[:3])}")
         mem.finding("Ready for Phase 2 (PRD)")
+
+    # Write to knowledge graph
+    if graph:
+        # Update decisions from 105 to "accepted" status
+        for i, decision in enumerate(key_decisions[:10]):
+            graph.add_decision(
+                id=f"DEC-106-{i+1}",
+                title=str(decision),
+                rationale=f"Confirmed by human at direction lock-in",
+                status="accepted",
+            )
+        if direction:
+            graph.add_finding(
+                id="F-106-locked-direction",
+                category="vision",
+                title="Locked Direction",
+                content=str(direction),
+                confidence=1.0,
+            )
 
     success("Direction confirmed")
     return True

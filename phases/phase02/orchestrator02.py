@@ -37,6 +37,7 @@ from orchestration.memory_enrichment import summarize_task_artifacts, enrich_mem
 from orchestration.task_memory import TaskMemory
 from orchestration.task_display import display_task_roster, resolve_agent_roster, is_infrastructure_task
 from core.llm.resolver import resolve_model, get_resolver
+from core.graph import get_graph
 
 
 def _make_flush_fn(phase_id: str, task_id: str):
@@ -87,6 +88,11 @@ def run_phase(resume_at: str = None) -> bool:
 
     state = StateManager()
     phase_id = "2-prd"
+
+    # Initialize knowledge graph (None if disabled/unavailable)
+    graph = get_graph(phase_id=phase_id)
+    if graph:
+        graph.ensure_schema()
 
     # Register active phase in task-state.json so dashboard always knows
     state.set_current_phase(phase_id)
@@ -162,7 +168,7 @@ def run_phase(resume_at: str = None) -> bool:
         mem = TaskMemory(phase_id, task_id, task_name,
                          flush_fn=_make_flush_fn(phase_id, task_id))
         try:
-            success = task_func(mem)
+            success = task_func(mem, graph=graph)
             if not success:
                 state.mark_task_failed(phase_id, task_id, task_name)
                 # Special handling for Task 206: Don't fail the phase, proceed to 206b
@@ -245,53 +251,53 @@ def run_phase(resume_at: str = None) -> bool:
 
 # Task wrapper functions (call Python modules)
 
-def task_201_entry_validation(mem=None) -> bool:
+def task_201_entry_validation(mem=None, graph=None) -> bool:
     """Task 201: Entry validation"""
-    return task_201(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_201(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
-def task_202_prd_setup(mem=None) -> bool:
+def task_202_prd_setup(mem=None, graph=None) -> bool:
     """Task 202: PRD setup"""
-    return task_202(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_202(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
-def task_203_prd_interview(mem=None) -> bool:
+def task_203_prd_interview(mem=None, graph=None) -> bool:
     """Task 203: PRD interview"""
-    return task_203(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_203(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
-def task_204_agent_selection(mem=None) -> bool:
+def task_204_agent_selection(mem=None, graph=None) -> bool:
     """Task 204: Agent selection"""
-    return task_204(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_204(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
-def task_205_prd_authoring(mem=None) -> bool:
+def task_205_prd_authoring(mem=None, graph=None) -> bool:
     """Task 205: PRD authoring"""
-    return task_205(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_205(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
-def task_206_prd_validation(mem=None) -> bool:
+def task_206_prd_validation(mem=None, graph=None) -> bool:
     """Task 206: PRD validation"""
-    return task_206(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_206(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
 # task_206b is a helper module called internally by task_206 when validation fails
 # It doesn't need a wrapper function here
 
 
-def task_207_prd_approval(mem=None) -> bool:
+def task_207_prd_approval(mem=None, graph=None) -> bool:
     """Task 207: PRD approval"""
-    return task_207(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_207(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
-def task_208_phase_audit(mem=None) -> bool:
+def task_208_phase_audit(mem=None, graph=None) -> bool:
     """Task 208: Phase audit"""
-    return task_208(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_208(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
-def task_209_closeout(mem=None) -> bool:
+def task_209_closeout(mem=None, graph=None) -> bool:
     """Task 209: Closeout"""
-    return task_209(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_209(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
 def create_closeout(phase_id: str, tasks: list):

@@ -32,7 +32,7 @@ from core.llm import invoke_llm as invoke
 from core.ui import phase_header, success, error, warning, info, step, wrap_text
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 104: Opening Dialogue.
 
@@ -328,6 +328,78 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         open_q = synthesis.get("open_questions", [])
         if open_q:
             mem.warning(f"Open questions: {', '.join(str(q) for q in open_q[:5])}")
+
+    # Write to knowledge graph
+    if graph:
+        # Source node for the dialogue itself
+        graph.add_source(
+            id="S-104-dialogue",
+            type="dialogue",
+            title=f"Opening Dialogue ({turn} turns)",
+        )
+        # Finding nodes from synthesis
+        vision = synthesis.get("vision", {})
+        if vision.get("core_problem"):
+            graph.add_finding(
+                id="F-104-core-problem",
+                category="vision",
+                title="Core Problem",
+                content=str(vision["core_problem"]),
+                source_id="S-104-dialogue",
+            )
+        if vision.get("solution_concept"):
+            graph.add_finding(
+                id="F-104-solution",
+                category="vision",
+                title="Solution Concept",
+                content=str(vision["solution_concept"]),
+                source_id="S-104-dialogue",
+            )
+        impact = synthesis.get("impact", {})
+        if impact.get("primary_impact"):
+            graph.add_finding(
+                id="F-104-impact",
+                category="impact",
+                title="Primary Impact",
+                content=str(impact["primary_impact"]),
+                source_id="S-104-dialogue",
+            )
+        audience = synthesis.get("audience", {})
+        if audience.get("primary"):
+            graph.add_finding(
+                id="F-104-audience",
+                category="audience",
+                title="Primary Audience",
+                content=str(audience["primary"]),
+                source_id="S-104-dialogue",
+            )
+        constraints = synthesis.get("constraints", "")
+        if constraints:
+            graph.add_finding(
+                id="F-104-constraints",
+                category="constraint",
+                title="Constraints",
+                content=str(constraints),
+                source_id="S-104-dialogue",
+            )
+        non_neg = synthesis.get("non_negotiables", [])
+        if non_neg:
+            graph.add_finding(
+                id="F-104-non-negotiables",
+                category="non_negotiable",
+                title="Non-Negotiables",
+                content=", ".join(str(n) for n in non_neg),
+                source_id="S-104-dialogue",
+            )
+        open_q = synthesis.get("open_questions", [])
+        if open_q:
+            graph.add_finding(
+                id="F-104-open-questions",
+                category="open_question",
+                title="Open Questions",
+                content=", ".join(str(q) for q in open_q),
+                source_id="S-104-dialogue",
+            )
 
     success("Opening dialogue complete")
     return True

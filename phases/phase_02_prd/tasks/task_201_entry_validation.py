@@ -9,12 +9,15 @@ Required artifacts from Phase 1:
   - corpus.json (optional but recommended)
 """
 
+import logging
 import os
 import sys
 import json
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -28,7 +31,7 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 201: Entry Validation.
 
@@ -36,6 +39,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
         uat_mode: If True, bypass interactive prompts for testing
+        graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
         True if task completed successfully, False otherwise
@@ -83,6 +87,17 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     # Load context from Phase 1
     context = load_phase1_context(phase1_dir)
+
+    # Supplement with graph data from Phase 1 (if available)
+    if graph:
+        try:
+            # Query Phase 1 findings and decisions from graph
+            phase1_graph_context = graph.reader.query_prd_context(section="vision", max_tokens=4000)
+            if phase1_graph_context:
+                context["graph_context"] = phase1_graph_context
+                logger.info("Loaded Phase 1 context from knowledge graph")
+        except Exception as e:
+            logger.warning(f"Graph query failed, using file-based context: {e}")
 
     # Save context summary
     context_file = output_dir / "phase1-context.json"

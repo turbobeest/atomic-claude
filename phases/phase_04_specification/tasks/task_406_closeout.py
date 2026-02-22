@@ -273,7 +273,7 @@ python main.py run 5
     return closeout_md, closeout_json
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 406: Phase Closeout.
 
@@ -281,6 +281,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
         uat_mode: If True, auto-approve closeout for testing
+        graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
         True if task completed successfully, False otherwise
@@ -381,6 +382,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     print(print_green(f"  ✓ Generated {closeout_md.name}"))
     print(print_green(f"  ✓ Generated {closeout_json.name}"))
     print()
+
+    # Export tasks.json with updated subtask info from knowledge graph
+    if graph:
+        try:
+            graph.export_tasks_json(output_dir / "tasks.json")
+            print(print_green("  ✓ Tasks exported from knowledge graph"))
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Graph export failed: {e}")
 
     # Memory Checkpoint (placeholder for future memory.py integration)
     tasks_data = json.loads(read_file(tasks_file))

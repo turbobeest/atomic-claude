@@ -28,7 +28,7 @@ from core.state import StateManager
 from core.ui import phase_header, success, error, warning, info, step
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 102: Import Requirements.
 
@@ -208,6 +208,16 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     with open(output_needs, 'w') as f:
         json.dump(needs_data, f, indent=2)
     print(f"  ✓ Copied to phase output")
+
+    # Write to knowledge graph
+    if graph:
+        for need in needs_data.get("needs", []):
+            graph.add_source(
+                id=f"S-102-{need.get('id', 'unknown')}",
+                type="need",
+                title=need.get("title", need.get("id", "unknown")),
+                file_path=need.get("source_file", ""),
+            )
 
     print()
 

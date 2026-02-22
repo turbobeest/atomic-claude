@@ -33,6 +33,7 @@ from orchestration.memory_enrichment import summarize_task_artifacts, enrich_mem
 from orchestration.task_memory import TaskMemory
 from orchestration.task_display import display_task_roster, resolve_agent_roster, is_infrastructure_task
 from core.llm.resolver import resolve_model, get_resolver
+from core.graph import get_graph
 
 
 def _make_flush_fn(phase_id: str, task_id: str):
@@ -79,6 +80,11 @@ def run_phase(resume_at: str = None) -> bool:
 
     state = StateManager()
     phase_id = "4-specification"
+
+    # Initialize knowledge graph (None if disabled/unavailable)
+    graph = get_graph(phase_id=phase_id)
+    if graph:
+        graph.ensure_schema()
 
     # Register active phase in task-state.json so dashboard always knows
     state.set_current_phase(phase_id)
@@ -139,7 +145,7 @@ def run_phase(resume_at: str = None) -> bool:
         mem = TaskMemory(phase_id, task_id, task_name,
                          flush_fn=_make_flush_fn(phase_id, task_id))
         try:
-            success = task_func(mem)
+            success = task_func(mem, graph=graph)
             if not success:
                 state.mark_task_failed(phase_id, task_id, task_name)
                 print(f"\n❌ Task {task_id} failed")
@@ -215,34 +221,34 @@ def run_phase(resume_at: str = None) -> bool:
 
 # Task wrapper functions (call Python modules)
 
-def task_401_entry_initialization(mem=None) -> bool:
+def task_401_entry_initialization(mem=None, graph=None) -> bool:
     """Task 401: Entry initialization"""
-    return task_401(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_401(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
-def task_402_agent_selection(mem=None) -> bool:
+def task_402_agent_selection(mem=None, graph=None) -> bool:
     """Task 402: Agent selection"""
-    return task_402(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_402(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
-def task_403_openspec_generation(mem=None) -> bool:
+def task_403_openspec_generation(mem=None, graph=None) -> bool:
     """Task 403: OpenSpec generation"""
-    return task_403(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_403(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
-def task_404_tdd_subtask_injection(mem=None) -> bool:
+def task_404_tdd_subtask_injection(mem=None, graph=None) -> bool:
     """Task 404: TDD subtask injection"""
-    return task_404(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_404(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
-def task_405_phase_audit(mem=None) -> bool:
+def task_405_phase_audit(mem=None, graph=None) -> bool:
     """Task 405: Phase audit"""
-    return task_405(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_405(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
-def task_406_closeout(mem=None) -> bool:
+def task_406_closeout(mem=None, graph=None) -> bool:
     """Task 406: Closeout"""
-    return task_406(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem)
+    return task_406(ATOMIC_ROOT, OUTPUT_DIR, UAT_MODE, mem=mem, graph=graph)
 
 
 def create_closeout(phase_id: str, tasks: list):

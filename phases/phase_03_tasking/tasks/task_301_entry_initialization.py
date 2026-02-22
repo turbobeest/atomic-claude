@@ -14,9 +14,12 @@ Initializes:
 
 import sys
 import json
+import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -30,7 +33,7 @@ from core.utils.cli_ui import (
 from core.utils.file_ops import ensure_dir, read_file, write_file
 
 
-def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None) -> bool:
+def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=None, graph=None) -> bool:
     """
     Execute Task 301: Entry & Initialization.
 
@@ -38,6 +41,7 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         atomic_root: Path to atomic-claude root directory
         output_dir: Path to phase output directory
         uat_mode: If True, bypass interactive prompts for testing
+        graph: Optional GraphManager instance for knowledge graph operations
 
     Returns:
         True if task completed successfully, False otherwise
@@ -169,6 +173,11 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
 
     # Configure TaskMaster for Bedrock if enabled
     _configure_taskmaster_provider(taskmaster_dir, output_dir, atomic_root)
+
+    # Knowledge graph status
+    if graph:
+        logger.info("Graph-powered tasking enabled, TaskMaster CLI optional")
+        print(print_green("  ✓ Knowledge graph available (TaskMaster CLI optional)"))
     print()
 
     # Summary
