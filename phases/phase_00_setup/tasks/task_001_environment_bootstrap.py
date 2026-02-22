@@ -242,7 +242,7 @@ def _check_tool(tool: str) -> Optional[str]:
             if result.returncode == 0:
                 return result.stdout.strip().split()[-1] if result.stdout.strip() else "installed"
         elif tool == "task-master":
-            return "installed"  # No version command
+            return "installed"  # Legacy — no longer required
         elif tool == "dot":
             result = subprocess.run([tool_path, "-V"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
@@ -405,7 +405,7 @@ def _show_recommended_tools(os_type: str) -> None:
     print(print_cyan("  RECOMMENDED TOOLS:"))
     print()
 
-    tools = ["gh", "docker", "task-master"]
+    tools = ["gh", "docker"]
 
     for tool in tools:
         RECOMMENDED_TOTAL += 1
@@ -418,7 +418,6 @@ def _show_recommended_tools(os_type: str) -> None:
             descs = {
                 "gh": "GitHub CLI",
                 "docker": "Required for FalkorDB knowledge graph",
-                "task-master": "Legacy task management (replaced by graph)",
             }
             desc = descs.get(tool, tool)
             print(print_yellow(f"    ○ {tool} - {desc}"))
