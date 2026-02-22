@@ -824,6 +824,12 @@ def _run_wizard(
                 for _host_url, host_models in inventory_ollama_models.items():
                     if isinstance(host_models, dict):
                         ollama_models.update(host_models)
+            elif isinstance(first_val, list):
+                # Keyed by host: {host_url: [model_name, ...]}
+                for _host_url, model_list in inventory_ollama_models.items():
+                    if isinstance(model_list, list):
+                        for model_name in model_list:
+                            ollama_models[model_name] = {"size": 0, "category": "general"}
             else:
                 ollama_models = dict(inventory_ollama_models)
     elif has_ollama:
