@@ -2219,6 +2219,205 @@ def select_audit(
     return f"phase-{phase_num}-audit"
 
 
+# ---------------------------------------------------------------------------
+# On-demand audit API (CLI and programmatic use)
+# ---------------------------------------------------------------------------
+
+def list_audits(
+    phase_num: int = None,
+    category: str = None,
+) -> list[dict]:
+    """
+    List available audits, optionally filtered by phase or category.
+
+    Args:
+        phase_num: If given, return only audits applicable to this phase.
+        category: If given, return only audits matching this category (case-insensitive).
+
+    Returns:
+        List of audit row dicts from the inventory CSV.
+    """
+    rows = _load_audit_inventory()
+    if phase_num is not None:
+        rows = _select_audits_for_phase(rows, phase_num)
+    if category:
+        cat_lower = category.lower()
+        rows = [r for r in rows if cat_lower in r.get("category", "").lower()]
+    return rows
+
+
+def search_audits(query: str) -> list[dict]:
+    """
+    Search audits by substring match on audit_id, audit_name, and category.
+
+    Args:
+        query: Search string (case-insensitive).
+
+    Returns:
+        Matching audit row dicts.
+    """
+    rows = _load_audit_inventory()
+    q = query.lower()
+    return [
+        r for r in rows
+        if q in r.get("audit_id", "").lower()
+        or q in r.get("audit_name", "").lower()
+        or q in r.get("category", "").lower()
+        or q in r.get("subcategory", "").lower()
+    ]
+
+
+def load_audit_results(phase_num: int = None) -> Optional[dict]:
+    """
+    Load existing audit report.json for a phase (or latest available).
+
+    Args:
+        phase_num: Specific phase, or None to auto-detect latest.
+
+    Returns:
+        Parsed report dict, or None if no results found.
+    """
+    audits_dir = _ATOMIC_ROOT.parent / ".outputs" / "audits"
+
+    if phase_num is not None:
+        report_path = audits_dir / f"phase-{phase_num}" / "report.json"
+        if report_path.exists():
+            return json.loads(report_path.read_text(encoding="utf-8"))
+        return None
+
+    # Auto-detect: find latest phase with audit results
+    if not audits_dir.exists():
+        return None
+    for pn in range(9, -1, -1):
+        rp = audits_dir / f"phase-{pn}" / "report.json"
+        if rp.exists():
+            return json.loads(rp.read_text(encoding="utf-8"))
+    return None
+
+
+def run_targeted_audit(
+    audit_ids: list = None,
+    category: str = None,
+    phase_num: int = None,
+    output_dir: Path = None,
+    interactive: bool = True,
+) -> list:
+    """
+    Run specific audits on demand (outside the pipeline phase gate).
+
+    Three filter modes:
+    - audit_ids: run specific audits by ID
+    - category: run all audits in a category
+    - phase_num alone: run phase-appropriate audits (like pipeline)
+
+    Auto-detects phase and output directory if not provided.
+
+    Args:
+        audit_ids: List of audit IDs to run.
+        category: Category name to filter by.
+        phase_num: Phase number for deliverable context.
+        output_dir: Phase output directory (auto-resolved if None).
+        interactive: If True, show audit plan TUI before running.
+
+    Returns:
+        List of AuditEvaluation results.
+    """
+    # Lazy imports to avoid circular deps
+    from orchestration.pipeline import PHASE_REGISTRY
+
+    # 1. Load inventory
+    rows = _load_audit_inventory()
+    if not rows:
+        print("  No audit inventory found.")
+        return []
+
+    # 2. Filter audits
+    if audit_ids:
+        all_ids = {r.get("audit_id", "") for r in rows}
+        missing = [aid for aid in audit_ids if aid not in all_ids]
+        if missing:
+            print(f"  Unknown audit ID(s): {', '.join(missing)}")
+            return []
+        audits = [r for r in rows if r.get("audit_id", "") in audit_ids]
+    elif category:
+        cat_lower = category.lower()
+        audits = [r for r in rows if cat_lower in r.get("category", "").lower()]
+        if not audits:
+            print(f"  No audits found for category '{category}'")
+            return []
+    elif phase_num is not None:
+        audits = _select_audits_for_phase(rows, phase_num)
+        if not audits:
+            print(f"  No applicable audits for phase {phase_num}")
+            return []
+    else:
+        print("  Specify audit_ids, category, or phase_num")
+        return []
+
+    # 3. Auto-detect phase if not provided
+    if phase_num is None:
+        project_root = _ATOMIC_ROOT.parent
+        for pn in range(9, -1, -1):
+            meta = PHASE_REGISTRY.get(pn)
+            if meta:
+                closeout = project_root / ".outputs" / meta.phase_id / "closeout.json"
+                if closeout.exists():
+                    phase_num = pn
+                    break
+        if phase_num is None:
+            # Fall back to latest output dir that exists
+            for pn in range(9, -1, -1):
+                meta = PHASE_REGISTRY.get(pn)
+                if meta and (project_root / ".outputs" / meta.phase_id).exists():
+                    phase_num = pn
+                    break
+        if phase_num is None:
+            print("  No phase output found. Run a phase first or specify --phase.")
+            return []
+
+    # 4. Resolve output_dir and phase_id
+    meta = PHASE_REGISTRY.get(phase_num)
+    phase_id = meta.phase_id if meta else f"{phase_num}-unknown"
+    if output_dir is None:
+        output_dir = _ATOMIC_ROOT.parent / ".outputs" / phase_id
+
+    # 5. Gather deliverables
+    project_root = _ATOMIC_ROOT.parent
+    extra_dirs = _get_phase_deliverable_dirs(phase_num, project_root)
+    deliverables = _gather_deliverables(output_dir, extra_dirs=extra_dirs)
+
+    # 6. Build configs
+    audit_configs = _build_audit_configs(audits[:MAX_AUDITS])
+
+    # 7. Optional interactive plan
+    if interactive:
+        audit_configs = _display_audit_plan(audit_configs, phase_num)
+        if not audit_configs:
+            print("  Audit skipped by user.")
+            return []
+
+    # 8. Run parallel evaluations
+    print(f"\n  Evaluating {len(audit_configs)} audit(s) against phase {phase_num} deliverables...")
+    try:
+        evaluations = _run_parallel_evaluations(
+            audit_configs, deliverables, phase_num, phase_id
+        )
+    except Exception as e:
+        print(f"  Audit evaluation failed: {e}")
+        return []
+
+    if not evaluations:
+        print("  No evaluation results.")
+        return []
+
+    # 9. Save and display
+    audit_dir = _save_audit_markdowns(evaluations, phase_num)
+    _save_audit_report(evaluations, phase_num, phase_id, audit_dir)
+    _display_rich_results(evaluations, phase_num, audit_dir)
+
+    return evaluations
+
+
 class AuditManager:
     """Manages audit execution and reporting."""
 

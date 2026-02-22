@@ -131,6 +131,98 @@ def do_task(args):
         sys.exit(1)
 
 
+def do_audit(args):
+    """On-demand audit operations."""
+    from core.audit import (
+        run_targeted_audit, run_phase_audit, list_audits,
+        search_audits, load_audit_results, PHASE_CSV_COLUMN,
+    )
+
+    subcmd = args.audit_command
+
+    if subcmd == "run":
+        if args.audit_id:
+            # Single audit by ID
+            run_targeted_audit(
+                audit_ids=[args.audit_id],
+                phase_num=args.phase,
+                interactive=not args.no_interactive,
+            )
+        elif args.phase is not None and not args.category:
+            # Full phase audit — delegate to existing pipeline function
+            meta = PHASE_REGISTRY.get(args.phase)
+            if not meta:
+                print(f"Invalid phase number: {args.phase}")
+                sys.exit(1)
+            output_dir = Path(__file__).parent.parent / ".outputs" / meta.phase_id
+            run_phase_audit(args.phase, meta.phase_id, output_dir)
+        elif args.category:
+            # All audits in a category
+            run_targeted_audit(
+                category=args.category,
+                phase_num=args.phase,
+                interactive=not args.no_interactive,
+            )
+        else:
+            print("Specify an audit_id, --phase, or --category")
+            sys.exit(1)
+
+    elif subcmd == "list":
+        audits = list_audits(phase_num=args.phase, category=args.category)
+        if not audits:
+            print("No audits found matching criteria.")
+            return
+        print(f"\n  {'ID':<55} {'Sev':<9} {'Category':<30} Name")
+        print(f"  {'-'*120}")
+        for a in audits:
+            aid = a.get("audit_id", "")[:54]
+            sev = a.get("severity", "?")[:8]
+            cat = a.get("category", "?")[:29]
+            name = a.get("audit_name", "Unnamed")
+            print(f"  {aid:<55} {sev:<9} {cat:<30} {name}")
+        print(f"\n  {len(audits)} audit(s) found.\n")
+
+    elif subcmd == "search":
+        results = search_audits(args.query)
+        if not results:
+            print(f"No audits matching '{args.query}'")
+            return
+        print(f"\n  {'ID':<55} {'Sev':<9} {'Category':<30} Name")
+        print(f"  {'-'*120}")
+        for a in results:
+            aid = a.get("audit_id", "")[:54]
+            sev = a.get("severity", "?")[:8]
+            cat = a.get("category", "?")[:29]
+            name = a.get("audit_name", "Unnamed")
+            print(f"  {aid:<55} {sev:<9} {cat:<30} {name}")
+        print(f"\n  {len(results)} result(s) for '{args.query}'.\n")
+
+    elif subcmd == "results":
+        report = load_audit_results(phase_num=args.phase)
+        if not report:
+            phase_label = f"phase {args.phase}" if args.phase is not None else "any phase"
+            print(f"No audit results found for {phase_label}.")
+            return
+        summary = report.get("summary", {})
+        print(f"\n  Phase {report.get('phase_num', '?')} ({report.get('phase_id', '?')}) "
+              f"— {report.get('overall_status', '?')}")
+        print(f"  Passed: {summary.get('passed', 0)}  "
+              f"Warnings: {summary.get('warnings', 0)}  "
+              f"Failed: {summary.get('failed', 0)}")
+        print()
+        for ev in report.get("evaluations", []):
+            status_map = {"pass": "PASS", "warn": "WARN", "fail": "FAIL"}
+            icon = status_map.get(ev.get("status"), "?")
+            print(f"  [{icon}] {ev.get('audit_id', '?')}: "
+                  f"{ev.get('audit_name', 'Unnamed')} "
+                  f"({ev.get('severity', '?')})")
+        print()
+
+    else:
+        print("Unknown audit subcommand. Use: run, list, search, results")
+        sys.exit(1)
+
+
 def do_reset():
     """Full pipeline reset."""
     import shutil
@@ -179,6 +271,11 @@ Examples:
   python main.py task complexity         # Analyze task complexity
   python main.py task validate           # Check dependency graph
   python main.py task add "Title" "Desc" # Add a new task
+  python main.py audit list              # List all audits
+  python main.py audit list --phase 2    # List PRD-applicable audits
+  python main.py audit search csrf       # Search audits by keyword
+  python main.py audit run SEC-001       # Run a single audit
+  python main.py audit results           # Show latest audit results
         """
     )
 
@@ -255,6 +352,48 @@ Subcommands:
     # task fix
     task_subparsers.add_parser("fix", help="Auto-repair dependency graph issues")
 
+    # Audit command group (on-demand audit operations)
+    audit_parser = subparsers.add_parser(
+        "audit", help="Run, list, and search audits on demand",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Subcommands:
+  run <audit_id>              Run a single audit by ID
+  run --phase <N>             Run all phase-appropriate audits
+  run --category <name>       Run all audits in a category
+  list                        List all audits (summary table)
+  list --phase <N>            List audits for a specific phase
+  list --category <name>      List audits in a category
+  search <query>              Search audits by keyword
+  results                     Show latest audit results
+  results --phase <N>         Show results for specific phase
+        """,
+    )
+    audit_subparsers = audit_parser.add_subparsers(dest="audit_command", help="Audit operation")
+
+    # audit run
+    audit_run = audit_subparsers.add_parser("run", help="Run audit(s)")
+    audit_run.add_argument("audit_id", nargs="?", default=None, help="Single audit ID to run")
+    audit_run.add_argument("--phase", "-p", type=int, default=None, help="Phase number (0-9)")
+    audit_run.add_argument("--category", "-c", default=None, help="Category name")
+    audit_run.add_argument(
+        "--no-interactive", action="store_true", default=False,
+        help="Skip interactive plan confirmation",
+    )
+
+    # audit list
+    audit_list = audit_subparsers.add_parser("list", help="List available audits")
+    audit_list.add_argument("--phase", "-p", type=int, default=None, help="Filter by phase number")
+    audit_list.add_argument("--category", "-c", default=None, help="Filter by category")
+
+    # audit search
+    audit_search = audit_subparsers.add_parser("search", help="Search audits by keyword")
+    audit_search.add_argument("query", help="Search query string")
+
+    # audit results
+    audit_results = audit_subparsers.add_parser("results", help="Show latest audit results")
+    audit_results.add_argument("--phase", "-p", type=int, default=None, help="Phase number")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -274,6 +413,11 @@ Subcommands:
             task_parser.print_help()
             sys.exit(1)
         do_task(args)
+    elif args.command == "audit":
+        if not getattr(args, "audit_command", None):
+            audit_parser.print_help()
+            sys.exit(1)
+        do_audit(args)
 
 
 if __name__ == "__main__":
