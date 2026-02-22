@@ -73,18 +73,21 @@ def run_phase(resume_at: str = None) -> bool:
     Returns:
         bool: True if phase completed successfully
     """
-    phase_header("Phase 0: Setup")
+    if resume_at:
+        phase_header("Phase 0: Setup (resuming)")
+    else:
+        phase_header("Phase 0: Setup")
 
-    print("  This phase walks you through project setup in 5 steps:")
-    print()
-    print("    1. Environment bootstrap — OS, tools, npm deps, dashboard launch")
-    print("    2. Provider detection    — credentials, Ollama hosts, health checks")
-    print("    3. Setup wizard          — project identity, type, pipeline, LLM preferences")
-    print("    4. Material scan         — scan, collect references, and organize")
-    print("    5. Repository & system   — agents/audits/skills, git, system capabilities")
-    print()
-    print("  You can quit at any prompt with 'q' and resume later.")
-    print()
+        print("  This phase walks you through project setup in 5 steps:")
+        print()
+        print("    1. Environment bootstrap — OS, tools, npm deps, dashboard launch")
+        print("    2. Provider detection    — credentials, Ollama hosts, health checks")
+        print("    3. Setup wizard          — project identity, type, pipeline, LLM preferences")
+        print("    4. Material scan         — scan, collect references, and organize")
+        print("    5. Repository & system   — agents/audits/skills, git, system capabilities")
+        print()
+        print("  You can quit at any prompt with 'q' and resume later.")
+        print()
 
     state = StateManager()
     phase_id = "0-setup"

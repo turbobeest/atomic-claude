@@ -75,7 +75,10 @@ def run_phase(resume_at: str = None) -> bool:
     Returns:
         bool: True if phase completed successfully
     """
-    phase_header("Phase 9: Release")
+    if resume_at:
+        phase_header("Phase 9: Release (resuming)")
+    else:
+        phase_header("Phase 9: Release")
 
     state = StateManager()
     phase_id = "9-release"

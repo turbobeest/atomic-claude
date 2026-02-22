@@ -503,8 +503,9 @@ class PhasePipeline:
                 phase_num, auto_chain, transition_mode
             )
 
-        # Display phase header
-        self._display_phase_header(metadata)
+        # Display phase header (skip when resuming — orchestrator prints its own)
+        if not resume_at:
+            self._display_phase_header(metadata)
 
         # Set current phase in state
         self.state.set_current_phase(metadata.phase_id)
