@@ -222,6 +222,7 @@ def is_allowed_file(file_path: Path, acp_root: Path) -> bool:
         "setup.py", "MANIFEST.in",
         "pytest.ini", "coverage.xml",
         "requirements.txt", "requirements-dev.txt", "requirements-llm.txt",
+        "docker-compose.yml", "docker-compose.yaml",
     }
     if str(rel_path) in allowed_root_files:
         return True
@@ -277,7 +278,10 @@ def classify_violation(file_path: Path, acp_root: Path) -> Dict[str, Any]:
                 "reason": "Project test file"
             }
 
-    if suffix == ".md" and not any(allowed in str(rel_path) for allowed in ["README.md", "docs/", "reports/"]):
+    if suffix == ".md" and not any(allowed in str(rel_path) for allowed in [
+        "README.md", "CLAUDE.md", "OPERATIONAL.md", "PROJECT-STRUCTURE.md",
+        "docs/", "reports/"
+    ]) and not file_path.name.startswith("PLAN-") and not file_path.name.startswith("REFACTORING-"):
         return {
             "path": str(rel_path),
             "correct_location": "../docs/ or reports/ (if scratch work)",
