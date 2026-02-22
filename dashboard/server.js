@@ -130,39 +130,56 @@ app.get('/api/config', (req, res) => {
     // Extract project name with intelligent fallbacks
     let projectName = config.extracted?.project?.name || config.project?.name;
 
-    // If project name is a test value or missing, read directly from setup.md
+    // If project name is a test value or missing, read directly from setup files
     if (!projectName || projectName === 'atomic-test' || projectName === 'test-project') {
+      // Check both setup.md (user project file) and SETUP-GUIDE.md (template)
       const setupFile = path.join(ATOMIC_ROOT, 'initialization', 'setup.md');
       const setupGuideFile = path.join(ATOMIC_ROOT, 'initialization', 'SETUP-GUIDE.md');
-      const actualSetupFile = fs.existsSync(setupFile) ? setupFile
-        : fs.existsSync(setupGuideFile) ? setupGuideFile : null;
-      if (actualSetupFile) {
-        const setupContent = fs.readFileSync(actualSetupFile, 'utf8');
+      const filesToCheck = [setupFile, setupGuideFile].filter(f => fs.existsSync(f));
 
-        // First priority: Look for **name** field
+      for (const f of filesToCheck) {
+        const setupContent = fs.readFileSync(f, 'utf8');
+
+        // Look for **name** field (works in both setup.md and SETUP-GUIDE.md)
         const nameMatch = setupContent.match(/^\*\*name\*\*:\s*(.+)$/m);
         if (nameMatch && nameMatch[1].trim() &&
             nameMatch[1].trim() !== 'atomic-test' &&
             nameMatch[1].trim() !== 'test-project') {
           projectName = nameMatch[1].trim();
-        } else {
-          // Second priority: Look for first heading (e.g., "# WeatherWise")
+          break;
+        }
+
+        // Heading fallback only for setup.md (user's project file), not the template
+        if (f === setupFile) {
           const headingMatch = setupContent.match(/^#\s+([^\n]+)/m);
           if (headingMatch) {
             const heading = headingMatch[1].replace(/\s+Configuration$/i, '').trim();
             if (heading.toLowerCase() !== 'test project' &&
-                heading.toLowerCase() !== 'atomic claude') {
+                heading.toLowerCase() !== 'atomic claude' &&
+                heading.toLowerCase() !== 'setup guide') {
               projectName = heading;
+              break;
             }
           }
         }
       }
 
       // Ultimate fallback: use project directory name, prettified
-      // When deployed inside a host project (PROJECT_ROOT != ATOMIC_ROOT),
-      // use the host project name, not "atomic-claude"
+      // Detect host project: if ATOMIC_ROOT basename is "atomic-claude" and a
+      // parent directory exists with .outputs/ or its own project files, use the
+      // parent name instead (e.g., "eloreum" instead of "atomic-claude")
       if (!projectName || projectName === 'atomic-test' || projectName === 'test-project') {
-        const nameSource = (PROJECT_ROOT !== ATOMIC_ROOT) ? PROJECT_ROOT : ATOMIC_ROOT;
+        let nameSource = ATOMIC_ROOT;
+        const atomicBasename = path.basename(ATOMIC_ROOT).toLowerCase();
+        if (atomicBasename === 'atomic-claude' || atomicBasename === 'atomic-claude2') {
+          const parentDir = path.resolve(ATOMIC_ROOT, '..');
+          // If parent has .outputs/ or other project indicators, it's a host project
+          if (fs.existsSync(path.join(parentDir, '.outputs')) ||
+              fs.existsSync(path.join(parentDir, 'src')) ||
+              fs.existsSync(path.join(parentDir, 'package.json'))) {
+            nameSource = parentDir;
+          }
+        }
         const repoName = path.basename(nameSource);
         projectName = repoName
           .split(/[-_]/)
