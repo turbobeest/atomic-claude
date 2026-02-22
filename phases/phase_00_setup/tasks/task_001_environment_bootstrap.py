@@ -214,37 +214,50 @@ def _check_tool(tool: str) -> Optional[str]:
     Returns:
         Version string or None if not installed
     """
-    if not shutil.which(tool):
+    # For cargo/rustup, also check $HOME/.cargo/bin (not always on PATH)
+    tool_path = shutil.which(tool)
+    if not tool_path and tool in ("cargo", "rustup"):
+        cargo_bin = Path.home() / ".cargo" / "bin" / tool
+        if cargo_bin.exists():
+            tool_path = str(cargo_bin)
+
+    if not tool_path:
         return None
 
     try:
         if tool == "git":
-            result = subprocess.run([tool, "--version"], capture_output=True, text=True, timeout=5)
+            result = subprocess.run([tool_path, "--version"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 return result.stdout.split()[2]
         elif tool == "jq":
-            result = subprocess.run([tool, "--version"], capture_output=True, text=True, timeout=5)
+            result = subprocess.run([tool_path, "--version"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 return result.stdout.strip().replace("jq-", "")
         elif tool == "node":
-            result = subprocess.run([tool, "--version"], capture_output=True, text=True, timeout=5)
+            result = subprocess.run([tool_path, "--version"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 return result.stdout.strip().lstrip('v')
         elif tool == "claude":
-            result = subprocess.run([tool, "--version"], capture_output=True, text=True, timeout=5)
+            result = subprocess.run([tool_path, "--version"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 return result.stdout.strip().split()[-1] if result.stdout.strip() else "installed"
         elif tool == "task-master":
             return "installed"  # No version command
         elif tool == "dot":
-            result = subprocess.run([tool, "-V"], capture_output=True, text=True, timeout=5)
+            result = subprocess.run([tool_path, "-V"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 parts = result.stdout.split()
                 for i, part in enumerate(parts):
                     if part == "version" and i + 1 < len(parts):
                         return parts[i + 1]
+        elif tool in ("cargo", "rustup"):
+            result = subprocess.run([tool_path, "--version"], capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                # "cargo 1.93.1 (...)" or "rustup 1.27.1 (...)"
+                parts = result.stdout.strip().split()
+                return parts[1] if len(parts) >= 2 else "installed"
         else:
-            result = subprocess.run([tool, "--version"], capture_output=True, text=True, timeout=5)
+            result = subprocess.run([tool_path, "--version"], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 return result.stdout.split()[0] if result.stdout else "installed"
     except Exception:
@@ -295,6 +308,17 @@ def _get_install_cmd(tool: str, os_type: str) -> str:
             "arch": "sudo pacman -S graphviz",
             "windows": "winget install Graphviz.Graphviz",
         },
+        "rustup": {
+            "macos": "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh",
+            "debian": "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh",
+            "redhat": "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh",
+            "arch": "sudo pacman -S rustup && rustup default stable",
+            "windows": "winget install Rustlang.Rustup",
+            "*": "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh",
+        },
+        "cargo": {
+            "*": "Install via rustup: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh",
+        },
     }
 
     tool_cmds = commands.get(tool, {})
@@ -315,6 +339,7 @@ def _show_required_tools(os_type: str) -> None:
         ("claude", None),
         ("task-master", None),
         ("dot", None),  # graphviz
+        ("cargo", None),  # Rust toolchain (installed via rustup)
     ]
 
     for tool, min_version in tools:
@@ -332,10 +357,21 @@ def _show_required_tools(os_type: str) -> None:
                     print(print_yellow(f"    ! {tool} (v{version}) - v{min_version}+ required"))
                     print(print_dim(f"      {_get_install_cmd(tool, os_type)}"))
             else:
-                print(print_green(f"    ✓ {tool} ({version})"))
-                REQUIRED_INSTALLED += 1
+                if tool == "cargo":
+                    # Show PATH hint if cargo found in ~/.cargo/bin but not on PATH
+                    if not shutil.which("cargo"):
+                        print(print_green(f"    ✓ {tool} ({version})") + print_dim("  — found in ~/.cargo/bin"))
+                        print(print_dim("      Add to PATH: source \"$HOME/.cargo/env\""))
+                    else:
+                        print(print_green(f"    ✓ {tool} ({version})"))
+                    REQUIRED_INSTALLED += 1
+                else:
+                    print(print_green(f"    ✓ {tool} ({version})"))
+                    REQUIRED_INSTALLED += 1
         else:
             tool_name = "graphviz" if tool == "dot" else tool
+            if tool == "cargo":
+                tool_name = "cargo (Rust toolchain)"
             print(print_red(f"    ✗ {tool_name} - REQUIRED"))
             print(print_dim(f"      {_get_install_cmd(tool, os_type)}"))
 
@@ -346,7 +382,7 @@ def _recheck_required(os_type: str) -> None:
     """Recheck required tools (silent, just updates counters)."""
     global REQUIRED_TOTAL, REQUIRED_INSTALLED
 
-    tools = ["git", "jq", "node", "claude", "task-master", "dot"]
+    tools = ["git", "jq", "node", "claude", "task-master", "dot", "cargo"]
 
     for tool in tools:
         REQUIRED_TOTAL += 1
@@ -396,15 +432,17 @@ def _show_quick_install(os_type: str) -> None:
         print(print_dim("    # All required tools:"))
         print(print_bold("    brew install git jq node graphviz"))
         print(print_bold("    npm install -g @anthropic-ai/claude-code task-master-ai"))
+        print(print_bold("    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"))
     elif os_type == "debian":
         print(print_dim("    # All required tools:"))
         print(print_bold("    sudo apt update && sudo apt install -y git jq graphviz"))
         print(print_bold("    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -"))
         print(print_bold("    sudo apt install -y nodejs"))
         print(print_bold("    npm install -g @anthropic-ai/claude-code task-master-ai"))
+        print(print_bold("    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"))
     elif os_type == "windows":
         print(print_dim("    # All required tools (PowerShell as Admin):"))
-        print(print_bold("    winget install Git.Git jqlang.jq OpenJS.NodeJS.LTS Graphviz.Graphviz"))
+        print(print_bold("    winget install Git.Git jqlang.jq OpenJS.NodeJS.LTS Graphviz.Graphviz Rustlang.Rustup"))
         print(print_bold("    npm install -g @anthropic-ai/claude-code task-master-ai"))
     else:
         print(print_dim("    See tool-specific install commands above"))
@@ -595,12 +633,21 @@ def _record_environment(config_file: Path, os_type: str) -> None:
         except (json.JSONDecodeError, OSError):
             pass
 
+    # Record cargo/rustup availability and PATH status
+    cargo_version = _check_tool("cargo")
+    cargo_on_path = shutil.which("cargo") is not None
+    cargo_in_home = (Path.home() / ".cargo" / "bin" / "cargo").exists()
+
     config['environment'] = {
         "os_type": os_type,
         "required_total": REQUIRED_TOTAL,
         "required_installed": REQUIRED_INSTALLED,
         "recommended_total": RECOMMENDED_TOTAL,
         "recommended_installed": RECOMMENDED_INSTALLED,
+        "cargo_available": cargo_version is not None,
+        "cargo_version": cargo_version,
+        "cargo_on_path": cargo_on_path,
+        "cargo_env_source_needed": cargo_in_home and not cargo_on_path,
         "checked_at": datetime.now().isoformat(),
     }
     write_file(config_file, json.dumps(config, indent=2))
