@@ -337,7 +337,6 @@ def _show_required_tools(os_type: str) -> None:
         ("jq", None),
         ("node", 18),  # Minimum version
         ("claude", None),
-        ("task-master", None),
         ("dot", None),  # graphviz
         ("cargo", None),  # Rust toolchain (installed via rustup)
     ]
@@ -382,7 +381,7 @@ def _recheck_required(os_type: str) -> None:
     """Recheck required tools (silent, just updates counters)."""
     global REQUIRED_TOTAL, REQUIRED_INSTALLED
 
-    tools = ["git", "jq", "node", "claude", "task-master", "dot", "cargo"]
+    tools = ["git", "jq", "node", "claude", "dot", "cargo"]
 
     for tool in tools:
         REQUIRED_TOTAL += 1
@@ -406,7 +405,7 @@ def _show_recommended_tools(os_type: str) -> None:
     print(print_cyan("  RECOMMENDED TOOLS:"))
     print()
 
-    tools = ["gh", "docker"]
+    tools = ["gh", "docker", "task-master"]
 
     for tool in tools:
         RECOMMENDED_TOTAL += 1
@@ -416,7 +415,12 @@ def _show_recommended_tools(os_type: str) -> None:
             print(print_green(f"    ✓ {tool} ({version})"))
             RECOMMENDED_INSTALLED += 1
         else:
-            desc = "GitHub CLI" if tool == "gh" else "Containerized deployment"
+            descs = {
+                "gh": "GitHub CLI",
+                "docker": "Required for FalkorDB knowledge graph",
+                "task-master": "Legacy task management (replaced by graph)",
+            }
+            desc = descs.get(tool, tool)
             print(print_yellow(f"    ○ {tool} - {desc}"))
             print(print_dim(f"      {_get_install_cmd(tool, os_type)}"))
 
@@ -431,19 +435,19 @@ def _show_quick_install(os_type: str) -> None:
     if os_type == "macos":
         print(print_dim("    # All required tools:"))
         print(print_bold("    brew install git jq node graphviz"))
-        print(print_bold("    npm install -g @anthropic-ai/claude-code task-master-ai"))
+        print(print_bold("    npm install -g @anthropic-ai/claude-code"))
         print(print_bold("    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"))
     elif os_type == "debian":
         print(print_dim("    # All required tools:"))
         print(print_bold("    sudo apt update && sudo apt install -y git jq graphviz"))
         print(print_bold("    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -"))
         print(print_bold("    sudo apt install -y nodejs"))
-        print(print_bold("    npm install -g @anthropic-ai/claude-code task-master-ai"))
+        print(print_bold("    npm install -g @anthropic-ai/claude-code"))
         print(print_bold("    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"))
     elif os_type == "windows":
         print(print_dim("    # All required tools (PowerShell as Admin):"))
         print(print_bold("    winget install Git.Git jqlang.jq OpenJS.NodeJS.LTS Graphviz.Graphviz Rustlang.Rustup"))
-        print(print_bold("    npm install -g @anthropic-ai/claude-code task-master-ai"))
+        print(print_bold("    npm install -g @anthropic-ai/claude-code"))
     else:
         print(print_dim("    See tool-specific install commands above"))
 
@@ -457,11 +461,9 @@ def _show_airgap_note() -> None:
     print(print_dim("  │                                                         │"))
     print(print_dim("  │ Download these packages on a connected machine:         │"))
     print(print_dim("  │   npm pack @anthropic-ai/claude-code                    │"))
-    print(print_dim("  │   npm pack task-master-ai                               │"))
     print(print_dim("  │                                                         │"))
     print(print_dim("  │ Transfer .tgz files and install with:                   │"))
     print(print_dim("  │   npm install -g ./anthropic-ai-claude-code-*.tgz       │"))
-    print(print_dim("  │   npm install -g ./task-master-ai-*.tgz                 │"))
     print(print_dim("  └─────────────────────────────────────────────────────────┘"))
     print()
 
