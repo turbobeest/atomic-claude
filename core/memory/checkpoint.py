@@ -16,18 +16,20 @@ from .store import MemoryStore
 class CheckpointManager:
     """Manage memory checkpoints for recovery."""
 
-    def __init__(self, state_dir: Path, store: MemoryStore):
+    def __init__(self, state_dir: Path, store: MemoryStore, graph=None):
         """
         Initialize checkpoint manager.
 
         Args:
             state_dir: State directory
             store: Memory store instance
+            graph: Optional GraphManager for dual-write to FalkorDB
         """
         self.state_dir = Path(state_dir)
         self.checkpoint_dir = self.state_dir / "memory-checkpoints"
         self.head_file = self.state_dir / "memory-head.json"
         self.store = store
+        self._graph = graph
 
         # Create checkpoint directory
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -56,7 +58,7 @@ class CheckpointManager:
             Checkpoint ID
         """
         # Generate checkpoint ID
-        checkpoint_id = f"phase{phase}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        checkpoint_id = f"phase{phase}-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"
 
         # Get project name from head
         head = self._load_head()
@@ -87,6 +89,20 @@ class CheckpointManager:
         checkpoint_file = self.checkpoint_dir / f"{checkpoint_id}.json"
         with open(checkpoint_file, 'w', encoding='utf-8') as f:
             json.dump(checkpoint.dict(), f, indent=2, default=str)
+
+        # Dual-write to graph
+        if self._graph:
+            try:
+                self._graph.save_checkpoint(
+                    checkpoint_id=checkpoint_id,
+                    phase=phase,
+                    phase_name=phase_name,
+                    summary=summary,
+                    key_decisions=key_decisions,
+                    artifacts=artifacts,
+                )
+            except Exception:
+                pass  # Non-blocking
 
         # Update head
         self._update_head(phase, checkpoint_id)
@@ -246,6 +262,13 @@ class CheckpointManager:
                     json.dump(checkpoint.dict(), f, indent=2, default=str)
 
                 invalidated += 1
+
+        # Also invalidate in graph
+        if self._graph:
+            try:
+                self._graph.invalidate_checkpoints_after(phase_num)
+            except Exception:
+                pass  # Non-blocking
 
         return invalidated
 

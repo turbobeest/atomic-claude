@@ -2,6 +2,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from core.graph.connection import GraphConnection
+from core.graph.exceptions import GraphUnavailableError
 
 
 class TestGraphConnectionGet:
@@ -12,18 +13,11 @@ class TestGraphConnectionGet:
     def teardown_method(self):
         GraphConnection.reset()
 
-    @patch.dict("os.environ", {"ATOMIC_GRAPH_ENABLED": "false"})
-    def test_returns_none_when_disabled(self):
-        result = GraphConnection.get()
-        assert result is None
-
-    @patch.dict("os.environ", {"ATOMIC_GRAPH_ENABLED": "true"})
     @patch("core.graph.connection.HAS_FALKORDB", False)
-    def test_returns_none_without_package(self):
-        result = GraphConnection.get()
-        assert result is None
+    def test_raises_without_package(self):
+        with pytest.raises(GraphUnavailableError, match="not installed"):
+            GraphConnection.get()
 
-    @patch.dict("os.environ", {"ATOMIC_GRAPH_ENABLED": "true"})
     @patch("core.graph.connection.HAS_FALKORDB", True)
     @patch("core.graph.connection.FalkorDB")
     def test_successful_connection(self, mock_falkor_cls):
@@ -35,17 +29,15 @@ class TestGraphConnectionGet:
         assert result is not None
         assert result.connected is True
 
-    @patch.dict("os.environ", {"ATOMIC_GRAPH_ENABLED": "true"})
     @patch("core.graph.connection.HAS_FALKORDB", True)
     @patch("core.graph.connection.FalkorDB")
-    def test_connection_failure_returns_none(self, mock_falkor_cls):
+    def test_connection_failure_raises(self, mock_falkor_cls):
         mock_falkor_cls.side_effect = Exception("Connection refused")
 
-        result = GraphConnection.get()
-        assert result is None
+        with pytest.raises(GraphUnavailableError, match="Connection refused"):
+            GraphConnection.get()
 
     @patch.dict("os.environ", {
-        "ATOMIC_GRAPH_ENABLED": "true",
         "ATOMIC_GRAPH_HOST": "myhost",
         "ATOMIC_GRAPH_PORT": "7777",
         "ATOMIC_GRAPH_NAME": "my-graph",
@@ -70,7 +62,6 @@ class TestGraphConnectionSingleton:
     def teardown_method(self):
         GraphConnection.reset()
 
-    @patch.dict("os.environ", {"ATOMIC_GRAPH_ENABLED": "true"})
     @patch("core.graph.connection.HAS_FALKORDB", True)
     @patch("core.graph.connection.FalkorDB")
     def test_returns_same_instance(self, mock_falkor_cls):

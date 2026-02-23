@@ -222,11 +222,15 @@ class TestListCheckpoints:
         checkpoints = manager.list_checkpoints(status=CheckpointStatus.VALID)
         assert len(checkpoints) == 1
 
-        # Invalidate it
+        # Invalidate all after phase -1 (phase 0 > -1 is True, so it gets invalidated)
         manager.invalidate_after_phase(-1)
 
-        # Should still find it with VALID filter (phase 0 > -1 is false)
+        # No valid checkpoints remain
         checkpoints = manager.list_checkpoints(status=CheckpointStatus.VALID)
+        assert len(checkpoints) == 0
+
+        # Should find it with INVALIDATED filter
+        checkpoints = manager.list_checkpoints(status=CheckpointStatus.INVALIDATED)
         assert len(checkpoints) == 1
 
     def test_list_checkpoints_sorted_by_date(self, manager):
