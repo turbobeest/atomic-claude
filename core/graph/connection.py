@@ -8,13 +8,13 @@ and graceful degradation.
 import os
 import logging
 import threading
-from typing import Optional, Any, Dict, List
+from typing import Optional, Any, Dict
 
 from .exceptions import GraphUnavailableError, QueryError
 
 logger = logging.getLogger(__name__)
 
-# Guard import — falkordb is optional
+# Guard import — falkordb is required
 try:
     from falkordb import FalkorDB
     HAS_FALKORDB = True
@@ -29,8 +29,7 @@ class GraphConnection:
 
     Usage:
         conn = GraphConnection.get()
-        if conn:
-            result = conn.query("MATCH (n) RETURN n LIMIT 1")
+        result = conn.query("MATCH (n) RETURN n LIMIT 1")
     """
 
     _instance: Optional['GraphConnection'] = None
@@ -47,34 +46,29 @@ class GraphConnection:
 
     @classmethod
     def get(cls, host: str = None, port: int = None,
-            graph_name: str = None) -> Optional['GraphConnection']:
+            graph_name: str = None) -> 'GraphConnection':
         """
         Get or create singleton connection.
 
         Reads from environment if args not provided:
         - ATOMIC_GRAPH_HOST (default: localhost)
-        - ATOMIC_GRAPH_PORT (default: 6379)
+        - ATOMIC_GRAPH_PORT (default: 6380)
         - ATOMIC_GRAPH_NAME (default: atomic-claude)
 
-        Returns None if:
-        - ATOMIC_GRAPH_ENABLED is not 'true'
-        - falkordb package not installed
-        - Connection fails
+        Raises:
+            GraphUnavailableError: If falkordb not installed or connection fails
         """
-        # Check feature flag
-        if os.environ.get("ATOMIC_GRAPH_ENABLED", "false").lower() != "true":
-            return None
-
         if not HAS_FALKORDB:
-            logger.warning("falkordb package not installed. pip install falkordb")
-            return None
+            raise GraphUnavailableError(
+                "falkordb package not installed. pip install falkordb"
+            )
 
         with cls._lock:
             if cls._instance is not None and cls._instance._connected:
                 return cls._instance
 
             _host = host or os.environ.get("ATOMIC_GRAPH_HOST", "localhost")
-            _port = port or int(os.environ.get("ATOMIC_GRAPH_PORT", "6379"))
+            _port = port or int(os.environ.get("ATOMIC_GRAPH_PORT", "6380"))
             _name = graph_name or os.environ.get("ATOMIC_GRAPH_NAME", "atomic-claude")
 
             instance = cls(_host, _port, _name)
@@ -83,8 +77,9 @@ class GraphConnection:
                 cls._instance = instance
                 return instance
             except Exception as e:
-                logger.warning(f"FalkorDB unavailable at {_host}:{_port}: {e}")
-                return None
+                raise GraphUnavailableError(
+                    f"FalkorDB unavailable at {_host}:{_port}: {e}"
+                )
 
     @classmethod
     def reset(cls):

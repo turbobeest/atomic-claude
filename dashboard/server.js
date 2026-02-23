@@ -7,6 +7,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const { createClient } = require('redis');
 const app = express();
 
 const PORT = process.env.ATOMIC_TASKS_PORT || 5174;
@@ -600,6 +601,121 @@ app.get('/api/stream', (req, res) => {
   });
 });
 
+// API: Memory SSE stream — real-time memory entry feed
+const MEMORY_JSON_FILE = path.join(STATE_DIR, 'memory.json');
+
+app.get('/api/memory/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  let lastKnownCount = 0;
+  let watcher = null;
+  let pollInterval = null;
+  let debounceTimer = null;
+
+  // Read memory.json and return entries array
+  const readEntries = () => {
+    try {
+      if (!fs.existsSync(MEMORY_JSON_FILE)) return [];
+      const data = JSON.parse(fs.readFileSync(MEMORY_JSON_FILE, 'utf8'));
+      return data.entries || [];
+    } catch (err) {
+      return [];
+    }
+  };
+
+  // Derive categories from entry metadata (matches TaskMemory categories)
+  const deriveCategories = (entry) => {
+    const cats = [];
+    const meta = entry.metadata || {};
+    if (meta.warnings && meta.warnings.length) cats.push('warning');
+    if (meta.decisions && meta.decisions.length) cats.push('decision');
+    if (meta.findings && meta.findings.length) cats.push('finding');
+    if (meta.configurations && meta.configurations.length) cats.push('configuration');
+    if (meta.conversations && meta.conversations.length) cats.push('conversation');
+    if (cats.length === 0) {
+      // Fall back to entry_type
+      const et = entry.entry_type || '';
+      if (et === 'phase_closeout' || et === 'checkpoint' || et === 'task_start') {
+        cats.push('system');
+      } else {
+        cats.push('finding');
+      }
+    }
+    return cats;
+  };
+
+  // Enrich entry with categories
+  const enrichEntry = (entry) => ({
+    ...entry,
+    categories: deriveCategories(entry),
+  });
+
+  // Send initial backfill
+  const entries = readEntries();
+  lastKnownCount = entries.length;
+  const enriched = entries.map(enrichEntry);
+  res.write(`event: init\ndata: ${JSON.stringify({ entries: enriched, total: enriched.length })}\n\n`);
+
+  // Check for new entries (debounced)
+  const checkForNew = () => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      try {
+        const current = readEntries();
+        if (current.length > lastKnownCount) {
+          // Send only new entries
+          const newEntries = current.slice(lastKnownCount);
+          for (const entry of newEntries) {
+            res.write(`event: entry\ndata: ${JSON.stringify(enrichEntry(entry))}\n\n`);
+          }
+          lastKnownCount = current.length;
+        }
+      } catch (err) {
+        // Ignore read errors
+      }
+    }, 100); // 100ms debounce for rapid writes
+  };
+
+  // Watch memory.json for changes
+  const startWatching = () => {
+    try {
+      if (fs.existsSync(MEMORY_JSON_FILE)) {
+        watcher = fs.watch(MEMORY_JSON_FILE, (eventType) => {
+          if (eventType === 'change' || eventType === 'rename') {
+            checkForNew();
+          }
+        });
+        // Also watch the directory in case file is recreated (atomic write)
+        return true;
+      }
+      return false;
+    } catch (err) {
+      return false;
+    }
+  };
+
+  if (!startWatching()) {
+    // File doesn't exist yet — poll until it appears
+    pollInterval = setInterval(() => {
+      if (startWatching()) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+        // Check for entries that appeared while we waited
+        checkForNew();
+      }
+    }, 2000);
+  }
+
+  // Cleanup on disconnect
+  req.on('close', () => {
+    if (watcher) watcher.close();
+    if (pollInterval) clearInterval(pollInterval);
+    if (debounceTimer) clearTimeout(debounceTimer);
+  });
+});
+
 // Helper: Get memory flow for a task
 function getTaskMemoryFlow(phaseId, taskId) {
   const memoryFlow = {
@@ -1164,6 +1280,89 @@ function generateMarkdownReport(report) {
 
   return md;
 }
+
+// ============================================================================
+// FalkorDB Graph Queries (Agent Catalog)
+// ============================================================================
+
+let redisClient = null;
+const GRAPH_HOST = process.env.ATOMIC_GRAPH_HOST || 'localhost';
+const GRAPH_PORT = parseInt(process.env.ATOMIC_GRAPH_PORT || '6380');
+const GRAPH_NAME = process.env.ATOMIC_GRAPH_NAME || 'atomic-claude';
+
+async function getRedisClient() {
+  if (redisClient && redisClient.isOpen) return redisClient;
+  redisClient = createClient({ socket: { host: GRAPH_HOST, port: GRAPH_PORT } });
+  redisClient.on('error', () => {}); // Suppress connection errors in logs
+  await redisClient.connect();
+  return redisClient;
+}
+
+// API: Query Agent nodes from FalkorDB knowledge graph
+app.get('/api/agents/graph', async (req, res) => {
+  try {
+    const client = await getRedisClient();
+    const { tier, category, search } = req.query;
+
+    // Build Cypher query with optional filters
+    let where = [];
+    if (tier) where.push(`n.tier = '${tier.replace(/'/g, "\\'")}'`);
+    if (category) where.push(`n.category = '${category.replace(/'/g, "\\'")}'`);
+    if (search) {
+      const safe = search.replace(/'/g, "\\'");
+      where.push(`(toLower(n.name) CONTAINS toLower('${safe}') OR toLower(n.description) CONTAINS toLower('${safe}'))`);
+    }
+
+    const whereClause = where.length ? ` WHERE ${where.join(' AND ')}` : '';
+    const cypher = `MATCH (n:Agent)${whereClause} RETURN n ORDER BY n.category, n.name`;
+
+    const result = await client.graph.query(GRAPH_NAME, cypher);
+
+    const agents = result.data.map(row => {
+      const node = row.n;
+      return {
+        name: node.name,
+        tier: node.tier,
+        category: node.category,
+        subcategory: node.subcategory || '',
+        role: node.role,
+        description: node.description || '',
+        grade: node.grade || '',
+        composite_score: parseFloat(node.composite_score || 0),
+      };
+    });
+
+    // Group by category for the UI
+    const byCategory = {};
+    agents.forEach(a => {
+      if (!byCategory[a.category]) byCategory[a.category] = [];
+      byCategory[a.category].push(a);
+    });
+
+    res.json({
+      agents,
+      total: agents.length,
+      byCategory,
+      categories: Object.keys(byCategory).sort(),
+    });
+  } catch (error) {
+    // Fall back to manifest file if graph is down
+    try {
+      const manifestPath = path.join(ATOMIC_ROOT, 'agents', 'agent-manifest.json');
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      const agents = manifest.agents || [];
+      const byCategory = {};
+      agents.forEach(a => {
+        const cat = a.category || 'uncategorized';
+        if (!byCategory[cat]) byCategory[cat] = [];
+        byCategory[cat].push(a);
+      });
+      res.json({ agents, total: agents.length, byCategory, categories: Object.keys(byCategory).sort(), fallback: true });
+    } catch (fallbackError) {
+      res.status(500).json({ error: 'Graph unavailable and manifest not found' });
+    }
+  }
+});
 
 // Serve index.html for all other routes
 app.get('*', (req, res) => {
