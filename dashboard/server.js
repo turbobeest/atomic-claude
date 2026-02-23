@@ -1298,6 +1298,23 @@ async function getRedisClient() {
   return redisClient;
 }
 
+// Lazy-cached agent name -> path index from manifest
+let agentPathIndex = null;
+function getAgentPathIndex() {
+  if (agentPathIndex) return agentPathIndex;
+  try {
+    const manifestPath = path.join(ATOMIC_ROOT, 'agents', 'agent-manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    agentPathIndex = {};
+    for (const a of manifest.agents || []) {
+      if (a.name && a.path) agentPathIndex[a.name] = a.path;
+    }
+  } catch (e) {
+    agentPathIndex = {};
+  }
+  return agentPathIndex;
+}
+
 // API: Query Agent nodes from FalkorDB knowledge graph
 app.get('/api/agents/graph', async (req, res) => {
   try {
@@ -1318,6 +1335,7 @@ app.get('/api/agents/graph', async (req, res) => {
 
     const result = await client.graph.query(GRAPH_NAME, cypher);
 
+    const pathIdx = getAgentPathIndex();
     const agents = result.data.map(row => {
       const node = row.n;
       return {
@@ -1329,6 +1347,7 @@ app.get('/api/agents/graph', async (req, res) => {
         description: node.description || '',
         grade: node.grade || '',
         composite_score: parseFloat(node.composite_score || 0),
+        path: pathIdx[node.name] || '',
       };
     });
 
@@ -1361,6 +1380,54 @@ app.get('/api/agents/graph', async (req, res) => {
     } catch (fallbackError) {
       res.status(500).json({ error: 'Graph unavailable and manifest not found' });
     }
+  }
+});
+
+// API: Read an agent definition .md file
+app.get('/api/agents/definition', (req, res) => {
+  try {
+    const agentPath = req.query.path;
+    if (!agentPath) return res.status(400).json({ error: 'Missing path parameter' });
+
+    const fullPath = path.resolve(path.join(ATOMIC_ROOT, 'agents', agentPath));
+    const agentsDir = path.resolve(path.join(ATOMIC_ROOT, 'agents'));
+    if (!fullPath.startsWith(agentsDir + path.sep)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).json({ error: 'Agent definition not found' });
+    }
+
+    const content = fs.readFileSync(fullPath, 'utf8');
+    const stat = fs.statSync(fullPath);
+    res.json({ content, size: stat.size, modified: stat.mtime, path: agentPath });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Save an edited agent definition .md file
+app.put('/api/agents/definition', (req, res) => {
+  try {
+    const { path: agentPath, content } = req.body;
+    if (!agentPath || content === undefined) {
+      return res.status(400).json({ error: 'Missing path or content' });
+    }
+
+    const fullPath = path.resolve(path.join(ATOMIC_ROOT, 'agents', agentPath));
+    const agentsDir = path.resolve(path.join(ATOMIC_ROOT, 'agents'));
+    if (!fullPath.startsWith(agentsDir + path.sep)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).json({ error: 'Agent definition not found' });
+    }
+
+    fs.writeFileSync(fullPath, content, 'utf8');
+    const stat = fs.statSync(fullPath);
+    res.json({ success: true, size: stat.size, modified: stat.mtime });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
