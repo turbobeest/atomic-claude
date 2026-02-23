@@ -102,6 +102,15 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     total_agents = len(manifest.get("agents", []))
     print(f"  ✓ Agent repository found: {agent_repo}")
     print(f"    Total agents: {total_agents}")
+
+    # Load agents into knowledge graph (idempotent)
+    if graph:
+        loaded = graph.load_agents_from_manifest(agent_manifest)
+        if loaded:
+            print(f"  ✓ Loaded {loaded} agents into knowledge graph")
+        else:
+            print(f"  ✓ Agent catalog already in knowledge graph")
+
     print()
 
     # ═══════════════════════════════════════════════════════════════
@@ -135,8 +144,9 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # Load project context
     project_context = _load_project_context(output_dir)
 
-    # Get LLM suggestions
-    selected_experts = _suggest_experts(prompts_dir, project_context)
+    # Get LLM suggestions (catalog-backed: graph preferred, manifest fallback)
+    selected_experts = _suggest_experts(prompts_dir, project_context,
+                                        manifest=manifest, graph=graph)
 
     print()
     print("  Suggested SMEs:")
@@ -352,10 +362,33 @@ def _load_project_context(output_dir: Path) -> Dict[str, str]:
     return context
 
 
-def _suggest_experts(prompts_dir: Path, context: Dict[str, str]) -> List[str]:
-    """Get expert agent suggestions from LLM."""
+def _suggest_experts(prompts_dir: Path, context: Dict[str, str],
+                     manifest: Dict = None, graph=None) -> List[str]:
+    """Get expert agent suggestions from LLM.
+
+    Always includes the real agent catalog in the prompt (from graph or
+    manifest) and validates suggestions against known names — eliminating
+    hallucinated agent names.
+    """
     # Default suggestions if LLM fails
     default_experts = ["python-pro", "test-strategist", "backend-architect"]
+
+    # Build the set of valid agent names and a catalog string for the prompt
+    valid_names = set()
+    catalog = ""
+
+    if graph:
+        # Prefer graph-backed catalog
+        catalog = graph.query_agent_catalog(tier="expert")
+        try:
+            valid_agents = graph.reader.get_nodes("Agent")
+            valid_names = {a["id"] for a in valid_agents}
+        except Exception:
+            pass
+
+    if not catalog and manifest:
+        # Fallback: build catalog directly from manifest JSON
+        catalog, valid_names = _build_catalog_from_manifest(manifest)
 
     # Build a focused context summary (avoid dumping raw corpus file list)
     context_summary = ""
@@ -387,7 +420,14 @@ Based on the project context below, suggest 3-5 expert agents from the available
 
 ## Project Context
 {context_summary}
+"""
 
+    # Include real agent catalog in prompt
+    if catalog:
+        prompt += f"\n## Available Agents\n\n{catalog}\n"
+        prompt += "\nIMPORTANT: You MUST only suggest agents from the list above. Use exact agent names as shown. Do NOT invent agent names.\n"
+
+    prompt += """
 ## Output
 Return a simple list of agent names, one per line. No JSON, no explanations.
 
@@ -421,11 +461,53 @@ backend-architect
                 s = re.sub(r'^\d+[\.\)]\s*', '', s).strip()
                 if s:
                     parsed.append(s)
+
+            # Validate against known agents — drop hallucinated names
+            if valid_names and parsed:
+                validated = [s for s in parsed if s in valid_names]
+                if validated:
+                    return validated
+                # All suggestions were hallucinated — fall through to defaults
+
             return parsed if parsed else default_experts
     except Exception:
         pass
 
     return default_experts
+
+
+def _build_catalog_from_manifest(manifest: Dict) -> tuple:
+    """Build agent catalog string and valid name set from manifest JSON.
+
+    Returns:
+        (catalog_string, valid_names_set)
+    """
+    from collections import defaultdict
+
+    agents = manifest.get("agents", [])
+    if not agents:
+        return "", set()
+
+    # Only include expert-tier agents in suggestions
+    experts = [a for a in agents if a.get("tier") == "expert"]
+    valid_names = {a["name"] for a in agents}  # All tiers for validation
+
+    by_category = defaultdict(list)
+    for a in experts:
+        by_category[a.get("category", "uncategorized")].append(a)
+
+    parts = []
+    for cat in sorted(by_category.keys()):
+        cat_agents = by_category[cat]
+        parts.append(f"### {cat} ({len(cat_agents)} agents)")
+        for a in sorted(cat_agents, key=lambda x: x.get("name", "")):
+            desc = a.get("description", "")
+            if len(desc) > 120:
+                desc = desc[:117] + "..."
+            parts.append(f"- {a['name']}: {desc}")
+        parts.append("")
+
+    return "\n".join(parts), valid_names
 
 
 def _browse_categories(manifest: Dict[str, Any]) -> None:

@@ -125,7 +125,12 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         try:
             with open(state_file) as f:
                 state_data = json.load(f)
-            current_phase = state_data.get('current_phase', 0)
+            raw_phase = state_data.get('current_phase', 0)
+            # Phase IDs can be int (0), or str like "1-discovery" — extract leading number
+            try:
+                current_phase = int(str(raw_phase).split('-')[0])
+            except (ValueError, IndexError):
+                current_phase = 0
             phase_0_status = state_data.get('phases', {}).get('0', {}).get('status', 'unknown')
 
             if phase_0_status == "completed" or current_phase >= 1:
@@ -179,7 +184,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
     # ═══════════════════════════════════════════════════════════════
 
     reference_dir = project_root / "docs" / "reference"
-    materials = _collect_reference_materials(reference_dir)
+    materials = _load_curated_materials(setup_dir)
+    if materials is None:
+        # Fallback for old manifests without reference_materials key
+        materials = _collect_reference_materials(reference_dir)
 
     if not materials:
         print("  No reference materials found in docs/reference/")
@@ -293,17 +301,69 @@ def _flatten_config(config_file: Path, config_data: Dict[str, Any]) -> None:
         json.dump(config_data, f, indent=2)
 
 
+def _load_curated_materials(setup_dir: Path) -> Optional[List[Path]]:
+    """Load pre-curated reference materials from the Phase 0 manifest.
+
+    Returns a list of Path objects for files that still exist on disk,
+    or None if the manifest lacks a 'reference_materials' key (backward
+    compat with older manifests).
+    """
+    manifest_file = setup_dir / "material-manifest.json"
+    if not manifest_file.exists():
+        return None
+
+    try:
+        with open(manifest_file) as f:
+            manifest = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    ref_list = manifest.get('reference_materials')
+    if ref_list is None:
+        return None
+
+    # Validate each path still exists
+    materials = []
+    for path_str in ref_list:
+        p = Path(path_str)
+        if p.is_file():
+            materials.append(p)
+
+    return materials
+
+
 # ---------------------------------------------------------------------------
 # Corpus analysis (merged from former Task 102)
 # ---------------------------------------------------------------------------
 
 def _collect_reference_materials(reference_dir: Path) -> List[Path]:
-    """Collect materials from docs/reference/ (populated by Task 005)."""
+    """Collect materials from docs/reference/ (populated by Task 005).
+
+    Skips:
+      - macOS resource fork files (._*)
+      - Directories that are clearly full source repos (node_modules, .git, etc.)
+      - Symlinks to directories (avoids pulling in entire trees)
+    """
     if not reference_dir.exists():
         return []
 
+    # Directories to skip when encountered during traversal
+    _skip_dirs = {
+        'node_modules', '.git', '__pycache__', 'dist', 'build',
+        '.venv', 'venv', '.tox', '.mypy_cache', '.pytest_cache',
+    }
+
     materials = []
     for f in sorted(reference_dir.rglob("*")):
+        # Skip macOS resource fork files
+        if f.name.startswith('._'):
+            continue
+        # Skip files inside excluded directory trees
+        if any(part in _skip_dirs for part in f.parts):
+            continue
+        # Skip symlinks that point to directories (avoids pulling in entire trees)
+        if f.is_symlink() and f.resolve().is_dir():
+            continue
         if f.is_file() and f.suffix.lower() in SUPPORTED_EXTS:
             materials.append(f)
 
@@ -352,40 +412,11 @@ def _analyze_corpus(
 
     total_chars = sum(s for _, s in file_sizes)
 
-    # --- If over budget, let user discard files ---
-    if total_chars > max_chars and not uat_mode:
+    if total_chars > max_chars:
         budget_k = max_chars // 1000
         total_k = total_chars // 1000
         print(f"  Total corpus: ~{total_k:,}K chars  |  Context budget: ~{budget_k:,}K chars")
-        print()
-        print("  Some files will be truncated or skipped. You can discard")
-        print("  files to make room for the ones that matter most.")
-        print()
-
-        # Show numbered file list with sizes
-        for i, (path, size) in enumerate(file_sizes, 1):
-            size_label = f"{size:,}" if size < 10_000 else f"{size // 1000:,}K"
-            print(f"    {i:>2}. {path.name:<40} {size_label:>8} chars")
-        print()
-
-        print("  Enter numbers to discard (e.g. '3 5 7'), or press Enter to keep all:")
-        choice = input("  > ").strip()
-
-        if choice:
-            try:
-                discard_indices = {int(x) for x in choice.split()}
-                before = len(file_sizes)
-                file_sizes = [
-                    (p, s) for i, (p, s) in enumerate(file_sizes, 1)
-                    if i not in discard_indices
-                ]
-                discarded = before - len(file_sizes)
-                if discarded:
-                    print(f"  ✓ Discarded {discarded} file(s)")
-                    total_chars = sum(s for _, s in file_sizes)
-                    print(f"  Revised corpus: ~{total_chars // 1000:,}K chars")
-            except ValueError:
-                print("  (Could not parse — keeping all files)")
+        print(f"  (Large files will be truncated to fit)")
         print()
 
     # --- Pass 2: build corpus content ---

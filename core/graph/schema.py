@@ -22,6 +22,9 @@ class NodeLabel(str, Enum):
     FEATURE = "Feature"
     TASK = "Task"
     SPEC = "Spec"
+    AGENT = "Agent"
+    MEMORY = "Memory"
+    PHASE_CHECKPOINT = "PhaseCheckpoint"
 
 
 # ============================================================================
@@ -58,6 +61,9 @@ REQUIRED_PROPERTIES: Dict[str, List[str]] = {
     NodeLabel.FEATURE: ["id", "title"],
     NodeLabel.TASK: ["id", "title", "description"],
     NodeLabel.SPEC: ["id", "task_id"],
+    NodeLabel.AGENT: ["id", "name", "tier", "category", "role"],
+    NodeLabel.MEMORY: ["id", "phase", "entry_type", "content"],
+    NodeLabel.PHASE_CHECKPOINT: ["id", "phase", "phase_name", "summary"],
 }
 
 # Valid values for enumerated properties
@@ -88,6 +94,19 @@ VALID_VALUES: Dict[str, Dict[str, Set[str]]] = {
             "documentation", "security",
         },
     },
+    NodeLabel.AGENT: {
+        "tier": {"expert", "phd", "focused", "pipeline"},
+        "role": {"executor", "advisor", "auditor", "architect", "gatekeeper",
+                 "analyzer", "validator", "monitor", "controller", "strategist"},
+    },
+    NodeLabel.MEMORY: {
+        "entry_type": {"task_start", "task_end", "task_progress",
+                       "phase_closeout", "checkpoint", "user_note",
+                       "system_event"},
+    },
+    NodeLabel.PHASE_CHECKPOINT: {
+        "status": {"valid", "invalidated", "superseded"},
+    },
 }
 
 # Optional properties with defaults
@@ -103,6 +122,9 @@ PROPERTY_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "estimated_complexity": 5,
     },
     NodeLabel.SPEC: {},
+    NodeLabel.AGENT: {"composite_score": 0.0},
+    NodeLabel.MEMORY: {"relevance_score": 0.8, "tags_csv": ""},
+    NodeLabel.PHASE_CHECKPOINT: {"status": "valid"},
 }
 
 # Valid relationship endpoints: {rel_type: (from_labels, to_labels)}
@@ -158,9 +180,13 @@ VALID_RELATIONSHIPS: Dict[str, tuple] = {
     RelType.SUPERSEDES: (
         # Any node type can supersede any other of same type
         {NodeLabel.SOURCE, NodeLabel.FINDING, NodeLabel.DECISION,
-         NodeLabel.REQUIREMENT, NodeLabel.FEATURE, NodeLabel.TASK, NodeLabel.SPEC},
+         NodeLabel.REQUIREMENT, NodeLabel.FEATURE, NodeLabel.TASK,
+         NodeLabel.SPEC, NodeLabel.AGENT, NodeLabel.MEMORY,
+         NodeLabel.PHASE_CHECKPOINT},
         {NodeLabel.SOURCE, NodeLabel.FINDING, NodeLabel.DECISION,
-         NodeLabel.REQUIREMENT, NodeLabel.FEATURE, NodeLabel.TASK, NodeLabel.SPEC},
+         NodeLabel.REQUIREMENT, NodeLabel.FEATURE, NodeLabel.TASK,
+         NodeLabel.SPEC, NodeLabel.AGENT, NodeLabel.MEMORY,
+         NodeLabel.PHASE_CHECKPOINT},
     ),
 }
 
@@ -195,12 +221,26 @@ INDEX_DEFINITIONS = [
     ("Requirement", "section"),
     ("Task", "category"),
     ("Task", "status"),
+    # Agent lookups
+    ("Agent", "id"),
+    ("Agent", "category"),
+    ("Agent", "tier"),
+    # Memory lookups
+    ("Memory", "id"),
+    ("Memory", "phase"),
+    ("Memory", "task_id"),
+    ("Memory", "entry_type"),
+    # Checkpoint lookups
+    ("PhaseCheckpoint", "id"),
+    ("PhaseCheckpoint", "phase"),
 ]
 
 FULLTEXT_INDEX_DEFINITIONS = [
     ("Finding", ["content"]),
     ("Requirement", ["content", "acceptance_criteria"]),
     ("Task", ["title", "description"]),
+    ("Agent", ["name", "description"]),
+    ("Memory", ["content", "tags_csv"]),
 ]
 
 

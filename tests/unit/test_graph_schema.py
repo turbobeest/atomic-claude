@@ -75,6 +75,85 @@ class TestNodeValidation:
         props = {"id": "spec-1", "task_id": 1}
         assert validate_node_properties("Spec", props) is None
 
+    def test_valid_agent(self):
+        props = {"id": "python-pro", "name": "python-pro", "tier": "expert",
+                 "category": "backend-ecosystems", "role": "executor"}
+        assert validate_node_properties("Agent", props) is None
+
+    def test_agent_missing_required(self):
+        props = {"id": "python-pro", "name": "python-pro"}  # missing tier, category, role
+        error = validate_node_properties("Agent", props)
+        assert error is not None
+        assert "tier" in error or "category" in error or "role" in error
+
+    def test_agent_invalid_tier(self):
+        props = {"id": "x", "name": "x", "tier": "bogus",
+                 "category": "backend-ecosystems", "role": "executor"}
+        error = validate_node_properties("Agent", props)
+        assert error is not None
+        assert "bogus" in error
+
+    def test_agent_invalid_role(self):
+        props = {"id": "x", "name": "x", "tier": "expert",
+                 "category": "backend-ecosystems", "role": "hacker"}
+        error = validate_node_properties("Agent", props)
+        assert error is not None
+        assert "hacker" in error
+
+    def test_agent_all_valid_tiers(self):
+        for tier in ("expert", "phd", "focused", "pipeline"):
+            props = {"id": "x", "name": "x", "tier": tier,
+                     "category": "test", "role": "executor"}
+            assert validate_node_properties("Agent", props) is None
+
+    # Memory node validation
+    def test_valid_memory(self):
+        props = {"id": "mem-001", "phase": "1-discovery",
+                 "entry_type": "task_end", "content": "Task completed"}
+        assert validate_node_properties("Memory", props) is None
+
+    def test_memory_missing_required(self):
+        props = {"id": "mem-001"}  # missing phase, entry_type, content
+        error = validate_node_properties("Memory", props)
+        assert error is not None
+
+    def test_memory_invalid_entry_type(self):
+        props = {"id": "mem-001", "phase": "1-discovery",
+                 "entry_type": "bogus", "content": "text"}
+        error = validate_node_properties("Memory", props)
+        assert error is not None
+        assert "bogus" in error
+
+    def test_memory_all_valid_entry_types(self):
+        for et in ("task_start", "task_end", "task_progress",
+                    "phase_closeout", "checkpoint", "user_note", "system_event"):
+            props = {"id": "m", "phase": "0-setup", "entry_type": et, "content": "c"}
+            assert validate_node_properties("Memory", props) is None
+
+    # PhaseCheckpoint node validation
+    def test_valid_phase_checkpoint(self):
+        props = {"id": "phase1-20260222", "phase": 1,
+                 "phase_name": "discovery", "summary": "Phase 1 complete"}
+        assert validate_node_properties("PhaseCheckpoint", props) is None
+
+    def test_checkpoint_missing_required(self):
+        props = {"id": "cp-1"}  # missing phase, phase_name, summary
+        error = validate_node_properties("PhaseCheckpoint", props)
+        assert error is not None
+
+    def test_checkpoint_invalid_status(self):
+        props = {"id": "cp-1", "phase": 1, "phase_name": "setup",
+                 "summary": "done", "status": "bogus"}
+        error = validate_node_properties("PhaseCheckpoint", props)
+        assert error is not None
+        assert "bogus" in error
+
+    def test_checkpoint_all_valid_statuses(self):
+        for status in ("valid", "invalidated", "superseded"):
+            props = {"id": "cp-1", "phase": 1, "phase_name": "setup",
+                     "summary": "done", "status": status}
+            assert validate_node_properties("PhaseCheckpoint", props) is None
+
     def test_defaults_applied_externally(self):
         """Verify defaults dict exists for each label."""
         for label in NodeLabel:

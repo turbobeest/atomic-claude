@@ -33,12 +33,13 @@ _compactor: Optional[MemoryCompactor] = None
 _initialized = False
 
 
-def memory_init(state_dir: Optional[Path] = None) -> None:
+def memory_init(state_dir: Optional[Path] = None, graph=None) -> None:
     """
     Initialize memory system.
 
     Args:
         state_dir: State directory (defaults to .state/)
+        graph: Optional GraphManager for dual-write to FalkorDB
     """
     global _store, _checkpoint_manager, _recall_engine, _compactor, _initialized
 
@@ -48,17 +49,17 @@ def memory_init(state_dir: Optional[Path] = None) -> None:
     if state_dir is None:
         state_dir = Path.cwd() / ".state"
 
-    # Initialize store
-    _store = MemoryStore(state_dir)
+    # Initialize store (with optional graph for dual-write)
+    _store = MemoryStore(state_dir, graph=graph)
     _store.initialize()
 
-    # Initialize checkpoint manager
-    _checkpoint_manager = CheckpointManager(state_dir, _store)
+    # Initialize checkpoint manager (with optional graph)
+    _checkpoint_manager = CheckpointManager(state_dir, _store, graph=graph)
 
-    # Initialize recall engine
-    _recall_engine = MemoryRecall(_store)
+    # Initialize recall engine (with optional graph for fulltext search)
+    _recall_engine = MemoryRecall(_store, graph=graph)
 
-    # Initialize compactor
+    # Initialize compactor (file-level only, no graph needed)
     _compactor = MemoryCompactor(_store)
 
     _initialized = True

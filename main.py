@@ -5,6 +5,7 @@ Atomic Claude 2.0 - Main Entry Point
 Python-based SDLC pipeline orchestrator.
 """
 
+import os
 import sys
 import argparse
 import readline  # Enable arrow keys, history, and line editing in input()
@@ -12,6 +13,18 @@ from pathlib import Path
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
+
+# Load .env file into os.environ (no dependency on python-dotenv)
+_env_file = Path(__file__).parent / ".env"
+if _env_file.exists():
+    for _line in _env_file.read_text().splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith('#') and '=' in _line:
+            _key, _, _val = _line.partition('=')
+            _key = _key.strip()
+            _val = _val.strip().strip('"').strip("'")
+            if _key and _key not in os.environ:  # Don't override existing env
+                os.environ[_key] = _val
 
 from core.state import StateManager
 from orchestration.pipeline import PhasePipeline, TransitionMode, PHASE_REGISTRY

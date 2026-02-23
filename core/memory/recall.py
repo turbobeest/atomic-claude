@@ -4,10 +4,10 @@ Memory Recall - Context retrieval with relevance scoring
 Intelligent context search with semantic matching and recency weighting.
 """
 
-import re
 import math
+import re
 from datetime import datetime, timedelta
-from typing import List, Optional, Set
+from typing import Dict, List, Optional, Set
 
 from .types import MemoryEntry, MemoryContext, MemoryEntryType
 from .store import MemoryStore
@@ -16,14 +16,16 @@ from .store import MemoryStore
 class MemoryRecall:
     """Intelligent context recall from memory."""
 
-    def __init__(self, store: MemoryStore):
+    def __init__(self, store: MemoryStore, graph=None):
         """
         Initialize recall engine.
 
         Args:
             store: Memory store instance
+            graph: Optional GraphManager for fulltext search
         """
         self.store = store
+        self._graph = graph
 
     def recall(
         self,
@@ -36,6 +38,9 @@ class MemoryRecall:
         """
         Recall relevant context.
 
+        Uses graph fulltext search when available (better relevance),
+        falls back to file-based keyword matching.
+
         Args:
             query: Search query
             phase: Optional phase filter
@@ -46,7 +51,27 @@ class MemoryRecall:
         Returns:
             Memory context with ranked entries
         """
-        # Get all entries matching filters
+        # Try graph-based recall first (fulltext search is superior)
+        if self._graph:
+            try:
+                graph_results = self._graph.recall_memory(
+                    query=query, phase=phase, task_id=task_id, limit=30,
+                )
+                if graph_results:
+                    entries = [self._graph_result_to_entry(r) for r in graph_results]
+                    selected = self._select_within_token_limit(entries, max_tokens)
+                    total_tokens = sum(self._estimate_tokens(e.content) for e in selected)
+                    return MemoryContext(
+                        query=query,
+                        entries=selected,
+                        total_tokens=total_tokens,
+                        max_tokens=max_tokens,
+                        relevance_threshold=relevance_threshold,
+                    )
+            except Exception:
+                pass  # Fall through to file-based recall
+
+        # File-based recall (fallback)
         entries = self.store.query(phase=phase, task_id=task_id)
 
         # Score each entry
@@ -309,6 +334,28 @@ class MemoryRecall:
             return 0.7  # Adjacent phase
         else:
             return 0.3  # Distant phase
+
+    def _graph_result_to_entry(self, node_dict: dict) -> MemoryEntry:
+        """Convert a graph Memory node dict to a MemoryEntry."""
+        entry_type_str = node_dict.get("entry_type", "task_end")
+        try:
+            entry_type = MemoryEntryType(entry_type_str)
+        except ValueError:
+            entry_type = MemoryEntryType.TASK_END
+
+        tags_csv = node_dict.get("tags_csv", "")
+        tags = [t.strip() for t in tags_csv.split(",") if t.strip()] if tags_csv else []
+
+        return MemoryEntry(
+            id=node_dict.get("id", ""),
+            timestamp=datetime.fromisoformat(node_dict["created_at"]) if node_dict.get("created_at") else datetime.now(),
+            entry_type=entry_type,
+            phase=node_dict.get("phase", ""),
+            task_id=node_dict.get("task_id") or None,
+            content=node_dict.get("content", ""),
+            tags=tags,
+            relevance_score=float(node_dict.get("relevance_score", 0.8)),
+        )
 
     def _estimate_tokens(self, text: str) -> int:
         """

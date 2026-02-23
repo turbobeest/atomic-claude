@@ -156,6 +156,10 @@ def execute(atomic_root: Path, output_dir: Path, uat_mode: bool = False, mem=Non
         else:
             print(print_dim("  Skipped — you can create it anytime."))
 
+    # ── Part 4b: Curate reference materials for corpus ─────────────────────
+
+    _select_reference_materials(manifest, reference_dir, project_root, uat_mode)
+
     # ── Part 5: Record everything ──────────────────────────────────────────
 
     write_file(manifest_file, json.dumps(manifest, indent=2))
@@ -488,7 +492,98 @@ def _display_summary(manifest: Dict[str, Any]) -> None:
 
 def _prompt_exclusions(manifest: Dict[str, Any], project_root: Path, uat_mode: bool = False) -> None:
     """
-    Prompt the user to exclude directories or files from the material scan.
+    Prompt the user to exclude files via curses multi-select, with text fallback.
+
+    Uses a cursor-navigable, space-to-toggle UI when the terminal supports it.
+    Falls back to the text-based command interface (_prompt_exclusions_text)
+    when curses is unavailable, stdin is not a TTY, or in UAT mode.
+
+    Args:
+        manifest: The material manifest dict (modified in-place)
+        project_root: Project root for display
+        uat_mode: If True, skip entirely
+    """
+    if uat_mode:
+        return
+
+    if not sys.stdin.isatty():
+        return
+
+    try:
+        from core.utils.multi_select import (
+            build_selection_tree, curses_multi_select, ItemType,
+        )
+
+        items = build_selection_tree(manifest)
+        if not items:
+            return
+
+        items = curses_multi_select(items)
+
+        # Check if any files were excluded
+        excluded_files = [it for it in items if it.item_type == ItemType.FILE and it.excluded]
+        if not excluded_files:
+            return
+
+        # Preserve originals before applying exclusions
+        categories = ['documentation', 'configuration', 'source_code', 'tests']
+        manifest['files']['all_scanned'] = {
+            cat: list(files) for cat, files in manifest['files'].items()
+            if cat != 'all_scanned' and cat != 'external_references'
+        }
+
+        # Apply exclusions to manifest
+        excluded_paths = {it.path for it in excluded_files}
+        excluded_dirs_set: set = set()
+        excluded_cats_set: set = set()
+
+        for it in items:
+            if it.excluded and it.item_type == ItemType.DIRECTORY:
+                excluded_dirs_set.add(it.path)
+            if it.excluded and it.item_type == ItemType.CATEGORY:
+                excluded_cats_set.add(it.path)
+
+        for cat in categories:
+            files = manifest['files'].get(cat, [])
+            manifest['files'][cat] = [f for f in files if f not in excluded_paths]
+
+        # Store exclusion metadata
+        manifest['exclusions'] = {
+            'dirs': sorted(excluded_dirs_set),
+            'files': sorted(it.path for it in excluded_files),
+            'categories': sorted(excluded_cats_set),
+        }
+
+        # Recalculate totals
+        _calculate_totals(manifest)
+
+        # Show after-exclusion summary
+        total_original = sum(
+            len(manifest['files']['all_scanned'].get(cat, []))
+            for cat in categories
+        )
+        total_remaining = sum(
+            len(manifest['files'].get(cat, []))
+            for cat in categories
+        )
+        total_excluded = total_original - total_remaining
+
+        if total_excluded > 0:
+            print()
+            print(print_bold(
+                f"  After exclusions: {total_remaining} files "
+                f"(excluded {total_excluded})"
+            ))
+            print()
+
+    except Exception:
+        # Fall back to text-based UI on any failure
+        _prompt_exclusions_text(manifest, project_root, uat_mode=False)
+
+
+def _prompt_exclusions_text(manifest: Dict[str, Any], project_root: Path, uat_mode: bool = False) -> None:
+    """
+    Text-based fallback for file exclusion prompts.
 
     Supports commands:
         dir:<path>   — exclude all files under a directory prefix
@@ -868,6 +963,138 @@ def _offer_organization(
 
     print(print_dim("  OK — no files organized."))
     return False
+
+
+# ===========================================================================
+# Part 4b: Reference material curation
+# ===========================================================================
+
+# Extensions considered useful for corpus analysis
+_CORPUS_EXTS = {'.md', '.txt', '.rst', '.pdf', '.json', '.yaml', '.yml', '.dot', '.svg'}
+
+# Nested-repo markers — skip files under these directories
+_NESTED_REPO_MARKERS = {
+    'node_modules', '.git', '__pycache__', 'dist', 'build',
+    '.venv', 'venv', '.tox', '.mypy_cache', '.pytest_cache',
+}
+
+
+def _select_reference_materials(
+    manifest: Dict[str, Any],
+    reference_dir: Path,
+    project_root: Path,
+    uat_mode: bool,
+) -> None:
+    """
+    Scan docs/reference/ for corpus-worthy files and let the user curate
+    which ones to include via the curses multi-select widget.
+
+    Stores the selected absolute paths in manifest['reference_materials'].
+    """
+    if not reference_dir.exists():
+        return
+
+    # ── 1. Gather candidates ──────────────────────────────────────────────
+
+    candidates: List[Path] = []
+    for f in sorted(reference_dir.rglob("*")):
+        # Skip macOS resource fork files
+        if f.name.startswith('._'):
+            continue
+        # Skip directory symlinks (avoids pulling in entire trees)
+        if f.is_symlink() and f.resolve().is_dir():
+            continue
+        # Skip files inside nested repo markers
+        if any(part in _NESTED_REPO_MARKERS for part in f.parts):
+            continue
+        if f.is_file() and f.suffix.lower() in _CORPUS_EXTS:
+            candidates.append(f)
+
+    if not candidates:
+        manifest['reference_materials'] = []
+        return
+
+    # ── 2. Categorize for display ─────────────────────────────────────────
+
+    _doc_exts = {'.md', '.txt', '.rst', '.pdf'}
+    _diagram_exts = {'.dot', '.svg'}
+    _data_exts = {'.json', '.yaml', '.yml'}
+
+    # Map relative display path → absolute path for reverse lookup
+    path_lookup: Dict[str, str] = {}
+    categorized: Dict[str, List[str]] = {}
+
+    for abspath in candidates:
+        try:
+            rel = str(abspath.relative_to(reference_dir))
+        except ValueError:
+            rel = abspath.name
+
+        path_lookup[rel] = str(abspath)
+
+        ext = abspath.suffix.lower()
+        if ext in _doc_exts:
+            cat = 'documents'
+        elif ext in _diagram_exts:
+            cat = 'diagrams'
+        elif ext in _data_exts:
+            cat = 'data'
+        else:
+            cat = 'documents'  # fallback
+
+        categorized.setdefault(cat, []).append(rel)
+
+    # ── 3. Show curses multi-select ───────────────────────────────────────
+
+    try:
+        if uat_mode or not sys.stdin.isatty():
+            raise RuntimeError("non-interactive")
+
+        from core.utils.multi_select import (
+            build_selection_tree, curses_multi_select, ItemType,
+        )
+
+        # Build a mini-manifest that build_selection_tree can consume
+        mini_manifest: Dict[str, Any] = {"files": categorized}
+        active_cats = [c for c in ('documents', 'diagrams', 'data') if c in categorized]
+
+        items = build_selection_tree(mini_manifest, categories=active_cats)
+        if not items:
+            manifest['reference_materials'] = [str(p) for p in candidates]
+            return
+
+        items = curses_multi_select(
+            items,
+            title="Reference materials for corpus",
+        )
+
+        # Map selected (non-excluded) file items back to absolute paths
+        selected: List[str] = []
+        for it in items:
+            if it.item_type == ItemType.FILE and not it.excluded:
+                abs_str = path_lookup.get(it.path)
+                if abs_str:
+                    selected.append(abs_str)
+
+        manifest['reference_materials'] = selected
+
+        total = sum(1 for it in items if it.item_type == ItemType.FILE)
+        excluded = total - len(selected)
+        if excluded > 0:
+            print()
+            print(print_bold(
+                f"  Reference corpus: {len(selected)} of {total} files "
+                f"(excluded {excluded})"
+            ))
+            print()
+        else:
+            print()
+            print(print_dim(f"  Reference corpus: all {total} files included"))
+            print()
+
+    except Exception:
+        # Fallback: include all candidates
+        manifest['reference_materials'] = [str(p) for p in candidates]
 
 
 # ===========================================================================

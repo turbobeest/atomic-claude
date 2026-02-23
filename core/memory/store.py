@@ -5,12 +5,15 @@ JSON-based storage with atomic writes, indexing, and compression.
 """
 
 import json
+import logging
 import tempfile
 import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
 
 from .types import (
     MemoryEntry,
@@ -23,18 +26,20 @@ from .types import (
 class MemoryStore:
     """Persistent storage for memory entries."""
 
-    def __init__(self, state_dir: Path):
+    def __init__(self, state_dir: Path, graph=None):
         """
         Initialize memory store.
 
         Args:
             state_dir: Directory for state files (.state/)
+            graph: Optional GraphManager for dual-write to FalkorDB
         """
         self.state_dir = Path(state_dir)
         self.memory_dir = self.state_dir / "memory"
         self.memory_file = self.state_dir / "memory.json"
         self.head_file = self.state_dir / "memory-head.json"
         self.index_file = self.state_dir / "memory-index.json"
+        self._graph = graph
 
         # In-memory cache
         self._entries: List[MemoryEntry] = []
@@ -139,6 +144,21 @@ class MemoryStore:
 
         # Write phase-based markdown file for dashboard consumption
         self._write_phase_file(entry)
+
+        # Dual-write to graph if available
+        if self._graph:
+            try:
+                self._graph.save_memory(
+                    entry_id=entry.id,
+                    phase=entry.phase,
+                    content=entry.content,
+                    entry_type=entry.entry_type.value if hasattr(entry.entry_type, 'value') else str(entry.entry_type),
+                    task_id=entry.task_id,
+                    tags=entry.tags,
+                    relevance_score=entry.relevance_score,
+                )
+            except Exception as e:
+                logger.warning(f"Graph memory write failed (non-blocking): {e}")
 
     def _write_phase_file(self, entry: MemoryEntry) -> None:
         """
@@ -426,5 +446,12 @@ class MemoryStore:
                 entry.id: idx for idx, entry in enumerate(self._entries)
             }
             self._save()
+
+        # Also clear graph memory nodes
+        if self._graph:
+            try:
+                self._graph.clear_memory_after_phase(phase_num - 1)
+            except Exception:
+                pass  # Non-blocking
 
         return removed_count

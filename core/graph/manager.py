@@ -3,7 +3,10 @@
 High-level graph operations for pipeline tasks.
 This is the primary interface used by phase orchestrators."""
 
+import json
 import logging
+from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -146,6 +149,213 @@ class GraphManager:
             rel_type, from_label, from_id, to_label, to_id,
             properties if properties else None,
         )
+
+    # ========================================================================
+    # AGENT OPERATIONS
+    # ========================================================================
+
+    def add_agent(self, name: str, tier: str, category: str, role: str,
+                  **kwargs) -> None:
+        """Add an Agent node to the graph."""
+        self.writer.add_node("Agent", {
+            "id": name,
+            "name": name,
+            "tier": tier,
+            "category": category,
+            "role": role,
+            "phase": self.phase_id,
+            **kwargs,
+        })
+
+    def load_agents_from_manifest(self, manifest_path: Path) -> int:
+        """Load agents from agent-manifest.json into graph.
+
+        Skips loading if all agents are already present (idempotent).
+        Returns count of agents loaded (0 if already loaded).
+        """
+        manifest_path = Path(manifest_path)
+        if not manifest_path.exists():
+            logger.warning(f"Agent manifest not found: {manifest_path}")
+            return 0
+
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+
+        agents = manifest.get("agents", [])
+        if not agents:
+            return 0
+
+        # Check if already loaded
+        existing = self.reader.count_nodes("Agent")
+        if existing >= len(agents):
+            logger.debug(f"Agent catalog already loaded ({existing} agents)")
+            return 0
+
+        # Bulk load all agents
+        ops = []
+        for agent in agents:
+            props = {
+                "id": agent["name"],
+                "name": agent["name"],
+                "tier": agent.get("tier", "expert"),
+                "category": agent.get("category", ""),
+                "role": agent.get("role", "executor"),
+                "phase": self.phase_id,
+                "description": agent.get("description", ""),
+                "subcategory": agent.get("subcategory", ""),
+                "composite_score": agent.get("composite_score", 0.0),
+                "grade": agent.get("grade", ""),
+            }
+            ops.append({"op": "add_node", "label": "Agent", "properties": props})
+
+        loaded = self.writer.bulk_write(ops)
+        logger.info(f"Loaded {loaded} agents from manifest into graph")
+        return loaded
+
+    def query_agent_catalog(self, tier: str = None,
+                            categories: List[str] = None) -> str:
+        """Return a formatted agent catalog string for LLM consumption.
+
+        Groups agents by category with name + short description.
+        Optional filters by tier and/or categories.
+        """
+        filters = {}
+        if tier:
+            filters["tier"] = tier
+
+        agents = self.reader.get_nodes("Agent", filters=filters if filters else None,
+                                       order_by="category")
+
+        # Apply category filter if specified
+        if categories:
+            cat_set = set(categories)
+            agents = [a for a in agents if a.get("category") in cat_set]
+
+        if not agents:
+            return ""
+
+        # Group by category
+        by_category = defaultdict(list)
+        for a in agents:
+            by_category[a.get("category", "uncategorized")].append(a)
+
+        parts = []
+        for cat in sorted(by_category.keys()):
+            cat_agents = by_category[cat]
+            parts.append(f"### {cat} ({len(cat_agents)} agents)")
+            for a in sorted(cat_agents, key=lambda x: x.get("name", "")):
+                desc = a.get("description", "")
+                # Truncate long descriptions for prompt efficiency
+                if len(desc) > 120:
+                    desc = desc[:117] + "..."
+                parts.append(f"- {a['name']}: {desc}")
+            parts.append("")  # blank line between categories
+
+        return "\n".join(parts)
+
+    # ========================================================================
+    # MEMORY OPERATIONS
+    # ========================================================================
+
+    def save_memory(self, entry_id: str, phase: str, content: str,
+                    entry_type: str = "task_end", task_id: str = None,
+                    tags: List[str] = None, relevance_score: float = 0.8,
+                    metadata: dict = None) -> None:
+        """Save a memory entry as a Memory node in the graph."""
+        self.writer.add_node("Memory", {
+            "id": entry_id,
+            "phase": phase,
+            "task_id": task_id or "",
+            "entry_type": entry_type,
+            "content": content,
+            "tags_csv": ",".join(tags) if tags else "",
+            "relevance_score": relevance_score,
+            "created_at": datetime.now().isoformat(),
+        })
+
+    def recall_memory(self, query: str, phase: str = None,
+                      task_id: str = None, limit: int = 20) -> List[Dict]:
+        """Recall memory entries using fulltext search + filters.
+
+        Returns list of Memory node dicts sorted by relevance.
+        Falls back to property-based query if fulltext search fails.
+        """
+        try:
+            results = self.reader.fulltext_search("Memory", query, limit=limit)
+        except Exception:
+            results = []
+
+        # Apply phase/task_id filters
+        if phase:
+            results = [r for r in results if r.get("phase") == phase]
+        if task_id:
+            results = [r for r in results if r.get("task_id") == task_id]
+
+        # If fulltext returned nothing, try property-based query
+        if not results:
+            filters = {}
+            if phase:
+                filters["phase"] = phase
+            if task_id:
+                filters["task_id"] = task_id
+            results = self.reader.get_nodes(
+                "Memory", filters=filters if filters else None, limit=limit,
+            )
+
+        return results[:limit]
+
+    def save_checkpoint(self, checkpoint_id: str, phase: int,
+                        phase_name: str, summary: str,
+                        key_decisions: List[str] = None,
+                        artifacts: List[str] = None) -> None:
+        """Save a phase checkpoint as a PhaseCheckpoint node."""
+        self.writer.add_node("PhaseCheckpoint", {
+            "id": checkpoint_id,
+            "phase": phase,
+            "phase_name": phase_name,
+            "summary": summary,
+            "key_decisions_csv": ",".join(key_decisions) if key_decisions else "",
+            "artifacts_csv": ",".join(artifacts) if artifacts else "",
+            "status": "valid",
+            "created_at": datetime.now().isoformat(),
+        })
+
+    def invalidate_checkpoints_after(self, phase_num: int) -> int:
+        """Mark all PhaseCheckpoint nodes after phase_num as invalidated."""
+        cypher = (
+            "MATCH (c:PhaseCheckpoint) WHERE c.phase > $phase_num "
+            "SET c.status = 'invalidated' RETURN count(c)"
+        )
+        result = self.conn.query(cypher, {"phase_num": phase_num})
+        count = result.result_set[0][0] if result.result_set else 0
+        if count:
+            logger.info(f"Invalidated {count} checkpoints after phase {phase_num}")
+        return count
+
+    def clear_memory_after_phase(self, phase_num: int) -> int:
+        """Delete Memory nodes belonging to phases after phase_num.
+
+        Parses phase string (e.g. '2-prd') to extract phase number.
+        """
+        # Memory nodes store phase as string like "2-prd"
+        # We need to match all where the numeric prefix > phase_num
+        # FalkorDB doesn't have great string parsing, so fetch and filter
+        all_memory = self.reader.get_nodes("Memory")
+        to_delete = []
+        for m in all_memory:
+            try:
+                mem_phase = int(m.get("phase", "0").split("-")[0])
+                if mem_phase > phase_num:
+                    to_delete.append(m.get("id"))
+            except (ValueError, AttributeError):
+                continue
+
+        for mid in to_delete:
+            self.writer.delete_node("Memory", mid)
+
+        if to_delete:
+            logger.info(f"Cleared {len(to_delete)} memory nodes after phase {phase_num}")
+        return len(to_delete)
 
     # ========================================================================
     # CONTEXT QUERIES
